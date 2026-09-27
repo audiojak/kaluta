@@ -35,20 +35,71 @@ final class ThreadRowView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func configure(with row: ThreadRow) {
+    /// A user label shown on a row: its full path and its color.
+    struct Chip: Equatable {
+        let path: String
+        let color: String?
+    }
+
+    /// The labels to chip on a row: user labels other than the mailbox
+    /// being shown, in path order, at most `limit`.
+    static func chips(for row: ThreadRow, labels: [String: Chip], excluding mailboxID: String?, limit: Int = 3) -> [Chip] {
+        row.labelIds
+            .filter { $0 != mailboxID }
+            .compactMap { labels[$0] }
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    /// Chips as text: each leaf name on a tint of its label color, then the
+    /// snippet. Kept in the snippet line so rows keep their fixed height.
+    static func snippetLine(_ snippet: String, chips: [Chip]) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        for chip in chips {
+            let tint = chip.color.flatMap(NSColor.init(hex:)) ?? .tertiaryLabelColor
+            out.append(NSAttributedString(string: "\u{2009}\(LabelTree.leafName(chip.path))\u{2009}", attributes: [
+                .font: font,
+                .foregroundColor: NSColor.labelColor,
+                .backgroundColor: tint.withAlphaComponent(0.28),
+            ]))
+            out.append(NSAttributedString(string: " ", attributes: [.font: font]))
+        }
+        out.append(NSAttributedString(string: snippet, attributes: [
+            .font: NSFont.systemFont(ofSize: 12),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        return out
+    }
+
+    func configure(with row: ThreadRow, chips: [Chip] = []) {
         let unread = row.unreadCount > 0
         unreadDot.isHidden = !unread
         senders.stringValue = Self.senderLine(row)
         senders.font = .systemFont(ofSize: 13, weight: unread ? .semibold : .regular)
         date.stringValue = RowDateFormatter.string(forMillis: row.lastMessageAt)
-        subject.stringValue = row.subject.isEmpty ? "(no subject)" : row.subject
-        subject.font = .systemFont(ofSize: 12, weight: unread ? .medium : .regular)
-        snippet.stringValue = row.snippet
+        let subjectText = row.subject.isEmpty ? "(no subject)" : row.subject
+        let subjectFont = NSFont.systemFont(ofSize: 12, weight: unread ? .medium : .regular)
+        subject.font = subjectFont
+        if Self.isImportant(row) {
+            subject.attributedStringValue = Self.importantSubject(subjectText, font: subjectFont)
+        } else {
+            subject.stringValue = subjectText
+        }
+        if chips.isEmpty {
+            snippet.stringValue = row.snippet
+            toolTip = nil
+        } else {
+            snippet.attributedStringValue = Self.snippetLine(row.snippet, chips: chips)
+            toolTip = chips.map(\.path).joined(separator: ", ")
+        }
         badges.image = Self.badgeImage(row)
         badges.isHidden = badges.image == nil
 
         setAccessibilityLabel(
-            [unread ? "Unread" : nil, senders.stringValue, subject.stringValue, date.stringValue, row.snippet]
+            [unread ? "Unread" : nil, Self.isImportant(row) ? "Important" : nil, senders.stringValue, subjectText, date.stringValue,
+             chips.isEmpty ? nil : "Labels: " + chips.map(\.path).joined(separator: ", "), row.snippet]
                 .compactMap { $0 }.joined(separator: ", "))
         needsLayout = true
     }
@@ -80,6 +131,27 @@ final class ThreadRowView: NSTableCellView {
         if row.participants.count > 3 { line += " …" }
         if row.messageCount > 1 { line += " (\(row.messageCount))" }
         return line
+    }
+
+    /// Gmail's importance marker (the yellow chevron).
+    static func isImportant(_ row: ThreadRow) -> Bool {
+        row.labelIds.contains("IMPORTANT")
+    }
+
+    static func importantSubject(_ text: String, font: NSFont) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            .applying(.init(paletteColors: [.systemYellow]))
+        if let marker = NSImage(systemSymbolName: "chevron.right.2", accessibilityDescription: "Important")?
+            .withSymbolConfiguration(config) {
+            let attachment = NSTextAttachment()
+            attachment.image = marker
+            attachment.bounds = NSRect(x: 0, y: -1, width: marker.size.width, height: marker.size.height)
+            out.append(NSAttributedString(attachment: attachment))
+            out.append(NSAttributedString(string: " "))
+        }
+        out.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+        return out
     }
 
     private static let starImage = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Starred")
@@ -129,5 +201,15 @@ enum RowDateFormatter {
         let f = DateFormatter()
         f.setLocalizedDateFormatFromTemplate(template)
         return f
+    }
+}
+
+extension NSColor {
+    /// `#rrggbb` → NSColor.
+    convenience init?(hex: String) {
+        let h = hex.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
+        self.init(srgbRed: CGFloat((v >> 16) & 0xff) / 255, green: CGFloat((v >> 8) & 0xff) / 255,
+                  blue: CGFloat(v & 0xff) / 255, alpha: 1)
     }
 }

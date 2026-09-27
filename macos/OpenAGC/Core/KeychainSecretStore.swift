@@ -31,7 +31,22 @@ final class KeychainSecretStore: @unchecked Sendable {
             }
             return value
         case errSecItemNotFound:
-            return nil
+            // Without a team-signed build the data-protection keychain can
+            // answer "not found" rather than "missing entitlement", while
+            // earlier writes went to the login keychain. Look there too,
+            // and stay there if the item is found.
+            guard dataProtection else { return nil }
+            var legacy = baseQuery(key)
+            legacy.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            legacy[kSecReturnData as String] = true
+            legacy[kSecMatchLimit as String] = kSecMatchLimitOne
+            var found: CFTypeRef?
+            guard SecItemCopyMatching(legacy as CFDictionary, &found) == errSecSuccess,
+                  let data = found as? Data, let value = String(data: data, encoding: .utf8) else { return nil }
+            lock.lock()
+            useDataProtection = false
+            lock.unlock()
+            return value
         default:
             throw KeychainError(status: status, operation: "read")
         }

@@ -369,3 +369,19 @@ fn the_checker_detects_each_kind_of_drift() {
         assert!(problems.iter().any(|p| p.contains(expected)), "{sql} not detected; got {problems:?}");
     }
 }
+
+#[test]
+fn a_mailbox_can_be_narrowed_to_threads_that_also_carry_another_label() {
+    let db = open("narrowed");
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX", "IMPORTANT"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX"])).unwrap();
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "IMPORTANT"])).unwrap();
+        w.upsert_message(&msg("m4", "t4", 4_000, &["IMPORTANT"])).unwrap(); // archived
+    });
+    let page = db.read_blocking(|c| read::list_threads(c, "INBOX+IMPORTANT", None, 1)).unwrap();
+    assert_eq!(page.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t3"], "newest first, paged");
+    let rest = db.read_blocking(|c| read::list_threads(c, "INBOX+IMPORTANT", page.next_cursor.as_deref(), 10)).unwrap();
+    assert_eq!(rest.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
+    assert_eq!(db.read_blocking(|c| read::list_threads(c, "INBOX", None, 10)).unwrap().rows.len(), 3);
+}

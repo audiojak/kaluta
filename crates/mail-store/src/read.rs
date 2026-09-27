@@ -99,11 +99,18 @@ pub fn mailbox_label(mailbox: &Mailbox) -> &str {
 
 /// Threads in a mailbox, newest first, keyset-paged: cost is O(page)
 /// however deep the user scrolls (spec §4.2).
-pub fn list_threads(conn: &Connection, label: &str, cursor: Option<&str>, limit: u32) -> StoreResult<ThreadPage> {
+/// Threads in a mailbox, newest first. `mailbox` is a label id, or two
+/// joined by `+` for threads carrying both (`INBOX+IMPORTANT`: the Inbox's
+/// "Important only" view), ordered by the first.
+pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limit: u32) -> StoreResult<ThreadPage> {
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     let (after_at, after_id) = match cursor {
         Some(c) => decode_cursor(c)?,
         None => (i64::MAX, i64::MAX),
+    };
+    let (label, also) = match mailbox.split_once('+') {
+        Some((label, also)) => (label, Some(also)),
+        None => (mailbox, None),
     };
     let mut stmt = conn.prepare_cached(
         "SELECT t.id, t.gmail_id, t.subject, t.snippet, t.last_message_at, t.message_count, t.unread_count,
@@ -111,12 +118,15 @@ pub fn list_threads(conn: &Connection, label: &str, cursor: Option<&str>, limit:
          FROM thread_labels tl JOIN threads t ON t.id = tl.thread_id
          WHERE tl.label_id = (SELECT id FROM labels WHERE gmail_id = ?1)
            AND (tl.last_message_at, tl.thread_id) < (?2, ?3)
+           AND (?5 IS NULL OR EXISTS (
+                 SELECT 1 FROM thread_labels t2
+                 WHERE t2.thread_id = tl.thread_id AND t2.label_id = (SELECT id FROM labels WHERE gmail_id = ?5)))
          ORDER BY tl.last_message_at DESC, tl.thread_id DESC
          LIMIT ?4",
     )?;
     let mut last_key = None;
     let rows = stmt
-        .query_map(params![label, after_at, after_id, limit + 1], |r| {
+        .query_map(params![label, after_at, after_id, limit + 1, also], |r| {
             let key = (r.get::<_, i64>(11)?, r.get::<_, i64>(0)?);
             Ok((key, thread_summary(r, 1)?))
         })?

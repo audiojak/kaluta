@@ -19,6 +19,13 @@ struct MainWindow: View {
             }
         }
         .focusedSceneValue(\.isMailWindow, true)
+        .sheet(item: Binding(get: { model.importDraft }, set: { model.importDraft = $0 })) { draft in
+            ImportMailboxSheet(draft: draft)
+        }
+        .sheet(item: Binding(get: { model.runningImport.map(RunningImport.init) }, set: { if $0 == nil { model.runningImport = nil } })) { running in
+            ImportProgressSheet(accountID: running.id)
+                .interactiveDismissDisabled()
+        }
         .task { if model.accountState == .starting { await model.start() } }
         .onAppear {
             model.openComposer = { openWindow(id: "compose", value: $0) }
@@ -39,6 +46,14 @@ struct MainWindow: View {
             HStack(spacing: 0) {
                 detail
                     .frame(maxWidth: .infinity)
+                    // The agent prompt floats over the reader as an inset
+                    // glass capsule (macOS 26), not a bar pinned to a column.
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        AgentPromptBar()
+                            .frame(maxWidth: 680)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                    }
                 if model.agent.isPresented {
                     Divider()
                     AgentInspector()
@@ -48,9 +63,26 @@ struct MainWindow: View {
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)
         }
+        .navigationSubtitle(windowSubtitle)
+        // macOS 26: no toolbar background or separator line; content runs
+        // under the toolbar with the system's soft scroll-edge effect, so no
+        // line stops short at the floating sidebar's edge.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search mail")
         .searchFocused($searchFocused)
         .onChange(of: model.searchFocusRequests) { searchFocused = true }
+    }
+
+    /// "Inbox · Important only · Syncing over IMAP — 6,406 left", as Mail
+    /// puts mailbox status under the window title.
+    private var windowSubtitle: String {
+        var parts: [String] = []
+        if let id = model.selectedMailboxID, let mailbox = model.mailboxes.mailboxes.first(where: { $0.id == id }) {
+            parts.append(LabelTree.leafName(mailbox.name))
+            if id == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        }
+        if let status = SyncStatusView.subtitle(for: model) { parts.append(status) }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var content: some View {
@@ -63,6 +95,7 @@ struct MainWindow: View {
             ContentUnavailableView("Something Went Wrong", systemImage: "exclamationmark.triangle", description: Text(message))
         case .open:
             VStack(spacing: 0) {
+                listHeader
                 if model.needsReauthentication {
                     ReauthenticationBanner()
                 }
@@ -71,6 +104,15 @@ struct MainWindow: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(8)
+                }
+                if model.threads.isSearchingServer {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Also searching Gmail for older mail…")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
                 }
                 if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
@@ -81,9 +123,27 @@ struct MainWindow: View {
                 } else {
                     ThreadListView()
                 }
-                AgentPromptBar()
             }
         }
+    }
+
+    /// The list column's header: the Inbox's Important-only switch, and a
+    /// rule that separates the title area from the messages.
+    @ViewBuilder private var listHeader: some View {
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+            @Bindable var model = model
+            HStack {
+                Spacer()
+                Toggle("Important only", isOn: $model.inboxImportantOnly)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.callout)
+                    .help("Show only the Inbox threads Gmail marked Important")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+        }
+        Divider()
     }
 
     @ViewBuilder private var detail: some View {
@@ -111,4 +171,8 @@ private struct ReauthenticationBanner: View {
         .padding(.vertical, 8)
         .background(.yellow.opacity(0.15))
     }
+}
+
+private struct RunningImport: Identifiable {
+    let id: String
 }

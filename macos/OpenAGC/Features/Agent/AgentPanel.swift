@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The prompt bar under the thread list (spec §14.6): "Ask Claude…" with
-/// the agent switcher. Sending opens the inspector.
+/// The prompt capsule floating over the reader (spec §14.3, amended):
+/// "Ask Claude…" with the agent switcher. Sending opens the inspector.
 struct AgentPromptBar: View {
     @Environment(AppModel.self) private var model
     @State private var text = ""
@@ -52,10 +52,9 @@ struct AgentPromptBar: View {
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || !agent.isProviderReady)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(.bar)
-        .overlay(alignment: .top) { Divider() }
+        .glassEffect(.regular, in: .capsule)
         .task { await agent.loadProviders() }
         .onChange(of: model.agentFocusRequests) { focused = true }
     }

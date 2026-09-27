@@ -82,7 +82,13 @@ impl RateLimiter {
         s.tokens = 0.0;
         s.last = now;
         let until = now + retry_after.unwrap_or(DEFAULT_COOLDOWN);
+        // Requests in flight together are refused together: that is one
+        // signal, not one per request, so slow down once per cooldown.
+        let already_cooling = s.cooldown_until.is_some_and(|c| c > now);
         s.cooldown_until = Some(s.cooldown_until.map_or(until, |c| c.max(until)));
+        if already_cooling {
+            return;
+        }
         let floor = self.nominal_refill_per_sec * FLOOR;
         s.refill_per_sec = (s.refill_per_sec * DECREASE).max(floor);
         s.last_adjusted = Some(now);
@@ -189,9 +195,14 @@ mod tests {
         // The cooldown; tokens refilled meanwhile, so no further wait.
         assert!(waited >= Duration::from_secs(30) && waited < Duration::from_secs(31), "{waited:?}");
 
-        // Repeated limits never go below the floor.
+        // A burst refused together counts once.
+        limiter.report_rate_limited(Some(Duration::from_secs(5))).await;
+        limiter.report_rate_limited(Some(Duration::from_secs(5))).await;
+        assert_eq!(limiter.units_per_minute().await, 294, "one slow-down for the burst");
+        // Repeated limits, each after its cooldown, never go below the floor.
         for _ in 0..20 {
-            limiter.report_rate_limited(None).await;
+            sleep(Duration::from_secs(6)).await;
+            limiter.report_rate_limited(Some(Duration::from_secs(5))).await;
         }
         assert_eq!(limiter.units_per_minute().await, 120);
 

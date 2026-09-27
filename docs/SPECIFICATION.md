@@ -737,15 +737,23 @@ UID-ordered stream, newest last. Concretely:
    search see no difference. `X-GM-LABELS` plus `\Seen`/`\Flagged` map to
    label ids (`UNREAD`, `STARRED`); system labels use the API names.
 3. Listing stays on REST (`messages.list` is 5 units per 500 ids), so the
-   window and priority phases are unchanged. Optionally a headers-first
-   pass (`ENVELOPE` for the whole window) fills `messages` with
-   `body_state='metadata'` so the list is browsable minutes in.
+   window and priority phases are unchanged. A headers-first pass fills
+   `messages` with `body_state='metadata'` rows (1,000 per command) so the
+   list is browsable minutes in; bodies follow, and opening a header-only
+   message moves it to the front of the queue. *(Implemented with
+   `BODY.PEEK[HEADER]` parsed by `mail-mime`, not `ENVELOPE`, so headers
+   decode exactly like full messages. REST sources skip the pass: a
+   header fetch costs the same 20 units as a whole message.)*
 4. Scope: IMAP needs `https://mail.google.com/`, a superset of
    `gmail.modify`. Both are restricted scopes, so verification (§7.3) is
-   unchanged, but the consent screen wording changes; the request is made
-   once and the token serves both paths. If IMAP `AUTHENTICATE` fails (a
-   Workspace admin can disable IMAP), the engine logs it once and stays on
-   REST.
+   unchanged, but the consent screen then asks to "read, compose, send and
+   permanently delete all your email". *(Implementation decision,
+   2026-09-26: opt-in per account, Settings › Accounts › Download faster
+   over IMAP, which signs in again with `mail.google.com` instead of
+   `gmail.modify`; the default stays least-privilege, and a Cloud project
+   must list the scope before it can be granted.)* The granted scopes are
+   recorded per account. If IMAP `AUTHENTICATE` fails (a Workspace admin
+   can disable IMAP), the engine logs it once and stays on REST.
 5. Budget: the source tracks bytes per day and yields to REST at 2,000 MB.
    Incremental fetches (new mail from history) stay on REST: they are few
    and latency matters more than units there.
@@ -758,6 +766,40 @@ to `imap.gmail.com`.
 
 *Not in scope.* IMAP as the sole provider (non-Gmail accounts), IDLE push,
 and label writes over IMAP.
+
+**Amendment (2026-09-27): tiered download.** Planned. With IMAP, headers
+are cheap and bodies are not; most old mail is never opened. So an account
+using IMAP downloads in two tiers:
+
+- *Headers* for the whole sync window (six months by default, or
+  everything): subject, sender, recipients, date, labels, flags. The list,
+  labels, sorting and routines' first pass work from these.
+- *Bodies* only where they matter: the Inbox and a *body window* (default
+  the last 30 days; Settings › Accounts › *Full messages for*: last 30
+  days / last 6 months / the whole window), plus on demand: a message the
+  user opens (already prioritized), a header-only message an agent or
+  routine reads (fetched at interactive priority before the tool answers),
+  and search matches (server search fetches them).
+
+Details:
+1. Queue: ids outside the body window are listed with a *headers-only*
+   priority that the body backfill never drains; the headers pass covers
+   them. Widening the body window moves them to body priorities.
+2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
+   available, else REST) and store them; agent tools (`mail_get_thread`,
+   `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
+3. Search: free-text queries also run server search when the account has
+   header-only mail in the searched mailbox, not only when local results
+   are few; header-only rows match on headers locally in the meantime.
+4. Snippets: a partial fetch of the first bytes of the text part
+   (`BODY.PEEK[1]<0.2048>`, decoded best effort) gives list snippets
+   without whole bodies.
+5. Accounts on the REST API keep today's behaviour (bodies for the whole
+   window): headers cost the same quota there. Settings suggests IMAP for
+   large mailboxes and hides the body-window choice without it.
+
+Trade-off, accepted: text search over old mail waits on Gmail's server
+search, and an agent reading old mail pauses while it downloads.
 
 ### 7.5 Sending and threading **(Verified)**
 
@@ -786,10 +828,14 @@ agent sessions and Keychain items. New pieces:
   scanning the directories (each store records its `account_email`), then
   kept in step by sign-in and sign-out. The current account id lives in
   `UserDefaults` on the Swift side, not in the index.
-- Identity: sign-in requests `openid` and `userinfo.profile` alongside the
-  existing scopes (both non-sensitive; no verification change) and reads
-  `https://openidconnect.googleapis.com/v1/userinfo` once for `name` and
-  `picture`. The picture is downloaded to `accounts/<id>/avatar.jpg`
+- Identity: sign-in requests `openid` and `profile` alongside the
+  existing scopes (both non-sensitive; no verification change). The token
+  response's ID token carries `name` and `picture`, read without a
+  further call *(implementation note: the ID token comes straight from
+  Google's token endpoint over TLS and is used only for display, so it is
+  not signature-checked)*; `https://openidconnect.googleapis.com/v1/userinfo`
+  refreshes them weekly. Only `https` pictures on `*.googleusercontent.com`
+  are fetched, at most 1 MB. The picture is downloaded to `accounts/<id>/avatar.jpg`
   (refreshed weekly) and shown at 24 pt; without one, an initials disc
   coloured deterministically from the address. Adding an account uses the
   same sign-in flow with `prompt=select_account`, so Google shows the
@@ -855,7 +901,8 @@ draft. It exists to be read, searched, sorted and reasoned over.
   tools work; nothing is fetched on demand because there is nowhere to
   fetch from.
 
-**Import.** *File › Import Mailbox…* accepts an `.mbox` file or a folder
+**Import.** *File › Import Mailbox…* (no shortcut: ⌘⇧I is already *Load
+Remote Images*) accepts an `.mbox` file or a folder
 of them (Takeout splits large exports). A sheet asks for the account name,
 the user's addresses (for `SENT` and reply detection) and shows size and an
 estimate. The import runs on the core runtime: a streaming mbox reader
@@ -1657,8 +1704,12 @@ Every target in §1.3 traces to one of these rules.
   message; one document avoids measuring each web view's height and costs
   one load per selection.)* Attachments strip with Quick Look
   (`QLPreviewPanel`) and drag-out.
-- Bottom bar: the agent prompt field, "Ask Claude…"/"Ask Codex…" with the
-  provider switcher.
+- Agent prompt: "Ask Claude…"/"Ask Codex…" with the provider switcher.
+  *(Amended 2026-09-27: a glass capsule floating over the bottom of the
+  reader column, inset like the macOS 26 sidebar, rather than a bar pinned
+  under the thread list. The list column has a header: the Inbox's
+  Important-only switch, then a rule separating the title area from the
+  messages.)*
 
 ### 14.4 Message rendering **(Verified)**
 
@@ -1709,6 +1760,79 @@ opens an inspector column on the right with: a compact transcript
 behaves exactly like the main list, pending approval cards with
 Review/Reject/Approve, and a Cancel button. Drafts created by the agent open
 in the composer for review with a "Created by Claude" badge.
+
+### 14.6a Acknowledgement and undo **(Amendment 2026-09-27)**
+
+Planned. Every mail action the user takes shows a short acknowledgement
+with a way back, instead of any confirmation dialog ("never use a warning
+when you mean undo": all these actions are reversible).
+
+- **What it looks like.** A small notice at the bottom of the thread list:
+  "Archived 3 conversations — Undo ⌘Z", with a close button. One at a
+  time: a new action replaces it. It stays 8 seconds, pausing while the
+  pointer is over it, while it has keyboard focus, and while the window is
+  inactive. Reduce Motion: it appears without sliding.
+- **The undo does not expire with the notice.** ⌘Z is Edit › Undo
+  ("Undo Archive"), backed by the window's undo manager, and works on the
+  last 50 actions after the notice is gone, as in Mail. Text fields keep
+  their own ⌘Z while they are being edited. ⇧⌘Z redoes.
+- **VoiceOver** hears the notice as an announcement without focus moving
+  (WCAG 4.1.3); the Undo button is reachable by keyboard; nothing needed is
+  lost on a timer (WCAG 2.2.1), since ⌘Z remains.
+- **Covered actions:** archive, move to Inbox, trash, read/unread, star,
+  add/remove label (menus, keys, swipe, drag-to-label, the `l` popover),
+  and label creation is not undone (only its application). Agent and
+  routine actions are not on this stack: they have the activity log and
+  the routine run's Undo.
+- **Exactness.** Each action records, per message, the labels it actually
+  changed (a thread already archived is not "un-archived" into the Inbox by
+  undo). Undo applies the inverse through the outbox like any change; if
+  Gmail changed the thread since, undo still only reverses the recorded
+  diff. Undo is per account: after switching accounts, ⌘Z undoes that
+  account's actions.
+- **Undo Send.** Sending waits in the outbox for a delay (Settings ›
+  General: off, 5, 10 (default), 20 or 30 seconds); the notice reads
+  "Sending… Undo ⌘Z", and undo returns the message to an open composer.
+  Agent sends, approved by the user, use the same delay.
+
+### 14.6b Agent suggestions **(Amendment 2026-09-27)**
+
+Planned. The prompt capsule ("Ask Claude…") gives no hint of what an agent
+can do; most users will not guess. Suggestions show examples, drawn from
+the tools that exist (§10.2), so nothing is promised that a tool cannot do.
+
+- **Where.** (1) The agent column's empty state lists capabilities in
+  groups: *Find and summarise* (read tools), *Draft for you* (drafts,
+  never sent without approval), *Tidy up* (archive, labels, read state),
+  and, in an archive account, no drafting group. Each line is an example
+  prompt in the user's voice. (2) When the prompt field is focused and
+  empty, up to four **suggestion chips** appear above the capsule; ↑/↓ or
+  Tab move between them, Return sends one, Escape hides them. A chip
+  fills the field rather than sending when it ends in "…" (needs the
+  user's words).
+- **Context-aware.** Suggestions follow what the user is looking at:
+  - a thread selected: "Summarise this thread", "Draft a reply that…",
+    "What is being asked of me here?", "Add the label …";
+  - several threads selected: "Archive these", "Which of these need a
+    reply?", "Label these …";
+  - a mailbox with unread mail: "What's new since yesterday?", "Which
+    unread messages need a reply?";
+  - a search in progress: "Summarise these results", "Find the one that
+    mentions …";
+  - an attachment in the selected thread: "What does the attachment say?";
+  - an archive account: the same minus drafting.
+  Suggestions are generated locally from state; no model call and no
+  network to produce them.
+- **Honesty.** Every suggestion maps to tools the current agent and
+  account allow. Write actions say what happens: "Archive these (you can
+  undo)"; sends are never suggested ("draft" only, since sending needs
+  approval, §10.4).
+- **Learning.** The chips prefer prompts the user has sent before (last
+  20, stored per account); the examples rotate so the list does not look
+  static. No telemetry.
+- **Accessibility.** Chips are buttons with full labels; VoiceOver
+  announces "4 suggestions" when they appear; Reduce Motion disables the
+  fade.
 
 ### 14.7 Other native behaviors
 

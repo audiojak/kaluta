@@ -26,11 +26,15 @@ If you connect a real Gmail account to a development build, also run
 ./scripts/dev-signing.sh
 ```
 
-once. It creates a self-signed "OpenAGC Dev" identity in your login
-Keychain and points Debug builds at it (`macos/Local.xcconfig`, gitignored).
-Without it every rebuild is a new ad-hoc identity, and the Keychain stops
-handing the stored sign-in to the new binary, so the app asks you to sign in
-again after each build.
+once. It points Debug builds at a stable signing identity
+(`macos/Local.xcconfig`, gitignored): an *Apple Development* certificate if
+you have one (free with any Apple ID: Xcode › Settings › Accounts › Manage
+Certificates › + › Apple Development), otherwise a self-signed "OpenAGC Dev"
+identity it creates. Without either, every rebuild is a new ad-hoc identity
+and the Keychain stops handing the stored sign-in to the new binary. With
+the self-signed identity macOS still asks for your login password after each
+rebuild; an Apple Development certificate has a team ID, so one *Always
+Allow* lasts across rebuilds.
 
 ## Layout
 

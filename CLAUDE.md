@@ -12,7 +12,7 @@ This file provides instructions and context for AI coding agents working on this
 - Never touch real Gmail, Google/Apple accounts, or create Claude cloud routines from automation; test against fakes.
 - Never launch the app against the real account or start sync outside the fakes: the dev-signed build can read the real Gmail token from the Keychain. Snapshots use the demo account and `-OpenAGCFakeAgents YES`. Never delete anything under `~/Library/Application Support/OpenAGC`.
 - Overnight work happens on an `overnight-*` branch (plan in `docs/plans/`); push after each closed issue; never push to `main` overnight.
-- Debug builds are signed with the "OpenAGC Dev" identity when `macos/Local.xcconfig` (from `scripts/dev-signing.sh`, gitignored) exists; ad-hoc rebuilds lose Keychain access to the stored Gmail sign-in.
+- Debug builds are signed with the maintainer's Apple Development identity (team Y5W2BTVS33) or the self-signed "OpenAGC Dev" one, via `macos/Local.xcconfig` from `scripts/dev-signing.sh` (gitignored); ad-hoc rebuilds lose Keychain access to the stored Gmail sign-in. Batch changes: each rebuild of a self-signed build re-prompts for the login keychain.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker
