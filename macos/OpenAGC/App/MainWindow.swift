@@ -56,6 +56,10 @@ struct MainWindow: View {
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)
         }
         .navigationSubtitle(windowSubtitle)
+        // macOS 26: no toolbar background or separator line; content runs
+        // under the toolbar with the system's soft scroll-edge effect, so no
+        // line stops short at the floating sidebar's edge.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search mail")
         .searchFocused($searchFocused)
         .onChange(of: model.searchFocusRequests) { searchFocused = true }
