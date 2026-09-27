@@ -110,6 +110,12 @@ final class CoreClient: Sendable {
         try await call { try await core.searchServer(query: query, limit: limit) }
     }
 
+    /// Download header-only bodies now (tiered download, spec §7.4); on
+    /// failure the core queues them first instead.
+    func ensureBodies(_ ids: [String]) async {
+        _ = try? await call { try await core.ensureBodies(messageIds: ids) }
+    }
+
     /// Download these messages' bodies next (opened with headers only).
     func prioritizeMessages(_ ids: [String]) async {
         try? await call { try await core.prioritizeMessages(messageIds: ids) }

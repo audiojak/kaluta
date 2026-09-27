@@ -365,6 +365,33 @@ async fn headers_only_mail_is_fetched_in_full_when_headers_stop_being_cheap() {
 }
 
 #[tokio::test]
+async fn ensure_bodies_downloads_header_only_mail_now() {
+    let (fake, db, _recorder, engine) = setup("ensure");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    let source = Arc::new(CountingSource::cheap(&fake));
+    engine.set_backfill_source(source.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"));
+
+    let wanted = vec![MessageId::new("ancient"), MessageId::new("inbox-read")];
+    assert_eq!(engine.ensure_bodies(wanted.clone()).await.unwrap(), 2, "over the cheap source");
+    assert_eq!(source.bodies(), 2);
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("full"));
+    assert!(!ids(db.read(|c| queue::peek(c, 10)).await.unwrap()).contains(&"inbox-read".to_owned()), "dequeued");
+    assert_eq!(engine.ensure_bodies(wanted).await.unwrap(), 0, "already here");
+
+    // Without IMAP, over the API.
+    engine.use_rest_backfill();
+    assert_eq!(engine.ensure_bodies(vec![MessageId::new("this-year")]).await.unwrap(), 1);
+    assert_eq!(source.bodies(), 2);
+    assert_eq!(body_state(&db, "this-year").as_deref(), Some("full"));
+    assert_consistent(&db);
+}
+
+#[tokio::test]
 async fn backfill_bodies_come_from_the_configured_source() {
     let (fake, db, _recorder, engine) = setup("source");
     engine.set_window(SyncWindow::Everything).await.unwrap();

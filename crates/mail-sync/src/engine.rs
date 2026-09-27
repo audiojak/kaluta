@@ -520,6 +520,40 @@ impl SyncEngine {
         Ok(count)
     }
 
+    /// Download these messages' bodies now if they are not stored in full
+    /// (spec §7.4 tiered download: a header-only message the user opens or
+    /// an agent reads). Over IMAP when the source is IMAP, else over the
+    /// API at interactive priority. Returns how many were downloaded.
+    pub async fn ensure_bodies(&self, ids: Vec<MessageId>) -> SyncResult<usize> {
+        let missing = self.db.read(move |c| queue::missing(c, &ids)).await?;
+        if missing.is_empty() {
+            return Ok(0);
+        }
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let fetched = if source.cheap_headers() {
+            source.fetch(&missing).await?
+        } else {
+            self.provider.fetch_messages(&missing, Priority::Interactive).await?
+        };
+        let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
+        let count = incoming.len();
+        let changes = self
+            .db
+            .write(move |tx| {
+                let mut w = MailWriter::new(tx);
+                for m in &incoming {
+                    w.upsert_message(m)?;
+                }
+                let done: Vec<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
+                queue::remove(tx, &done)?;
+                w.finish()
+            })
+            .await?;
+        self.publish(&changes);
+        self.report(SyncPhase::Backfilling).await;
+        Ok(count)
+    }
+
     /// Fetch these messages next (the user opened one whose body is not
     /// here yet).
     pub async fn prioritize(&self, ids: Vec<MessageId>) -> SyncResult<()> {

@@ -56,10 +56,10 @@ final class ReaderStore {
         bodies = loaded.messages.reduce(into: [:]) { acc, m in
             if let cached = cache[m.id] { acc[m.id] = cached }
         }
-        // Headers only so far (headers-first sync): ask for these bodies
-        // next; the thread refreshes when they land.
+        // Headers only so far (headers-first sync, tiered download):
+        // download these bodies now; the thread refreshes when they land.
         let missing = loaded.messages.filter { !$0.hasBody }.map(\.id)
-        if !missing.isEmpty { Task { await core.prioritizeMessages(missing) } }
+        if !missing.isEmpty { Task { await core.ensureBodies(missing) } }
         for message in loaded.messages where bodies[message.id] == nil && message.hasBody {
             // `try?` flattens: nil means an error or no body yet.
             guard let body = try? await core.renderedBody(message.id), generation == loadGeneration else { continue }

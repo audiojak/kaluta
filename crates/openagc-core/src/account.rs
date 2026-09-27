@@ -601,6 +601,25 @@ impl Core {
         runtime::run(async move { service.prioritize(ids).await.map_err(CoreError::from) }).await
     }
 
+    /// Download these messages' bodies now if only their headers are here
+    /// (spec §7.4 tiered download): the reader opened them. If that fails
+    /// (offline) they are fetched first once sync can. Returns how many
+    /// arrived.
+    pub async fn ensure_bodies(&self, message_ids: Vec<String>) -> Result<u32, CoreError> {
+        let Some(service) = self.sync_service() else { return Ok(0) };
+        let ids: Vec<mail_domain::MessageId> = message_ids.into_iter().map(mail_domain::MessageId).collect();
+        runtime::run(async move {
+            match service.engine().ensure_bodies(ids.clone()).await {
+                Ok(n) => Ok(n as u32),
+                Err(e) => {
+                    let _ = service.prioritize(ids).await;
+                    Err(e.into())
+                }
+            }
+        })
+        .await
+    }
+
     /// How an account's backfill is fetching bodies (Settings shows it).
     pub async fn backfill_status(&self, account_id: String) -> BackfillStatus {
         let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();

@@ -104,6 +104,63 @@ fn search_read_and_list_labels() {
 }
 
 #[test]
+fn reading_a_header_only_message_downloads_its_body_first() {
+    use mail_domain::{EmailAddress, LabelId, MessageId};
+    use provider_api::fake::FakeProvider;
+    use provider_api::{FetchedBody, FetchedMessage};
+
+    let dir = std::env::temp_dir().join(format!("openagc-core-tools-headeronly-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let core = Core::new(
+        CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+        Arc::new(crate::secrets::MemorySecrets::default()),
+        Arc::new(Noop),
+    )
+    .unwrap();
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+    core.start_sync_with(fake.clone()).unwrap();
+    let service = core.sync_service().unwrap();
+    for _ in 0..200 {
+        if !crate::runtime::runtime().block_on(service.engine().needs_bootstrap()).unwrap() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+
+    // Gmail has the message; this Mac only its headers (tiered download).
+    let message = FetchedMessage {
+        id: MessageId::new("m1"),
+        thread_id: ThreadId::new("t1"),
+        label_ids: vec![LabelId::new("INBOX")],
+        internal_date: 1_780_000_000_000,
+        from: Some(EmailAddress::new(Some("Sam"), "sam@example.com")),
+        subject: "Old news".into(),
+        body: Some(FetchedBody { text: Some("The whole body, from Gmail.".into()), html: None, attachments: vec![] }),
+        ..Default::default()
+    };
+    fake.seed(message.clone());
+    let headers = mail_sync::to_incoming(FetchedMessage { body: None, ..message });
+    let db = core.db().unwrap();
+    db.write_blocking(move |tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        w.upsert_message(&headers)?;
+        w.finish().map(|_| ())
+    })
+    .unwrap();
+
+    core.agents.register("s1", Scope::Mailbox, None);
+    let thread = call(&core, "s1", Tool::GetThread, json!({ "thread_id": "t1" })).unwrap();
+    let m = &thread["messages"][0];
+    assert_eq!(m["body_available"], true);
+    assert_eq!(m["body"], "The whole body, from Gmail.");
+    let one = call(&core, "s1", Tool::GetMessage, json!({ "message_id": "m1" })).unwrap();
+    assert_eq!(one["body_available"], true);
+    core.stop_sync();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn bad_arguments_unknown_sessions_and_gated_tools() {
     let core = demo("errors");
     core.agents.register("s1", Scope::Mailbox, None);
