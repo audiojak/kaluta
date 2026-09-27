@@ -34,7 +34,7 @@ struct SidebarTreeTests {
 
     @Test func expansionIsRememberedPerAccount() {
         let a = "a", b = "b"
-        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         expansion.load(account: a)
         expansion.set("Customers", true)
         expansion.set("Projects/Launch", true)
@@ -72,7 +72,7 @@ struct ImportantOnlyTests {
     @Test func theInboxCanShowOnlyImportantThreadsAndRemembersItPerAccount() async throws {
         let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         await model.start(openDemo: true)
         let core = try #require(model.core)

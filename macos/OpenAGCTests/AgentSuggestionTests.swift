@@ -77,7 +77,7 @@ struct AgentSuggestionModelTests {
     }
 
     @Test func recentPromptsAreKeptPerAccountNewestFirstWithoutDuplicates() throws {
-        let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
         let store = RecentPrompts(defaults: defaults)
         for i in 0..<25 { store.record("prompt \(i)", for: "a") }
         store.record("PROMPT 24", for: "a")
@@ -96,7 +96,7 @@ struct AgentSuggestionPanelTests {
     private func demo() async throws -> AppModel {
         let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
         await model.agent.loadProviders()
         return model

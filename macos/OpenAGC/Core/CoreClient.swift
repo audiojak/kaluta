@@ -60,6 +60,16 @@ final class CoreClient: Sendable {
         testScratchRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
     }
 
+    /// The app's preferences, or a throwaway suite when the app is hosting
+    /// tests or running on a scratch data directory (snapshots,
+    /// automation): those must never write the real app's preferences
+    /// (the test host and snapshots share its bundle id).
+    static func appDefaults() -> UserDefaults {
+        let scratch = isRunningTests || !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
+        guard scratch else { return .standard }
+        return UserDefaults(suiteName: "openagc-scratch-\(UUID().uuidString)") ?? .standard
+    }
+
     static var isRunningTests: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil || env["XCTestBundlePath"] != nil

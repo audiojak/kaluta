@@ -47,7 +47,7 @@ struct AccountMenuTests {
         try await core.addDemoAccount("one", email: "one@example.com", name: "One", threads: 10)
         try await core.addDemoAccount("two", email: "two@example.com", threads: 10)
         try await core.moveAccount("two", to: 0)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         #expect(model.accounts.map(\.id) == ["two", "one"], "the user's order, which ⌃1 and ⌃2 follow")
         #expect(model.openAccountID == "two")

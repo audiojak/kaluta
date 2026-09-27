@@ -70,7 +70,7 @@ struct UndoModelTests {
     private func demo() async throws -> AppModel {
         let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         model.undo.runsClock = false
         await model.start(openDemo: true)
         return model
@@ -170,7 +170,7 @@ struct UndoModelTests {
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 10)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 10)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         model.undo.runsClock = false
         await model.start(openDemo: false)
         await model.switchAccount(to: "work")
@@ -206,7 +206,7 @@ struct UndoSendTests {
     }
 
     @Test func theDelayDefaultsToTenSecondsAndIsRemembered() throws {
-        let suite = "test-\(UUID().uuidString)"
+        let suite = "openagc-tests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         let model = AppModel(core: nil, defaults: defaults)
         #expect(model.undoSendSeconds == 10)

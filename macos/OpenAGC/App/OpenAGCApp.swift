@@ -54,9 +54,7 @@ struct OpenAGCApp: App {
 
     /// The app's preferences; a throwaway suite when hosting tests, so the
     /// remembered account is never read or changed by a test run.
-    private static let defaults: UserDefaults = CoreClient.isRunningTests
-        ? UserDefaults(suiteName: "openagc-test-host-\(UUID().uuidString)") ?? .standard
-        : .standard
+    private static let defaults: UserDefaults = CoreClient.appDefaults()
 
     private static func makeCore() -> CoreClient? {
         do {

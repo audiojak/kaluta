@@ -124,7 +124,9 @@ final class AppModel {
     /// touch the real app's (the test host *is* the app).
     @ObservationIgnored let defaults: UserDefaults
 
-    init(core: CoreClient?, defaults: UserDefaults = .standard) {
+    /// `defaults` defaults to the app's preferences, which are a throwaway
+    /// suite under tests and scratch runs (`CoreClient.appDefaults`).
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
         self.core = core
         self.defaults = defaults
         accountEmail = defaults.string(forKey: "accountEmail")

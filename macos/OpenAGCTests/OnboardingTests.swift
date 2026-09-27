@@ -37,7 +37,7 @@ struct GoogleClientConfigurationTests {
 struct SignInFlowTests {
     @Test func signInWithAnUnusableClientDoesNothing() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         let state = model.accountState
         await model.signIn(with: GoogleClientConfiguration(clientID: "", clientSecret: nil, isCustom: false))
@@ -46,7 +46,7 @@ struct SignInFlowTests {
 
     @Test func cancellingSignInReturnsToOnboarding() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         model.cancelSignIn()
         #expect(model.accountState == .noAccount)

@@ -18,8 +18,17 @@ xcodegen generate --spec project.yml --quiet
 # The tests keep their scratch data under $TMPDIR/openagc-apptests-<pid>
 # (CoreClient.testScratchRoot); remove the ones this run made afterwards.
 MARKER="$(mktemp "${TMPDIR:-/tmp}/openagc-run-marker.XXXXXX")"
+# Throwaway preference suites the tests made (UserDefaults(suiteName:)
+# writes a plist) go too; only UUID-named ones, never the app's own.
+# cfprefsd writes them just after the test host exits, hence the pause;
+# the sweeper (clean-test-scratch.sh) catches any written later still.
+UUID_RE='[0-9A-F]\{8\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{12\}'
 cleanup() {
   find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'openagc-apptests-*' -newer "$MARKER" -exec rm -rf {} + 2>/dev/null || true
+  sleep 2
+  find "$HOME/Library/Preferences" -maxdepth 1 -newer "$MARKER" \
+    -regex ".*/\(openagc-tests-\|openagc-scratch-\|ai\.actual\.openagc\.tests\.\)$UUID_RE\.plist" \
+    -delete 2>/dev/null || true
   rm -f "$MARKER"
 }
 trap cleanup EXIT
