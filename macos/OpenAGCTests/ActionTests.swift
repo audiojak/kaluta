@@ -6,7 +6,7 @@ import Testing
 @MainActor
 struct ActionTests {
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model

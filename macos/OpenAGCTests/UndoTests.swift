@@ -68,7 +68,7 @@ struct UndoNoticeTimerTests {
 @MainActor
 struct UndoModelTests {
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
                              defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
         model.undo.runsClock = false
@@ -166,7 +166,7 @@ struct UndoModelTests {
     }
 
     @Test func eachAccountHasItsOwnStack() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 10)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 10)

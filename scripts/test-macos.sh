@@ -15,6 +15,15 @@ cd "$ROOT/macos"
 [[ -f Local.xcconfig ]] || printf '// Optional overrides; see scripts/dev-signing.sh\n' > Local.xcconfig
 xcodegen generate --spec project.yml --quiet
 
+# The tests keep their scratch data under $TMPDIR/openagc-apptests-<pid>
+# (CoreClient.testScratchRoot); remove the ones this run made afterwards.
+MARKER="$(mktemp "${TMPDIR:-/tmp}/openagc-run-marker.XXXXXX")"
+cleanup() {
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'openagc-apptests-*' -newer "$MARKER" -exec rm -rf {} + 2>/dev/null || true
+  rm -f "$MARKER"
+}
+trap cleanup EXIT
+
 set +e
 xcodebuild -project OpenAGC.xcodeproj -scheme OpenAGC \
   -destination 'platform=macOS,arch=arm64' \

@@ -4,7 +4,7 @@ import Testing
 
 struct AgentFFITests {
     @Test func aFakeAgentStreamsItsReplyToSwift() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         core.useFakeAgents()
         try await core.openAccount(AppModel.demoAccountID)

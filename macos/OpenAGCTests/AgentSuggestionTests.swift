@@ -94,7 +94,7 @@ struct AgentSuggestionModelTests {
 @MainActor
 struct AgentSuggestionPanelTests {
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
                              defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
         await model.start(openDemo: true)

@@ -67,7 +67,7 @@ struct OpenAGCApp: App {
             // accounts, read their Keychain items or start a real sync: it
             // gets a fresh scratch directory like any snapshot run.
             let scratch = CoreClient.isRunningTests
-                ? FileManager.default.temporaryDirectory.appending(path: "openagc-test-host-\(UUID().uuidString)").path
+                ? CoreClient.testScratchRoot.appending(path: "test-host-\(UUID().uuidString)").path
                 : nil
             if let override = scratch ?? UserDefaults.standard.string(forKey: "OpenAGCDataDirectory"), !override.isEmpty {
                 let dir = URL(filePath: override, directoryHint: .isDirectory)

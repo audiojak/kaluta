@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct SearchTests {
     private func demo() async throws -> AppModel {
-        let model = AppModel(core: try CoreClient(dataDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         await model.start(openDemo: true)
         return model
     }
@@ -64,7 +64,7 @@ struct SearchTests {
 @MainActor
 struct ServerSearchTests {
     @Test func accountsWithoutAServerNeverAskGmail() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let core = try CoreClient(dataDirectory: dir)
         try await core.setCurrentAccount("demo")
@@ -82,7 +82,7 @@ struct ServerSearchTests {
     }
 
     @Test func theDemoMailboxHasNoHeaderOnlyMail() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let core = try CoreClient(dataDirectory: dir)
         try await core.setCurrentAccount("demo")

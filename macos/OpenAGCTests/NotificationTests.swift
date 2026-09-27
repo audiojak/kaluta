@@ -54,7 +54,7 @@ struct NotificationTests {
     }
 
     @Test func clickingANotificationRevealsTheThread() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         let row = try #require(model.threads.rows.dropFirst(3).first)
@@ -80,7 +80,7 @@ struct NotificationTests {
     }
 
     @Test func clickingANotificationForAnotherAccountSwitchesToIt() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 20)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 20)
@@ -95,7 +95,7 @@ struct NotificationTests {
     }
 
     @Test func removingTheShownAccountOpensTheNextThenOnboarding() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 10)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 10)

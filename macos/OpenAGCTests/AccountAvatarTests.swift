@@ -42,7 +42,7 @@ struct AccountMenuTests {
     }
 
     @Test func theAvatarMenuListsEveryAccountFromTheModel() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("one", email: "one@example.com", name: "One", threads: 10)
         try await core.addDemoAccount("two", email: "two@example.com", threads: 10)

@@ -49,6 +49,17 @@ final class CoreClient: Sendable {
         KeychainSecretStore(service: isRunningTests ? "ai.actual.openagc.tests" : "ai.actual.openagc")
     }
 
+    /// Where the app's tests put scratch data: one directory per test-host
+    /// process, which scripts/test-macos.sh removes after the run (and the
+    /// sweeper after an hour), so tests need not clean up one by one.
+    static let testScratchRoot = FileManager.default.temporaryDirectory
+        .appending(path: "openagc-apptests-\(ProcessInfo.processInfo.processIdentifier)", directoryHint: .isDirectory)
+
+    /// A fresh scratch directory for a test.
+    static func testScratch() -> URL {
+        testScratchRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
     static var isRunningTests: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil || env["XCTestBundlePath"] != nil

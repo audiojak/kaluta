@@ -15,7 +15,7 @@ struct PerformanceTests {
 
     /// A core whose "perf" account is a copy of the fixture.
     private func fixtureModel() async throws -> AppModel {
-        let data = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let data = CoreClient.testScratch()
         let accountDir = data.appending(path: "accounts/perf")
         try FileManager.default.createDirectory(at: accountDir, withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: Self.fixture, to: accountDir.appending(path: "mail.sqlite"))

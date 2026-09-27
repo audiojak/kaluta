@@ -7,7 +7,7 @@ struct SidebarTreeTests {
     struct Timeout: Error {}
 
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model
@@ -70,7 +70,7 @@ struct SidebarTreeTests {
 @MainActor
 struct ImportantOnlyTests {
     @Test func theInboxCanShowOnlyImportantThreadsAndRemembersItPerAccount() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)

@@ -41,7 +41,7 @@ struct ArchiveAccountTests {
     }
 
     @Test func anImportedMailboxIsAListedAccountThatNeedsNoSignIn() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "Old Mail.mbox")
@@ -67,7 +67,7 @@ struct ArchiveAccountTests {
     }
 
     @Test func theImportSheetSuggestsANameAndAddressAndTheNewAccountOpensWhenDone() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "Work 2019.mbox")
@@ -92,7 +92,7 @@ struct ArchiveAccountTests {
     }
 
     @Test func aPathWithNoMailboxesExplainsWhy() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AppModel(core: try CoreClient(dataDirectory: dir.appending(path: "data")),
@@ -114,7 +114,7 @@ struct ArchiveAccountTests {
 @MainActor
 struct ArchiveCannotSendTests {
     @Test func inAnArchiveTheWindowOffersNoComposingAndTheCoreRefusesAnyway() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "old.mbox")

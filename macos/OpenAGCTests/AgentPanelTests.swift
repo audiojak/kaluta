@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct AgentPanelTests {
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model
@@ -81,7 +81,7 @@ struct AgentPanelTests {
 @MainActor
 struct AgentHistoryTests {
     @Test func aConversationCanBeReopenedAndContinued() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         let agent = model.agent
@@ -117,7 +117,7 @@ struct AgentHistoryTests {
 @MainActor
 struct ApprovalCardTests {
     @Test func proposalsBecomeCardsAndResolveFromTheirEvent() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         let agent = model.agent

@@ -4,7 +4,7 @@ import Testing
 
 struct CoreEventTests {
     private func client() throws -> CoreClient {
-        try CoreClient(dataDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        try CoreClient(dataDirectory: CoreClient.testScratch())
     }
 
     /// Collects events for `duration`, long enough for Rust's 50 ms window.
@@ -39,7 +39,7 @@ struct CoreEventTests {
 @MainActor
 struct AccountEventFilterTests {
     @Test func theWindowOnlyTakesEventsForItsAccountOrAppWideOnes() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         #expect(model.openAccountID == "demo")
@@ -50,7 +50,7 @@ struct AccountEventFilterTests {
     }
 
     @Test func eventsFromTheCoreCarryTheAccountTheyAreAbout() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let client = try CoreClient(dataDirectory: dir)
         try await client.setCurrentAccount("demo")
         _ = try await client.seedDemoMailbox(threads: 60)
