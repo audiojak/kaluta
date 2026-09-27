@@ -110,6 +110,8 @@ final class AppModel {
     /// Where each account's window was (mailbox, thread), restored on switch.
     @ObservationIgnored private var placeByAccount: [String: (mailbox: String?, thread: String?)] = [:]
     let routines: RoutinesStore
+    /// Undo for the user's mail actions, one stack per account (spec §14.6a).
+    let undo: MailUndo
     let core: CoreClient?
 
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
@@ -131,6 +133,11 @@ final class AppModel {
         reader = ReaderStore(core: core)
         fallbackAgent = AgentStore(core: core)
         routines = RoutinesStore(core: core)
+        undo = MailUndo(core: core)
+        undo.onError = { [weak self] message in
+            self?.logger.error("undo failed: \(message, privacy: .private)")
+            Task { await self?.threads.refresh() }
+        }
     }
 
     /// Open the remembered account, or the demo when asked for on launch.
@@ -557,14 +564,19 @@ final class AppModel {
     }
 
     /// Archive (or trash): rows leave at once and the next row is selected.
-    func archiveSelection() { removeFromList(action: { core, ids in try await core.archive(ids) }) }
-    func trashSelection() { removeFromList(action: { core, ids in try await core.trash(ids) }) }
+    func archiveSelection() {
+        removeFromList(.archive) { core, ids in try await core.archive(ids) }
+    }
+
+    func trashSelection() {
+        removeFromList(.trash) { core, ids in try await core.trash(ids) }
+    }
 
     func moveSelectionToInbox() {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         if selectedMailboxID != "INBOX" { dropFromList(ids) }
-        Task { await perform { try await core.moveToInbox(ids) } }
+        Task { await perform(UndoableAction(kind: .moveToInbox, count: ids.count)) { try await core.moveToInbox(ids) } }
     }
 
     /// Toggle read: if any target is unread, mark all read; else all unread.
@@ -573,7 +585,8 @@ final class AppModel {
         guard let core, !ids.isEmpty else { return }
         let anyUnread = threads.rows.contains { ids.contains($0.id) && $0.unreadCount > 0 }
         threads.optimisticallyUpdate(Set(ids)) { $0.unreadCount = anyUnread ? 0 : max($0.unreadCount, 1) }
-        Task { await perform { try await core.setRead(ids, anyUnread) } }
+        let action = UndoableAction(kind: anyUnread ? .read : .unread, count: ids.count)
+        Task { await perform(action) { try await core.setRead(ids, anyUnread) } }
     }
 
     func toggleStarSelection() {
@@ -582,17 +595,62 @@ final class AppModel {
         let allStarred = threads.rows.filter { ids.contains($0.id) }.allSatisfy(\.isStarred)
         threads.optimisticallyUpdate(Set(ids)) { $0.isStarred = !allStarred }
         if selectedMailboxID == "STARRED", allStarred { dropFromList(ids) }
-        Task { await perform { try await core.setStarred(ids, !allStarred) } }
+        let action = UndoableAction(kind: allStarred ? .unstar : .star, count: ids.count)
+        Task { await perform(action) { try await core.setStarred(ids, !allStarred) } }
     }
 
     func setLabel(_ labelID: String, applied: Bool) {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         if !applied, selectedMailboxID == labelID { dropFromList(ids) }
+        let name = labelName(labelID)
+        let action = UndoableAction(kind: applied ? .label(name) : .unlabel(name), count: ids.count)
         Task {
-            await perform {
+            await perform(action) {
                 try await core.modifyLabels(ids, add: applied ? [labelID] : [], remove: applied ? [] : [labelID])
             }
+        }
+    }
+
+    /// A label's last path segment, for the notice.
+    private func labelName(_ labelID: String) -> String {
+        mailboxes.mailboxes.first { $0.labelId == labelID }.map { LabelTree.leafName($0.name) } ?? "label"
+    }
+
+    // MARK: Undo (spec §14.6a)
+
+    /// Undo the open account's last mail action (the notice's button, and
+    /// ⌘Z when no text is being edited).
+    func undoMailAction() {
+        undo.undo(in: openAccountID)
+    }
+
+    func redoMailAction() {
+        undo.redo(in: openAccountID)
+    }
+
+    /// Whether ⌘Z belongs to text being edited: a text view is first
+    /// responder in the key window (a field, the composer), or the key
+    /// window is not the mail window.
+    static func textOwnsUndo() -> Bool {
+        guard let window = NSApp.keyWindow else { return false }
+        return window.firstResponder is NSText || window.firstResponder is NSTextView
+    }
+
+    /// Edit › Undo: text keeps its own undo while it is being edited.
+    func undoCommand(mailWindowKey: Bool) {
+        if Self.textOwnsUndo() || !mailWindowKey {
+            NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+        } else {
+            undoMailAction()
+        }
+    }
+
+    func redoCommand(mailWindowKey: Bool) {
+        if Self.textOwnsUndo() || !mailWindowKey {
+            NSApp.sendAction(Selector(("redo:")), to: nil, from: nil)
+        } else {
+            redoMailAction()
         }
     }
 
@@ -611,7 +669,9 @@ final class AppModel {
             let label = try await core.createLabel(path)
             await mailboxes.reload()
             if applyToTargets, !ids.isEmpty {
-                try await core.modifyLabels(ids, add: [label.id], remove: [])
+                if let token = try await core.modifyLabels(ids, add: [label.id], remove: []) {
+                    undo.record(token, UndoableAction(kind: .label(LabelTree.leafName(label.name)), count: ids.count))
+                }
                 await mailboxes.reload()
                 await threads.refresh()
             }
@@ -624,7 +684,8 @@ final class AppModel {
     /// Label threads dropped on a sidebar label (they need not be selected).
     func addLabel(_ labelID: String, toThreads ids: [String]) {
         guard let core, !ids.isEmpty else { return }
-        Task { await perform { try await core.modifyLabels(ids, add: [labelID], remove: []) } }
+        let action = UndoableAction(kind: .label(labelName(labelID)), count: ids.count)
+        Task { await perform(action) { try await core.modifyLabels(ids, add: [labelID], remove: []) } }
     }
 
     func dismissFailedChanges() {
@@ -632,11 +693,14 @@ final class AppModel {
         Task { try? await core.clearFailedChanges() }
     }
 
-    private func removeFromList(action: @escaping @Sendable (CoreClient, [String]) async throws -> UndoToken?) {
+    private func removeFromList(
+        _ kind: UndoableAction.Kind,
+        action: @escaping @Sendable (CoreClient, [String]) async throws -> UndoToken?
+    ) {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         dropFromList(ids)
-        Task { await perform { _ = try await action(core, ids) } }
+        Task { await perform(UndoableAction(kind: kind, count: ids.count)) { try await action(core, ids) } }
     }
 
     /// Remove rows and move the selection to the row after the last one
@@ -652,9 +716,11 @@ final class AppModel {
         selectedThreadID = next?.id
     }
 
-    private func perform(_ body: () async throws -> Void) async {
+    /// Run an action; if it changed anything, put it on the undo stack and
+    /// acknowledge it.
+    private func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
         do {
-            try await body()
+            if let token = try await body() { undo.record(token, action) }
         } catch {
             logger.error("action failed: \(String(describing: error), privacy: .private)")
             // The store was not changed; bring the list back in line.

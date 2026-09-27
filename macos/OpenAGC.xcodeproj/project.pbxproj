@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01E26AB1CB793D384B5C7300 /* UndoNoticeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 548862DE416451002EBB3C1F /* UndoNoticeView.swift */; };
 		020FC5F4D626FA3D9FEC35D0 /* MessageWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CD3817AE3B32FC2F3B89845 /* MessageWebView.swift */; };
 		0665BDF0CA8EA8B79ED06F61 /* ReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDAEE7BA4E6152A7714BD298 /* ReaderTests.swift */; };
 		0C3A1E2BB1395CFE3826E5C0 /* SchemeHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B84FAD449704789E8707C7 /* SchemeHandlers.swift */; };
@@ -69,6 +70,7 @@
 		B453F38BECAF82D76E2FE0BF /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */; };
 		B46DC7164B626E812E646EDE /* ThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0633FEBD199D3028E73DAA /* ThreadListView.swift */; };
 		B739287D44855F0E839EDAB4 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8D9EFB8321E02452EFCF26 /* AppDelegate.swift */; };
+		B79B36EDE217EE06866A9F40 /* MailUndo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D52F53D78AD39AD9664700 /* MailUndo.swift */; };
 		C9F5E1202A2849397390D3AC /* MailboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD6458B52C0ABAB8AED1A828 /* MailboxStore.swift */; };
 		CB74E21E4FDF9E9140826A70 /* AgentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17B53574C86CCC4F40FC00A1 /* AgentStore.swift */; };
 		CC89EB36D485FE29C268F72A /* ThreadRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF32A9AE2D35843656097005 /* ThreadRowView.swift */; };
@@ -78,6 +80,7 @@
 		D9D7C636BB9415D3857A891E /* UpdaterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3FE3957640F5FB9A22D3965 /* UpdaterTests.swift */; };
 		DB3DC4EECF705D9820BC3B1E /* RichTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24E3C75C954D3F4970670D2 /* RichTextEditor.swift */; };
 		DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9036B10AEDC12CF3CF3416BD /* MainWindow.swift */; };
+		DDDC17F9FCF6F1E7462D3B7D /* UndoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E8DBF47559E5EC82041284 /* UndoTests.swift */; };
 		E44E3F9A96EE57A2B8F018CF /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF9BB1ABE76E11F4305E525 /* KeyboardShortcuts.swift */; };
 		E65B21770ED2B172D35054C7 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5846BE9A95C68C7383B2B7C /* SyncStatusView.swift */; };
 		E6C0C4D4E44A1BE9838F0FB8 /* RoutinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226B235AA4B7F4515359C61 /* RoutinesStore.swift */; };
@@ -122,6 +125,7 @@
 		00C8234BE90C43AB48FCA078 /* DraftClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftClient.swift; sourceTree = "<group>"; };
 		0226B235AA4B7F4515359C61 /* RoutinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesStore.swift; sourceTree = "<group>"; };
 		033CF7C15494E30BC67D425A /* AttachmentStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStrip.swift; sourceTree = "<group>"; };
+		04D52F53D78AD39AD9664700 /* MailUndo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailUndo.swift; sourceTree = "<group>"; };
 		04F1A33FDE9F24E15210C90A /* AccountSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSwitchTests.swift; sourceTree = "<group>"; };
 		0853C589261B9BC5E99D0106 /* ComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTests.swift; sourceTree = "<group>"; };
 		0C8A5AC940824CF40F0B058F /* LabelTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelTreeTests.swift; sourceTree = "<group>"; };
@@ -146,12 +150,14 @@
 		448D8466905D410325058CE5 /* OpenAGC.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenAGC.entitlements; sourceTree = "<group>"; };
 		46BFDFDE09CC5207A0A048D0 /* ReaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStore.swift; sourceTree = "<group>"; };
 		4E9589E376D0608FB13DD219 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
+		548862DE416451002EBB3C1F /* UndoNoticeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoNoticeView.swift; sourceTree = "<group>"; };
 		56136D185C680F33C31C33A6 /* OnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTests.swift; sourceTree = "<group>"; };
 		5D0633FEBD199D3028E73DAA /* ThreadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListView.swift; sourceTree = "<group>"; };
 		601938BEED9E6F66CF748199 /* AccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettings.swift; sourceTree = "<group>"; };
 		6106757A4B6B179819362741 /* AgentSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSettingsTests.swift; sourceTree = "<group>"; };
 		6407F10744C6609C6D77A3E9 /* EmailDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmailDocument.swift; sourceTree = "<group>"; };
 		662ED4D20063A892C72301EF /* Snapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Snapshot.swift; sourceTree = "<group>"; };
+		66E8DBF47559E5EC82041284 /* UndoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoTests.swift; sourceTree = "<group>"; };
 		6AF84574CC4178F1C4DEFC88 /* OpenAGC-dev.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "OpenAGC-dev.entitlements"; sourceTree = "<group>"; };
 		6D322E3E16D6E19FF3D99CBF /* agent-system-prompt.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "agent-system-prompt.md"; sourceTree = "<group>"; };
 		6EA889A74036D5319EED2E94 /* CoreClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreClientTests.swift; sourceTree = "<group>"; };
@@ -303,6 +309,15 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		41A4803B6ABF0BDBE2711120 /* Undo */ = {
+			isa = PBXGroup;
+			children = (
+				04D52F53D78AD39AD9664700 /* MailUndo.swift */,
+				548862DE416451002EBB3C1F /* UndoNoticeView.swift */,
+			);
+			path = Undo;
+			sourceTree = "<group>";
+		};
 		69C4720C0FA23E101118BEBF /* Sidebar */ = {
 			isa = PBXGroup;
 			children = (
@@ -384,6 +399,7 @@
 				CEACE15E5A6BE04DA48CAEFA /* RoutineTests.swift */,
 				D5D8587064562266E1C5E1DC /* SearchTests.swift */,
 				BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */,
+				66E8DBF47559E5EC82041284 /* UndoTests.swift */,
 				F3FE3957640F5FB9A22D3965 /* UpdaterTests.swift */,
 			);
 			path = OpenAGCTests;
@@ -449,6 +465,7 @@
 				8A7408779DD1060A1ED75B09 /* Settings */,
 				69C4720C0FA23E101118BEBF /* Sidebar */,
 				B755F7DDAB76557EFF1EA484 /* ThreadList */,
+				41A4803B6ABF0BDBE2711120 /* Undo */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -702,6 +719,7 @@
 				4CE51440690817A4081731E3 /* RoutineTests.swift in Sources */,
 				AB0A75C26EE77D8683A01474 /* SearchTests.swift in Sources */,
 				22FED86B0464F6B629120D6E /* SidebarTreeTests.swift in Sources */,
+				DDDC17F9FCF6F1E7462D3B7D /* UndoTests.swift in Sources */,
 				D9D7C636BB9415D3857A891E /* UpdaterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -733,6 +751,7 @@
 				D8B9D29E5D5F15BCAF819FB9 /* LabelPicker.swift in Sources */,
 				79D089313B823566456CDFBD /* LabelTree.swift in Sources */,
 				73F5C2F69C703EED929AAA94 /* LinkSafety.swift in Sources */,
+				B79B36EDE217EE06866A9F40 /* MailUndo.swift in Sources */,
 				C9F5E1202A2849397390D3AC /* MailboxStore.swift in Sources */,
 				DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */,
 				020FC5F4D626FA3D9FEC35D0 /* MessageWebView.swift in Sources */,
@@ -754,6 +773,7 @@
 				B46DC7164B626E812E646EDE /* ThreadListView.swift in Sources */,
 				A67D0A6156AB71A08D7ABBAC /* ThreadReaderView.swift in Sources */,
 				CC89EB36D485FE29C268F72A /* ThreadRowView.swift in Sources */,
+				01E26AB1CB793D384B5C7300 /* UndoNoticeView.swift in Sources */,
 				4B30B25AE957C2C75F0AC0FE /* Updater.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

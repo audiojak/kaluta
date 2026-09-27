@@ -106,6 +106,18 @@ struct MailCommands: Commands {
                 .disabled(model.isArchive)
                 .help(model.isArchive ? AppModel.cannotSendReason : "")
         }
+        // Mail actions undo per account; text being edited keeps its own
+        // undo (spec §14.6a).
+        CommandGroup(replacing: .undoRedo) {
+            Button(mailKey ? model.undo.undoTitle(in: model.openAccountID) : "Undo") {
+                model.undoCommand(mailWindowKey: mailKey)
+            }
+            .keyboardShortcut("z")
+            Button(mailKey ? model.undo.redoTitle(in: model.openAccountID) : "Redo") {
+                model.redoCommand(mailWindowKey: mailKey)
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+        }
         CommandGroup(after: .newItem) {
             Divider()
             // No shortcut: ⌘⇧I is Load Remote Images (spec §7.8 note).

@@ -18,6 +18,8 @@ import os
 ///                                       -OpenAGCFakeAgents YES)
 ///   -OpenAGCSnapshotProposal <summary>  show a sample approval card
 ///   -OpenAGCSnapshotWidth <points>      resize the main window first
+///   -OpenAGCSnapshotArchive YES         archive the selection first (shows
+///                                       the undo notice)
 ///   -OpenAGCSnapshotRoutine <runner>    open the Routines window (creating
 ///                                       a routine if there is none) and
 ///                                       capture it
@@ -63,6 +65,11 @@ enum Snapshot {
                 } else if defaults.bool(forKey: "OpenAGCSnapshotSelectFirst") {
                     delegate.model?.selectedThreadID = rows[0].id
                 }
+            }
+            if defaults.bool(forKey: "OpenAGCSnapshotArchive"), let model = delegate.model {
+                model.undo.runsClock = false
+                model.archiveSelection()
+                try? await Task.sleep(for: .milliseconds(500))
             }
             if let prompt = defaults.string(forKey: "OpenAGCSnapshotAgentPrompt"), let model = delegate.model {
                 await model.agent.loadProviders()

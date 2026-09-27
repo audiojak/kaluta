@@ -124,6 +124,7 @@ struct MainWindow: View {
                     ThreadListView()
                 }
             }
+            .overlay(alignment: .bottom) { UndoNoticeView() }
         }
     }
 
