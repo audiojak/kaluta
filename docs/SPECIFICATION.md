@@ -1704,8 +1704,11 @@ Every target in §1.3 traces to one of these rules.
   message; one document avoids measuring each web view's height and costs
   one load per selection.)* Attachments strip with Quick Look
   (`QLPreviewPanel`) and drag-out.
-- Bottom bar: the agent prompt field, "Ask Claude…"/"Ask Codex…" with the
-  provider switcher.
+- Agent prompt: "Ask Claude…"/"Ask Codex…" with the provider switcher.
+  *(Amended 2026-09-27: a glass capsule floating over the bottom of the
+  reader column, inset like the macOS 26 sidebar, rather than a bar pinned
+  under the thread list; the Inbox's Important-only switch is a toolbar
+  button over the list column.)*
 
 ### 14.4 Message rendering **(Verified)**
 

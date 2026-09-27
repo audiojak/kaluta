@@ -46,6 +46,14 @@ struct MainWindow: View {
             HStack(spacing: 0) {
                 detail
                     .frame(maxWidth: .infinity)
+                    // The agent prompt floats over the reader as an inset
+                    // glass capsule (macOS 26), not a bar pinned to a column.
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        AgentPromptBar()
+                            .frame(maxWidth: 680)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 12)
+                    }
                 if model.agent.isPresented {
                     Divider()
                     AgentInspector()
@@ -105,19 +113,6 @@ struct MainWindow: View {
                     .foregroundStyle(.secondary)
                     .padding(8)
                 }
-                if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
-                    @Bindable var model = model
-                    HStack {
-                        Spacer()
-                        Toggle("Important only", isOn: $model.inboxImportantOnly)
-                            .toggleStyle(.switch)
-                            .controlSize(.mini)
-                            .font(.callout)
-                            .help("Show only the Inbox threads Gmail marked Important")
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                }
                 if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
                         ContentUnavailableView.search(text: model.searchText)
@@ -127,7 +122,21 @@ struct MainWindow: View {
                 } else {
                     ThreadListView()
                 }
-                AgentPromptBar()
+            }
+            // The Important-only switch lives in the column's toolbar, so
+            // the list starts straight under the title.
+            .toolbar {
+                if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+                    ToolbarItem(placement: .automatic) {
+                        @Bindable var model = model
+                        Toggle(isOn: $model.inboxImportantOnly) {
+                            Label("Important only", systemImage: "chevron.right.2")
+                        }
+                        .toggleStyle(.button)
+                        .labelStyle(.titleAndIcon)
+                        .help("Show only the Inbox threads Gmail marked Important")
+                    }
+                }
             }
         }
     }
