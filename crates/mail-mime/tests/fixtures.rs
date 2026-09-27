@@ -203,3 +203,22 @@ fn decode_text_part_applies_the_charset() {
     assert_eq!(decode_text_part("naïve".as_bytes(), "text/plain; charset=\"utf-8\""), "naïve");
     assert_eq!(decode_text_part(b"<p>x</p>", "text/html; charset=utf-8"), "<p>x</p>");
 }
+
+#[test]
+fn bytes_that_are_not_the_utf8_they_claim_decode_as_windows_1252() {
+    // oagc-u40: a mailer labels Windows-1252 as UTF-8. Each bad byte came out
+    // as U+FFFD; valid UTF-8 around it (and a genuine U+FFFD) must survive.
+    let m = fixture("19-mislabelled-utf8.eml");
+    assert_eq!(
+        m.text.as_deref().map(str::trim),
+        Some("Checking in — did you get it? Café — ok. A real \u{FFFD} stays.")
+    );
+    assert_eq!(m.html.as_deref().map(str::trim), Some("<p>Checking in — did you get it? Café — ok</p>"));
+}
+
+#[test]
+fn decode_text_part_repairs_mislabelled_utf8() {
+    assert_eq!(decode_text_part(b"in \x97 ok \xe2\x80\x94", "text/plain; charset=utf-8"), "in — ok —");
+    assert_eq!(decode_text_part(b"in \x97 ok", "text/plain"), "in — ok");
+    assert_eq!(decode_text_part(b"Gr\xfc\xdfe", "text/plain; charset=iso-8859-1"), "Grüße");
+}
