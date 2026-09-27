@@ -767,6 +767,40 @@ to `imap.gmail.com`.
 *Not in scope.* IMAP as the sole provider (non-Gmail accounts), IDLE push,
 and label writes over IMAP.
 
+**Amendment (2026-09-27): tiered download.** Planned. With IMAP, headers
+are cheap and bodies are not; most old mail is never opened. So an account
+using IMAP downloads in two tiers:
+
+- *Headers* for the whole sync window (six months by default, or
+  everything): subject, sender, recipients, date, labels, flags. The list,
+  labels, sorting and routines' first pass work from these.
+- *Bodies* only where they matter: the Inbox and a *body window* (default
+  the last 30 days; Settings › Accounts › *Full messages for*: last 30
+  days / last 6 months / the whole window), plus on demand: a message the
+  user opens (already prioritized), a header-only message an agent or
+  routine reads (fetched at interactive priority before the tool answers),
+  and search matches (server search fetches them).
+
+Details:
+1. Queue: ids outside the body window are listed with a *headers-only*
+   priority that the body backfill never drains; the headers pass covers
+   them. Widening the body window moves them to body priorities.
+2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
+   available, else REST) and store them; agent tools (`mail_get_thread`,
+   `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
+3. Search: free-text queries also run server search when the account has
+   header-only mail in the searched mailbox, not only when local results
+   are few; header-only rows match on headers locally in the meantime.
+4. Snippets: a partial fetch of the first bytes of the text part
+   (`BODY.PEEK[1]<0.2048>`, decoded best effort) gives list snippets
+   without whole bodies.
+5. Accounts on the REST API keep today's behaviour (bodies for the whole
+   window): headers cost the same quota there. Settings suggests IMAP for
+   large mailboxes and hides the body-window choice without it.
+
+Trade-off, accepted: text search over old mail waits on Gmail's server
+search, and an agent reading old mail pauses while it downloads.
+
 ### 7.5 Sending and threading **(Verified)**
 
 Outgoing mail is built with `mail-builder`: `multipart/alternative` with
