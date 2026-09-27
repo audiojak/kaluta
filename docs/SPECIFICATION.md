@@ -1794,6 +1794,45 @@ when you mean undo": all these actions are reversible).
   "Sending… Undo ⌘Z", and undo returns the message to an open composer.
   Agent sends, approved by the user, use the same delay.
 
+### 14.6b Agent suggestions **(Amendment 2026-09-27)**
+
+Planned. The prompt capsule ("Ask Claude…") gives no hint of what an agent
+can do; most users will not guess. Suggestions show examples, drawn from
+the tools that exist (§10.2), so nothing is promised that a tool cannot do.
+
+- **Where.** (1) The agent column's empty state lists capabilities in
+  groups: *Find and summarise* (read tools), *Draft for you* (drafts,
+  never sent without approval), *Tidy up* (archive, labels, read state),
+  and, in an archive account, no drafting group. Each line is an example
+  prompt in the user's voice. (2) When the prompt field is focused and
+  empty, up to four **suggestion chips** appear above the capsule; ↑/↓ or
+  Tab move between them, Return sends one, Escape hides them. A chip
+  fills the field rather than sending when it ends in "…" (needs the
+  user's words).
+- **Context-aware.** Suggestions follow what the user is looking at:
+  - a thread selected: "Summarise this thread", "Draft a reply that…",
+    "What is being asked of me here?", "Add the label …";
+  - several threads selected: "Archive these", "Which of these need a
+    reply?", "Label these …";
+  - a mailbox with unread mail: "What's new since yesterday?", "Which
+    unread messages need a reply?";
+  - a search in progress: "Summarise these results", "Find the one that
+    mentions …";
+  - an attachment in the selected thread: "What does the attachment say?";
+  - an archive account: the same minus drafting.
+  Suggestions are generated locally from state; no model call and no
+  network to produce them.
+- **Honesty.** Every suggestion maps to tools the current agent and
+  account allow. Write actions say what happens: "Archive these (you can
+  undo)"; sends are never suggested ("draft" only, since sending needs
+  approval, §10.4).
+- **Learning.** The chips prefer prompts the user has sent before (last
+  20, stored per account); the examples rotate so the list does not look
+  static. No telemetry.
+- **Accessibility.** Chips are buttons with full labels; VoiceOver
+  announces "4 suggestions" when they appear; Reduce Motion disables the
+  fade.
+
 ### 14.7 Other native behaviors
 
 Standard menu bar with all commands and shortcuts; `NSUserNotification` via
