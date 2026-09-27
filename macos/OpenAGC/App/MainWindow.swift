@@ -95,6 +95,7 @@ struct MainWindow: View {
             ContentUnavailableView("Something Went Wrong", systemImage: "exclamationmark.triangle", description: Text(message))
         case .open:
             VStack(spacing: 0) {
+                listHeader
                 if model.needsReauthentication {
                     ReauthenticationBanner()
                 }
@@ -123,22 +124,26 @@ struct MainWindow: View {
                     ThreadListView()
                 }
             }
-            // The Important-only switch lives in the column's toolbar, so
-            // the list starts straight under the title.
-            .toolbar {
-                if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
-                    ToolbarItem(placement: .automatic) {
-                        @Bindable var model = model
-                        Toggle(isOn: $model.inboxImportantOnly) {
-                            Label("Important only", systemImage: "chevron.right.2")
-                        }
-                        .toggleStyle(.button)
-                        .labelStyle(.titleAndIcon)
-                        .help("Show only the Inbox threads Gmail marked Important")
-                    }
-                }
-            }
         }
+    }
+
+    /// The list column's header: the Inbox's Important-only switch, and a
+    /// rule that separates the title area from the messages.
+    @ViewBuilder private var listHeader: some View {
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+            @Bindable var model = model
+            HStack {
+                Spacer()
+                Toggle("Important only", isOn: $model.inboxImportantOnly)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .font(.callout)
+                    .help("Show only the Inbox threads Gmail marked Important")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+        }
+        Divider()
     }
 
     @ViewBuilder private var detail: some View {

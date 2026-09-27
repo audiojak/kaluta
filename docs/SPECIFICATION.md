@@ -1707,8 +1707,9 @@ Every target in §1.3 traces to one of these rules.
 - Agent prompt: "Ask Claude…"/"Ask Codex…" with the provider switcher.
   *(Amended 2026-09-27: a glass capsule floating over the bottom of the
   reader column, inset like the macOS 26 sidebar, rather than a bar pinned
-  under the thread list; the Inbox's Important-only switch is a toolbar
-  button over the list column.)*
+  under the thread list. The list column has a header: the Inbox's
+  Important-only switch, then a rule separating the title area from the
+  messages.)*
 
 ### 14.4 Message rendering **(Verified)**
 
