@@ -1848,7 +1848,7 @@ when you mean undo": all these actions are reversible).
 
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 
-Planned. The prompt capsule ("Ask Claude…") gives no hint of what an agent
+Implemented 2026-09-27 (oagc-gra). The prompt capsule ("Ask Claude…") gives no hint of what an agent
 can do; most users will not guess. Suggestions show examples, drawn from
 the tools that exist (§10.2), so nothing is promised that a tool cannot do.
 
@@ -1884,6 +1884,17 @@ the tools that exist (§10.2), so nothing is promised that a tool cannot do.
 - **Accessibility.** Chips are buttons with full labels; VoiceOver
   announces "4 suggestions" when they appear; Reduce Motion disables the
   fade.
+
+*Implementation notes.* `AgentSuggestions` (Swift, pure) builds the groups
+and chips; up to two recent prompts that fit the context come first (one
+mentioning "this"/"here" fits a single selection, "these"/"results" several
+or a search, anything else no selection), then the context's examples, the
+most relevant fixed and the rest rotated by day. *Decision:* the archive
+chip reads "Archive these (reversible)", not "(you can undo)": agent
+actions are not on the ⌘Z stack (§14.6a), though they can be moved back.
+The empty state replaces the transcript area (header kept); the chips sit
+above the capsule. Settings › Agents › Clear Suggestions History forgets
+the recent prompts (UserDefaults, per account).
 
 ### 14.7 Other native behaviors
 

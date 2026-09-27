@@ -205,6 +205,16 @@ impl Core {
         .await
     }
 
+    /// [`Core::held_send_count`] without waiting on the runtime, for the
+    /// app's quit handler (it must answer on the main thread at once). A
+    /// pooled read; well under a millisecond.
+    pub fn held_send_count_now(&self) -> u32 {
+        let stores: Vec<mail_store::Db> =
+            self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
+        let now = mail_sync::now_millis();
+        stores.iter().map(|db| db.read_blocking(move |c| mail_store::outbox::held_sends(c, now)).unwrap_or(0)).sum()
+    }
+
     /// Sends waiting out their Undo Send delay, in every account.
     pub async fn held_send_count(&self) -> u32 {
         let stores: Vec<mail_store::Db> =
@@ -534,6 +544,7 @@ mod tests {
         let id = block_on(core.save_draft(draft_to("Held"))).unwrap();
         assert!(block_on(core.send_draft(id)).unwrap(), "held");
         assert_eq!(block_on(core.held_send_count()), 1);
+        assert_eq!(core.held_send_count_now(), 1);
         assert!(block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held"));
         std::thread::sleep(std::time::Duration::from_millis(200));
         assert!(fake.message(&MessageId::new("sent1")).is_none(), "held, not sent");

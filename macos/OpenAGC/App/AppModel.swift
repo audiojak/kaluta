@@ -359,7 +359,53 @@ final class AppModel {
     func askAgent(_ prompt: String) async {
         let context = PromptContextInfo(mailboxId: selectedMailboxID, selectedThreadIds: actionTargets,
                                         searchQuery: threads.searchQuery)
+        if let id = openAccountID {
+            RecentPrompts(defaults: defaults).record(prompt, for: id)
+            recentPromptsRevision += 1
+        }
         await agent.send(prompt, context: context)
+    }
+
+    // MARK: Agent suggestions (spec §14.6b)
+
+    /// The prompt capsule's text, shared so a suggestion can fill it.
+    var agentPromptDraft = ""
+    /// Bumped when recent prompts change, so chips recompute.
+    private(set) var recentPromptsRevision = 0
+
+    /// What is on screen, for the suggestions.
+    var suggestionContext: SuggestionContext {
+        let targets = actionTargets
+        let mailbox = mailboxes.mailboxes.first { $0.id == selectedMailboxID }
+        let attachment = targets.count == 1 && reader.detail?.thread.id == targets.first && !reader.attachments.isEmpty
+        return SuggestionContext(selectedCount: targets.count, mailboxID: selectedMailboxID,
+                                 unreadInMailbox: Int(mailbox?.unreadCount ?? 0), searchQuery: threads.searchQuery,
+                                 hasAttachment: attachment, canDraft: !isArchive)
+    }
+
+    /// Up to four chips over the empty prompt field.
+    var agentChips: [AgentSuggestion] {
+        _ = recentPromptsRevision
+        let recent = openAccountID.map { RecentPrompts(defaults: defaults).prompts(for: $0) } ?? []
+        return AgentSuggestions.chips(for: suggestionContext, recent: recent, day: AgentSuggestions.today())
+    }
+
+    /// A suggestion was chosen: send it, or put it in the field when it
+    /// needs the user's words.
+    func choose(_ suggestion: AgentSuggestion) {
+        if suggestion.fillsOnly {
+            agentPromptDraft = suggestion.fillText
+            focusAgentPrompt()
+        } else {
+            agentPromptDraft = ""
+            Task { await askAgent(suggestion.text) }
+        }
+    }
+
+    /// Settings › Agents › Clear Suggestions History.
+    func clearSuggestionHistory() {
+        RecentPrompts(defaults: defaults).clear(accounts.map(\.id) + [openAccountID].compactMap { $0 })
+        recentPromptsRevision += 1
     }
 
     // MARK: Notifications
@@ -646,13 +692,6 @@ final class AppModel {
         }
     }
 
-    /// Quitting sends held messages at once (spec §14.6a decision): waits
-    /// a few seconds for them; any still going are sent at next launch.
-    func sendHeldBeforeQuitting() async {
-        guard let core, await core.heldSendCount() > 0 else { return }
-        let left = await core.sendHeldNow(timeout: .seconds(5))
-        if left > 0 { logger.info("\(left) held send(s) will go at next launch") }
-    }
 
     /// Undo the open account's last mail action (the notice's button, and
     /// ⌘Z when no text is being edited).

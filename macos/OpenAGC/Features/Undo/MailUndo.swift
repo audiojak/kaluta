@@ -83,6 +83,8 @@ final class MailUndo {
     /// Drives the countdown; tests turn it off and call `advance(by:)`.
     @ObservationIgnored var runsClock = true
     @ObservationIgnored private var clock: Task<Void, Never>?
+    /// The last undo or redo sent to the core; the next waits for it.
+    @ObservationIgnored private var replaying: Task<Void, Never>?
 
     init(core: CoreClient?) {
         self.core = core
@@ -123,7 +125,10 @@ final class MailUndo {
         register(token, action, undoing: !undoing, on: manager)
         revision += 1
         guard let core else { return }
-        Task {
+        // In order: ⌘Z ⌘Z must reverse the last action, then the one before.
+        let previous = replaying
+        replaying = Task {
+            await previous?.value
             do {
                 if undoing { try await core.undo(token) } else { try await core.redo(token) }
             } catch let error as CoreClientError {

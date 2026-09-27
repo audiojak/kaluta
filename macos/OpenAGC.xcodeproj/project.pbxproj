@@ -17,11 +17,13 @@
 		1970C5710634017B9B3E926B /* CoreClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA889A74036D5319EED2E94 /* CoreClientTests.swift */; };
 		19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */; };
 		1EE4D994E6332B9D2D7B1772 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65BAFCB0A37F91E630541F2 /* SidebarView.swift */; };
+		216E07D01A157F0BCAAB350D /* AgentSuggestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD34CB7C1FA0DB564F8F5DC1 /* AgentSuggestionTests.swift */; };
 		22FED86B0464F6B629120D6E /* SidebarTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */; };
 		23F77D5789CFA8F3CBE1F3D0 /* GoogleOAuth.plist in Resources */ = {isa = PBXBuildFile; fileRef = 19F04E00E0E6BE9B7678CEDB /* GoogleOAuth.plist */; };
 		24C211EEAB25BC61A3BB4F70 /* MailReadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7491CD8B391923F8E19F565D /* MailReadTests.swift */; };
 		277A64612543D96AB16DA154 /* OnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56136D185C680F33C31C33A6 /* OnboardingTests.swift */; };
 		290545266B859DE81481C714 /* Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662ED4D20063A892C72301EF /* Snapshot.swift */; };
+		2D0D0324CD5B8C0B57B55A0D /* AgentSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */; };
 		319185B7856E5D37CAB6C52A /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4372C03A0DB7F78DF414F892 /* PerformanceTests.swift */; };
 		3383C90F028074A9FDD81433 /* GoogleClientConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33717E284E8BBBD24A611B4F /* GoogleClientConfiguration.swift */; };
 		366FA0C92B6526C208B62372 /* LabelPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD60D05E2A25A84E52603E5F /* LabelPickerTests.swift */; };
@@ -150,6 +152,7 @@
 		448D8466905D410325058CE5 /* OpenAGC.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenAGC.entitlements; sourceTree = "<group>"; };
 		46BFDFDE09CC5207A0A048D0 /* ReaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStore.swift; sourceTree = "<group>"; };
 		4E9589E376D0608FB13DD219 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
+		518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestions.swift; sourceTree = "<group>"; };
 		548862DE416451002EBB3C1F /* UndoNoticeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoNoticeView.swift; sourceTree = "<group>"; };
 		56136D185C680F33C31C33A6 /* OnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTests.swift; sourceTree = "<group>"; };
 		5D0633FEBD199D3028E73DAA /* ThreadListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListView.swift; sourceTree = "<group>"; };
@@ -181,6 +184,7 @@
 		A751B74E9626A3A08F4D905F /* ThreadListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListStore.swift; sourceTree = "<group>"; };
 		AB3DFF446CD804B9EB7984C8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		ACA440AC1C73AD0A9E18E993 /* ActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionTests.swift; sourceTree = "<group>"; };
+		AD34CB7C1FA0DB564F8F5DC1 /* AgentSuggestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestionTests.swift; sourceTree = "<group>"; };
 		AE47B2F1BDB2A00655547EA9 /* AppShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellTests.swift; sourceTree = "<group>"; };
 		AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHTML.swift; sourceTree = "<group>"; };
 		BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarTreeTests.swift; sourceTree = "<group>"; };
@@ -278,6 +282,7 @@
 				7AFC64B77AEDD827390E1C08 /* AgentPanel.swift */,
 				7DFBC630572AC27DA6ED8285 /* AgentSettings.swift */,
 				17B53574C86CCC4F40FC00A1 /* AgentStore.swift */,
+				518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */,
 			);
 			path = Agent;
 			sourceTree = "<group>";
@@ -380,6 +385,7 @@
 				BE6FF06BED85F5FE72CF32A5 /* AgentFFITests.swift */,
 				90CE9D77767388614457FBCE /* AgentPanelTests.swift */,
 				6106757A4B6B179819362741 /* AgentSettingsTests.swift */,
+				AD34CB7C1FA0DB564F8F5DC1 /* AgentSuggestionTests.swift */,
 				83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */,
 				AE47B2F1BDB2A00655547EA9 /* AppShellTests.swift */,
 				813AFF04D4AA06CBAF57266A /* ArchiveAccountTests.swift */,
@@ -700,6 +706,7 @@
 				B0F9127F48B25962A0D3E324 /* AgentFFITests.swift in Sources */,
 				B2F035E69CB0D6421F8A763E /* AgentPanelTests.swift in Sources */,
 				72B799A4785C73464A0783BC /* AgentSettingsTests.swift in Sources */,
+				216E07D01A157F0BCAAB350D /* AgentSuggestionTests.swift in Sources */,
 				B453F38BECAF82D76E2FE0BF /* AppModelTests.swift in Sources */,
 				4BDBFCA9AB0E6E20DC8E6EA0 /* AppShellTests.swift in Sources */,
 				9EA6082C5120AB0A63AA34E5 /* ArchiveAccountTests.swift in Sources */,
@@ -735,6 +742,7 @@
 				CF4F91CC076301CA21FE2C86 /* AgentPanel.swift in Sources */,
 				70D4EC96D9BC0BC67EAE0885 /* AgentSettings.swift in Sources */,
 				CB74E21E4FDF9E9140826A70 /* AgentStore.swift in Sources */,
+				2D0D0324CD5B8C0B57B55A0D /* AgentSuggestions.swift in Sources */,
 				B739287D44855F0E839EDAB4 /* AppDelegate.swift in Sources */,
 				5983A19ACD9796ACFA5E19D5 /* AppModel.swift in Sources */,
 				A64492AC04FB122343BA17D2 /* AttachmentStrip.swift in Sources */,
