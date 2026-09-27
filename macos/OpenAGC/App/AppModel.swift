@@ -33,6 +33,10 @@ final class AppModel {
         return nil
     }
     private(set) var syncDisplay: SyncDisplay = .idle
+    /// How the open account's backfill downloads bodies ("imap", "rest",
+    /// "imap-refused"), for the sidebar's sync line.
+    private(set) var backfillTransport: String?
+    @ObservationIgnored private var transportCheckedAt: Date = .distantPast
     /// Set when Google rejected the stored credentials; shows a banner.
     private(set) var needsReauthentication = false
     /// Why a sign-in is needed, so Settings can say what happened.
@@ -247,6 +251,7 @@ final class AppModel {
             }
             needsReauthentication = false
             reauthenticationReason = nil
+            backfillTransport = nil
             // An imported mailbox has no server and no sign-in (spec §7.8).
             if accountID != Self.demoAccountID, !core.isArchive(accountID) {
                 // A Keychain that will not hand over the sign-in (for example
@@ -410,6 +415,16 @@ final class AppModel {
         guard let id = runningImport else { return }
         runningImport = nil
         if show { await switchAccount(to: id) }
+    }
+
+    /// Re-read the backfill transport at most every few seconds.
+    private func refreshTransport(force: Bool = false) {
+        guard let core, let id = openAccountID, force || Date().timeIntervalSince(transportCheckedAt) > 5 else { return }
+        transportCheckedAt = Date()
+        Task {
+            let status = await core.backfillStatus(id)
+            if openAccountID == id, backfillTransport != status.transport { backfillTransport = status.transport }
+        }
     }
 
     /// Tag notifications with their account; the label only matters when
@@ -731,6 +746,7 @@ final class AppModel {
                 reauthenticationReason = .googleRejected
             }
         case let .syncStatus(state, pending):
+            refreshTransport()
             switch state {
             case .idle: syncDisplay = .idle
             case .bootstrapping, .syncing: syncDisplay = pending > 0 || state == .bootstrapping ? .syncing(pending: pending) : .idle

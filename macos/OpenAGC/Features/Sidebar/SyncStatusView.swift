@@ -9,7 +9,9 @@ struct SyncStatusView: View {
             switch model.syncDisplay {
             case let .syncing(pending):
                 ProgressView().controlSize(.mini)
-                Text(pending > 0 ? "Syncing — \(pending.formatted()) left" : "Syncing…")
+                Text(SyncStatusView.syncingText(pending: pending, transport: model.backfillTransport))
+                    .help(model.backfillTransport == "imap"
+                        ? "Downloading message bodies over IMAP (Settings › Accounts)" : "")
             case .offline:
                 Image(systemName: "wifi.slash")
                 Text("Offline")
@@ -35,5 +37,11 @@ struct SyncStatusView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// "Syncing over IMAP — 7,258 left".
+    static func syncingText(pending: UInt32, transport: String?) -> String {
+        let how = transport == "imap" ? "Syncing over IMAP" : "Syncing"
+        return pending > 0 ? "\(how) — \(pending.formatted()) left" : "\(how)…"
     }
 }

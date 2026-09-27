@@ -123,3 +123,12 @@ struct NotificationTests {
         #expect(NSApp.dockTile.badgeLabel == nil)
     }
 }
+
+struct SyncStatusTextTests {
+    @Test func theSidebarSaysWhenItDownloadsOverIMAP() {
+        #expect(SyncStatusView.syncingText(pending: 7258, transport: "imap") == "Syncing over IMAP — 7,258 left")
+        #expect(SyncStatusView.syncingText(pending: 12, transport: "rest") == "Syncing — 12 left")
+        #expect(SyncStatusView.syncingText(pending: 0, transport: "imap") == "Syncing over IMAP…")
+        #expect(SyncStatusView.syncingText(pending: 3, transport: nil) == "Syncing — 3 left")
+    }
+}
