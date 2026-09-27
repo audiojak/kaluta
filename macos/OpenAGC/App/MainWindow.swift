@@ -55,9 +55,22 @@ struct MainWindow: View {
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)
         }
+        .navigationSubtitle(windowSubtitle)
         .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search mail")
         .searchFocused($searchFocused)
         .onChange(of: model.searchFocusRequests) { searchFocused = true }
+    }
+
+    /// "Inbox · Important only · Syncing over IMAP — 6,406 left", as Mail
+    /// puts mailbox status under the window title.
+    private var windowSubtitle: String {
+        var parts: [String] = []
+        if let id = model.selectedMailboxID, let mailbox = model.mailboxes.mailboxes.first(where: { $0.id == id }) {
+            parts.append(LabelTree.leafName(mailbox.name))
+            if id == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        }
+        if let status = SyncStatusView.subtitle(for: model) { parts.append(status) }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder private var content: some View {

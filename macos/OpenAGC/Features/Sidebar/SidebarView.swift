@@ -8,13 +8,9 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
-        // A plain footer rather than a safe-area inset: on macOS 26 the
-        // inset does not push the list's last section up (it drew over it).
-        VStack(spacing: 0) {
-        AccountMenuButton()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        // Only the native list lives in the sidebar, so macOS 26 draws it as
+        // one glass panel; the account switcher sits in the sidebar's title
+        // bar and sync status in the window subtitle.
         List(selection: $model.selectedMailboxID) {
             Section {
                 ForEach(model.mailboxes.systemMailboxes, id: \.id) { mailbox in
@@ -58,8 +54,10 @@ struct SidebarView: View {
         .task(id: model.openAccountID) { expansion.load(account: model.openAccountID) }
         .onChange(of: model.routinesRevision) { Task { await model.routines.load() } }
         .listStyle(.sidebar)
-        Divider()
-        SyncStatusView()
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                AccountMenuButton()
+            }
         }
     }
 }

@@ -1,8 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// The avatar button at the top of the sidebar: the account on screen, and
-/// a menu to switch, add or manage accounts (spec §7.7).
+/// The account switcher: a small avatar in the sidebar's title bar, with
+/// the account list in its menu (spec §7.7). The address is in the tooltip,
+/// not beside the picture.
 struct AccountMenuButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openSettings) private var openSettings
@@ -11,26 +12,16 @@ struct AccountMenuButton: View {
         Menu {
             AccountMenuItems(openSettings: { openSettings() })
         } label: {
-            HStack(spacing: 8) {
-                if let current {
-                    AccountAvatar(account: current, size: 22)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(current.displayName ?? current.email).font(.callout.weight(.medium)).lineLimit(1)
-                        if current.displayName != nil {
-                            Text(current.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                } else {
-                    Image(systemName: "person.crop.circle").font(.system(size: 20)).foregroundStyle(.secondary)
-                    Text(model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts")
-                        .font(.callout.weight(.medium))
-                }
+            if let current {
+                AccountAvatar(account: current, size: 18)
+            } else {
+                Image(systemName: "person.crop.circle")
             }
-            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.visible)
-        .fixedSize(horizontal: false, vertical: true)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(current.map { "\($0.displayName ?? $0.email) — \($0.email)\nSwitch account" }
+            ?? (model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts"))
         .accessibilityLabel("Account: \(current?.email ?? "none"). Switch account")
         .task { await model.reloadAccounts() }
     }

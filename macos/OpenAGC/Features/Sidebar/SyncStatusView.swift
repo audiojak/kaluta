@@ -44,4 +44,20 @@ struct SyncStatusView: View {
         let how = transport == "imap" ? "Syncing over IMAP" : "Syncing"
         return pending > 0 ? "\(how) — \(pending.formatted()) left" : "\(how)…"
     }
+
+    /// Sync state as a phrase for the window subtitle, or nil when there is
+    /// nothing to say (idle and healthy).
+    @MainActor
+    static func subtitle(for model: AppModel) -> String? {
+        switch model.syncDisplay {
+        case let .syncing(pending): return syncingText(pending: pending, transport: model.backfillTransport)
+        case .offline: return "Offline"
+        case .error: return "Sync paused"
+        case .idle:
+            if model.isArchive { return "Imported mailbox · cannot send" }
+            if model.needsReauthentication { return "Not syncing — sign in again" }
+            if model.openAccountID == AppModel.demoAccountID { return "Demo mailbox" }
+            return nil
+        }
+    }
 }
