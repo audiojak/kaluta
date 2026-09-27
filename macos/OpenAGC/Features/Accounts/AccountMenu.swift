@@ -12,8 +12,11 @@ struct AccountMenuButton: View {
         Menu {
             AccountMenuItems(openSettings: { openSettings() })
         } label: {
+            // Toolbar menus draw their label as a template (one colour), which
+            // turns a photo into a blank shape: give it a full-colour image.
             if let current {
-                AccountAvatar(account: current, size: 18)
+                Image(nsImage: AccountAvatar.toolbarImage(current))
+                    .renderingMode(.original)
             } else {
                 Image(systemName: "person.crop.circle")
             }
@@ -62,6 +65,16 @@ struct AccountMenuItems: View {
 }
 
 extension AccountAvatar {
+    /// The avatar at toolbar size, as a non-template image.
+    @MainActor
+    static func toolbarImage(_ account: AccountSummary) -> NSImage {
+        let renderer = ImageRenderer(content: AccountAvatar(account: account, size: 20))
+        renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
+        let image = renderer.nsImage ?? NSImage()
+        image.isTemplate = false
+        return image
+    }
+
     /// The avatar as a menu image, with a check ring on the current account.
     @MainActor
     static func menuImage(_ account: AccountSummary, current: Bool) -> NSImage {
@@ -70,6 +83,8 @@ extension AccountAvatar {
             .padding(1)
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
-        return renderer.nsImage ?? NSImage()
+        let image = renderer.nsImage ?? NSImage()
+        image.isTemplate = false
+        return image
     }
 }

@@ -55,3 +55,14 @@ struct AccountMenuTests {
         #expect(model.openAccountID == "one")
     }
 }
+
+@MainActor
+struct ToolbarAvatarTests {
+    @Test func theToolbarAvatarKeepsItsColours() {
+        let account = AccountSummary(id: "a", kind: .gmail, email: "a@example.com", displayName: "Ada", avatarPath: nil,
+                                     position: 0, inboxUnread: 0, imapEnabled: false)
+        let image = AccountAvatar.toolbarImage(account)
+        #expect(!image.isTemplate, "a template image draws as a blank shape in the toolbar")
+        #expect(image.size.width >= 20)
+    }
+}
