@@ -1,7 +1,6 @@
 # Overnight run — 2026-09-27
 
-Branch `overnight-3`, created from `overnight-2` (PR #2 is not merged yet;
-if it is merged before the run starts, branch from `main` instead). Commit
+Branch `overnight-3`, created from `main` after PR #2 was merged. Commit
 and push after every closed issue. Open a PR to `main` in the morning; never
 push to `main` overnight.
 
