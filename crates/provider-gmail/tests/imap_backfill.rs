@@ -165,6 +165,87 @@ async fn headers_come_without_bodies_for_a_browsable_list() {
     assert!(refused.fetch_headers(&[hex(MSG_A)]).await.unwrap().is_none(), "no cheap headers without IMAP");
 }
 
+fn crlf(s: &str) -> Vec<u8> {
+    s.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes()
+}
+
+fn headed(content_headers: &str, body: &str) -> Vec<u8> {
+    crlf(&format!(
+        "From: Sam <sam@example.com>\nTo: me@example.com\nSubject: Snippet\nMessage-ID: <s@example.com>\n\
+         Date: Mon, 01 Sep 2025 10:00:00 +0000\nMIME-Version: 1.0\n{content_headers}\n{body}"
+    ))
+}
+
+#[tokio::test]
+async fn headers_carry_a_snippet_from_the_first_bytes_of_the_text() {
+    let (server, _rest, source) = setup("good-token").await;
+    let long_qp = "Caf=C3=A9 au lait =E2=80=94 ".repeat(120);
+    let long_b64 = {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode("Base64 body words. ".repeat(200));
+        encoded.as_bytes().chunks(76).map(|c| String::from_utf8_lossy(c).into_owned() + "\n").collect::<String>()
+    };
+    let cases: Vec<(u64, Vec<u8>, &str)> = vec![
+        (
+            0x2001,
+            headed("Content-Type: text/plain; charset=utf-8\n", "Hello there,\nplain   text.\n"),
+            "Hello there, plain text.",
+        ),
+        (
+            0x2002,
+            headed("Content-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: quoted-printable\n", &long_qp),
+            "Café au lait — Café au lait —",
+        ),
+        (
+            0x2003,
+            headed("Content-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: base64\n", &long_b64),
+            "Base64 body words. Base64 body words.",
+        ),
+        (
+            0x2004,
+            headed(
+                "Content-Type: text/html; charset=utf-8\n",
+                "<html><body><p>Hello <b>HTML</b> world</p></body></html>\n",
+            ),
+            "Hello HTML world",
+        ),
+        (
+            0x2005,
+            headed(
+                "Content-Type: multipart/alternative; boundary=\"b\"\n",
+                &format!(
+                    "--b\nContent-Type: text/plain; charset=utf-8\n\nThe plain part first.\n--b\n\
+                     Content-Type: text/html; charset=utf-8\n\n<p>{}</p>\n--b--\n",
+                    "html ".repeat(1000)
+                ),
+            ),
+            "The plain part first.",
+        ),
+    ];
+    for (i, (msgid, raw, _)) in cases.iter().enumerate() {
+        server.add(FakeImapMessage {
+            uid: 100 + i as u32,
+            msgid: *msgid,
+            thrid: *msgid,
+            labels: vec![],
+            flags: vec!["\\Seen".into()],
+            raw: raw.clone(),
+        });
+    }
+    let ids: Vec<MessageId> = cases.iter().map(|(m, _, _)| hex(*m)).collect();
+    let headers = source.fetch_headers(&ids).await.unwrap().expect("IMAP can");
+    assert_eq!(headers.len(), cases.len());
+    for (msgid, raw, expected) in &cases {
+        let m = headers.iter().find(|m| m.id == hex(*msgid)).unwrap();
+        assert!(m.body.is_none());
+        assert!(m.snippet.starts_with(expected), "{msgid:x}: {:?} should start {expected:?}", m.snippet);
+        assert!(m.snippet.chars().count() <= 160);
+        assert_eq!(m.size_estimate, raw.len() as u64, "the whole message's size, not the bytes fetched");
+    }
+    assert_eq!(server.body_fetches(), 0);
+    assert!(source.bytes_today().await < 5 * 2048 + 5 * 400, "headers and 2 KB of text each");
+}
+
 #[tokio::test]
 async fn a_message_that_left_all_mail_since_the_map_loaded_comes_over_the_api() {
     let (server, rest, source) = setup("good-token").await;

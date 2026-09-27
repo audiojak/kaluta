@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
-use async_imap::imap_proto::{AttributeValue, Response, Status};
+use async_imap::imap_proto::{AttributeValue, MessageSection, Response, SectionPath, Status};
 use async_trait::async_trait;
 use mail_domain::{LabelId, MessageId, Millis, ThreadId, system_labels};
 use provider_api::{
@@ -32,6 +32,9 @@ use tokio::sync::Mutex;
 pub const GMAIL_IMAP_HOST: &str = "imap.gmail.com";
 const ALL_MAIL: &str = "[Gmail]/All Mail";
 const SNIPPET_CHARS: usize = 160;
+/// Bytes of the message text fetched with headers, for a list snippet
+/// without the body (spec §7.4 tiered download, 4).
+const SNIPPET_TEXT_BYTES: usize = 2048;
 
 /// Where to connect: Gmail over TLS, or a plain local socket (tests).
 #[derive(Debug, Clone)]
@@ -343,16 +346,25 @@ impl BackfillSource for ImapBackfill {
         let uids: Vec<u32> = wanted.iter().filter_map(|m| state.map.get(m).map(|l| l.uid)).collect();
         let labels = self.labels.read().unwrap_or_else(|e| e.into_inner()).clone();
         let mut out = Vec::with_capacity(uids.len());
+        let mut bytes = 0u64;
         let mut failed = false;
         for chunk in uids.chunks(1000) {
             let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-            let command =
-                format!("UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE BODY.PEEK[HEADER])");
+            let command = format!(
+                "UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE RFC822.SIZE \
+                 BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.{SNIPPET_TEXT_BYTES}>)"
+            );
             let result = for_each_fetch(&mut session, &command, |attrs| {
+                bytes += attrs
+                    .iter()
+                    .map(|a| match a {
+                        AttributeValue::BodySection { data: Some(d), .. } => d.len() as u64,
+                        _ => 0,
+                    })
+                    .sum::<u64>();
                 if let Some(mut m) = to_fetched(attrs, &labels) {
-                    // Headers only: no body yet, so sync keeps it queued.
+                    // Headers (and a snippet) only: no body yet.
                     m.body = None;
-                    m.snippet.clear();
                     out.push(m);
                 }
             })
@@ -362,6 +374,7 @@ impl BackfillSource for ImapBackfill {
                 break;
             }
         }
+        self.count_bytes(bytes);
         if failed {
             return Ok(None);
         }
@@ -420,15 +433,26 @@ async fn for_each_fetch(
 }
 
 /// One FETCH response → a provider message, parsed exactly like the other
-/// paths (headers, text, HTML, attachments with their bytes).
+/// paths (headers, text, HTML, attachments with their bytes). A headers
+/// fetch may carry the first bytes of the text too (`BODY[TEXT]<0>`): they
+/// are parsed with the header for the snippet only.
 fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -> Option<FetchedMessage> {
-    let (mut msgid, mut thrid, mut raw, mut internal) = (None, None, None, None);
+    let (mut msgid, mut thrid, mut raw, mut internal, mut size) = (None, None, None, None, None);
+    let mut partial_text: Option<Vec<u8>> = None;
     let mut label_ids: Vec<LabelId> = Vec::new();
     let (mut seen, mut flagged) = (false, false);
     for a in attrs {
         match a {
             AttributeValue::GmailMsgId(m) => msgid = Some(*m),
             AttributeValue::GmailThrId(t) => thrid = Some(*t),
+            AttributeValue::Rfc822Size(n) => size = Some(u64::from(*n)),
+            AttributeValue::BodySection {
+                section: Some(SectionPath::Full(MessageSection::Text)),
+                data: Some(d),
+                ..
+            } => {
+                partial_text = Some(d.to_vec());
+            }
             AttributeValue::BodySection { data: Some(d), .. } | AttributeValue::Rfc822(Some(d)) => {
                 raw = Some(d.to_vec());
             }
@@ -461,6 +485,11 @@ fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -
     }
     label_ids.sort();
     label_ids.dedup();
+    let size = size.unwrap_or(raw.len() as u64);
+    let raw = match partial_text {
+        Some(text) => with_partial_text(raw, &text),
+        None => raw,
+    };
     let parsed = mail_mime::parse(&raw).ok()?;
     let h = parsed.headers;
     let text = parsed.text.clone();
@@ -471,7 +500,7 @@ fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -
         label_ids,
         snippet,
         internal_date: internal.or(h.date).unwrap_or(0),
-        size_estimate: raw.len() as u64,
+        size_estimate: size,
         message_id_header: h.message_id,
         in_reply_to: h.in_reply_to,
         references: h.references,
@@ -540,6 +569,21 @@ fn system_label(name: &str) -> Option<&'static str> {
         "\\Trash" => system_labels::TRASH,
         _ => return None,
     })
+}
+
+/// The header block followed by the first bytes of the text, cut back to
+/// the last whole line so a quoted-printable escape or a base64 quantum is
+/// never split: a truncated message the MIME parser reads best effort.
+fn with_partial_text(mut header: Vec<u8>, text: &[u8]) -> Vec<u8> {
+    let whole = match text.iter().rposition(|&b| b == b'\n') {
+        Some(end) if text.len() >= SNIPPET_TEXT_BYTES => &text[..=end],
+        _ => text,
+    };
+    if !header.ends_with(b"\r\n\r\n") && !header.ends_with(b"\n\n") {
+        header.extend_from_slice(b"\r\n");
+    }
+    header.extend_from_slice(whole);
+    header
 }
 
 fn snippet(text: &str) -> String {

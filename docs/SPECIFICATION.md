@@ -807,7 +807,12 @@ Details:
    message.)*
 4. Snippets: a partial fetch of the first bytes of the text part
    (`BODY.PEEK[1]<0.2048>`, decoded best effort) gives list snippets
-   without whole bodies.
+   without whole bodies. *(Implemented as `BODY.PEEK[TEXT]<0.2048>` in the
+   same command as the headers, for every message: the header block plus
+   those bytes, cut back to the last whole line, go through `mail-mime` like
+   a full message, which handles multipart, quoted-printable, base64,
+   charsets and HTML-only mail alike. `RFC822.SIZE` gives the true size;
+   header bytes count towards the daily IMAP budget.)*
 5. Accounts on the REST API keep today's behaviour (bodies for the whole
    window): headers cost the same quota there. Settings suggests IMAP for
    large mailboxes and hides the body-window choice without it.

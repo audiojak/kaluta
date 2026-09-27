@@ -2,8 +2,8 @@
 //! amendment, Testing). Plain TCP on 127.0.0.1; speaks only what the
 //! backfill client uses: CAPABILITY, AUTHENTICATE XOAUTH2, SELECT/EXAMINE,
 //! UID FETCH (UID, FLAGS, X-GM-MSGID, X-GM-THRID, X-GM-LABELS,
-//! RFC822.SIZE, BODY.PEEK[]), NOOP and LOGOUT. Nothing here ever connects
-//! anywhere.
+//! RFC822.SIZE, BODY.PEEK[], BODY.PEEK[HEADER], BODY.PEEK[TEXT]<0.n>),
+//! NOOP and LOGOUT. Nothing here ever connects anywhere.
 
 use std::sync::{Arc, Mutex};
 
@@ -175,6 +175,11 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                 };
                 let with_body = items.contains("BODY.PEEK[]") || items.contains("BODY[]");
                 let with_header = items.contains("BODY.PEEK[HEADER]");
+                // `BODY.PEEK[TEXT]<0.n>`: the first n bytes of the text.
+                let partial_text: Option<usize> = items
+                    .split_once("BODY.PEEK[TEXT]<0.")
+                    .and_then(|(_, rest)| rest.split_once('>'))
+                    .and_then(|(n, _)| n.parse().ok());
                 if with_body {
                     state.lock().unwrap().body_fetches += messages.len();
                 }
@@ -213,9 +218,20 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                         write.write_all(format!(" BODY[] {{{}}}\r\n", m.raw.len()).as_bytes()).await?;
                         write.write_all(&m.raw).await?;
                     } else if with_header {
-                        let end = m.raw.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4).unwrap_or(m.raw.len());
+                        let end = m
+                            .raw
+                            .windows(4)
+                            .position(|w| w == b"\r\n\r\n")
+                            .map(|i| i + 4)
+                            .or_else(|| m.raw.windows(2).position(|w| w == b"\n\n").map(|i| i + 2))
+                            .unwrap_or(m.raw.len());
                         write.write_all(format!(" BODY[HEADER] {{{end}}}\r\n").as_bytes()).await?;
                         write.write_all(&m.raw[..end]).await?;
+                        if let Some(n) = partial_text {
+                            let text = &m.raw[end..(end + n).min(m.raw.len())];
+                            write.write_all(format!(" BODY[TEXT]<0> {{{}}}\r\n", text.len()).as_bytes()).await?;
+                            write.write_all(text).await?;
+                        }
                     }
                     write.write_all(b")\r\n").await?;
                 }
