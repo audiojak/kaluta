@@ -27,6 +27,31 @@ final class AppModel {
 
     private(set) var accountState: AccountState = .starting
 
+    /// The Inbox shows only threads Gmail marked Important (a per-account
+    /// switch at the top of the Inbox list).
+    var inboxImportantOnly: Bool {
+        get { inboxImportantOnlyLoaded }
+        set {
+            guard newValue != inboxImportantOnlyLoaded else { return }
+            inboxImportantOnlyLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.importantOnlyKey(id)) }
+            selectedThreadID = nil
+            selectedThreadIDs = []
+            if case .open = accountState, let id = listMailboxID { Task { await threads.show(mailboxID: id) } }
+        }
+    }
+
+    private var inboxImportantOnlyLoaded = false
+
+    static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
+
+    /// What the thread list shows: the selected mailbox, narrowed to
+    /// Important in the Inbox when that switch is on.
+    var listMailboxID: String? {
+        guard let id = selectedMailboxID else { return nil }
+        return id == "INBOX" && inboxImportantOnly ? "INBOX+IMPORTANT" : id
+    }
+
     /// The open account's id, if any (demo included).
     var openAccountID: String? {
         if case .open(let id) = accountState { return id }
@@ -244,7 +269,8 @@ final class AppModel {
             accountState = .open(accountID: accountID)
             await mailboxes.reload()
             await reloadAccounts()
-            await threads.show(mailboxID: selectedMailboxID ?? "INBOX")
+            inboxImportantOnlyLoaded = defaults.bool(forKey: Self.importantOnlyKey(accountID))
+            await threads.show(mailboxID: listMailboxID ?? "INBOX")
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -681,7 +707,7 @@ final class AppModel {
         selectedThreadIDs = []
         searchText = ""
 
-        guard case .open = accountState, let id = selectedMailboxID else { return }
+        guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
 
@@ -733,6 +759,10 @@ final class AppModel {
             updateBadge()
             if mailboxID == threads.mailboxID || threads.searchQuery != nil {
                 await threads.apply(hint)
+            } else if let shown = threads.mailboxID, shown.split(separator: "+").contains(Substring(mailboxID)) {
+                // A narrowed view (INBOX+IMPORTANT): a change to either
+                // label may move a thread in or out; re-query it.
+                await threads.apply(ThreadChangeHint(invalidate: true))
             }
             // A thread shown with headers only gets its bodies: show them.
             if reader.isWaitingForBodies, let shown = reader.threadID,

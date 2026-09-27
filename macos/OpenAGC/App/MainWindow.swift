@@ -88,6 +88,19 @@ struct MainWindow: View {
                     .foregroundStyle(.secondary)
                     .padding(8)
                 }
+                if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+                    @Bindable var model = model
+                    HStack {
+                        Spacer()
+                        Toggle("Important only", isOn: $model.inboxImportantOnly)
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .font(.callout)
+                            .help("Show only the Inbox threads Gmail marked Important")
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                }
                 if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
                         ContentUnavailableView.search(text: model.searchText)

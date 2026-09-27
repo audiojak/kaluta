@@ -66,3 +66,35 @@ struct SidebarTreeTests {
         }
     }
 }
+
+@MainActor
+struct ImportantOnlyTests {
+    @Test func theInboxCanShowOnlyImportantThreadsAndRemembersItPerAccount() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
+        let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let all = model.threads.rows.count
+        let marked = Array(model.threads.rows.prefix(2).map(\.id))
+        let alreadyImportant = model.threads.rows.filter { $0.labelIds.contains("IMPORTANT") }.map(\.id)
+        try await core.modifyLabels(marked, add: ["IMPORTANT"], remove: [])
+
+        model.inboxImportantOnly = true
+        let deadline = ContinuousClock.now + .seconds(5)
+        while model.threads.mailboxID != "INBOX+IMPORTANT", ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.listMailboxID == "INBOX+IMPORTANT")
+        #expect(Set(model.threads.rows.map(\.id)) == Set(marked + alreadyImportant))
+        #expect(model.threads.rows.allSatisfy { $0.labelIds.contains("IMPORTANT") })
+        #expect(defaults.bool(forKey: AppModel.importantOnlyKey("demo")), "remembered for this account")
+
+        model.selectedMailboxID = "STARRED"
+        #expect(model.listMailboxID == "STARRED", "only the Inbox is narrowed")
+        model.selectedMailboxID = "INBOX"
+        model.inboxImportantOnly = false
+        while model.threads.mailboxID != "INBOX", ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(model.threads.rows.count == all)
+    }
+}
