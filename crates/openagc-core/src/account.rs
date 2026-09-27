@@ -576,6 +576,10 @@ impl Core {
             let mut needs_sign_in = Vec::new();
             for entry in entries.into_iter().filter(|e| e.kind == crate::registry::AccountKind::Gmail) {
                 if core.is_syncing(&entry.id) {
+                    // Already started (the open account): still refresh its
+                    // name and picture.
+                    let refresher = core.clone();
+                    tokio::spawn(async move { refresher.refresh_identity(&entry).await });
                     continue;
                 }
                 let provider = match core.gmail_provider(&entry.id) {
