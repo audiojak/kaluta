@@ -85,6 +85,10 @@ impl provider_api::BackfillSource for LabelRefreshingImap {
         self.inner.fetch_headers(ids).await
     }
 
+    fn cheap_headers(&self) -> bool {
+        self.inner.cheap_headers()
+    }
+
     fn name(&self) -> &'static str {
         self.inner.name()
     }
@@ -270,6 +274,36 @@ impl From<mail_sync::SyncWindow> for SyncWindow {
             mail_sync::SyncWindow::HalfYear => Self::HalfYear,
             mail_sync::SyncWindow::Year => Self::Year,
             mail_sync::SyncWindow::Everything => Self::Everything,
+        }
+    }
+}
+
+/// Which part of the window gets full messages over IMAP (spec §7.4,
+/// tiered download); mirrors `mail_sync::BodyWindow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BodyWindow {
+    Month,
+    HalfYear,
+    /// Everything in the sync window.
+    Window,
+}
+
+impl From<BodyWindow> for mail_sync::BodyWindow {
+    fn from(w: BodyWindow) -> Self {
+        match w {
+            BodyWindow::Month => Self::Month,
+            BodyWindow::HalfYear => Self::HalfYear,
+            BodyWindow::Window => Self::Window,
+        }
+    }
+}
+
+impl From<mail_sync::BodyWindow> for BodyWindow {
+    fn from(w: mail_sync::BodyWindow) -> Self {
+        match w {
+            mail_sync::BodyWindow::Month => Self::Month,
+            mail_sync::BodyWindow::HalfYear => Self::HalfYear,
+            mail_sync::BodyWindow::Window => Self::Window,
         }
     }
 }
@@ -689,6 +723,42 @@ impl Core {
         crate::registry::scoped(Some(account_id), self.set_sync_window(window)).await
     }
 
+    /// Which part of `account_id`'s window gets full messages when it
+    /// downloads over IMAP (spec §7.4, tiered download).
+    pub async fn body_window_for(&self, account_id: String) -> Result<BodyWindow, CoreError> {
+        let db = self.store_for(&account_id).await?;
+        runtime::run(async move {
+            let stored = db.read(|c| mail_store::read::sync_state(c, mail_sync::KEY_BODY_WINDOW)).await?;
+            Ok(stored.as_deref().and_then(mail_sync::BodyWindow::parse).unwrap_or_default().into())
+        })
+        .await
+    }
+
+    /// Change it. Widening queues bodies for header-only mail now inside
+    /// it; narrowing keeps bodies already stored.
+    pub async fn set_body_window_for(&self, account_id: String, body_window: BodyWindow) -> Result<(), CoreError> {
+        let db = self.store_for(&account_id).await?;
+        let body_window: mail_sync::BodyWindow = body_window.into();
+        let service = crate::registry::scoped(Some(account_id), async { self.sync_service() }).await;
+        runtime::run(async move {
+            match service {
+                Some(service) => {
+                    service.engine().set_body_window(body_window).await.map_err(CoreError::from)?;
+                    service.sync_now();
+                }
+                // Not syncing: the next start re-tiers from the stored value.
+                None => {
+                    db.write(move |tx| {
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_BODY_WINDOW, body_window.as_str())
+                    })
+                    .await?
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
     /// Sync now (foreground, wake from sleep, network regained, ⌘R).
     pub fn sync_now(&self) {
         for service in self.accounts.all() {
@@ -886,6 +956,11 @@ mod tests {
             assert_eq!(status.transport, "imap");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
+
+            // Tiered download: the body window is per account.
+            assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::Month, "default");
+            core.set_body_window_for("acct".into(), BodyWindow::HalfYear).await.unwrap();
+            assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::HalfYear);
         });
         core.stop_sync();
         let _ = std::fs::remove_dir_all(&dir);

@@ -155,6 +155,12 @@ impl SyncService {
                     self.fail(e);
                     return;
                 }
+                // Tiered download (spec §7.4): IMAP on or off since the
+                // queue was listed re-lists the window.
+                if let Err(e) = self.retrying(|| self.engine.ensure_tiers()).await {
+                    self.fail(e);
+                    return;
+                }
             }
             Err(e) => {
                 self.fail(e);

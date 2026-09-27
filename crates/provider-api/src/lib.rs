@@ -137,6 +137,12 @@ pub trait BackfillSource: Send + Sync {
     async fn fetch_headers(&self, _ids: &[MessageId]) -> ProviderResult<Option<Vec<FetchedMessage>>> {
         Ok(None)
     }
+    /// Whether [`BackfillSource::fetch_headers`] is cheap here at all (it
+    /// may still answer `None` for a while, e.g. over its daily budget).
+    /// Decides tiered download (spec §7.4 amendment 2026-09-27).
+    fn cheap_headers(&self) -> bool {
+        false
+    }
     /// A short name for logs and diagnostics ("rest", "imap").
     fn name(&self) -> &'static str;
 }

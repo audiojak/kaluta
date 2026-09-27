@@ -369,6 +369,10 @@ impl BackfillSource for ImapBackfill {
         Ok(Some(out))
     }
 
+    fn cheap_headers(&self) -> bool {
+        !self.is_refused()
+    }
+
     fn name(&self) -> &'static str {
         if self.is_refused() { "imap-refused" } else { "imap" }
     }

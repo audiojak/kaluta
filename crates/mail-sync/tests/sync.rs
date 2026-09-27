@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use mail_domain::{EmailAddress, Label, LabelId, LabelKind, MessageId, ThreadId};
 use mail_store::{ARCHIVE_LABEL, Db, ThreadChanges, consistency, queue, read};
-use mail_sync::{SyncEngine, SyncError, SyncObserver, SyncPhase, SyncProgress, SyncWindow};
+use mail_sync::{BodyWindow, SyncEngine, SyncError, SyncObserver, SyncPhase, SyncProgress, SyncWindow};
 use provider_api::fake::FakeProvider;
 use provider_api::{FetchedBody, FetchedMessage};
 
@@ -167,7 +167,23 @@ async fn the_sync_window_bounds_the_backfill_and_can_be_widened_or_narrowed() {
 
 /// A backfill source that answers from the fake provider's data but
 /// counts its calls, standing in for a bulk transport.
-struct CountingSource(Arc<FakeProvider>, std::sync::atomic::AtomicUsize);
+struct CountingSource(Arc<FakeProvider>, std::sync::atomic::AtomicUsize, bool);
+
+impl CountingSource {
+    /// Headers cost about as much as bodies (the default): no tiers.
+    fn new(fake: &Arc<FakeProvider>) -> Self {
+        Self(fake.clone(), Default::default(), false)
+    }
+
+    /// Headers are cheap (IMAP): tiered download applies.
+    fn cheap(fake: &Arc<FakeProvider>) -> Self {
+        Self(fake.clone(), Default::default(), true)
+    }
+
+    fn bodies(&self) -> usize {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
 
 #[async_trait::async_trait]
 impl provider_api::BackfillSource for CountingSource {
@@ -184,6 +200,9 @@ impl provider_api::BackfillSource for CountingSource {
         }
         Ok(Some(all))
     }
+    fn cheap_headers(&self) -> bool {
+        self.2
+    }
     fn name(&self) -> &'static str {
         "counting"
     }
@@ -198,7 +217,7 @@ async fn a_headers_pass_fills_the_list_before_bodies_and_leaves_them_queued() {
     engine.bootstrap_list_rest().await.unwrap();
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0, "REST: headers cost as much as bodies, so no pass");
 
-    engine.set_backfill_source(Arc::new(CountingSource(fake.clone(), Default::default())));
+    engine.set_backfill_source(Arc::new(CountingSource::new(&fake)));
     assert_eq!(engine.headers_pass(3).await.unwrap(), 3);
     assert_eq!(engine.headers_pass(100).await.unwrap(), 2);
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0, "every queued message has a row");
@@ -215,19 +234,149 @@ async fn a_headers_pass_fills_the_list_before_bodies_and_leaves_them_queued() {
     assert_consistent(&db);
 }
 
+fn ids(v: Vec<MessageId>) -> Vec<String> {
+    v.into_iter().map(|m| m.0).collect()
+}
+
+fn body_state(db: &Db, id: &str) -> Option<String> {
+    let id = id.to_owned();
+    db.read_blocking(move |c| {
+        Ok(c.query_row("SELECT body_state FROM messages WHERE gmail_id = ?1", [id], |r| r.get(0)).ok())
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn with_cheap_headers_only_the_inbox_and_the_body_window_get_bodies() {
+    let (fake, db, _recorder, engine) = setup("tiers");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    let source = Arc::new(CountingSource::cheap(&fake));
+    engine.set_backfill_source(source.clone());
+    assert_eq!(engine.body_window().await.unwrap(), BodyWindow::Month, "default");
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+
+    // Bodies: the Inbox and the last 30 days. Older mail: headers only.
+    assert_eq!(ids(db.read(|c| queue::peek(c, 10)).await.unwrap()), ["inbox-unread", "inbox-read", "recent"]);
+    assert_eq!(db.read(queue::counts).await.unwrap(), (3, 2));
+
+    // One headers pass lists everything; the headers-only tier leaves the queue.
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 5);
+    assert_eq!(db.read(queue::counts).await.unwrap(), (3, 0));
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0, "nothing left for headers");
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"));
+    let all = db.read(|c| read::list_threads(c, ARCHIVE_LABEL, None, 10)).await.unwrap();
+    assert!(all.rows.iter().any(|t| t.id.as_str() == "t5"), "old mail is listed");
+
+    assert_eq!(engine.backfill_all().await.unwrap(), 3);
+    assert_eq!(source.bodies(), 3, "no bodies outside the body window");
+    assert_eq!(body_state(&db, "this-year").as_deref(), Some("metadata"));
+
+    // Widening the body window queues bodies for mail now inside it.
+    engine.set_body_window(BodyWindow::HalfYear).await.unwrap();
+    assert_eq!(ids(db.read(|c| queue::peek(c, 10)).await.unwrap()), ["this-year"]);
+    assert_eq!(engine.backfill_all().await.unwrap(), 1);
+    assert_eq!(body_state(&db, "this-year").as_deref(), Some("full"));
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"));
+
+    // Narrowing keeps what is stored and queues nothing.
+    engine.set_body_window(BodyWindow::Month).await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 0));
+    assert_eq!(body_state(&db, "this-year").as_deref(), Some("full"));
+
+    // The whole window: every body.
+    engine.set_body_window(BodyWindow::Window).await.unwrap();
+    assert_eq!(ids(db.read(|c| queue::peek(c, 10)).await.unwrap()), ["ancient"]);
+    assert_consistent(&db);
+}
+
+#[tokio::test]
+async fn refresh_under_tiers_brings_header_only_labels_current_without_bodies() {
+    let (fake, db, _recorder, engine) = setup("tiers-refresh");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    let source = Arc::new(CountingSource::cheap(&fake));
+    engine.set_backfill_source(source.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+    engine.backfill_all().await.unwrap();
+    db.write(|tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        w.modify_message_labels(&MessageId::new("ancient"), &[LabelId::new("Label_1")], &[])?;
+        w.finish().map(|_| ())
+    })
+    .await
+    .unwrap();
+
+    engine.refetch_all().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (3, 2), "old mail refreshes by headers");
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+    engine.backfill_all().await.unwrap();
+    assert_eq!(source.bodies(), 6, "the three bodies again, none for old mail");
+    let receipts = db.read(|c| read::list_threads(c, "Label_1", None, 10)).await.unwrap();
+    assert_eq!(receipts.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t3"], "label restored");
+    let (thread, _) = db.read(|c| read::get_thread(c, &ThreadId::new("t5"))).await.unwrap().unwrap();
+    assert_eq!(thread.snippet, "snippet ancient", "a header refresh keeps the snippet");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
+async fn turning_imap_on_or_off_re_tiers_the_queue() {
+    let (fake, db, _recorder, engine) = setup("retier");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (5, 0), "REST: bodies for the whole window");
+    engine.ensure_tiers().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (5, 0), "unchanged tiering does nothing");
+
+    engine.set_backfill_source(Arc::new(CountingSource::cheap(&fake)));
+    engine.ensure_tiers().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (3, 2));
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+
+    // Back to REST: header-only mail in the window gets its bodies.
+    engine.use_rest_backfill();
+    engine.ensure_tiers().await.unwrap();
+    assert_eq!(
+        ids(db.read(|c| queue::peek(c, 10)).await.unwrap()),
+        ["inbox-unread", "inbox-read", "recent", "this-year", "ancient"]
+    );
+    assert_eq!(engine.backfill_all().await.unwrap(), 5);
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("full"));
+}
+
+#[tokio::test]
+async fn headers_only_mail_is_fetched_in_full_when_headers_stop_being_cheap() {
+    let (fake, db, _recorder, engine) = setup("refused");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    engine.set_backfill_source(Arc::new(CountingSource::cheap(&fake)));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    // IMAP refused mid-run: the source can no longer fetch headers.
+    engine.use_rest_backfill();
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
+    assert_eq!(db.read(queue::counts).await.unwrap(), (5, 0));
+    assert_eq!(engine.backfill_all().await.unwrap(), 5);
+}
+
 #[tokio::test]
 async fn backfill_bodies_come_from_the_configured_source() {
     let (fake, db, _recorder, engine) = setup("source");
     engine.set_window(SyncWindow::Everything).await.unwrap();
     seed_mailbox(&fake);
     assert_eq!(engine.backfill_source_name(), "rest");
-    let source = Arc::new(CountingSource(fake.clone(), Default::default()));
+    let source = Arc::new(CountingSource::new(&fake));
     engine.set_backfill_source(source.clone());
     assert_eq!(engine.backfill_source_name(), "counting");
     engine.bootstrap_prepare().await.unwrap();
     engine.bootstrap_list_rest().await.unwrap();
     assert_eq!(engine.backfill_all().await.unwrap(), 5);
-    assert_eq!(source.1.load(std::sync::atomic::Ordering::SeqCst), 5, "every body came through the source");
+    assert_eq!(source.bodies(), 5, "every body came through the source");
     engine.use_rest_backfill();
     assert_eq!(engine.backfill_source_name(), "rest");
     assert_eq!(db.read(queue::len).await.unwrap(), 0);

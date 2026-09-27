@@ -785,6 +785,15 @@ Details:
 1. Queue: ids outside the body window are listed with a *headers-only*
    priority that the body backfill never drains; the headers pass covers
    them. Widening the body window moves them to body priorities.
+   *(Implemented: each age tier has its own priority, 3 = six months,
+   4 = a year, 5 = older, and headers-only is that priority + 10. The
+   headers pass stores their headers and drops them from the queue. The
+   tiering a queue was listed under is recorded in `sync_state`; when sync
+   starts with another one (IMAP turned on or off, another body window) the
+   window's phases are re-listed. If the source stops offering cheap
+   headers mid-run (IMAP refused), the headers-only tier is promoted to
+   body fetches rather than left unlisted. A header-only refresh keeps an
+   existing snippet.)*
 2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
    available, else REST) and store them; agent tools (`mail_get_thread`,
    `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
