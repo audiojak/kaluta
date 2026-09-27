@@ -1757,6 +1757,40 @@ behaves exactly like the main list, pending approval cards with
 Review/Reject/Approve, and a Cancel button. Drafts created by the agent open
 in the composer for review with a "Created by Claude" badge.
 
+### 14.6a Acknowledgement and undo **(Amendment 2026-09-27)**
+
+Planned. Every mail action the user takes shows a short acknowledgement
+with a way back, instead of any confirmation dialog ("never use a warning
+when you mean undo": all these actions are reversible).
+
+- **What it looks like.** A small notice at the bottom of the thread list:
+  "Archived 3 conversations — Undo ⌘Z", with a close button. One at a
+  time: a new action replaces it. It stays 8 seconds, pausing while the
+  pointer is over it, while it has keyboard focus, and while the window is
+  inactive. Reduce Motion: it appears without sliding.
+- **The undo does not expire with the notice.** ⌘Z is Edit › Undo
+  ("Undo Archive"), backed by the window's undo manager, and works on the
+  last 50 actions after the notice is gone, as in Mail. Text fields keep
+  their own ⌘Z while they are being edited. ⇧⌘Z redoes.
+- **VoiceOver** hears the notice as an announcement without focus moving
+  (WCAG 4.1.3); the Undo button is reachable by keyboard; nothing needed is
+  lost on a timer (WCAG 2.2.1), since ⌘Z remains.
+- **Covered actions:** archive, move to Inbox, trash, read/unread, star,
+  add/remove label (menus, keys, swipe, drag-to-label, the `l` popover),
+  and label creation is not undone (only its application). Agent and
+  routine actions are not on this stack: they have the activity log and
+  the routine run's Undo.
+- **Exactness.** Each action records, per message, the labels it actually
+  changed (a thread already archived is not "un-archived" into the Inbox by
+  undo). Undo applies the inverse through the outbox like any change; if
+  Gmail changed the thread since, undo still only reverses the recorded
+  diff. Undo is per account: after switching accounts, ⌘Z undoes that
+  account's actions.
+- **Undo Send.** Sending waits in the outbox for a delay (Settings ›
+  General: off, 5, 10 (default), 20 or 30 seconds); the notice reads
+  "Sending… Undo ⌘Z", and undo returns the message to an open composer.
+  Agent sends, approved by the user, use the same delay.
+
 ### 14.7 Other native behaviors
 
 Standard menu bar with all commands and shortcuts; `NSUserNotification` via
