@@ -95,12 +95,14 @@ pub fn for_headers(conn: &Connection, limit: usize) -> StoreResult<Vec<MessageId
 
 /// Drop these ids if they are queued for headers only (their headers are
 /// stored now); ids waiting for bodies stay.
-pub fn remove_headers_only(tx: &Transaction<'_>, ids: &[MessageId]) -> StoreResult<()> {
+/// Returns how many were dropped.
+pub fn remove_headers_only(tx: &Transaction<'_>, ids: &[MessageId]) -> StoreResult<usize> {
     let mut stmt = tx.prepare_cached("DELETE FROM backfill_queue WHERE gmail_id = ?1 AND priority >= ?2")?;
+    let mut dropped = 0;
     for id in ids {
-        stmt.execute(params![id.as_str(), HEADERS_ONLY])?;
+        dropped += stmt.execute(params![id.as_str(), HEADERS_ONLY])?;
     }
-    Ok(())
+    Ok(dropped)
 }
 
 /// Turn every headers-only id into a body fetch at its tier's priority

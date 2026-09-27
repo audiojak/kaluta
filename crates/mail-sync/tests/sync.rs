@@ -262,7 +262,7 @@ async fn with_cheap_headers_only_the_inbox_and_the_body_window_get_bodies() {
     assert_eq!(db.read(queue::counts).await.unwrap(), (3, 2));
 
     // One headers pass lists everything; the headers-only tier leaves the queue.
-    assert_eq!(engine.headers_pass(100).await.unwrap(), 5);
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 7, "progress: 5 rows stored, 2 headers-only ids done");
     assert_eq!(db.read(queue::counts).await.unwrap(), (3, 0));
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0, "nothing left for headers");
     assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"));
@@ -362,6 +362,48 @@ async fn headers_only_mail_is_fetched_in_full_when_headers_stop_being_cheap() {
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
     assert_eq!(db.read(queue::counts).await.unwrap(), (5, 0));
     assert_eq!(engine.backfill_all().await.unwrap(), 5);
+}
+
+/// A cheap-headers source that never returns some ids (moved to Spam or
+/// Trash since they were listed).
+struct Forgetful(CountingSource, Vec<MessageId>);
+
+#[async_trait::async_trait]
+impl provider_api::BackfillSource for Forgetful {
+    async fn fetch(&self, ids: &[MessageId]) -> provider_api::ProviderResult<Vec<FetchedMessage>> {
+        self.0.fetch(ids).await
+    }
+    async fn fetch_headers(&self, ids: &[MessageId]) -> provider_api::ProviderResult<Option<Vec<FetchedMessage>>> {
+        let kept: Vec<MessageId> = ids.iter().filter(|id| !self.1.contains(id)).cloned().collect();
+        self.0.fetch_headers(&kept).await
+    }
+    fn cheap_headers(&self) -> bool {
+        true
+    }
+    fn name(&self) -> &'static str {
+        "forgetful"
+    }
+}
+
+#[tokio::test]
+async fn a_message_the_headers_pass_cannot_get_does_not_stall_backfill() {
+    let (fake, db, _recorder, engine) = setup("headers-missing");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    let lost = MessageId::new("inbox-unread");
+    engine.set_backfill_source(Arc::new(Forgetful(CountingSource::cheap(&fake), vec![lost.clone()])));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    let mut passes = 0;
+    while engine.headers_pass(2).await.unwrap() > 0 {
+        passes += 1;
+        assert!(passes < 20, "the headers pass must end");
+    }
+    assert!(db.read(queue::counts).await.unwrap().0 > 0, "bodies still queued, the lost one included");
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0, "not asked for again");
+    engine.backfill_all().await.unwrap();
+    assert_eq!(body_state(&db, "inbox-unread").as_deref(), Some("full"), "the body backfill got it");
+    assert_eq!(db.read(queue::len).await.unwrap(), 0);
 }
 
 #[tokio::test]

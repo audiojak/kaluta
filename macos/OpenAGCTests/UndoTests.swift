@@ -194,6 +194,10 @@ struct UndoSendTests {
         undo.recordSend(accountID: "a", holdFor: .seconds(10)) { tookBack = true }
         #expect(undo.notice?.text == "Sending…")
         #expect(undo.remaining == .seconds(10), "the notice lasts as long as the hold")
+        undo.setPaused(.hover, true)
+        undo.advance(by: .seconds(4))
+        #expect(undo.remaining == .seconds(6), "the hold does not pause, so neither does its notice")
+        undo.setPaused(.hover, false)
         #expect(undo.undoTitle(in: "a") == "Undo Send")
         undo.undo(in: "a")
         try await Task.sleep(for: .milliseconds(50))

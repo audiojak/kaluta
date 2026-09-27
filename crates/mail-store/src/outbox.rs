@@ -88,12 +88,15 @@ pub fn release_in_flight(tx: &Transaction<'_>) -> StoreResult<usize> {
 /// Undo Send: take a held send back before it goes. Removes the
 /// optimistic Sent copy and returns the draft to editing. `None` if the
 /// send has already started (or finished).
-pub fn cancel_send(tx: &Transaction<'_>, draft_id: i64) -> StoreResult<Option<ThreadChanges>> {
+/// Only a send never tried and still within its hold: once Gmail has been
+/// asked, it may have accepted the message.
+pub fn cancel_send(tx: &Transaction<'_>, draft_id: i64, now: Millis) -> StoreResult<Option<ThreadChanges>> {
     let row: Option<(i64, String)> = tx
         .query_row(
             "SELECT id, payload_json FROM outbox WHERE kind = 'send' AND state = 'pending'
+               AND attempts = 0 AND next_attempt_at > ?2
                AND json_extract(payload_json, '$.draft_id') = ?1",
-            [draft_id],
+            params![draft_id, now],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
@@ -119,6 +122,20 @@ pub fn held_sends(conn: &Connection, now: Millis) -> StoreResult<u32> {
         .max(0) as u32)
 }
 
+/// Sends not yet handed to Gmail that quitting should wait for: held,
+/// due, or being sent right now (not ones waiting to retry after an
+/// error; those go at next launch).
+pub fn unsent_sends(conn: &Connection) -> StoreResult<u32> {
+    Ok(conn
+        .query_row(
+            "SELECT COUNT(*) FROM outbox WHERE kind = 'send'
+           AND ((state = 'pending' AND attempts = 0) OR state = 'in_flight')",
+            [],
+            |r| r.get::<_, i64>(0),
+        )?
+        .max(0) as u32)
+}
+
 /// Let every held send go now (the app is quitting, spec §14.6a).
 pub fn release_held_sends(tx: &Transaction<'_>, now: Millis) -> StoreResult<usize> {
     Ok(tx.execute(
@@ -128,18 +145,23 @@ pub fn release_held_sends(tx: &Transaction<'_>, now: Millis) -> StoreResult<usiz
     )?)
 }
 
-/// The oldest pending op whose retry time has come, FIFO.
+/// The oldest pending op, strictly in order: if it is waiting on a retry,
+/// nothing runs yet, since a later op (an undo, an unarchive) must not
+/// reach the server before the one it follows. Sends still held for Undo
+/// Send are the exception: they step aside until their time.
 pub fn next_ready(conn: &Connection, now: Millis) -> StoreResult<Option<QueuedOp>> {
-    let row: Option<(i64, String, i64)> = conn
+    let row: Option<(i64, String, i64, Option<Millis>)> = conn
         .prepare_cached(
-            "SELECT id, payload_json, attempts FROM outbox
-             WHERE state = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?1)
+            "SELECT id, payload_json, attempts, next_attempt_at FROM outbox
+             WHERE state = 'pending'
+               AND NOT (kind = 'send' AND attempts = 0 AND next_attempt_at IS NOT NULL AND next_attempt_at > ?1)
              ORDER BY id LIMIT 1",
         )?
-        .query_row([now], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .query_row([now], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
         .optional()?;
     match row {
-        Some((id, json, attempts)) => {
+        Some((_, _, _, Some(at))) if at > now => Ok(None),
+        Some((id, json, attempts, _)) => {
             Ok(Some(QueuedOp { id, op: serde_json::from_str(&json)?, attempts: attempts.max(0) as u32 }))
         }
         None => Ok(None),

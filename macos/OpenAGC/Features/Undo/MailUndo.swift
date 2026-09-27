@@ -83,6 +83,8 @@ final class MailUndo {
     /// Drives the countdown; tests turn it off and call `advance(by:)`.
     @ObservationIgnored var runsClock = true
     @ObservationIgnored private var clock: Task<Void, Never>?
+    /// False for the Undo Send notice, which follows the core's hold.
+    @ObservationIgnored private var noticePausable = true
     /// The last undo or redo sent to the core; the next waits for it.
     @ObservationIgnored private var replaying: Task<Void, Never>?
 
@@ -186,16 +188,19 @@ final class MailUndo {
         manager.setActionName(UndoableAction(kind: .send, count: 1).actionName)
         manager.endUndoGrouping()
         revision += 1
-        show(UndoableAction(kind: .send, count: 1).noticeText, accountID: accountID, for: hold)
+        // The hold runs in the core whatever the pointer does, so this
+        // notice never pauses: it goes when the message does.
+        show(UndoableAction(kind: .send, count: 1).noticeText, accountID: accountID, for: hold, pausable: false)
     }
 
     // MARK: The notice
 
     /// Show a notice, replacing any other; VoiceOver hears it without
     /// focus moving (WCAG 4.1.3).
-    func show(_ text: String, accountID: String, for duration: Duration = noticeDuration) {
+    func show(_ text: String, accountID: String, for duration: Duration = noticeDuration, pausable: Bool = true) {
         notice = UndoNotice(text: text, accountID: accountID)
         remaining = duration
+        noticePausable = pausable
         pauses.remove(.hover)
         pauses.remove(.focus)
         announce(text)
@@ -214,7 +219,7 @@ final class MailUndo {
 
     /// Count the notice down; it goes when time runs out, unless paused.
     func advance(by elapsed: Duration) {
-        guard notice != nil, pauses.isEmpty else { return }
+        guard notice != nil, pauses.isEmpty || !noticePausable else { return }
         remaining -= elapsed
         if remaining <= .zero { dismissNotice() }
     }

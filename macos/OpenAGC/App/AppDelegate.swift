@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// task called it), and AppKit's wait for the reply would deadlock a
     /// main-actor task.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let core = model?.core, core.heldSendCountNow() > 0 else { return .terminateNow }
+        guard let core = model?.core, core.unsentSendCountNow() > 0 else { return .terminateNow }
         Task.detached {
             let left = await core.sendHeldNow(timeout: .seconds(5))
             if left > 0 {

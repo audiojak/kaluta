@@ -194,7 +194,8 @@ impl Core {
         let events = self.account_events();
         let service = self.sync_service();
         runtime::run(async move {
-            let changes = db.write(move |tx| mail_store::outbox::cancel_send(tx, draft_id)).await?;
+            let now = mail_sync::now_millis();
+            let changes = db.write(move |tx| mail_store::outbox::cancel_send(tx, draft_id, now)).await?;
             let Some(changes) = changes else { return Ok(false) };
             mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events }, &changes);
             if let Some(service) = service {
@@ -213,6 +214,14 @@ impl Core {
             self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
         let now = mail_sync::now_millis();
         stores.iter().map(|db| db.read_blocking(move |c| mail_store::outbox::held_sends(c, now)).unwrap_or(0)).sum()
+    }
+
+    /// Sends quitting should wait for, answered at once (the quit handler
+    /// cannot wait to ask): held, due, or on their way to Gmail.
+    pub fn unsent_send_count_now(&self) -> u32 {
+        let stores: Vec<mail_store::Db> =
+            self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
+        stores.iter().map(|db| db.read_blocking(mail_store::outbox::unsent_sends).unwrap_or(0)).sum()
     }
 
     /// Sends waiting out their Undo Send delay, in every account.
@@ -248,33 +257,22 @@ impl Core {
             stores.iter().filter_map(|(id, _)| self.accounts_sync_service(id)).collect();
         runtime::run(async move {
             let now = mail_sync::now_millis();
-            let mut released = 0;
             for (_, db) in &stores {
-                released += db.write(move |tx| mail_store::outbox::release_held_sends(tx, now)).await.unwrap_or(0);
-            }
-            if released == 0 {
-                return Ok::<_, CoreError>(0);
+                db.write(move |tx| mail_store::outbox::release_held_sends(tx, now)).await.unwrap_or(0);
             }
             for service in &services {
                 service.outbox_changed();
             }
+            // Wait for every send not yet handed over, whether it was
+            // released just now or its hold ran out a moment before.
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms));
             loop {
                 let mut waiting = 0;
                 for (_, db) in &stores {
-                    waiting += db
-                        .read(|c| {
-                            Ok(c.query_row(
-                                "SELECT COUNT(*) FROM outbox WHERE kind = 'send' AND state != 'failed'",
-                                [],
-                                |r| r.get::<_, i64>(0),
-                            )?)
-                        })
-                        .await
-                        .unwrap_or(0);
+                    waiting += db.read(mail_store::outbox::unsent_sends).await.unwrap_or(0);
                 }
                 if waiting == 0 || std::time::Instant::now() >= deadline {
-                    return Ok(waiting.max(0) as u32);
+                    return Ok::<_, CoreError>(waiting);
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
@@ -556,10 +554,19 @@ mod tests {
         );
         assert!(!block_on(core.cancel_send(id)).unwrap(), "nothing left to take back");
 
-        // Sent again, then the app quits: it goes at once.
+        // A send already tried (it timed out after Gmail may have taken
+        // it) cannot be taken back: that could mean sending it twice.
         block_on(core.send_draft(id)).unwrap();
+        let db = core.db().unwrap();
+        db.write_blocking(|tx| Ok(tx.execute("UPDATE outbox SET attempts = 1 WHERE kind = 'send'", [])?)).unwrap();
+        assert!(!block_on(core.cancel_send(id)).unwrap(), "already attempted");
+        db.write_blocking(|tx| Ok(tx.execute("UPDATE outbox SET attempts = 0 WHERE kind = 'send'", [])?)).unwrap();
+        assert_eq!(core.unsent_send_count_now(), 1);
+
+        // Then the app quits: it goes at once.
         assert_eq!(block_on(core.send_held_now(5_000)), 0, "delivered before quitting");
         assert!(fake.message(&MessageId::new("sent1")).is_some());
+        assert_eq!(core.unsent_send_count_now(), 0);
         assert!(!block_on(core.cancel_send(id)).unwrap(), "too late to take back");
 
         // No delay: straight out.

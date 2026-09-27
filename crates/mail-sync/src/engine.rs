@@ -213,6 +213,10 @@ pub struct SyncEngine {
     /// Label changes OpenAGC itself pushed recently, so history sync can
     /// tell them from changes made elsewhere (spec §11.6).
     pub(crate) own_changes: std::sync::Mutex<Vec<OwnChange>>,
+    /// Queued ids the headers pass asked for and did not get (gone from
+    /// All Mail since they were listed): left to the body backfill, which
+    /// falls back to the API, and not asked for again.
+    headers_missed: std::sync::Mutex<std::collections::HashSet<MessageId>>,
 }
 
 /// One label change the outbox pushed.
@@ -246,6 +250,7 @@ impl SyncEngine {
             observer,
             drain_lock: tokio::sync::Mutex::new(()),
             own_changes: std::sync::Mutex::new(Vec::new()),
+            headers_missed: Default::default(),
         }
     }
 
@@ -453,10 +458,19 @@ impl SyncEngine {
     /// up to `max` queued messages that have no row yet, so the list is
     /// browsable before their bodies arrive (they stay queued for bodies),
     /// then for the headers-only tier (tiered download), which leaves the
-    /// queue. Returns how many ids were handled; 0 when the source cannot
-    /// do it now or nothing is left.
+    /// queue. Returns the progress made (rows stored plus headers-only ids
+    /// finished); 0 when the source cannot do it now or nothing is left.
     pub async fn headers_pass(&self, max: usize) -> SyncResult<usize> {
-        let ids = self.db.read(move |c| queue::for_headers(c, max)).await?;
+        let missed = self.headers_missed.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let skip = missed.len();
+        let ids: Vec<MessageId> = self
+            .db
+            .read(move |c| queue::for_headers(c, max + skip))
+            .await?
+            .into_iter()
+            .filter(|id| !missed.contains(id))
+            .take(max)
+            .collect();
         if ids.is_empty() {
             return Ok(0);
         }
@@ -473,8 +487,10 @@ impl SyncEngine {
             return Ok(0);
         };
         let incoming: Vec<_> = headers.into_iter().map(to_incoming).collect();
-        let handled = ids.len();
-        let changes = self
+        let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
+        let stored = incoming.len();
+        let requested = ids.clone();
+        let (changes, dropped) = self
             .db
             .write(move |tx| {
                 let mut w = MailWriter::new(tx);
@@ -483,13 +499,21 @@ impl SyncEngine {
                 }
                 // Headers-only ids are done, found or not (a message the
                 // source no longer has is not coming back).
-                queue::remove_headers_only(tx, &ids)?;
-                w.finish()
+                let dropped = queue::remove_headers_only(tx, &requested)?;
+                Ok((w.finish()?, dropped))
             })
             .await?;
+        // Ids waiting for bodies that the source did not return stay for
+        // the body backfill; this pass stops asking for them.
+        {
+            let mut missed = self.headers_missed.lock().unwrap_or_else(|e| e.into_inner());
+            missed.extend(ids.into_iter().filter(|id| !returned.contains(id)));
+        }
         self.publish(&changes);
         self.report(SyncPhase::Backfilling).await;
-        Ok(handled)
+        // Progress, not ids asked for: a pass that stored nothing and
+        // dropped nothing must end the loop.
+        Ok(stored + dropped)
     }
 
     /// Search Gmail itself for `query` and download up to `max` matching

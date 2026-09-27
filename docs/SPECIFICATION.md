@@ -1841,8 +1841,13 @@ when you mean undo": all these actions are reversible).
   only remove a send that has not started. Undo removes the optimistic
   Sent copy, returns the draft to editing and reopens it; there is no
   redo. The notice lasts as long as the hold. *Decision:* quitting sends
-  held messages at once (the app waits up to 5 s; any not delivered go at
-  the next launch). The demo mailbox sends locally at once, so it offers
+  held messages at once (the app waits up to 5 s for every send not yet
+  handed to Gmail, held or not; any not delivered go at the next launch).
+  Only a send never attempted and still within its hold can be taken
+  back, and its notice does not pause, since the hold does not.
+- The outbox runs strictly in order: an op waiting to retry holds back
+  the ones after it (an undo must never reach Gmail before the action it
+  reverses); held sends alone step aside until their time. The demo mailbox sends locally at once, so it offers
   no Undo Send. Agent sends are held for the same delay but have no notice
   of their own yet.
 

@@ -104,11 +104,34 @@ async fn a_transient_failure_is_retried_in_order() {
     let report = engine.drain_outbox().await.unwrap();
     assert_eq!((report.sent, report.retrying), (0, 1), "the second op waits behind the first");
     assert_eq!(engine.outbox_counts().await.unwrap().pending, 2);
+    // Draining again before the retry is due: the later op (an unarchive,
+    // an undo) must still not overtake it.
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!(report.sent, 0, "strict order while the first waits to retry");
+    assert_eq!(labels(&fake, "m1"), vec!["INBOX", "UNREAD"], "nothing reached the server out of order");
     // Time passes.
     db.write(|tx| Ok(tx.execute("UPDATE outbox SET next_attempt_at = 0", [])?)).await.unwrap();
     let report = engine.drain_outbox().await.unwrap();
     assert_eq!(report.sent, 2);
     assert_eq!(labels(&fake, "m1"), vec!["INBOX", "UNREAD"], "archive then unarchive, in order");
+}
+
+#[tokio::test]
+async fn a_send_held_for_undo_steps_aside_for_later_changes() {
+    let (fake, db, _recorder, engine) = setup("held").await;
+    let held = mail_store::outbox::OutboxOp::Send {
+        draft_id: 999,
+        raw: String::new(),
+        thread_id: None,
+        local_message_id: mail_domain::MessageId::new("local-x"),
+    };
+    let far = mail_sync::now_millis() + 60_000;
+    db.write(move |tx| mail_store::outbox::enqueue_held(tx, &held, 0, Some(far)).map(|_| ())).await.unwrap();
+    engine.apply_change(LocalChange::archive(vec![ThreadId::new("a")]), true).await.unwrap();
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!(report.sent, 1, "the archive went");
+    assert!(!labels(&fake, "m1").contains(&"INBOX".to_owned()));
+    assert_eq!(engine.outbox_counts().await.unwrap().pending, 1, "the send still waits");
 }
 
 #[tokio::test]

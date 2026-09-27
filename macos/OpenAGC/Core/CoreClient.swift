@@ -345,8 +345,9 @@ final class CoreClient: Sendable {
 
     func heldSendCount() async -> UInt32 { await core.heldSendCount() }
 
-    /// The same, answered at once (the quit handler cannot wait).
-    func heldSendCountNow() -> UInt32 { core.heldSendCountNow() }
+    /// Sends quitting should wait for (held, due or on their way),
+    /// answered at once: the quit handler cannot wait to ask.
+    func unsentSendCountNow() -> UInt32 { core.unsentSendCountNow() }
 
     /// Mirror edited drafts to Gmail now instead of at the next 30 s tick.
     func flushDrafts() { core.flushDrafts() }
