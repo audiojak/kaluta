@@ -542,6 +542,23 @@ impl Core {
         .await
     }
 
+    /// Download every message in `account_id`'s window again, so labels
+    /// and bodies match Gmail (Settings › Accounts › Refresh from Gmail).
+    /// Returns how many are queued.
+    pub async fn refresh_from_server(&self, account_id: String) -> Result<u64, CoreError> {
+        self.store_for(&account_id).await?;
+        let service = crate::registry::scoped(Some(account_id.clone()), async { self.sync_service() }).await;
+        let Some(service) = service else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "that account is not syncing"));
+        };
+        runtime::run(async move {
+            let queued = service.engine().refetch_all().await.map_err(CoreError::from)?;
+            service.sync_now();
+            Ok(queued)
+        })
+        .await
+    }
+
     /// Download these messages' bodies next: the user opened a message
     /// that only has headers so far (spec §7.4 headers-first).
     pub async fn prioritize_messages(&self, message_ids: Vec<String>) -> Result<(), CoreError> {

@@ -435,9 +435,10 @@ fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -
             }
             AttributeValue::GmailLabels(names) => {
                 for name in names {
-                    match system_label(name) {
+                    let name = unescape_label(name);
+                    match system_label(&name) {
                         Some(id) => label_ids.push(LabelId::new(id)),
-                        None => match labels.get(name.as_ref()) {
+                        None => match labels.get(name.as_str()) {
                             Some(id) => label_ids.push(id.clone()),
                             None => tracing::debug!("IMAP label not in the label list yet; skipped"),
                         },
@@ -498,6 +499,29 @@ fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -
                 .collect(),
         }),
     })
+}
+
+/// Gmail sends X-GM-LABELS either as atoms (`\Inbox`) or as quoted strings
+/// with IMAP escaping (`"\\Inbox"`, `"Clients \"A\""`); the parser keeps the
+/// escapes. Undo them so both forms compare the same.
+fn unescape_label(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut chars = name.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some(next @ ('\\' | '"')) => out.push(next),
+                Some(next) => {
+                    out.push(c);
+                    out.push(next);
+                }
+                None => out.push(c),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// IMAP's names for Gmail's system labels.
@@ -625,5 +649,17 @@ mod tests {
         assert_eq!(system_label("\\Inbox"), Some("INBOX"));
         assert_eq!(system_label("\\Sent"), Some("SENT"));
         assert_eq!(system_label("Clients/Acme"), None);
+    }
+
+    #[test]
+    fn labels_arrive_as_atoms_or_escaped_quoted_strings() {
+        // As Gmail really sends them: a quoted string whose backslash is
+        // escaped. The bug this guards against dropped every system label
+        // on 6,000 messages of a real mailbox.
+        assert_eq!(unescape_label("\\\\Important"), "\\Important");
+        assert_eq!(system_label(&unescape_label("\\\\Important")), Some("IMPORTANT"));
+        assert_eq!(system_label(&unescape_label("\\Inbox")), Some("INBOX"), "atom form");
+        assert_eq!(unescape_label("Clients \\\"A\\\""), "Clients \"A\"");
+        assert_eq!(unescape_label("Clients/Acme"), "Clients/Acme");
     }
 }

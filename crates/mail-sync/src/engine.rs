@@ -326,6 +326,18 @@ impl SyncEngine {
         Ok(processed)
     }
 
+    /// Queue every message in the window again, fetched anew even if
+    /// stored (labels and bodies come back current). The user's repair
+    /// button; also useful after a bug in a fetch path.
+    pub async fn refetch_all(&self) -> SyncResult<u64> {
+        for phase in &phases_for(self.window().await?) {
+            self.list_phase_with(phase, true).await?;
+        }
+        let queued = self.db.read(queue::len).await?;
+        self.report(SyncPhase::Backfilling).await;
+        Ok(queued)
+    }
+
     /// Headers-first (spec §7.4 IMAP amendment): store header-only rows for
     /// up to `max` queued messages that have no row yet, so the list is
     /// browsable before their bodies arrive. They stay queued for bodies.

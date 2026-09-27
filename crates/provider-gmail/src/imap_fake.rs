@@ -193,7 +193,8 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                         let labels: Vec<String> = m
                             .labels
                             .iter()
-                            .map(|l| if l.starts_with('\\') { l.clone() } else { format!("\"{l}\"") })
+                            // As Gmail does: quoted, with backslashes and quotes escaped.
+                            .map(|l| format!("\"{}\"", l.replace('\\', "\\\\").replace('"', "\\\"")))
                             .collect();
                         parts.push(format!("X-GM-LABELS ({})", labels.join(" ")));
                     }
@@ -296,7 +297,9 @@ mod tests {
         assert_eq!(fetched[0].uid, Some(4));
         assert_eq!(fetched[0].gmail_msg_id(), Some(&1_700_000_000_000_000_001));
         let labels: Vec<String> = fetched[0].gmail_labels().unwrap().iter().map(|l| l.to_string()).collect();
-        assert_eq!(labels, vec!["\\Inbox".to_owned(), "Clients/Acme".to_owned()]);
+        // The parser keeps IMAP's escaping in quoted strings; the backfill
+        // client undoes it.
+        assert_eq!(labels, vec!["\\\\Inbox".to_owned(), "Clients/Acme".to_owned()]);
         assert!(fetched[0].body().unwrap().ends_with(b"Hello\r\n"));
         assert_eq!(server.logins(), 1);
         assert_eq!(server.body_fetches(), 1);

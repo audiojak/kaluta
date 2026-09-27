@@ -125,6 +125,10 @@ struct AccountRow: View {
                 if account.id != model.openAccountID {
                     Button("Show") { Task { await model.switchAccount(to: account.id) } }
                 }
+                if account.kind == .gmail, signedIn == true {
+                    Button("Refresh from Gmail") { Task { _ = try? await model.core?.refreshFromServer(account.id) } }
+                        .help("Download this account's mail again so labels and messages match Gmail. Nothing is sent or changed on the server.")
+                }
                 if account.kind == .archive {
                     Button("Re-import…") { Task { _ = try? await model.core?.reimportArchive(account.id) } }
                         .disabled(model.imports[account.id].map { !$0.done } ?? false)

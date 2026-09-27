@@ -115,6 +115,11 @@ final class CoreClient: Sendable {
         try? await call { try await core.prioritizeMessages(messageIds: ids) }
     }
 
+    /// Re-download an account's mail so labels and bodies match Gmail.
+    func refreshFromServer(_ accountID: String) async throws(CoreClientError) -> UInt64 {
+        try await call { try await core.refreshFromServer(accountId: accountID) }
+    }
+
     /// How an account's backfill fetches bodies ("rest", "imap", …).
     func backfillStatus(_ accountID: String) async -> BackfillStatus {
         await core.backfillStatus(accountId: accountID)

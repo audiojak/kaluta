@@ -252,6 +252,30 @@ async fn server_search_downloads_matches_outside_the_window() {
 }
 
 #[tokio::test]
+async fn refetch_all_queues_stored_messages_again_and_brings_labels_current() {
+    let (fake, db, _recorder, engine) = setup("refetch");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+    // The store has a wrong label set for one message (a fetch-path bug).
+    db.write(|tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        w.modify_message_labels(&MessageId::new("inbox-read"), &[], &[LabelId::new("INBOX")])?;
+        w.finish().map(|_| ())
+    })
+    .await
+    .unwrap();
+    assert_eq!(db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap().rows.len(), 1);
+
+    assert_eq!(engine.refetch_all().await.unwrap(), 5, "everything queued again");
+    assert_eq!(engine.backfill_all().await.unwrap(), 5);
+    assert_eq!(db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap().rows.len(), 2, "label restored");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
 async fn incremental_sync_applies_new_mail_label_changes_and_deletions() {
     let (fake, db, recorder, engine) = setup("incremental");
     seed_mailbox(&fake);
