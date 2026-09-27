@@ -767,7 +767,7 @@ to `imap.gmail.com`.
 *Not in scope.* IMAP as the sole provider (non-Gmail accounts), IDLE push,
 and label writes over IMAP.
 
-**Amendment (2026-09-27): tiered download.** Planned. With IMAP, headers
+**Amendment (2026-09-27): tiered download.** Implemented. With IMAP, headers
 are cheap and bodies are not; most old mail is never opened. So an account
 using IMAP downloads in two tiers:
 
@@ -816,6 +816,15 @@ Details:
 5. Accounts on the REST API keep today's behaviour (bodies for the whole
    window): headers cost the same quota there. Settings suggests IMAP for
    large mailboxes and hides the body-window choice without it.
+   *(Implemented: Settings › Accounts shows "Full messages for: Last 30
+   days / Last 6 months / Everything downloaded" under the IMAP toggle when
+   it is on, and otherwise, above 20,000 stored messages, a one-line nudge
+   towards IMAP. `SyncStatus` carries `pending_headers`; the sync line reads
+   "Syncing over IMAP — headers 6,406 left" while headers-only mail is
+   queued, then the body count.)*
+
+*Status (2026-09-27): implemented (oagc-m90), tested against the fakes
+only.*
 
 Trade-off, accepted: text search over old mail waits on Gmail's server
 search, and an agent reading old mail pauses while it downloads.

@@ -7,9 +7,9 @@ struct SyncStatusView: View {
     var body: some View {
         HStack(spacing: 6) {
             switch model.syncDisplay {
-            case let .syncing(pending):
+            case let .syncing(pending, headers):
                 ProgressView().controlSize(.mini)
-                Text(SyncStatusView.syncingText(pending: pending, transport: model.backfillTransport))
+                Text(SyncStatusView.syncingText(pending: pending, headers: headers, transport: model.backfillTransport))
                     .help(model.backfillTransport == "imap"
                         ? "Downloading message bodies over IMAP (Settings › Accounts)" : "")
             case .offline:
@@ -39,9 +39,11 @@ struct SyncStatusView: View {
         .padding(.vertical, 8)
     }
 
-    /// "Syncing over IMAP — 7,258 left".
-    static func syncingText(pending: UInt32, transport: String?) -> String {
+    /// "Syncing over IMAP — 7,258 left". Headers come first when some
+    /// mail downloads headers only (tiered download): "— headers 6,406 left".
+    static func syncingText(pending: UInt32, headers: UInt32 = 0, transport: String?) -> String {
         let how = transport == "imap" ? "Syncing over IMAP" : "Syncing"
+        if headers > 0 { return "\(how) — headers \(headers.formatted()) left" }
         return pending > 0 ? "\(how) — \(pending.formatted()) left" : "\(how)…"
     }
 
@@ -50,7 +52,8 @@ struct SyncStatusView: View {
     @MainActor
     static func subtitle(for model: AppModel) -> String? {
         switch model.syncDisplay {
-        case let .syncing(pending): return syncingText(pending: pending, transport: model.backfillTransport)
+        case let .syncing(pending, headers):
+            return syncingText(pending: pending, headers: headers, transport: model.backfillTransport)
         case .offline: return "Offline"
         case .error: return "Sync paused"
         case .idle:

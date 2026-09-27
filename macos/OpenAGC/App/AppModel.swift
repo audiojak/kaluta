@@ -19,7 +19,8 @@ final class AppModel {
     }
 
     enum SyncDisplay: Equatable {
-        case idle, syncing(pending: UInt32), offline, error
+        /// `headers`: messages waiting for headers only (tiered download).
+        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline, error
     }
 
     static let demoAccountID = "demo"
@@ -775,11 +776,13 @@ final class AppModel {
                 needsReauthentication = true
                 reauthenticationReason = .googleRejected
             }
-        case let .syncStatus(state, pending):
+        case let .syncStatus(state, pending, headers):
             refreshTransport()
             switch state {
             case .idle: syncDisplay = .idle
-            case .bootstrapping, .syncing: syncDisplay = pending > 0 || state == .bootstrapping ? .syncing(pending: pending) : .idle
+            case .bootstrapping, .syncing:
+                syncDisplay = pending + headers > 0 || state == .bootstrapping
+                    ? .syncing(pending: pending, headers: headers) : .idle
             case .offline: syncDisplay = .offline
             case .error: syncDisplay = .error
             }

@@ -156,6 +156,8 @@ pub struct SyncProgress {
     pub phase: SyncPhase,
     /// Messages still waiting for a full fetch.
     pub queued: u64,
+    /// Messages waiting for headers only (tiered download).
+    pub headers: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -780,8 +782,8 @@ impl SyncEngine {
     }
 
     async fn report(&self, phase: SyncPhase) {
-        let queued = self.db.read(queue::len).await.unwrap_or(0);
-        let phase = if queued == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
-        self.observer.progress(SyncProgress { phase, queued });
+        let (queued, headers) = self.db.read(queue::counts).await.unwrap_or((0, 0));
+        let phase = if queued + headers == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
+        self.observer.progress(SyncProgress { phase, queued, headers });
     }
 }

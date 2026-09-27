@@ -104,6 +104,10 @@ struct NotificationTests {
         try await core.setSyncWindow(.year, for: "home")
         #expect(try await core.syncWindow(for: "home") == .year)
         #expect(try await core.syncWindow(for: "work") == .halfYear, "per account")
+        #expect(try await core.bodyWindow(for: "home") == .month, "tiered download: 30 days by default")
+        try await core.setBodyWindow(.window, for: "home")
+        #expect(try await core.bodyWindow(for: "home") == .window)
+        #expect(try await core.bodyWindow(for: "work") == .month, "per account")
         await model.removeAccount("work")
         #expect(model.openAccountID == "home")
         #expect(model.accounts.map(\.id) == ["home"])
@@ -124,11 +128,26 @@ struct NotificationTests {
     }
 }
 
+struct IMAPSuggestionTests {
+    @Test func onlyLargeMailboxesWithoutIMAPAreNudged() {
+        #expect(AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 25_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 5_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: true, storedMessages: 25_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: nil))
+    }
+}
+
 struct SyncStatusTextTests {
     @Test func theSidebarSaysWhenItDownloadsOverIMAP() {
         #expect(SyncStatusView.syncingText(pending: 7258, transport: "imap") == "Syncing over IMAP — 7,258 left")
         #expect(SyncStatusView.syncingText(pending: 12, transport: "rest") == "Syncing — 12 left")
         #expect(SyncStatusView.syncingText(pending: 0, transport: "imap") == "Syncing over IMAP…")
         #expect(SyncStatusView.syncingText(pending: 3, transport: nil) == "Syncing — 3 left")
+    }
+
+    @Test func headersOnlyMailSaysHeadersFirst() {
+        #expect(SyncStatusView.syncingText(pending: 120, headers: 6406, transport: "imap")
+            == "Syncing over IMAP — headers 6,406 left")
+        #expect(SyncStatusView.syncingText(pending: 120, headers: 0, transport: "imap") == "Syncing over IMAP — 120 left")
     }
 }

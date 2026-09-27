@@ -532,6 +532,15 @@ final class CoreClient: Sendable {
         try await call { try await core.setSyncWindow(window: window) }
     }
 
+    /// Which part of the download range gets full messages over IMAP.
+    func bodyWindow(for accountID: String) async throws(CoreClientError) -> BodyWindow {
+        try await call { try await core.bodyWindowFor(accountId: accountID) }
+    }
+
+    func setBodyWindow(_ window: BodyWindow, for accountID: String) async throws(CoreClientError) {
+        try await call { try await core.setBodyWindowFor(accountId: accountID, bodyWindow: window) }
+    }
+
     func signOut(_ accountID: String) async throws(CoreClientError) {
         try await call { try await core.signOut(accountId: accountID) }
     }
@@ -652,6 +661,7 @@ typealias DraftStatus = OpenAGCCore.DraftStatus
 typealias LabelInfo = OpenAGCCore.LabelInfo
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
+typealias BodyWindow = OpenAGCCore.BodyWindow
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias ImportStatus = OpenAGCCore.ImportStatus
@@ -695,7 +705,7 @@ enum CoreClientEvent: Sendable, Equatable {
     }
 
     case threadsChanged(mailboxID: String, hint: ThreadChangeHint)
-    case syncStatus(SyncState, pending: UInt32)
+    case syncStatus(SyncState, pending: UInt32, headers: UInt32)
     case outboxStatus(pending: UInt32, failed: UInt32)
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
@@ -771,8 +781,8 @@ private extension CoreClientEvent {
             self = .threadsChanged(mailboxID: mailboxId, hint: ThreadChangeHint(
                 inserted: hint.inserted, updated: hint.updated,
                 removed: hint.removed, invalidate: hint.invalidate))
-        case let .syncStatus(state, pending):
-            self = .syncStatus(SyncState(state), pending: pending)
+        case let .syncStatus(state, pending, pendingHeaders):
+            self = .syncStatus(SyncState(state), pending: pending, headers: pendingHeaders)
         case let .outboxStatus(pending, failed):
             self = .outboxStatus(pending: pending, failed: failed)
         case let .error(kind, message):

@@ -51,7 +51,11 @@ impl SyncObserver for EventObserver {
             SyncPhase::Backfilling | SyncPhase::Incremental => SyncState::Syncing,
             SyncPhase::Idle => SyncState::Idle,
         };
-        self.events.emit(CoreEvent::SyncStatus { state, pending: progress.queued.min(u32::MAX as u64) as u32 });
+        self.events.emit(CoreEvent::SyncStatus {
+            state,
+            pending: progress.queued.min(u32::MAX as u64) as u32,
+            pending_headers: progress.headers.min(u32::MAX as u64) as u32,
+        });
     }
 }
 
@@ -335,7 +339,7 @@ impl SyncService {
     }
 
     fn status(&self, state: SyncState, pending: u32) {
-        self.events.emit(CoreEvent::SyncStatus { state, pending });
+        self.events.emit(CoreEvent::SyncStatus { state, pending, pending_headers: 0 });
     }
 
     fn offline_or_error(&self, e: &SyncError) {

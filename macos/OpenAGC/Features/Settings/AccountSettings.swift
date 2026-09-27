@@ -109,8 +109,21 @@ struct AccountRow: View {
     let account: AccountSummary
     let onRemove: () -> Void
     @State private var window: SyncWindow?
+    @State private var bodyWindow: BodyWindow?
     @State private var signedIn: Bool?
     @State private var backfill: BackfillStatus?
+
+    /// Above this many messages, suggest IMAP to accounts without it.
+    static let suggestIMAPAbove: UInt64 = 20_000
+
+    static let bodyWindowChoices: [(BodyWindow, String)] = [
+        (.month, "Last 30 days"), (.halfYear, "Last 6 months"), (.window, "Everything downloaded"),
+    ]
+
+    /// Whether to suggest IMAP: a large mailbox still on the API.
+    static func suggestsIMAP(imapEnabled: Bool, storedMessages: UInt64?) -> Bool {
+        !imapEnabled && (storedMessages ?? 0) > suggestIMAPAbove
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -162,11 +175,33 @@ struct AccountRow: View {
                     Text("Asks Google for full mail access, which IMAP needs. OpenAGC still never deletes mail permanently.")
                 }
                 .disabled(signedIn != true)
+                if account.imapEnabled {
+                    // Tiered download (spec §7.4): older mail in the range
+                    // comes down as headers; bodies when needed.
+                    Picker("Full messages for", selection: Binding(
+                        get: { bodyWindow ?? .month },
+                        set: { newValue in
+                            bodyWindow = newValue
+                            Task { try? await model.core?.setBodyWindow(newValue, for: account.id) }
+                        }
+                    )) {
+                        ForEach(Self.bodyWindowChoices, id: \.0) { choice in
+                            Text(choice.1).tag(choice.0)
+                        }
+                    }
+                    .disabled(bodyWindow == nil)
+                    .help("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full.")
+                } else if signedIn == true, Self.suggestsIMAP(imapEnabled: false, storedMessages: backfill?.storedMessages) {
+                    Label("A mailbox this large downloads much faster over IMAP.", systemImage: "bolt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 2)
         .task(id: account.id) {
             window = try? await model.core?.syncWindow(for: account.id)
+            bodyWindow = account.kind == .gmail ? try? await model.core?.bodyWindow(for: account.id) : nil
             signedIn = account.kind == .gmail ? ((try? model.core?.accountHasCredentials(account.id)) ?? false) : nil
             backfill = await model.core?.backfillStatus(account.id)
         }

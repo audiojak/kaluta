@@ -57,6 +57,9 @@ pub struct BackfillStatus {
     /// "rest", "imap", "imap-refused", or "none" when not syncing.
     pub transport: String,
     pub imap_bytes_today: u64,
+    /// Messages stored for the account (Settings suggests IMAP above
+    /// about 20,000 without it).
+    pub stored_messages: u64,
 }
 
 /// IMAP backfill with the label-name map refreshed from the store before
@@ -636,7 +639,19 @@ impl Core {
             Some(imap) => runtime::run(async move { Ok(imap.bytes_today().await) }).await.unwrap_or(0),
             None => 0,
         };
-        BackfillStatus { transport, imap_bytes_today }
+        let db = self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.get(&account_id).cloned();
+        let stored_messages = match db {
+            Some(db) => runtime::run(async move {
+                Ok(db
+                    .read(|c| Ok(c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0))?))
+                    .await?
+                    .max(0) as u64)
+            })
+            .await
+            .unwrap_or(0),
+            None => 0,
+        };
+        BackfillStatus { transport, imap_bytes_today, stored_messages }
     }
 
     /// Start syncing every Gmail account that has a stored sign-in, in the
