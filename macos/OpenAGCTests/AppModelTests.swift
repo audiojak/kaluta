@@ -16,7 +16,7 @@ struct AppModelTests {
         #expect(model.accountState == .open(accountID: AppModel.demoAccountID))
         let inbox = try #require(model.mailboxes.systemMailboxes.first { $0.kind == .inbox })
         #expect(inbox.unreadCount > 0)
-        #expect(model.mailboxes.systemMailboxes.map(\.kind) == [.inbox, .starred, .sent, .drafts, .archive, .spam, .trash])
+        #expect(model.mailboxes.systemMailboxes.map(\.kind) == [.inbox, .starred, .important, .sent, .drafts, .archive, .spam, .trash])
         #expect(model.mailboxes.labels.map(\.name) == ["Customers", "Customers/Acme", "Customers/Globex", "Hiring", "Newsletters",
                                                   "Projects/Launch", "Projects/Launch/Press", "Receipts", "Travel"])
         #expect(model.threads.mailboxID == "INBOX")

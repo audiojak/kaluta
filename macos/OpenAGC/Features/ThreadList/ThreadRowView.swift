@@ -79,8 +79,14 @@ final class ThreadRowView: NSTableCellView {
         senders.stringValue = Self.senderLine(row)
         senders.font = .systemFont(ofSize: 13, weight: unread ? .semibold : .regular)
         date.stringValue = RowDateFormatter.string(forMillis: row.lastMessageAt)
-        subject.stringValue = row.subject.isEmpty ? "(no subject)" : row.subject
-        subject.font = .systemFont(ofSize: 12, weight: unread ? .medium : .regular)
+        let subjectText = row.subject.isEmpty ? "(no subject)" : row.subject
+        let subjectFont = NSFont.systemFont(ofSize: 12, weight: unread ? .medium : .regular)
+        subject.font = subjectFont
+        if Self.isImportant(row) {
+            subject.attributedStringValue = Self.importantSubject(subjectText, font: subjectFont)
+        } else {
+            subject.stringValue = subjectText
+        }
         if chips.isEmpty {
             snippet.stringValue = row.snippet
             toolTip = nil
@@ -92,7 +98,7 @@ final class ThreadRowView: NSTableCellView {
         badges.isHidden = badges.image == nil
 
         setAccessibilityLabel(
-            [unread ? "Unread" : nil, senders.stringValue, subject.stringValue, date.stringValue,
+            [unread ? "Unread" : nil, Self.isImportant(row) ? "Important" : nil, senders.stringValue, subjectText, date.stringValue,
              chips.isEmpty ? nil : "Labels: " + chips.map(\.path).joined(separator: ", "), row.snippet]
                 .compactMap { $0 }.joined(separator: ", "))
         needsLayout = true
@@ -125,6 +131,27 @@ final class ThreadRowView: NSTableCellView {
         if row.participants.count > 3 { line += " …" }
         if row.messageCount > 1 { line += " (\(row.messageCount))" }
         return line
+    }
+
+    /// Gmail's importance marker (the yellow chevron).
+    static func isImportant(_ row: ThreadRow) -> Bool {
+        row.labelIds.contains("IMPORTANT")
+    }
+
+    static func importantSubject(_ text: String, font: NSFont) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+            .applying(.init(paletteColors: [.systemYellow]))
+        if let marker = NSImage(systemSymbolName: "chevron.right.2", accessibilityDescription: "Important")?
+            .withSymbolConfiguration(config) {
+            let attachment = NSTextAttachment()
+            attachment.image = marker
+            attachment.bounds = NSRect(x: 0, y: -1, width: marker.size.width, height: marker.size.height)
+            out.append(NSAttributedString(attachment: attachment))
+            out.append(NSAttributedString(string: " "))
+        }
+        out.append(NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+        return out
     }
 
     private static let starImage = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Starred")

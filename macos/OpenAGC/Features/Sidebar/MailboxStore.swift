@@ -14,7 +14,8 @@ final class MailboxStore {
         self.core = core
     }
 
-    var systemMailboxes: [MailboxInfo] { mailboxes.filter { $0.kind != .label && $0.kind != .important } }
+    /// Inbox, Starred, Important, Sent, Drafts, Archive, Spam, Trash (Gmail's order).
+    var systemMailboxes: [MailboxInfo] { mailboxes.filter { $0.kind != .label } }
     var labels: [MailboxInfo] { mailboxes.filter { $0.kind == .label } }
 
     func reload() async {
