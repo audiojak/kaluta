@@ -14,6 +14,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::{Core, CoreError};
+use mail_sync::LocalChange;
+
+fn ids(thread_ids: Vec<String>) -> Vec<ThreadId> {
+    thread_ids.into_iter().map(ThreadId).collect()
+}
 
 /// Most threads one search returns.
 pub(crate) const MAX_SEARCH: u32 = 50;
@@ -155,7 +160,7 @@ async fn approve_then_run(core: &Arc<Core>, session: &str, tool: Tool, arguments
             match a {
                 Ok(a) => {
                     let n = a.thread_ids.len();
-                    match core.trash(a.thread_ids).await {
+                    match core.mutate_unrecorded(LocalChange::Trash { thread_ids: ids(a.thread_ids) }).await {
                         Ok(()) => Outcome::json(json!({ "trashed": n })),
                         Err(e) => failed(e),
                     }
@@ -699,9 +704,11 @@ async fn change_threads(core: &Arc<Core>, arguments: Value, change: ThreadChange
     let a: ThreadsArgs = args(arguments)?;
     let n = a.thread_ids.len();
     let (done, key) = match change {
-        ThreadChange::Archive => (core.archive(a.thread_ids).await, "archived"),
-        ThreadChange::Read(true) => (core.set_read(a.thread_ids, true).await, "marked_read"),
-        ThreadChange::Read(false) => (core.set_read(a.thread_ids, false).await, "marked_unread"),
+        ThreadChange::Archive => (core.mutate_unrecorded(LocalChange::archive(ids(a.thread_ids))).await, "archived"),
+        ThreadChange::Read(read) => (
+            core.mutate_unrecorded(LocalChange::set_read(ids(a.thread_ids), read)).await,
+            if read { "marked_read" } else { "marked_unread" },
+        ),
     };
     done.map_err(failed)?;
     Ok(Outcome::json(json!({ key: n })))
@@ -742,7 +749,12 @@ async fn label_threads(core: &Arc<Core>, arguments: Value, add: bool) -> Result<
     }
     let n = a.thread_ids.len();
     let (plus, minus) = if add { (vec![label.id.0.clone()], vec![]) } else { (vec![], vec![label.id.0.clone()]) };
-    core.modify_labels(a.thread_ids, plus, minus).await.map_err(failed)?;
+    let change = LocalChange::Labels {
+        thread_ids: ids(a.thread_ids),
+        add: plus.into_iter().map(LabelId).collect(),
+        remove: minus.into_iter().map(LabelId).collect(),
+    };
+    core.mutate_unrecorded(change).await.map_err(failed)?;
     Ok(Outcome::json(json!({ "label": label.name, if add { "labeled" } else { "unlabeled" }: n })))
 }
 

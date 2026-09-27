@@ -384,6 +384,12 @@ fn archive_read_state_and_labels() {
     assert!(block_on(core.get_thread(b.clone())).unwrap().unwrap().thread.unread_count > 0);
     call(&core, "s1", Tool::MarkRead, json!({ "thread_ids": [b] })).unwrap();
     assert_eq!(block_on(core.get_thread(b.clone())).unwrap().unwrap().thread.unread_count, 0);
+    let recorded: i64 = core
+        .db()
+        .unwrap()
+        .read_blocking(|c| Ok(c.query_row("SELECT COUNT(*) FROM undo_actions", [], |r| r.get(0))?))
+        .unwrap();
+    assert_eq!(recorded, 0, "agent actions are not on the user's undo stack");
 
     let made = call(&core, "s1", Tool::CreateLabel, json!({ "name": "Sorted/Important", "color": "#fb4c2f" })).unwrap();
     let again = call(&core, "s1", Tool::CreateLabel, json!({ "name": "sorted/important" })).unwrap();

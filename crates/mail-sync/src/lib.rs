@@ -16,4 +16,5 @@ pub use engine::{
     NewMail, Phase, SyncEngine, SyncObserver, SyncPhase, SyncProgress, SyncWindow, phases_for,
 };
 pub use error::{SyncError, SyncResult};
-pub use outbox::{DrainReport, LocalChange, MAX_ATTEMPTS, apply_local_change, now_millis};
+pub use mail_store::undo::MessageDiff;
+pub use outbox::{DrainReport, LocalChange, MAX_ATTEMPTS, apply_local_change, apply_local_change_recorded, now_millis};

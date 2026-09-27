@@ -632,11 +632,11 @@ final class AppModel {
         Task { try? await core.clearFailedChanges() }
     }
 
-    private func removeFromList(action: @escaping @Sendable (CoreClient, [String]) async throws -> Void) {
+    private func removeFromList(action: @escaping @Sendable (CoreClient, [String]) async throws -> UndoToken?) {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         dropFromList(ids)
-        Task { await perform { try await action(core, ids) } }
+        Task { await perform { _ = try await action(core, ids) } }
     }
 
     /// Remove rows and move the selection to the row after the last one

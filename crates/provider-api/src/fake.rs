@@ -238,6 +238,13 @@ impl MailProvider for FakeProvider {
         Ok(())
     }
 
+    async fn restore_from_trash(&self, id: &MessageId) -> ProviderResult<()> {
+        self.injected_failure()?;
+        let mut s = self.state();
+        apply_labels(&mut s, id, &[], &[LabelId::new("TRASH")]);
+        Ok(())
+    }
+
     async fn send(&self, raw: &[u8], thread: Option<&ThreadId>) -> ProviderResult<MessageId> {
         self.injected_failure()?;
         let mut s = self.state();

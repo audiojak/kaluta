@@ -17,6 +17,8 @@ pub enum OutboxOp {
     ModifyLabels { message_ids: Vec<MessageId>, add: Vec<LabelId>, remove: Vec<LabelId> },
     /// Move these messages to Trash.
     Trash { message_ids: Vec<MessageId>, previous: Vec<(MessageId, Vec<LabelId>)> },
+    /// Take these messages out of Trash (undoing a trash).
+    Untrash { message_ids: Vec<MessageId> },
     /// Send a frozen message. `local_message_id` is the optimistic copy
     /// shown in Sent until the real one syncs back.
     Send {
@@ -38,6 +40,7 @@ impl OutboxOp {
         match self {
             Self::ModifyLabels { .. } => "modify_labels",
             Self::Trash { .. } => "trash",
+            Self::Untrash { .. } => "untrash",
             Self::Send { .. } => "send",
             Self::SyncDraft { .. } => "sync_draft",
             Self::DeleteDraft { .. } => "delete_draft",
@@ -131,6 +134,12 @@ pub fn fail(tx: &Transaction<'_>, id: i64, error: &str) -> StoreResult<ThreadCha
                 w.modify_message_labels(m, labels, &current)?;
             }
         }
+        OutboxOp::Untrash { message_ids } => {
+            let trash = [LabelId::new(mail_domain::system_labels::TRASH)];
+            for m in message_ids {
+                w.modify_message_labels(m, &trash, &[])?;
+            }
+        }
         // The optimistic Sent copy goes; the draft comes back with the error.
         OutboxOp::Send { draft_id, local_message_id, .. } => {
             w.delete_message(local_message_id)?;
@@ -168,7 +177,7 @@ pub fn clear_failed(tx: &Transaction<'_>) -> StoreResult<usize> {
     Ok(tx.execute("DELETE FROM outbox WHERE state = 'failed'", [])?)
 }
 
-fn current_labels(tx: &Transaction<'_>, m: &MessageId) -> StoreResult<Vec<LabelId>> {
+pub fn current_labels(tx: &Transaction<'_>, m: &MessageId) -> StoreResult<Vec<LabelId>> {
     Ok(tx
         .prepare_cached(
             "SELECT l.gmail_id FROM message_labels ml JOIN labels l ON l.id = ml.label_id

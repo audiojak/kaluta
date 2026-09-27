@@ -196,28 +196,45 @@ final class CoreClient: Sendable {
 
     // MARK: Mutations (applied locally at once, then pushed to Gmail)
 
-    func archive(_ threadIDs: [String]) async throws(CoreClientError) {
+    // Each returns a token for undo (spec §14.6a), or nil if nothing changed.
+
+    @discardableResult
+    func archive(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.archive(threadIds: threadIDs) }
     }
 
-    func moveToInbox(_ threadIDs: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func moveToInbox(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.moveToInbox(threadIds: threadIDs) }
     }
 
-    func setRead(_ threadIDs: [String], _ read: Bool) async throws(CoreClientError) {
+    @discardableResult
+    func setRead(_ threadIDs: [String], _ read: Bool) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.setRead(threadIds: threadIDs, read: read) }
     }
 
-    func setStarred(_ threadIDs: [String], _ starred: Bool) async throws(CoreClientError) {
+    @discardableResult
+    func setStarred(_ threadIDs: [String], _ starred: Bool) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.setStarred(threadIds: threadIDs, starred: starred) }
     }
 
-    func modifyLabels(_ threadIDs: [String], add: [String], remove: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func modifyLabels(_ threadIDs: [String], add: [String], remove: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.modifyLabels(threadIds: threadIDs, add: add, remove: remove) }
     }
 
-    func trash(_ threadIDs: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func trash(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.trash(threadIds: threadIDs) }
+    }
+
+    /// Reverse a recorded action exactly, in its own account.
+    func undo(_ token: UndoToken) async throws(CoreClientError) {
+        try await call { try await core.undoAction(token: token) }
+    }
+
+    func redo(_ token: UndoToken) async throws(CoreClientError) {
+        try await call { try await core.redoAction(token: token) }
     }
 
     func outboxStatus() async throws(CoreClientError) -> (pending: UInt32, failed: UInt32) {
@@ -662,6 +679,7 @@ typealias LabelInfo = OpenAGCCore.LabelInfo
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow
+typealias UndoToken = OpenAGCCore.UndoToken
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias ImportStatus = OpenAGCCore.ImportStatus
