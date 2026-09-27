@@ -486,7 +486,7 @@ mod tests {
         let message_id = detail.messages[0].id.clone();
         refused(block_on(core.reply_draft(message_id.clone(), false)).map(|_| ()));
         refused(block_on(core.forward_draft(message_id)).map(|_| ()));
-        refused(block_on(core.send_draft(1)));
+        refused(block_on(core.send_draft(1)).map(|_| ()));
 
         // Agents: reading and local sorting work; drafting is refused with
         // a final, structured answer.

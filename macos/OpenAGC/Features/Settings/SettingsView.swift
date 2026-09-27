@@ -35,6 +35,17 @@ private struct GeneralSettings: View {
 
     var body: some View {
         Form {
+            Section("Sending") {
+                Picker("Undo send", selection: Binding(
+                    get: { model.undoSendSeconds }, set: { model.undoSendSeconds = $0 })) {
+                    ForEach(AppModel.undoSendChoices, id: \.self) { seconds in
+                        Text(seconds == 0 ? "Off" : "\(seconds) seconds").tag(seconds)
+                    }
+                }
+                Text("Messages wait this long before they go, so you can take one back with Undo (⌘Z). Quitting sends them at once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("New Mail") {
                 Toggle("Notify me about new mail in the Inbox", isOn: $notify)
                 Toggle("Show unread count on the Dock icon", isOn: $badge)

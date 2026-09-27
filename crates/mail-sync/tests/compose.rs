@@ -84,7 +84,7 @@ async fn sending_shows_an_optimistic_copy_then_the_real_one_replaces_it() {
     d.body_html = format!("<p>Thursday works.</p>{}", d.quoted_html);
     let id = save(&db, d).await;
 
-    send_draft(&db, id, me(), true).await.unwrap();
+    send_draft(&db, id, me(), true, 0).await.unwrap();
     assert_eq!(sent(&db).await, vec!["t1"], "the reply shows in Sent at once, in the same thread");
     assert!(db.read(drafts::list).await.unwrap().is_empty(), "sending drafts are hidden");
     let (_, messages) = db.read(|c| read::get_thread(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
@@ -118,7 +118,7 @@ async fn a_failed_send_brings_the_draft_back_with_the_error() {
         },
     )
     .await;
-    send_draft(&db, id, me(), true).await.unwrap();
+    send_draft(&db, id, me(), true, 0).await.unwrap();
     assert_eq!(sent(&db).await.len(), 1);
     fake.fail_next_writes(vec![ProviderError::Forbidden("daily sending limit".into())]);
     engine.drain_outbox().await.unwrap();
@@ -142,7 +142,7 @@ async fn forwarding_and_local_only_sending() {
     f.to = vec![EmailAddress::new(None, "jo@example.net")];
     let id = save(&db, f).await;
     // No provider (demo): sent locally, draft gone, copy kept.
-    send_draft(&db, id, me(), false).await.unwrap();
+    send_draft(&db, id, me(), false, 0).await.unwrap();
     assert!(db.read(move |c| drafts::get(c, id)).await.unwrap().is_none());
     assert_eq!(sent(&db).await, vec!["t1"]);
 }
@@ -152,7 +152,7 @@ async fn sending_without_recipients_is_refused_and_changes_nothing() {
     let (_fake, db, _engine) = setup("norecipients").await;
     let id = save(&db, drafts::DraftRecord { subject: "x".into(), body_html: "<p>x</p>".into(), ..Default::default() })
         .await;
-    assert!(send_draft(&db, id, me(), true).await.is_err());
+    assert!(send_draft(&db, id, me(), true, 0).await.is_err());
     assert!(sent(&db).await.is_empty());
     assert_eq!(db.read(move |c| drafts::get(c, id)).await.unwrap().unwrap().state, DraftState::Editing);
 }
@@ -218,7 +218,7 @@ async fn discarding_or_sending_removes_the_server_copy() {
     assert_eq!(fake.drafts().len(), 2);
 
     db.write(move |tx| drafts::discard(tx, a, NOW)).await.unwrap();
-    send_draft(&db, b, me(), true).await.unwrap();
+    send_draft(&db, b, me(), true, 0).await.unwrap();
     engine.drain_outbox().await.unwrap();
     assert!(fake.drafts().is_empty(), "both server drafts deleted");
     assert_eq!(outbox_count(&engine).await, 0);

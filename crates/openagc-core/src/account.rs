@@ -161,6 +161,11 @@ impl Core {
         self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
     }
 
+    /// An account's sync service, if it is syncing.
+    pub(crate) fn accounts_sync_service(&self, account_id: &str) -> Option<Arc<SyncService>> {
+        self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(account_id).cloned()
+    }
+
     /// Whether an account's sync is running.
     pub(crate) fn is_syncing(&self, account_id: &str) -> bool {
         self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).contains_key(account_id)

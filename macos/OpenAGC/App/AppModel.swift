@@ -128,6 +128,7 @@ final class AppModel {
         self.core = core
         self.defaults = defaults
         accountEmail = defaults.string(forKey: "accountEmail")
+        undoSendSeconds = (defaults.object(forKey: Self.undoSendKey) as? Int).map { UInt32(clamping: $0) } ?? 10
         mailboxes = MailboxStore(core: core)
         threads = ThreadListStore(core: core)
         reader = ReaderStore(core: core)
@@ -149,6 +150,7 @@ final class AppModel {
         }
         listenForEvents(from: core)
         applyAgentPolicy()
+        core.setSendDelay(seconds: undoSendSeconds)
         notifier.openThread = { [weak self] thread, account in
             guard let self else { return }
             Task { await self.reveal(threadID: thread, in: account) }
@@ -618,6 +620,39 @@ final class AppModel {
     }
 
     // MARK: Undo (spec §14.6a)
+
+    static let undoSendKey = "undoSendSeconds"
+    static let undoSendChoices: [UInt32] = [0, 5, 10, 20, 30]
+
+    /// Settings › General › Undo send: how long a send waits (0 = off).
+    var undoSendSeconds: UInt32 = 10 {
+        didSet {
+            defaults.set(Int(undoSendSeconds), forKey: Self.undoSendKey)
+            core?.setSendDelay(seconds: undoSendSeconds)
+        }
+    }
+
+    /// A composer sent a message that is held: offer to take it back.
+    func sendHeld(draftID: Int64, accountID: String) {
+        guard let core else { return }
+        undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
+            guard let self else { return }
+            if await core.cancelSend(draftID, in: accountID) {
+                if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
+                self.compose(.draft(id: draftID))
+            } else {
+                self.undo.show("Already sent", accountID: accountID)
+            }
+        }
+    }
+
+    /// Quitting sends held messages at once (spec §14.6a decision): waits
+    /// a few seconds for them; any still going are sent at next launch.
+    func sendHeldBeforeQuitting() async {
+        guard let core, await core.heldSendCount() > 0 else { return }
+        let left = await core.sendHeldNow(timeout: .seconds(5))
+        if left > 0 { logger.info("\(left) held send(s) will go at next launch") }
+    }
 
     /// Undo the open account's last mail action (the notice's button, and
     /// ⌘Z when no text is being edited).

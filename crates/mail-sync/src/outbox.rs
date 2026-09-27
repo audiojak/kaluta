@@ -212,12 +212,19 @@ impl SyncEngine {
     /// permanent error, the op is rolled back locally and marked failed.
     pub async fn drain_outbox(&self) -> SyncResult<DrainReport> {
         let _serialized = self.drain_lock.lock().await;
+        self.db().write(outbox::release_in_flight).await?;
         let mut report = DrainReport::default();
         loop {
             let now = now_millis();
             let Some(queued) = self.db().read(move |c| outbox::next_ready(c, now)).await? else {
                 return Ok(report);
             };
+            // Claimed first: a held send cancelled since it was read stays
+            // unsent (Undo Send).
+            let claimed_id = queued.id;
+            if !self.db().write(move |tx| outbox::claim(tx, claimed_id)).await? {
+                continue;
+            }
             let result = match &queued.op {
                 OutboxOp::ModifyLabels { message_ids, add, remove } => {
                     // Before the call: history may report it before we return.

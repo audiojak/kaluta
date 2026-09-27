@@ -1791,7 +1791,7 @@ in the composer for review with a "Created by Claude" badge.
 
 ### 14.6a Acknowledgement and undo **(Amendment 2026-09-27)**
 
-Planned. Every mail action the user takes shows a short acknowledgement
+Implemented 2026-09-27 (oagc-82v). Every mail action the user takes shows a short acknowledgement
 with a way back, instead of any confirmation dialog ("never use a warning
 when you mean undo": all these actions are reversible).
 
@@ -1822,6 +1822,29 @@ when you mean undo": all these actions are reversible).
   General: off, 5, 10 (default), 20 or 30 seconds); the notice reads
   "Sending… Undo ⌘Z", and undo returns the message to an open composer.
   Agent sends, approved by the user, use the same delay.
+
+*Implementation notes.*
+- The core records each user action in the account's store
+  (`undo_actions`, last 50) as per-message diffs and returns an
+  `UndoToken` (account, action id); `undo_action`/`redo_action` apply the
+  exact inverse or the original as outbox ops in the token's own account.
+  Trash is undone with Gmail's `messages.untrash` (outbox `Untrash`), then
+  the recorded labels. An action that changed nothing returns no token and
+  shows no notice. Agent tools use an unrecorded path.
+- Swift keeps one `UndoManager` per account; Edit › Undo/Redo is
+  replaced by a command group that sends `undo:`/`redo:` down the
+  responder chain when a text view is first responder or another window is
+  key, so fields and the composer keep their own undo.
+- The notice is a glass capsule over the bottom of the thread list.
+- Undo Send: held sends sit in the outbox with `next_attempt_at` set; the
+  drain claims an op (`in_flight`) before calling Gmail, so cancelling can
+  only remove a send that has not started. Undo removes the optimistic
+  Sent copy, returns the draft to editing and reopens it; there is no
+  redo. The notice lasts as long as the hold. *Decision:* quitting sends
+  held messages at once (the app waits up to 5 s; any not delivered go at
+  the next launch). The demo mailbox sends locally at once, so it offers
+  no Undo Send. Agent sends are held for the same delay but have no notice
+  of their own yet.
 
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 

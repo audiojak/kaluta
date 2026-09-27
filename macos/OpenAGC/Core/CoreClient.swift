@@ -311,9 +311,28 @@ final class CoreClient: Sendable {
         try await call { try await core.deleteDraft(id: id) }
     }
 
-    func sendDraft(_ id: Int64) async throws(CoreClientError) {
+    /// Returns whether the send is held for Undo Send.
+    @discardableResult
+    func sendDraft(_ id: Int64) async throws(CoreClientError) -> Bool {
         try await call { try await core.sendDraft(id: id) }
     }
+
+    /// Undo Send: take back a held send in `accountID`; false if it went.
+    func cancelSend(_ draftID: Int64, in accountID: String) async -> Bool {
+        let composer = composer(for: accountID)
+        return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
+    }
+
+    /// How long sends wait so they can be undone (0 = off).
+    func setSendDelay(seconds: UInt32) { core.setSendDelay(seconds: seconds) }
+
+    /// Quitting: send every held message now; waits up to `timeout` and
+    /// returns how many are still going.
+    func sendHeldNow(timeout: Duration) async -> UInt32 {
+        await core.sendHeldNow(timeoutMs: UInt32(timeout.components.seconds * 1000))
+    }
+
+    func heldSendCount() async -> UInt32 { await core.heldSendCount() }
 
     /// Mirror edited drafts to Gmail now instead of at the next 30 s tick.
     func flushDrafts() { core.flushDrafts() }

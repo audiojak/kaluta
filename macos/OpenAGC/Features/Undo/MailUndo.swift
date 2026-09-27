@@ -166,13 +166,31 @@ final class MailUndo {
         manager(for: accountID).redo()
     }
 
+    /// A send held for Undo Send: undo takes it back (if it has not gone
+    /// yet) and reopens the draft; there is no redo, the user sends again.
+    /// The notice lasts as long as the hold.
+    func recordSend(accountID: String, holdFor hold: Duration, takeBack: @escaping @MainActor () async -> Void) {
+        let manager = manager(for: accountID)
+        manager.beginUndoGrouping()
+        manager.registerUndo(withTarget: self) { target in
+            MainActor.assumeIsolated {
+                target.revision += 1
+                Task { await takeBack() }
+            }
+        }
+        manager.setActionName(UndoableAction(kind: .send, count: 1).actionName)
+        manager.endUndoGrouping()
+        revision += 1
+        show(UndoableAction(kind: .send, count: 1).noticeText, accountID: accountID, for: hold)
+    }
+
     // MARK: The notice
 
     /// Show a notice, replacing any other; VoiceOver hears it without
     /// focus moving (WCAG 4.1.3).
-    func show(_ text: String, accountID: String) {
+    func show(_ text: String, accountID: String, for duration: Duration = noticeDuration) {
         notice = UndoNotice(text: text, accountID: accountID)
-        remaining = Self.noticeDuration
+        remaining = duration
         pauses.remove(.hover)
         pauses.remove(.focus)
         announce(text)

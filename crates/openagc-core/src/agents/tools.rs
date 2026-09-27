@@ -150,7 +150,7 @@ async fn approve_then_run(core: &Arc<Core>, session: &str, tool: Tool, arguments
     let outcome = match tool {
         Tool::Send | Tool::Forward => match proposal.draft_id {
             Some(draft) => match core.clone().send_draft(draft).await {
-                Ok(()) => Outcome::json(json!({ "sent": true, "draft_id": draft })),
+                Ok(_) => Outcome::json(json!({ "sent": true, "draft_id": draft })),
                 Err(e) => failed(e),
             },
             None => Outcome::error("failed", "no draft to send"),

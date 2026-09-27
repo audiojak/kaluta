@@ -184,3 +184,30 @@ struct UndoModelTests {
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Archive")
     }
 }
+
+@MainActor
+struct UndoSendTests {
+    @Test func aHeldSendIsUndoneByTakingItBackWithoutRedo() async throws {
+        let undo = MailUndo(core: nil)
+        undo.runsClock = false
+        var tookBack = false
+        undo.recordSend(accountID: "a", holdFor: .seconds(10)) { tookBack = true }
+        #expect(undo.notice?.text == "Sending…")
+        #expect(undo.remaining == .seconds(10), "the notice lasts as long as the hold")
+        #expect(undo.undoTitle(in: "a") == "Undo Send")
+        undo.undo(in: "a")
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(tookBack)
+        #expect(!undo.canRedo(in: "a"), "no redo: the user sends again")
+    }
+
+    @Test func theDelayDefaultsToTenSecondsAndIsRemembered() throws {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        let model = AppModel(core: nil, defaults: defaults)
+        #expect(model.undoSendSeconds == 10)
+        model.undoSendSeconds = 0
+        #expect(AppModel(core: nil, defaults: defaults).undoSendSeconds == 0)
+        #expect(AppModel.undoSendChoices == [0, 5, 10, 20, 30])
+    }
+}

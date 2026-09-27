@@ -62,6 +62,9 @@ pub struct Core {
     imports: archive::Imports,
     accounts: account::AccountState,
     agents: agents::AgentHub,
+    /// How long a send waits in the outbox so it can be undone (spec
+    /// §14.6a); set from Settings, 0 = off.
+    send_delay_ms: std::sync::atomic::AtomicU64,
 }
 
 #[uniffi::export]
@@ -87,6 +90,7 @@ impl Core {
             imports: Default::default(),
             accounts: Default::default(),
             agents: Default::default(),
+            send_delay_ms: Default::default(),
         }))
     }
 
