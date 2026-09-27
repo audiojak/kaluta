@@ -428,6 +428,33 @@ async fn server_search_downloads_matches_outside_the_window() {
 }
 
 #[tokio::test]
+async fn server_search_finds_header_only_mail_by_body_text_and_downloads_it() {
+    let (fake, db, _recorder, engine) = setup("server-search-tiers");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    let source = Arc::new(CountingSource::cheap(&fake));
+    engine.set_backfill_source(source.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+    engine.backfill_all().await.unwrap();
+    assert!(db.read(read::has_header_only).await.unwrap());
+    let local = |q: &'static str| {
+        let expr = mail_store::search::parse(q).unwrap();
+        let page = db.read_blocking(move |c| mail_store::search::search(c, &expr, NOW, None, 50)).unwrap();
+        page.rows.iter().map(|t| t.id.as_str().to_owned()).collect::<Vec<_>>()
+    };
+    // Only the body says "ancient"'s words; locally it has headers only.
+    assert!(!local("\"body of ancient\"").contains(&"t5".to_owned()));
+
+    assert_eq!(engine.search_server("body ancient", 10).await.unwrap(), 1);
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("full"));
+    assert_eq!(local("\"body of ancient\""), ["t5"]);
+    assert_eq!(source.bodies(), 4, "downloaded over the cheap source");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
 async fn refetch_all_queues_stored_messages_again_and_brings_labels_current() {
     let (fake, db, _recorder, engine) = setup("refetch");
     engine.set_window(SyncWindow::Everything).await.unwrap();

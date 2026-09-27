@@ -576,6 +576,13 @@ impl Core {
         .await
     }
 
+    /// Whether the open account has mail stored with headers only (tiered
+    /// download): search then asks Gmail too for free-text queries.
+    pub async fn has_header_only_mail(&self) -> Result<bool, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.read(mail_store::read::has_header_only).await?) }).await
+    }
+
     /// Download every message in `account_id`'s window again, so labels
     /// and bodies match Gmail (Settings › Accounts › Refresh from Gmail).
     /// Returns how many are queued.

@@ -164,10 +164,15 @@ fn matches(m: &FetchedMessage, filter: &ListFilter, now: Millis) -> bool {
         if days.is_some_and(|days| m.internal_date < now - days * 86_400_000) {
             return false;
         }
-        // A plain word: the subject must contain it (enough for tests of
-        // server-side search).
-        if !term.contains(':') && !m.subject.to_lowercase().contains(&term.to_lowercase()) {
-            return false;
+        // A plain word: the subject or the text body must contain it
+        // (enough for tests of server-side search).
+        if !term.contains(':') {
+            let term = term.to_lowercase();
+            let in_body =
+                m.body.as_ref().and_then(|b| b.text.as_deref()).is_some_and(|t| t.to_lowercase().contains(&term));
+            if !m.subject.to_lowercase().contains(&term) && !in_body {
+                return false;
+            }
         }
     }
     true

@@ -800,6 +800,11 @@ Details:
 3. Search: free-text queries also run server search when the account has
    header-only mail in the searched mailbox, not only when local results
    are few; header-only rows match on headers locally in the meantime.
+   *(Implemented per account rather than per mailbox: any header-only
+   message, found through a partial index, makes a query with a word or
+   phrase outside an operator ask Gmail after the usual pause. Matches that
+   are stored with headers only download their bodies like an opened
+   message.)*
 4. Snippets: a partial fetch of the first bytes of the text part
    (`BODY.PEEK[1]<0.2048>`, decoded best effort) gives list snippets
    without whole bodies.

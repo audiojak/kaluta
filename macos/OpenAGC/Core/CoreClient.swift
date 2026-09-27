@@ -110,6 +110,11 @@ final class CoreClient: Sendable {
         try await call { try await core.searchServer(query: query, limit: limit) }
     }
 
+    /// Some mail is stored with headers only (tiered download).
+    func hasHeaderOnlyMail() async -> Bool {
+        (try? await call { try await core.hasHeaderOnlyMail() }) ?? false
+    }
+
     /// Download header-only bodies now (tiered download, spec §7.4); on
     /// failure the core queues them first instead.
     func ensureBodies(_ ids: [String]) async {

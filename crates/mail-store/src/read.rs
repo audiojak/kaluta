@@ -386,3 +386,8 @@ pub fn attachment_source(conn: &Connection, id: i64) -> StoreResult<Option<Attac
         })
         .optional()?)
 }
+
+/// Whether any message is stored with headers only (tiered download).
+pub fn has_header_only(conn: &Connection) -> StoreResult<bool> {
+    Ok(conn.query_row("SELECT EXISTS (SELECT 1 FROM messages WHERE body_state = 'metadata')", [], |r| r.get(0))?)
+}
