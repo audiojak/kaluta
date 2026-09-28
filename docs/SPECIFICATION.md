@@ -1772,11 +1772,13 @@ Unread, Starred, With Attachments (combinable). An active filter fills the
 button and shows in the subtitle. Filters apply locally (`is:unread`,
 `is:starred`, `has:attachment`), per window, not remembered.
 
-**Amendment (2026-09-28): junk.** Planned. *Mark as Junk* (toolbar,
-Message menu ⇧⌘J, context menu) moves threads to Spam (adds `SPAM`,
-removes `INBOX`); in Spam, *Not Junk* moves them to the Inbox. Both are
-undoable (§14.6a) and go through the outbox. Agents and `modify_labels`
-still may not set `SPAM`: only these two user actions do.
+**Amendment (2026-09-28): junk.** Implemented 2026-09-28. *Mark as Junk*
+(toolbar, Message menu ⇧⌘J, context menu, `!` in the thread list as in
+Gmail, VoiceOver's Actions) moves threads to Spam (adds `SPAM`, removes
+`INBOX`); in Spam the same command reads *Not Junk* and moves them to the
+Inbox. Both are undoable (§14.6a: "Moved 2 conversations to Spam") and go
+through the outbox as label changes. Agents and `modify_labels` still may
+not set `SPAM`: only these two user actions (`mark_junk`, `not_junk`) do.
 
 ### 14.4 Message rendering **(Verified)**
 

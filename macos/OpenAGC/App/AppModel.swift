@@ -729,6 +729,18 @@ final class AppModel {
         removeFromList(.trash) { core, ids in try await core.trash(ids) }
     }
 
+    /// The Spam mailbox is on screen: the junk action is Not Junk there.
+    var isSpamMailbox: Bool { selectedMailboxID == "SPAM" && threads.searchQuery == nil }
+
+    /// Mark as Junk, or Not Junk in Spam (spec §14.3 amendment, junk).
+    func toggleJunkSelection() {
+        if isSpamMailbox {
+            removeFromList(.notJunk) { core, ids in try await core.notJunk(ids) }
+        } else {
+            removeFromList(.junk) { core, ids in try await core.markJunk(ids) }
+        }
+    }
+
     func moveSelectionToInbox() {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }

@@ -5,7 +5,7 @@ import Observation
 /// Edit › Undo use (spec §14.6a).
 struct UndoableAction: Equatable {
     enum Kind: Equatable {
-        case archive, moveToInbox, trash, read, unread, star, unstar
+        case archive, moveToInbox, trash, junk, notJunk, read, unread, star, unstar
         case label(String), unlabel(String)
         case send
     }
@@ -23,6 +23,8 @@ struct UndoableAction: Equatable {
         case .archive: "Archive"
         case .moveToInbox: "Move to Inbox"
         case .trash: "Move to Trash"
+        case .junk: "Mark as Junk"
+        case .notJunk: "Not Junk"
         case .read: "Mark as Read"
         case .unread: "Mark as Unread"
         case .star: "Star"
@@ -39,6 +41,8 @@ struct UndoableAction: Equatable {
         case .archive: "Archived \(conversations)"
         case .moveToInbox: "Moved \(conversations) to the Inbox"
         case .trash: "Moved \(conversations) to the Trash"
+        case .junk: "Moved \(conversations) to Spam"
+        case .notJunk: "Moved \(conversations) out of Spam to the Inbox"
         case .read: "Marked \(conversations) as read"
         case .unread: "Marked \(conversations) as unread"
         case .star: "Starred \(conversations)"

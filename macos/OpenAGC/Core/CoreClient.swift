@@ -254,6 +254,16 @@ final class CoreClient: Sendable {
         try await call { try await core.trash(threadIds: threadIDs) }
     }
 
+    /// Mark as Junk: to Spam, out of the Inbox (spec §14.3 amendment, junk).
+    func markJunk(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
+        try await call { try await core.markJunk(threadIds: threadIDs) }
+    }
+
+    /// Not Junk: out of Spam, into the Inbox.
+    func notJunk(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
+        try await call { try await core.notJunk(threadIds: threadIDs) }
+    }
+
     /// Reverse a recorded action exactly, in its own account.
     func undo(_ token: UndoToken) async throws(CoreClientError) {
         try await call { try await core.undoAction(token: token) }

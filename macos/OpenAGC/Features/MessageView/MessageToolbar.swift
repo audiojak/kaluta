@@ -36,6 +36,12 @@ struct MessageToolbar: ToolbarContent {
             Button("Move to Trash", systemImage: "trash") { model.trashSelection() }
                 .help("Move to Trash (⌘⌫)")
                 .disabled(noTargets)
+            Button(model.isSpamMailbox ? "Not Junk" : "Mark as Junk",
+                   systemImage: model.isSpamMailbox ? "tray.and.arrow.up" : "xmark.bin") {
+                model.toggleJunkSelection()
+            }
+            .help(model.isSpamMailbox ? "Not Junk (⇧⌘J)" : "Mark as Junk (⇧⌘J)")
+            .disabled(noTargets)
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {

@@ -40,6 +40,23 @@ impl LocalChange {
     pub fn move_to_inbox(thread_ids: Vec<ThreadId>) -> Self {
         Self::Labels { thread_ids, add: vec![LabelId::new(system_labels::INBOX)], remove: vec![] }
     }
+    /// Mark as Junk: to Spam and out of the Inbox. Only this and
+    /// `not_junk` set or clear `SPAM` (spec §14.3 amendment, junk).
+    pub fn mark_junk(thread_ids: Vec<ThreadId>) -> Self {
+        Self::Labels {
+            thread_ids,
+            add: vec![LabelId::new(system_labels::SPAM)],
+            remove: vec![LabelId::new(system_labels::INBOX)],
+        }
+    }
+    /// Not Junk: out of Spam and into the Inbox.
+    pub fn not_junk(thread_ids: Vec<ThreadId>) -> Self {
+        Self::Labels {
+            thread_ids,
+            add: vec![LabelId::new(system_labels::INBOX)],
+            remove: vec![LabelId::new(system_labels::SPAM)],
+        }
+    }
     pub fn set_read(thread_ids: Vec<ThreadId>, read: bool) -> Self {
         let unread = vec![LabelId::new(system_labels::UNREAD)];
         if read {

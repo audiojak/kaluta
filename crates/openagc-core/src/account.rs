@@ -986,7 +986,8 @@ mod tests {
             core.start_sync_with_backfill(rest.clone(), imap).unwrap();
             for _ in 0..200 {
                 let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
-                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) {
+                // Subjects arrive with the headers pass; wait for the bodies too.
+                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) && server.body_fetches() == 2 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
