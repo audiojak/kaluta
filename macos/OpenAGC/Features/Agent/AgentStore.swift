@@ -38,8 +38,8 @@ final class AgentStore {
     }
 
     private(set) var providers: [AgentProviderInfo] = []
-    var providerID: String = UserDefaults.standard.string(forKey: providerKey) ?? "claude-code" {
-        didSet { UserDefaults.standard.set(providerID, forKey: Self.providerKey) }
+    var providerID: String {
+        didSet { defaults.set(providerID, forKey: Self.providerKey) }
     }
     private(set) var sessionID: String?
     /// A stored conversation being shown; resumed on the next prompt.
@@ -64,8 +64,12 @@ final class AgentStore {
     @ObservationIgnored private var toolEntries: [String: Int] = [:]
     @ObservationIgnored private let logger = Logger(subsystem: "ai.actual.openagc", category: "agent")
 
-    init(core: CoreClient?) {
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
         self.core = core
+        self.defaults = defaults
+        providerID = defaults.string(forKey: Self.providerKey) ?? "claude-code"
     }
 
     var provider: AgentProviderInfo? { providers.first { $0.id == providerID } }

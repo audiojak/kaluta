@@ -43,11 +43,17 @@ final class CoreClient: Sendable {
         }
     }
 
-    /// The app's Keychain items, or a separate service under tests so a
-    /// test can never read the user's sign-ins.
+    /// The app's Keychain items, or a separate service when hosting tests
+    /// or on a scratch data directory, so neither can read the user's
+    /// sign-ins. Everything that touches the Keychain defaults to this.
     static func defaultSecrets() -> KeychainSecretStore {
-        KeychainSecretStore(service: isRunningTests ? "ai.actual.openagc.tests" : "ai.actual.openagc")
+        if isRunningTests { return KeychainSecretStore(service: testSecretsService) }
+        return KeychainSecretStore(service: isScratchRun ? "ai.actual.openagc.scratch" : "ai.actual.openagc")
     }
+
+    /// The test host's Keychain service; emptied when the host starts and
+    /// quits (`AppDelegate`).
+    static let testSecretsService = "ai.actual.openagc.tests"
 
     /// Where the app's tests put scratch data: one directory per test-host
     /// process, which scripts/test-macos.sh removes after the run (and the
@@ -64,10 +70,20 @@ final class CoreClient: Sendable {
     /// tests or running on a scratch data directory (snapshots,
     /// automation): those must never write the real app's preferences
     /// (the test host and snapshots share its bundle id).
-    static func appDefaults() -> UserDefaults {
-        let scratch = isRunningTests || !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
-        guard scratch else { return .standard }
+    /// One suite per process, shared by everything that remembers a
+    /// setting, so a test run or snapshot is consistent with itself.
+    /// Launch arguments (`-OpenAGC…`) are still read from `.standard`:
+    /// reading the argument domain writes nothing.
+    static func appDefaults() -> UserDefaults { sharedDefaults }
+
+    nonisolated(unsafe) private static let sharedDefaults: UserDefaults = {
+        guard isRunningTests || isScratchRun else { return .standard }
         return UserDefaults(suiteName: "openagc-scratch-\(UUID().uuidString)") ?? .standard
+    }()
+
+    /// Pointed at a throwaway data directory (snapshots, automation).
+    static var isScratchRun: Bool {
+        !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
     }
 
     static var isRunningTests: Bool {

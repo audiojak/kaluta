@@ -184,7 +184,7 @@ final class AppModel {
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
 
-    let notifier = NewMailNotifier()
+    let notifier: NewMailNotifier
     let mailboxes: MailboxStore
     let threads: ThreadListStore
     let reader: ReaderStore
@@ -227,8 +227,9 @@ final class AppModel {
         undoSendSeconds = (defaults.object(forKey: Self.undoSendKey) as? Int).map { UInt32(clamping: $0) } ?? 10
         mailboxes = MailboxStore(core: core)
         threads = ThreadListStore(core: core)
-        reader = ReaderStore(core: core)
-        fallbackAgent = AgentStore(core: core)
+        reader = ReaderStore(core: core, defaults: defaults)
+        notifier = NewMailNotifier(defaults: defaults)
+        fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
@@ -803,7 +804,7 @@ final class AppModel {
     /// An account's agent panel; an approved send it holds can be taken
     /// back from its card (spec §14.6a), reopening the draft for review.
     private func makeAgentStore(core: CoreClient, accountID: String) -> AgentStore {
-        let store = AgentStore(core: core)
+        let store = AgentStore(core: core, defaults: defaults)
         store.heldUntil = { draftID in await core.sendHeldUntil(draftID, in: accountID) }
         store.takeBack = { [weak self, weak store] draftID in
             guard await core.cancelSend(draftID, in: accountID) else { return false }

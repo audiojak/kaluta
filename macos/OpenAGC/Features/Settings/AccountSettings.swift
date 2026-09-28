@@ -270,7 +270,7 @@ struct SyncWindowSection: View {
 
 /// The bring-your-own-client fields, shared with onboarding.
 struct GoogleClientFields: View {
-    @State private var customID = UserDefaults.standard.string(forKey: GoogleClientConfiguration.customClientIDKey) ?? ""
+    @State private var customID = CoreClient.appDefaults().string(forKey: GoogleClientConfiguration.customClientIDKey) ?? ""
     @State private var customSecret = ""
     @State private var status: String?
 
@@ -298,7 +298,7 @@ struct GoogleClientFields: View {
 
 /// Settings › Privacy: what leaves the Mac, and remote images.
 struct PrivacySettings: View {
-    @State private var allowed: [String] = UserDefaults.standard.stringArray(forKey: ReaderStore.allowedSendersKey) ?? []
+    @State private var allowed: [String] = CoreClient.appDefaults().stringArray(forKey: ReaderStore.allowedSendersKey) ?? []
 
     var body: some View {
         Form {
@@ -334,7 +334,7 @@ struct PrivacySettings: View {
 
     private func save(_ list: [String]) {
         allowed = list
-        UserDefaults.standard.set(list, forKey: ReaderStore.allowedSendersKey)
+        CoreClient.appDefaults().set(list, forKey: ReaderStore.allowedSendersKey)
     }
 }
 

@@ -50,6 +50,8 @@ enum Snapshot {
                let main = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
                 var frame = main.frame
                 frame.size.width = width
+                // Never saved into the user's preferences.
+                AppDelegate.forgetWindowState(main)
                 main.setFrame(frame, display: true)
             }
             try? await Task.sleep(for: .seconds(delay / 2))

@@ -71,7 +71,7 @@ struct OpenAGCApp: App {
                 let dir = URL(filePath: override, directoryHint: .isDirectory)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 return try CoreClient(dataDirectory: dir, logDirectory: dir.appending(path: "Logs"),
-                                      secrets: KeychainSecretStore(service: "ai.actual.openagc.scratch"))
+                                      secrets: CoreClient.defaultSecrets())
             }
             return try CoreClient(dataDirectory: CoreClient.defaultDataDirectory(),
                                   logDirectory: CoreClient.defaultLogDirectory())

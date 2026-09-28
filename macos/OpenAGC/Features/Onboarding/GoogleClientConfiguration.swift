@@ -21,20 +21,20 @@ struct GoogleClientConfiguration: Equatable {
         return GoogleClientConfiguration(clientID: dict["ClientID"] ?? "", clientSecret: secret, isCustom: false)
     }
 
-    static func custom(defaults: UserDefaults = .standard, keychain: KeychainSecretStore = KeychainSecretStore()) -> GoogleClientConfiguration? {
+    static func custom(defaults: UserDefaults = CoreClient.appDefaults(), keychain: KeychainSecretStore = CoreClient.defaultSecrets()) -> GoogleClientConfiguration? {
         guard let id = defaults.string(forKey: customClientIDKey), !id.isEmpty else { return nil }
         let secret = (try? keychain.get(customSecretKey)) ?? nil
         return GoogleClientConfiguration(clientID: id, clientSecret: secret, isCustom: true)
     }
 
     /// The client to use now.
-    static func effective(defaults: UserDefaults = .standard, keychain: KeychainSecretStore = KeychainSecretStore(),
+    static func effective(defaults: UserDefaults = CoreClient.appDefaults(), keychain: KeychainSecretStore = CoreClient.defaultSecrets(),
                           bundle: Bundle = .main) -> GoogleClientConfiguration {
         custom(defaults: defaults, keychain: keychain) ?? shipped(bundle: bundle)
     }
 
-    static func saveCustom(clientID: String, clientSecret: String, defaults: UserDefaults = .standard,
-                           keychain: KeychainSecretStore = KeychainSecretStore()) throws {
+    static func saveCustom(clientID: String, clientSecret: String, defaults: UserDefaults = CoreClient.appDefaults(),
+                           keychain: KeychainSecretStore = CoreClient.defaultSecrets()) throws {
         let id = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
         let secret = clientSecret.trimmingCharacters(in: .whitespacesAndNewlines)
         if id.isEmpty {

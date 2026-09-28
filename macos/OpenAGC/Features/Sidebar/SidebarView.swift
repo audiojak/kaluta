@@ -74,7 +74,7 @@ final class LabelExpansion {
     private var key: String?
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = CoreClient.appDefaults()) {
         self.defaults = defaults
     }
 

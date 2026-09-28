@@ -54,7 +54,7 @@ final class Updater: NSObject {
 extension Updater: SPUUpdaterDelegate {
     /// Release builds follow the default channel; opting in adds "beta".
     nonisolated func allowedChannels(for updater: SPUUpdater) -> Set<String> {
-        Self.channels(betas: UserDefaults.standard.bool(forKey: Self.betaKey))
+        Self.channels(betas: CoreClient.appDefaults().bool(forKey: Self.betaKey))
     }
 
     nonisolated static func channels(betas: Bool) -> Set<String> {

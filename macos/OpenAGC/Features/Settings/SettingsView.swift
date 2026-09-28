@@ -27,9 +27,9 @@ struct SettingsView: View {
 }
 
 private struct GeneralSettings: View {
-    @AppStorage(NewMailNotifier.notifyKey) private var notify = true
-    @AppStorage(NewMailNotifier.badgeKey) private var badge = true
-    @AppStorage(Updater.betaKey) private var betas = false
+    @AppStorage(NewMailNotifier.notifyKey, store: CoreClient.appDefaults()) private var notify = true
+    @AppStorage(NewMailNotifier.badgeKey, store: CoreClient.appDefaults()) private var badge = true
+    @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
     @Environment(AppModel.self) private var model
     @Environment(Updater.self) private var updater
 

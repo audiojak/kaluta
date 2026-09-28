@@ -76,6 +76,22 @@ final class KeychainSecretStore: @unchecked Sendable {
         }
     }
 
+    /// Delete every item under this service (the test host's, between
+    /// runs). Never used on the app's own service.
+    func deleteAll() throws(KeychainError) {
+        precondition(service != "ai.actual.openagc", "never empty the user's own Keychain items")
+        // The login keychain deletes one matching item per call.
+        for _ in 0..<1_000 {
+            let status = run {
+                var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+                if dataProtection { q[kSecUseDataProtectionKeychain as String] = true }
+                return SecItemDelete(q as CFDictionary)
+            }
+            if status == errSecItemNotFound { return }
+            guard status == errSecSuccess else { throw KeychainError(status: status, operation: "delete") }
+        }
+    }
+
     private func baseQuery(_ key: String) -> [String: Any] {
         var q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

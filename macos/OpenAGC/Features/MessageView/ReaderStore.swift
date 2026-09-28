@@ -19,12 +19,14 @@ final class ReaderStore {
     private(set) var remoteImagesAllowedForThread = false
 
     @ObservationIgnored private let core: CoreClient?
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var cache: [String: RenderedBody] = [:]
     @ObservationIgnored private var cacheOrder: [String] = []
     @ObservationIgnored private var loadGeneration = 0
 
-    init(core: CoreClient?) {
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
         self.core = core
+        self.defaults = defaults
     }
 
     var hasRemoteImages: Bool { bodies.values.contains { $0.hasRemoteImages } }
@@ -33,7 +35,7 @@ final class ReaderStore {
     var allowsRemoteImages: Bool {
         if remoteImagesAllowedForThread { return true }
         guard let detail else { return false }
-        let allowed = Set(UserDefaults.standard.stringArray(forKey: Self.allowedSendersKey) ?? [])
+        let allowed = Set(defaults.stringArray(forKey: Self.allowedSendersKey) ?? [])
         let senders = detail.messages.compactMap { $0.from?.email.lowercased() }
         return !senders.isEmpty && senders.allSatisfy(allowed.contains)
     }
@@ -117,11 +119,11 @@ final class ReaderStore {
 
     func alwaysLoadRemoteImagesFromSenders() {
         guard let detail else { return }
-        var allowed = Set(UserDefaults.standard.stringArray(forKey: Self.allowedSendersKey) ?? [])
+        var allowed = Set(defaults.stringArray(forKey: Self.allowedSendersKey) ?? [])
         for sender in detail.messages.compactMap({ $0.from?.email.lowercased() }) {
             allowed.insert(sender)
         }
-        UserDefaults.standard.set(Array(allowed).sorted(), forKey: Self.allowedSendersKey)
+        defaults.set(Array(allowed).sorted(), forKey: Self.allowedSendersKey)
         remoteImagesAllowedForThread = true
     }
 
