@@ -582,6 +582,63 @@ impl SyncEngine {
         }
     }
 
+    /// Drafts through the provider's drafts list, since Gmail's change
+    /// history leaves them out (spec §14.5 amendment 2026-09-28): every
+    /// draft's message is stored in full whatever the window, draft
+    /// messages whose draft is gone (sent or discarded elsewhere) are
+    /// removed, and which draft holds which message is recorded for
+    /// editing. Returns how many draft messages were downloaded.
+    pub async fn sync_drafts(&self) -> SyncResult<usize> {
+        let Some(listed) = self.provider.list_drafts().await? else { return Ok(0) };
+        let held: Vec<String> = listed.iter().map(|(_, m)| m.0.clone()).collect();
+        let (missing, stale) = self
+            .db
+            .read({
+                let held = held.clone();
+                move |c| {
+                    let mut full =
+                        c.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1 AND body_state = 'full'")?;
+                    let mut missing = Vec::new();
+                    for id in &held {
+                        if !full.exists([id])? {
+                            missing.push(MessageId(id.clone()));
+                        }
+                    }
+                    let mut drafts = c.prepare_cached("SELECT gmail_id FROM messages WHERE is_draft")?;
+                    let stored = drafts.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+                    let stale: Vec<MessageId> =
+                        stored.into_iter().filter(|id| !held.contains(id)).map(MessageId).collect();
+                    Ok((missing, stale))
+                }
+            })
+            .await?;
+        let fetched = if missing.is_empty() {
+            vec![]
+        } else {
+            self.provider.fetch_messages(&missing, Priority::Background).await?
+        };
+        let downloaded = fetched.len();
+        let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
+        let pairs: Vec<(String, String)> = listed.into_iter().map(|(d, m)| (d, m.0)).collect();
+        let changes = self
+            .db
+            .write(move |tx| {
+                let mut w = MailWriter::new(tx);
+                for m in &incoming {
+                    w.upsert_message(m)?;
+                }
+                for id in &stale {
+                    w.delete_message(id)?;
+                }
+                let changes = w.finish()?;
+                mail_store::drafts::replace_server_drafts(tx, &pairs)?;
+                Ok(changes)
+            })
+            .await?;
+        self.publish(&changes);
+        Ok(downloaded)
+    }
+
     /// Apply the provider's history since the stored cursor. On an expired
     /// cursor the store is queued for a full resync and
     /// [`SyncError::ResyncStarted`] is returned.
@@ -689,6 +746,11 @@ impl SyncEngine {
         let (mut report, labeled) = report;
         report.external_label_changes = self.not_ours(labeled);
         self.publish(&changes);
+        // Drafts are not in the history; a failure here waits for the next
+        // round rather than failing this one.
+        if let Err(e) = self.sync_drafts().await {
+            tracing::warn!(error = %e, "draft sync failed; retried next round");
+        }
         self.report(SyncPhase::Incremental).await;
         Ok(report)
     }

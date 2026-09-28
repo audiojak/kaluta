@@ -654,3 +654,35 @@ async fn label_changes_made_elsewhere_are_reported_and_our_own_are_not() {
     assert_eq!(change.added, vec![LabelId::new("Label_7")]);
     assert_eq!(change.removed, vec![LabelId::new("INBOX")]);
 }
+
+#[tokio::test]
+async fn drafts_sync_through_the_drafts_list_whatever_the_window() {
+    let (fake, db, _recorder, engine) = setup("drafts");
+    engine.set_window(SyncWindow::Month).await.unwrap();
+    seed_mailbox(&fake);
+    // Written on the web a year ago: outside the window, and Gmail's
+    // history never mentions drafts.
+    let mut old = message("draft-old", "t-draft", 400, &[]);
+    old.subject = "Plan for next year".into();
+    fake.seed_draft("r-web1", old);
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+
+    assert_eq!(engine.sync_drafts().await.unwrap(), 1, "the draft's message came down");
+    let drafts = db.read(|c| read::list_threads(c, "DRAFT", None, 10)).await.unwrap();
+    assert_eq!(drafts.rows.iter().map(|t| t.subject.as_str()).collect::<Vec<_>>(), ["Plan for next year"]);
+    assert_eq!(
+        db.read(|c| mail_store::drafts::server_draft_for_message(c, "draft-old")).await.unwrap().as_deref(),
+        Some("r-web1"),
+        "which draft holds it, for editing"
+    );
+    assert_eq!(engine.sync_drafts().await.unwrap(), 0, "nothing new the second time");
+
+    // Sent or discarded elsewhere: the draft's message goes.
+    use provider_api::MailProvider;
+    fake.delete_draft("r-web1").await.unwrap();
+    engine.sync_drafts().await.unwrap();
+    assert!(db.read(|c| read::list_threads(c, "DRAFT", None, 10)).await.unwrap().rows.is_empty());
+    assert_consistent(&db);
+}

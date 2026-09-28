@@ -128,6 +128,76 @@ async fn outgoing_message(
     Ok((draft, outgoing))
 }
 
+/// A draft saved on the server (in the Drafts mailbox) as a local draft
+/// the composer can edit (spec §14.5 amendment 2026-09-28). The one
+/// already mirroring that server draft is reused; otherwise a new one is
+/// made from the message: recipients, subject, body and its attachments
+/// (fetched if need be, copied under `drafts_dir`), keeping the server
+/// draft's id so saving replaces it rather than adding a second draft.
+/// The message's body must be stored already. Returns the draft's id.
+pub async fn draft_for_editing(
+    db: &Db,
+    provider: Option<&dyn provider_api::MailProvider>,
+    cache_dir: &std::path::Path,
+    drafts_dir: &std::path::Path,
+    message_id: &MessageId,
+) -> SyncResult<i64> {
+    let id = message_id.clone();
+    let (server_draft, message, body) = db
+        .read(move |c| {
+            let server = drafts::server_draft_for_message(c, id.as_str())?;
+            Ok((server, read::get_message(c, &id)?, read::get_body(c, &id)?))
+        })
+        .await?;
+    if let Some(server) = server_draft.clone()
+        && let Some(local) = db.read(move |c| drafts::local_for_server(c, &server)).await?
+    {
+        return Ok(local);
+    }
+    let message = message.ok_or_else(|| StoreError::NotFound(format!("message {message_id}")))?;
+    // A reply's draft names the message it answers by Message-ID.
+    let in_reply_to = match message.in_reply_to.clone() {
+        Some(rfc) => db.read(move |c| read::message_for_rfc822(c, &rfc)).await?,
+        None => None,
+    };
+    let mut attachments = Vec::new();
+    for a in message.attachments.iter().filter(|a| !a.is_inline) {
+        let Ok(attachment_id) = a.id.0.parse::<i64>() else { continue };
+        let file = crate::attachments::attachment_file(db, provider, cache_dir, attachment_id).await?;
+        let folder = drafts_dir.join(random_token());
+        std::fs::create_dir_all(&folder).map_err(|e| StoreError::Io(e.to_string()))?;
+        let copy = folder.join(crate::attachments::safe_filename(&file.filename));
+        std::fs::copy(&file.path, &copy).map_err(|e| StoreError::Io(format!("{}: {e}", file.filename)))?;
+        attachments.push(drafts::DraftAttachment {
+            path: copy.to_string_lossy().into_owned(),
+            filename: file.filename,
+            mime_type: file.mime_type,
+            size: a.size,
+        });
+    }
+    let record = DraftRecord {
+        gmail_draft_id: server_draft,
+        thread_id: Some(message.thread_id.0.clone()),
+        in_reply_to,
+        to: message.to,
+        cc: message.cc,
+        bcc: message.bcc,
+        subject: message.subject,
+        body_html: parent_html(&body),
+        attachments,
+        ..Default::default()
+    };
+    let now = now_millis();
+    Ok(db
+        .write(move |tx| {
+            let id = drafts::save(tx, &record, now)?;
+            // `save` leaves the server id to the mirror; this draft has one.
+            drafts::set_gmail_draft_id(tx, id, record.gmail_draft_id.as_deref())?;
+            Ok(id)
+        })
+        .await?)
+}
+
 /// RFC 5322 bytes for a draft being mirrored to the server. Unlike a send,
 /// a draft may have no recipients yet.
 pub(crate) async fn draft_raw(db: &Db, draft: DraftRecord, from: &EmailAddress) -> SyncResult<Vec<u8>> {

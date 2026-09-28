@@ -41,6 +41,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "e", action: "Archive", inThreadList: true),
             .init(keys: "#  or  ⌫", action: "Move to Trash", inThreadList: true),
             .init(keys: "!", action: "Mark as junk or not junk", inThreadList: true),
+            .init(keys: "↩", action: "Edit the draft (in Drafts)", inThreadList: true),
             .init(keys: "u", action: "Mark as read or unread", inThreadList: true),
             .init(keys: "s", action: "Star or unstar", inThreadList: true),
             .init(keys: "l", action: "Label…", inThreadList: true),

@@ -850,6 +850,25 @@ final class AppModel {
     }
 
     /// A composer sent a message that is held: offer to take it back.
+    /// Open a thread's draft in a composer (the Drafts mailbox: Edit
+    /// Draft, a double-click or Return). A draft written elsewhere becomes
+    /// a local draft the first time, attachments included; saving it
+    /// updates the same draft on Gmail.
+    func editDraft(threadID: String? = nil) {
+        guard let core, let threadID = threadID ?? selectedThreadID, let account = openAccountID else { return }
+        Task {
+            guard let detail = try? await core.thread(threadID),
+                  let message = detail.messages.last(where: \.isDraft) else { return }
+            do {
+                let draft = try await core.openDraft(message.id, in: account)
+                compose(.draft(id: draft.id))
+            } catch let error as CoreClientError {
+                logger.error("open draft failed: \(error.message, privacy: .private)")
+                undo.show("Couldn't open the draft: \(error.message)", accountID: account)
+            } catch {}
+        }
+    }
+
     /// An account's agent panel; an approved send it holds can be taken
     /// back from its card (spec §14.6a), reopening the draft for review.
     private func makeAgentStore(core: CoreClient, accountID: String) -> AgentStore {

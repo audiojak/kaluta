@@ -331,6 +331,14 @@ pub fn get_message(conn: &Connection, id: &MessageId) -> StoreResult<Option<Mess
     Ok(get_thread(conn, &ThreadId(thread))?.and_then(|(_, messages)| messages.into_iter().find(|m| &m.id == id)))
 }
 
+/// The stored message (not a draft) with this RFC 5322 Message-ID.
+pub fn message_for_rfc822(conn: &Connection, rfc822_id: &str) -> StoreResult<Option<String>> {
+    Ok(conn
+        .prepare_cached("SELECT gmail_id FROM messages WHERE rfc822_message_id = ?1 AND NOT is_draft")?
+        .query_row([rfc822_id], |r| r.get(0))
+        .optional()?)
+}
+
 pub fn get_body(conn: &Connection, id: &MessageId) -> StoreResult<Option<Body>> {
     Ok(conn
         .prepare_cached(

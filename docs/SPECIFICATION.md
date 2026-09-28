@@ -1854,6 +1854,21 @@ HTML inside `<blockquote>` with a "On <date>, <name> wrote:" line.
 Autosave to `drafts` every 2 s of idleness; Gmail draft sync through the
 outbox every 30 s or on close.
 
+**Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
+through Gmail's drafts list (`drafts.list`) on every incremental round,
+since Gmail's change history leaves drafts out and the sync window
+(one month by default) would miss older ones: every draft's message is
+stored in full whatever the window, draft messages whose draft is gone
+(sent or discarded elsewhere) are removed, and `server_drafts` records
+which Gmail draft holds which message. A draft in the Drafts mailbox opens
+in a composer from *Edit Draft* in the reader, a double-click or Return:
+the local draft already mirroring it is reused; a draft written elsewhere
+becomes a local draft on first open (recipients, subject, body, and its
+attachments fetched and copied beside the other draft attachments),
+keeping the Gmail draft id so saving replaces that draft rather than
+adding a second one. Drafts show their paperclip in the list like any
+thread.
+
 ### 14.6 Agent panel
 
 Not a chat window. The prompt bar sits under the thread list; a session

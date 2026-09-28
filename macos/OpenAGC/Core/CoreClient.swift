@@ -375,6 +375,13 @@ final class CoreClient: Sendable {
         return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
     }
 
+    /// The local draft that edits a draft from the Drafts mailbox (made on
+    /// first open, with its attachments).
+    func openDraft(_ messageID: String, in accountID: String) async throws(CoreClientError) -> DraftInfo {
+        let composer = composer(for: accountID)
+        return try await CoreClient.bridge { try await composer.openDraft(messageId: messageID) }
+    }
+
     /// When the draft's send stops being held, if it is still held.
     func sendHeldUntil(_ draftID: Int64, in accountID: String) async -> Date? {
         let composer = composer(for: accountID)

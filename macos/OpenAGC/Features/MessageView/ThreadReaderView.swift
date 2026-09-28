@@ -35,6 +35,12 @@ struct ThreadReaderView: View {
                 .textSelection(.enabled)
                 .lineLimit(2)
             Spacer()
+            if detail.messages.contains(where: \.isDraft) {
+                Button("Edit Draft", systemImage: "pencil") { model.editDraft(threadID: detail.thread.id) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .hoverHelp("Open this draft to edit and send it (Return in Drafts)")
+            }
             if detail.messages.count > 1 {
                 Text("\(detail.messages.count) messages")
                     .font(.callout)

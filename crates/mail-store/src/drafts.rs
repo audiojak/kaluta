@@ -204,6 +204,30 @@ pub fn set_rfc822_id(tx: &Transaction<'_>, id: i64, message_id: &str) -> StoreRe
     Ok(())
 }
 
+/// Replace the record of the server's drafts with `drafts` (draft id,
+/// message id), from a full `drafts.list`.
+pub fn replace_server_drafts(tx: &Transaction<'_>, drafts: &[(String, String)]) -> StoreResult<()> {
+    tx.execute("DELETE FROM server_drafts", [])?;
+    let mut insert =
+        tx.prepare_cached("INSERT OR REPLACE INTO server_drafts (gmail_draft_id, gmail_message_id) VALUES (?1, ?2)")?;
+    for (draft, message) in drafts {
+        insert.execute(params![draft, message])?;
+    }
+    Ok(())
+}
+
+/// The server draft that holds `message_id` now, if any.
+pub fn server_draft_for_message(conn: &Connection, message_id: &str) -> StoreResult<Option<String>> {
+    Ok(conn
+        .query_row("SELECT gmail_draft_id FROM server_drafts WHERE gmail_message_id = ?1", [message_id], |r| r.get(0))
+        .optional()?)
+}
+
+/// The local draft that mirrors server draft `gmail_draft_id`, if any.
+pub fn local_for_server(conn: &Connection, gmail_draft_id: &str) -> StoreResult<Option<i64>> {
+    Ok(conn.query_row("SELECT id FROM drafts WHERE gmail_draft_id = ?1", [gmail_draft_id], |r| r.get(0)).optional()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

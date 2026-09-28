@@ -142,6 +142,9 @@ struct MainWindow: View {
                     ThreadListView()
                 }
             }
+            // Fill the column, so the header stays at the top when the list
+            // is empty (it floated to the middle with a short VStack).
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .bottom) { UndoNoticeView() }
             // No drawn rule under the header: the column runs beneath the
             // floating sidebar, and a full-width rule showed through its

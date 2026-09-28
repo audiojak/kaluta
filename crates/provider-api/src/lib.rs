@@ -184,6 +184,13 @@ pub trait MailProvider: Send + Sync {
     async fn save_draft(&self, existing: Option<&str>, raw: &[u8], thread: Option<&ThreadId>)
     -> ProviderResult<String>;
     async fn delete_draft(&self, draft_id: &str) -> ProviderResult<()>;
+    /// The account's drafts: (draft id, the message it holds now). Gmail's
+    /// change history leaves drafts out, so they are synced through this
+    /// (spec §14.5 amendment 2026-09-28). `None`: the provider has no
+    /// drafts API, so stored drafts are left as they are.
+    async fn list_drafts(&self) -> ProviderResult<Option<Vec<(String, MessageId)>>> {
+        Ok(None)
+    }
     /// Create a user label. `color` is a `(background, text)` pair from the
     /// provider's palette.
     async fn create_label(&self, name: &str, color: Option<(&str, &str)>) -> ProviderResult<Label>;

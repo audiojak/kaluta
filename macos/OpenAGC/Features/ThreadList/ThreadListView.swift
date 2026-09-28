@@ -28,6 +28,8 @@ struct ThreadListView: NSViewRepresentable {
         table.addTableColumn(column)
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
+        table.target = context.coordinator
+        table.doubleAction = #selector(Coordinator.openClicked(_:))
         table.setAccessibilityLabel("Threads")
 
         let scroll = NSScrollView()
@@ -83,6 +85,13 @@ struct ThreadListView: NSViewRepresentable {
             table.selectRowIndexes(target, byExtendingSelection: false)
             if let first = target.first, target.count == 1 { table.scrollRowToVisible(first) }
             applyingSelection = false
+        }
+
+        /// A double-click on a draft opens it in a composer.
+        @objc func openClicked(_ sender: NSTableView) {
+            let row = sender.clickedRow
+            guard rows.indices.contains(row), rows[row].labelIds.contains("DRAFT") else { return }
+            model.editDraft(threadID: rows[row].id)
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int {
@@ -212,7 +221,9 @@ final class ThreadTableView: NSTableView {
         case "k": moveSelection(by: -1)
         case "/": model.focusSearch()
         default:
-            if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
+            if event.keyCode == 36 || event.keyCode == 76, model.selectedMailboxID == "DRAFT" { // return, enter
+                model.editDraft()
+            } else if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
                 model.trashSelection()
             } else {
                 super.keyDown(with: event)
