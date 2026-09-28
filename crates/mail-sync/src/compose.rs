@@ -191,8 +191,14 @@ pub async fn draft_for_editing(
     Ok(db
         .write(move |tx| {
             let id = drafts::save(tx, &record, now)?;
-            // `save` leaves the server id to the mirror; this draft has one.
+            // `save` leaves the server id to the mirror; this draft has one,
+            // and matches it: opening a draft uploads nothing until it is
+            // edited (re-uploading would drop what the composer cannot
+            // keep, like inline images).
             drafts::set_gmail_draft_id(tx, id, record.gmail_draft_id.as_deref())?;
+            if record.gmail_draft_id.is_some() {
+                drafts::set_clean(tx, id)?;
+            }
             Ok(id)
         })
         .await?)

@@ -681,6 +681,9 @@ mod tests {
         assert_eq!(draft.attachments.len(), 1);
         assert_eq!(std::fs::read(&draft.attachments[0].path).unwrap(), b"fake bytes of budget.pdf");
         assert_eq!(block_on(core.open_draft("webdraft1".into())).unwrap().id, draft.id, "opened again: the same draft");
+        core.flush_drafts();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(fake.drafts()["r-web1"].0.is_empty(), "opening alone uploads nothing");
 
         // Saving mirrors to the same server draft, not a second one.
         let mut edited = draft.clone();

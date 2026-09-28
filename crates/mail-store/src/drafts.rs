@@ -216,6 +216,13 @@ pub fn replace_server_drafts(tx: &Transaction<'_>, drafts: &[(String, String)]) 
     Ok(())
 }
 
+/// Mark a draft as matching its server copy, so nothing is uploaded until
+/// it is edited (a draft just made from its server copy).
+pub fn set_clean(tx: &Transaction<'_>, id: i64) -> StoreResult<()> {
+    tx.execute("UPDATE drafts SET dirty = 0 WHERE id = ?1", [id])?;
+    Ok(())
+}
+
 /// The server draft that holds `message_id` now, if any.
 pub fn server_draft_for_message(conn: &Connection, message_id: &str) -> StoreResult<Option<String>> {
     Ok(conn
