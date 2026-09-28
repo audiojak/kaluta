@@ -206,6 +206,17 @@ impl Core {
         .await
     }
 
+    /// When the draft's send stops being held (Unix ms), if it is held:
+    /// an agent's approved send can be taken back until then.
+    pub async fn send_held_until(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            let now = mail_sync::now_millis();
+            Ok(db.read(move |c| mail_store::outbox::send_held_until(c, draft_id, now)).await?)
+        })
+        .await
+    }
+
     /// [`Core::held_send_count`] without waiting on the runtime, for the
     /// app's quit handler (it must answer on the main thread at once). A
     /// pooled read; well under a millisecond.
@@ -383,6 +394,10 @@ impl AccountComposer {
         self.scoped(self.core.cancel_send(draft_id)).await
     }
 
+    pub async fn send_held_until(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
+        self.scoped(self.core.send_held_until(draft_id)).await
+    }
+
     pub fn flush_drafts(&self) {
         crate::registry::SCOPED_ACCOUNT.sync_scope(self.account.clone(), || self.core.flush_drafts());
     }
@@ -540,7 +555,11 @@ mod tests {
         // Sent, held, then taken back: nothing reaches Gmail, the draft is
         // editable again and the Sent copy is gone.
         let id = block_on(core.save_draft(draft_to("Held"))).unwrap();
+        let before = mail_sync::now_millis();
         assert!(block_on(core.send_draft(id)).unwrap(), "held");
+        let until = block_on(core.send_held_until(id)).unwrap().expect("held until");
+        assert!((before + 29_000..=mail_sync::now_millis() + 30_000).contains(&until), "about 30 s from now");
+        assert_eq!(block_on(core.send_held_until(id + 1)).unwrap(), None, "another draft is not held");
         assert_eq!(block_on(core.held_send_count()), 1);
         assert_eq!(core.held_send_count_now(), 1);
         assert!(block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held"));
@@ -553,6 +572,7 @@ mod tests {
             !block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held")
         );
         assert!(!block_on(core.cancel_send(id)).unwrap(), "nothing left to take back");
+        assert_eq!(block_on(core.send_held_until(id)).unwrap(), None);
 
         // A send already tried (it timed out after Gmail may have taken
         // it) cannot be taken back: that could mean sending it twice.

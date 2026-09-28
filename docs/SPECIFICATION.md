@@ -1890,10 +1890,14 @@ when you mean undo": all these actions are reversible).
   the ones after it (an undo must never reach Gmail before the action it
   reverses); held sends alone step aside until their time.
 - The demo mailbox sends locally at once, so it offers no Undo Send.
-  Agent sends are held for the same delay but have no notice of their own
-  yet. *(Amended 2026-09-28, planned: an agent's approved send shows the
-  same "Sending… Undo" row on its approval card in the agent panel for the
-  hold; undo returns the draft to the review composer.)*
+  Agent sends are held for the same delay. *(Amended 2026-09-28,
+  implemented:)* an approved agent send or forward that the core holds
+  shows "Sending… Undo" on its approval card for the hold
+  (`send_held_until`); Undo cancels it (`cancel_send`), the card reads
+  "Not sent. The draft is open for you." and the draft opens in the review
+  composer, switching accounts if need be. It is not on ⌘Z's stack and
+  has no notice; the agent's transcript still says it sent, and the
+  activity log keeps the approval.
 
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 

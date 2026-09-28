@@ -110,6 +110,21 @@ pub fn cancel_send(tx: &Transaction<'_>, draft_id: i64, now: Millis) -> StoreRes
     Ok(Some(changes))
 }
 
+/// When a draft's send stops being held for Undo Send, if it is still
+/// held at `now` (never attempted, its time not come): what an agent's
+/// approval card counts down to (spec §14.6a).
+pub fn send_held_until(conn: &Connection, draft_id: i64, now: Millis) -> StoreResult<Option<Millis>> {
+    Ok(conn
+        .query_row(
+            "SELECT next_attempt_at FROM outbox WHERE kind = 'send' AND state = 'pending'
+               AND attempts = 0 AND next_attempt_at > ?2
+               AND json_extract(payload_json, '$.draft_id') = ?1",
+            params![draft_id, now],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
 /// Sends still held for Undo Send at `now`.
 pub fn held_sends(conn: &Connection, now: Millis) -> StoreResult<u32> {
     Ok(conn

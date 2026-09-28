@@ -359,6 +359,13 @@ final class CoreClient: Sendable {
         return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
     }
 
+    /// When the draft's send stops being held, if it is still held.
+    func sendHeldUntil(_ draftID: Int64, in accountID: String) async -> Date? {
+        let composer = composer(for: accountID)
+        let until = try? await CoreClient.bridge { try await composer.sendHeldUntil(draftId: draftID) }
+        return until.flatMap { $0 }.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+    }
+
     /// How long sends wait so they can be undone (0 = off).
     func setSendDelay(seconds: UInt32) { core.setSendDelay(seconds: seconds) }
 

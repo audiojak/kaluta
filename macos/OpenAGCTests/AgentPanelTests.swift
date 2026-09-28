@@ -142,6 +142,49 @@ struct ApprovalCardTests {
         #expect(states == [.approved, .rejected])
     }
 
+    @Test func anApprovedHeldSendCanBeTakenBackFromItsCard() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: true)
+        let agent = model.agent
+        await agent.loadProviders()
+        await model.askAgent("hi")
+        let session = try #require(agent.sessionID)
+        let until = Date().addingTimeInterval(0.6)
+        var asked = 0
+        agent.heldUntil = { draftID in
+            asked += 1
+            return draftID == 3 && asked > 1 ? until : nil // held a moment after the approval
+        }
+        var tookBack: [Int64] = []
+        agent.takeBack = { draftID in tookBack.append(draftID); return true }
+        await agent.apply(sessionID: session, events: [
+            .actionProposed(actionId: 7, tool: "mail_send", summary: "Send “Lunch”", draftId: 3),
+            .actionProposed(actionId: 8, tool: "mail_forward", summary: "Forward “Plan”", draftId: 4),
+        ])
+        await agent.apply(sessionID: session, events: [.actionResolved(actionId: 7, approved: true)])
+        let state = { (id: Int64) -> AgentStore.Entry.ProposalState? in
+            for entry in agent.entries {
+                if case let .proposal(actionID, _, _, _, state) = entry.kind, actionID == id { return state }
+            }
+            return nil
+        }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while state(7) == .approved, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(state(7) == .sending(until: until))
+        agent.undoSend(7)
+        while state(7) != .takenBack, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(state(7) == .takenBack)
+        #expect(tookBack == [3])
+
+        // A send that is not held (no delay, the demo) just reads Approved,
+        // and one whose hold ran out goes back to Approved too.
+        agent.holdLookup = .milliseconds(200)
+        await agent.apply(sessionID: session, events: [.actionResolved(actionId: 8, approved: true)])
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(state(8) == .approved)
+    }
+
     @Test func reviewRequestsCarryTheAgentName() {
         #expect(ComposeRequest.review(draftID: 3, agent: "Claude").agentName == "Claude")
         #expect(ComposeRequest.draft(id: 3).agentName == nil)

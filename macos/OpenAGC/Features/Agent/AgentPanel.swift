@@ -370,6 +370,19 @@ private struct ProposalCard: View {
                 .controlSize(.small)
             case .approved:
                 Label("Approved", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+            case let .sending(until):
+                HStack {
+                    ProgressView().controlSize(.mini)
+                    Text("Sending…").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Undo") { model.agent.undoSend(actionID) }
+                        .controlSize(.small)
+                        .help("Take the message back and open it (until \(until.formatted(date: .omitted, time: .standard)))")
+                }
+                .accessibilityElement(children: .contain)
+            case .takenBack:
+                Label("Not sent. The draft is open for you.", systemImage: "arrow.uturn.backward.circle")
+                    .font(.caption).foregroundStyle(.secondary)
             case .rejected:
                 Label("Declined", systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary)
             }

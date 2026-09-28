@@ -371,7 +371,7 @@ final class AppModel {
         guard let core else { return }
         do {
             try await core.openAccount(accountID)
-            if agentStores[accountID] == nil { agentStores[accountID] = AgentStore(core: core) }
+            if agentStores[accountID] == nil { agentStores[accountID] = makeAgentStore(core: core, accountID: accountID) }
             accountState = .open(accountID: accountID)
             await mailboxes.reload()
             await reloadAccounts()
@@ -800,6 +800,21 @@ final class AppModel {
     }
 
     /// A composer sent a message that is held: offer to take it back.
+    /// An account's agent panel; an approved send it holds can be taken
+    /// back from its card (spec §14.6a), reopening the draft for review.
+    private func makeAgentStore(core: CoreClient, accountID: String) -> AgentStore {
+        let store = AgentStore(core: core)
+        store.heldUntil = { draftID in await core.sendHeldUntil(draftID, in: accountID) }
+        store.takeBack = { [weak self, weak store] draftID in
+            guard await core.cancelSend(draftID, in: accountID) else { return false }
+            guard let self else { return true }
+            if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
+            self.compose(.review(draftID: draftID, agent: store?.providerName ?? "Agent"))
+            return true
+        }
+        return store
+    }
+
     func sendHeld(draftID: Int64, accountID: String) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
