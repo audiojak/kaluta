@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// New Message in the list column's toolbar, at its trailing edge where it
@@ -8,7 +9,7 @@ struct ListToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItem {
             Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
-                .help(model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)")
+                .help(ToolbarHelp.text(for: "New Message", model: model) ?? "")
                 .disabled(model.isArchive)
         }
     }
@@ -26,28 +27,28 @@ struct MessageToolbar: ToolbarContent {
     var body: some ToolbarContent {
         ToolbarItemGroup {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { model.reply(all: false) }
-                .help("Reply (⌘R)")
+                .help(ToolbarHelp.text(for: "Reply", model: model) ?? "")
                 .disabled(noReplyTarget)
             Button("Reply All", systemImage: "arrowshape.turn.up.left.2") { model.reply(all: true) }
-                .help("Reply All (⇧⌘R)")
+                .help(ToolbarHelp.text(for: "Reply All", model: model) ?? "")
                 .disabled(noReplyTarget)
             Button("Forward", systemImage: "arrowshape.turn.up.right") { model.forward() }
-                .help("Forward (⇧⌘F)")
+                .help(ToolbarHelp.text(for: "Forward", model: model) ?? "")
                 .disabled(noReplyTarget)
         }
         ToolbarSpacer(.fixed)
         ToolbarItemGroup {
             Button("Archive", systemImage: "archivebox") { model.archiveSelection() }
-                .help("Archive (E)")
+                .help(ToolbarHelp.text(for: "Archive", model: model) ?? "")
                 .disabled(noTargets)
             Button("Move to Trash", systemImage: "trash") { model.trashSelection() }
-                .help("Move to Trash (⌘⌫)")
+                .help(ToolbarHelp.text(for: "Move to Trash", model: model) ?? "")
                 .disabled(noTargets)
             Button(model.isSpamMailbox ? "Not Junk" : "Mark as Junk",
                    systemImage: model.isSpamMailbox ? "tray.and.arrow.up" : "xmark.bin") {
                 model.toggleJunkSelection()
             }
-            .help(model.isSpamMailbox ? "Not Junk (⇧⌘J)" : "Mark as Junk (⇧⌘J)")
+            .help(ToolbarHelp.text(for: model.isSpamMailbox ? "Not Junk" : "Mark as Junk", model: model) ?? "")
             .disabled(noTargets || !model.canJunk)
         }
         ToolbarSpacer(.fixed)
@@ -59,7 +60,7 @@ struct MessageToolbar: ToolbarContent {
             Button(allStarred ? "Unstar" : "Star", systemImage: allStarred ? "star.fill" : "star") {
                 model.toggleStarSelection()
             }
-            .help(allStarred ? "Unstar (S)" : "Star (S)")
+            .help(ToolbarHelp.text(for: allStarred ? "Unstar" : "Star", model: model) ?? "")
             .disabled(noTargets)
         }
         ToolbarSpacer(.fixed)
@@ -67,7 +68,7 @@ struct MessageToolbar: ToolbarContent {
             Button(model.agent.isPresented ? "Hide Agent" : "Show Agent", systemImage: "sparkles") {
                 model.agent.isPresented.toggle()
             }
-            .help(model.agent.isPresented ? "Hide \(model.agent.providerName) (⌥⌘I)" : "Show \(model.agent.providerName) (⌥⌘I)")
+            .help(ToolbarHelp.text(for: model.agent.isPresented ? "Hide Agent" : "Show Agent", model: model) ?? "")
         }
     }
 
@@ -107,12 +108,65 @@ private struct LabelToolbarMenu: View {
             Label("Label", systemImage: "tag")
         }
         .menuIndicator(.visible)
-        .help("Label (L)")
+        .help(ToolbarHelp.text(for: "Label", model: model) ?? "")
     }
 
     private func appliedToAll(_ labelID: String) -> Bool {
         let ids = Set(model.actionTargets)
         let rows = model.threads.rows.filter { ids.contains($0.id) }
         return !rows.isEmpty && rows.allSatisfy { $0.labelIds.contains(labelID) }
+    }
+}
+
+/// What each toolbar button says on hover, by its label. SwiftUI's
+/// `.help` does not reach the window toolbar on macOS 26 (the
+/// `NSToolbarItem`s keep a nil tool tip, so nothing shows), so
+/// `ToolbarToolTips` also copies these onto the items; one source for both.
+@MainActor
+enum ToolbarHelp {
+    static func text(for label: String, model: AppModel) -> String? {
+        switch label {
+        case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
+        case "Reply": "Reply (⌘R)"
+        case "Reply All": "Reply All (⇧⌘R)"
+        case "Forward": "Forward (⇧⌘F)"
+        case "Archive": "Archive (E)"
+        case "Move to Trash": "Move to Trash (⌘⌫)"
+        case "Mark as Junk": "Mark as Junk: move to Spam (⇧⌘J)"
+        case "Not Junk": "Not Junk: move back to the Inbox (⇧⌘J)"
+        case "Label": "Label (L)"
+        case "Star": "Star (S)"
+        case "Unstar": "Unstar (S)"
+        case "Show Agent": "Show \(model.agent.providerName) (⌥⌘I)"
+        case "Hide Agent": "Hide \(model.agent.providerName) (⌥⌘I)"
+        case "Accounts": AccountMenuButton.helpText(model)
+        case "Hide Sidebar": "Hide the sidebar"
+        case "Show Sidebar": "Show the sidebar"
+        case "Search": "Search mail (⌘F)"
+        default: nil
+        }
+    }
+}
+
+/// Keeps the window toolbar's tool tips in step with `ToolbarHelp`: the
+/// labels change (Star/Unstar, Show/Hide Agent), so every window update
+/// re-checks them; a few dictionary lookups.
+@MainActor
+enum ToolbarToolTips {
+    private static var installed = false
+
+    static func install(model: AppModel) {
+        guard !installed else { return }
+        installed = true
+        NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil,
+                                               queue: .main) { [weak model] _ in
+            MainActor.assumeIsolated {
+                guard let model else { return }
+                for item in NSApp.windows.compactMap(\.toolbar).flatMap(\.items) {
+                    let tip = ToolbarHelp.text(for: item.label, model: model)
+                    if tip != nil, item.toolTip != tip { item.toolTip = tip }
+                }
+            }
+        }
     }
 }

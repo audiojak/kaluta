@@ -12,25 +12,37 @@ struct AccountMenuButton: View {
         Menu {
             AccountMenuItems(openSettings: { openSettings() })
         } label: {
-            // Toolbar menus draw their label as a template (one colour), which
-            // turns a photo into a blank shape: give it a full-colour image.
-            if let current {
-                Image(nsImage: AccountAvatar.toolbarImage(current))
-                    .renderingMode(.original)
-            } else {
-                Image(systemName: "person.crop.circle")
+            // "Accounts" names the toolbar item, so ToolbarToolTips finds it.
+            Label {
+                Text("Accounts")
+            } icon: {
+                // Toolbar menus draw their label as a template (one colour),
+                // which turns a photo into a blank shape: a full-colour image.
+                if let current {
+                    Image(nsImage: AccountAvatar.toolbarImage(current))
+                        .renderingMode(.original)
+                } else {
+                    Image(systemName: "person.crop.circle")
+                }
             }
+            .labelStyle(.iconOnly)
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(current.map { "\($0.displayName ?? $0.email) — \($0.email)\nSwitch account" }
-            ?? (model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts"))
+        .help(Self.helpText(model))
         .accessibilityLabel("Account: \(current?.email ?? "none"). Switch account")
         .task { await model.reloadAccounts() }
     }
 
     private var current: AccountSummary? {
         model.accounts.first { $0.id == model.openAccountID }
+    }
+
+    static func helpText(_ model: AppModel) -> String {
+        if let current = model.accounts.first(where: { $0.id == model.openAccountID }) {
+            return "\(current.displayName ?? current.email) — \(current.email)\nSwitch account"
+        }
+        return model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts"
     }
 }
 

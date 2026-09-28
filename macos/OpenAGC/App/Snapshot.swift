@@ -123,6 +123,10 @@ enum Snapshot {
             }
             if defaults.bool(forKey: "OpenAGCSnapshotDumpViews"), let root = (window ?? NSApp.windows.first)?.contentView?.superview {
                 dump(root, depth: 0)
+                for item in (window ?? NSApp.windows.first)?.toolbar?.items ?? [] {
+                    let line = "toolbar item \(item.itemIdentifier.rawValue) label=\"\(item.label)\" toolTip=\(item.toolTip.map { "\"\($0)\"" } ?? "nil")\n"
+                    FileHandle.standardError.write(Data(line.utf8))
+                }
             }
             capture(window, to: URL(filePath: path))
             NSApp.terminate(nil)
@@ -139,6 +143,7 @@ enum Snapshot {
             detail += " expandedRows=\(expanded)"
         }
         if let text = view as? NSTextField, !text.stringValue.isEmpty { detail = " \"\(text.stringValue)\"" }
+        if let tip = view.toolTip { detail += " toolTip=\"\(tip)\"" }
         let line = String(repeating: "  ", count: depth) + "\(type(of: view)) \(view.frame.integral) hidden=\(view.isHidden)\(detail)\n"
         FileHandle.standardError.write(Data(line.utf8))
         for sub in view.subviews { dump(sub, depth: depth + 1) }

@@ -30,6 +30,7 @@ struct MainWindow: View {
         .onAppear {
             model.openComposer = { openWindow(id: "compose", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
+            ToolbarToolTips.install(model: model)
         }
     }
 
