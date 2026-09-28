@@ -1766,9 +1766,12 @@ sidebar reads Favorites (Inbox, Starred, Sent), then the account's other
 mailboxes with its labels under the account's name, then Routines; sync
 status is its footer (a thin progress bar, "Downloading Messages", what is
 left). The list column is titled with the mailbox and its unread count.
-The reader's toolbar carries New Message, Reply / Reply All / Forward,
-Archive / Trash, a Label menu, Star and the agent toggle, beside search.
-*(Planned: New Message at the reader's leading edge, as in Mail.)*
+New Message sits at the list column's trailing edge, where it meets the
+reader, as in Mail (implemented 2026-09-28: the list column's own
+toolbar; SwiftUI right-aligns a detail column's items, and `.navigation`
+put it beside the title). The reader's toolbar starts at its leading edge
+with Reply / Reply All / Forward, Archive / Trash / Mark as Junk, a Label
+menu, Star and the agent toggle, with search at the trailing edge.
 
 **Amendment (2026-09-28): Gmail categories.** Implemented 2026-09-28.
 When the account uses Gmail's categories, the Inbox shows Mail-style tabs

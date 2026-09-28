@@ -1,7 +1,20 @@
 import SwiftUI
 
-/// The reader's toolbar, laid out like Mail's: New Message at the leading
-/// edge, then groups of glass buttons (reply, reply all, forward | archive,
+/// New Message in the list column's toolbar, at its trailing edge where it
+/// meets the reader, as in Mail.
+struct ListToolbar: ToolbarContent {
+    @Environment(AppModel.self) private var model
+
+    var body: some ToolbarContent {
+        ToolbarItem {
+            Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
+                .help(model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)")
+                .disabled(model.isArchive)
+        }
+    }
+}
+
+/// The reader's toolbar, laid out like Mail's: groups of glass buttons (reply, reply all, forward | archive,
 /// trash | labels | star) and the agent panel's toggle. Every button acts
 /// on the same targets as the Message menu.
 struct MessageToolbar: ToolbarContent {
@@ -11,12 +24,6 @@ struct MessageToolbar: ToolbarContent {
     private var noReplyTarget: Bool { !model.isMailOpen || model.replyTargetMessageID == nil || model.isArchive }
 
     var body: some ToolbarContent {
-        ToolbarItem {
-            Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
-                .help(model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)")
-                .disabled(model.isArchive)
-        }
-        ToolbarSpacer(.flexible)
         ToolbarItemGroup {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { model.reply(all: false) }
                 .help("Reply (⌘R)")

@@ -40,6 +40,7 @@ struct MainWindow: View {
         } content: {
             content
                 .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
+                .toolbar { ListToolbar() }
         } detail: {
             // The agent column sits beside the reader. (SwiftUI's
             // `.inspector` left its split item collapsed at zero width here.)

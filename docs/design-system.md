@@ -120,10 +120,12 @@ is only for "approved".
 
 ### Toolbar
 
-The toolbar is laid out like Mail's: New Message, then glass groups
-separated by `ToolbarSpacer(.fixed)`, from most to least often used:
-reply, reply all and forward; archive and trash; label and star; then the
-agent's toggle. Each button has a help tag naming its shortcut, is
+The toolbar is laid out like Mail's: New Message in the list column's
+toolbar (`ListToolbar`), at its trailing edge; then, from the reader's
+leading edge, glass groups separated by `ToolbarSpacer(.fixed)`, from
+most to least often used: reply, reply all and forward; archive, trash
+and junk; label and star; then the agent's toggle; search at the
+trailing edge. Each button has a help tag naming its shortcut, is
 disabled rather than hidden when it has no target, and does exactly what
 the matching Message menu item does.
 
