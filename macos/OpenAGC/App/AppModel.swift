@@ -425,6 +425,7 @@ final class AppModel {
             inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
             await reloadInboxCategories()
             ownAddresses = await core.ownAddresses()
+            reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email

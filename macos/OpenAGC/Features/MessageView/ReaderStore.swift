@@ -19,6 +19,8 @@ final class ReaderStore {
     private(set) var remoteImagesAllowedForThread = false
 
     @ObservationIgnored private let core: CoreClient?
+    /// The user's addresses, so To lines say "Me" (set by the model).
+    var ownAddresses: Set<String> = []
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var cache: [String: RenderedBody] = [:]
     @ObservationIgnored private var cacheOrder: [String] = []
@@ -134,7 +136,7 @@ final class ReaderStore {
                 id: m.id,
                 fromName: m.from.map { $0.name ?? $0.email } ?? "(unknown sender)",
                 fromEmail: m.from?.email ?? "",
-                recipients: (m.to + m.cc).map { $0.name ?? $0.email }.joined(separator: ", "),
+                recipients: (m.to + m.cc).map { ownAddresses.contains($0.email.lowercased()) ? "Me" : ($0.name ?? $0.email) },
                 date: Date(timeIntervalSince1970: TimeInterval(m.date) / 1000),
                 snippet: m.snippet,
                 isRead: m.isRead,
