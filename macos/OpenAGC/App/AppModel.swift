@@ -91,6 +91,7 @@ final class AppModel {
     }
 
     private var inboxCategoryLoaded = InboxCategories.primary
+    @ObservationIgnored private var categoryGeneration = 0
 
     static func showCategoriesKey(_ accountID: String) -> String { "inboxShowCategories.\(accountID)" }
     static func inboxCategoryKey(_ accountID: String) -> String { "inboxCategory.\(accountID)" }
@@ -126,13 +127,26 @@ final class AppModel {
         didSet { if listFilters != oldValue { relist() } }
     }
 
+    /// Run the search, or with nothing typed go back to the listing as it
+    /// is now: filters or tabs may have changed during the search.
+    private func searchChanged() {
+        let query = filteredSearch
+        guard query.isEmpty else { threads.search(query); return }
+        threads.search("")
+        if case .open = accountState, let id = listMailboxID, threads.searchQuery != nil || id != threads.mailboxID {
+            Task { await threads.show(mailboxID: id) }
+        }
+    }
+
     /// The search as the store runs it: the typed query plus the filters'
     /// operators. Empty when nothing is typed (the filters then narrow the
     /// mailbox instead).
     var filteredSearch: String {
         let typed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !typed.isEmpty else { return "" }
-        return ([typed] + ListFilter.ordered(listFilters).map(\.searchOperator)).joined(separator: " ")
+        let filters = ListFilter.ordered(listFilters).map(\.searchOperator)
+        // Grouped, so `a OR b` is filtered as a whole (AND binds tighter).
+        return filters.isEmpty ? typed : (["(\(typed))"] + filters).joined(separator: " ")
     }
 
     /// Show the list again after the Inbox's narrowing changed; the
@@ -156,8 +170,13 @@ final class AppModel {
     @discardableResult
     func reloadInboxCategories() async -> Bool {
         guard let core, case .open = accountState else { return false }
+        categoryGeneration += 1
+        let generation = categoryGeneration
         let before = listMailboxID
-        inboxCategoryCounts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        // A newer reload (the switch toggled again) wins.
+        guard generation == categoryGeneration else { return false }
+        inboxCategoryCounts = counts
         return listMailboxID != before
     }
 
@@ -192,7 +211,7 @@ final class AppModel {
     var selectedThreadID: String?
     /// The toolbar search field's text.
     var searchText = "" {
-        didSet { if searchText != oldValue { threads.search(filteredSearch) } }
+        didSet { if searchText != oldValue { searchChanged() } }
     }
     /// Every selected thread; actions apply to all of them.
     var selectedThreadIDs: Set<String> = []
@@ -690,16 +709,20 @@ final class AppModel {
         searchText = ""
         selectedThreadIDs = []
         selectedThreadID = threadID
-        guard !inboxCategoryTabs.isEmpty, let core else { return }
+        guard let core else { return }
         Task {
             guard let labels = try? await core.thread(threadID)?.thread.labelIds else { return }
+            // Hidden by Important only: show the whole Inbox.
+            if inboxImportantOnly, !labels.contains("IMPORTANT") { inboxImportantOnly = false }
+            // New mail may be the first in its tab: count before choosing.
+            await reloadInboxCategories()
             let tab = InboxCategories.category(of: labels, in: inboxCategoryCounts.map(\.id))
-            guard tab != activeInboxCategory else { return }
-            inboxCategory = tab
-            // Choosing a tab clears the selection; this one is the point.
+            if !inboxCategoryTabs.isEmpty, tab != activeInboxCategory { inboxCategory = tab }
+            // Changing the narrowing clears the selection; this one is the point.
             selectedThreadID = threadID
         }
     }
+
 
     // MARK: Compose
 
@@ -755,8 +778,12 @@ final class AppModel {
     /// The Spam mailbox is on screen: the junk action is Not Junk there.
     var isSpamMailbox: Bool { selectedMailboxID == "SPAM" && threads.searchQuery == nil }
 
+    /// Junk is for received mail: not offered in Sent or Drafts.
+    var canJunk: Bool { !["SENT", "DRAFT"].contains(selectedMailboxID ?? "") }
+
     /// Mark as Junk, or Not Junk in Spam (spec §14.3 amendment, junk).
     func toggleJunkSelection() {
+        guard canJunk else { return }
         if isSpamMailbox {
             removeFromList(.notJunk) { core, ids in try await core.notJunk(ids) }
         } else {

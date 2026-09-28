@@ -1799,7 +1799,9 @@ button and shows in the subtitle ("Filtered: Unread, Starred"). Filters
 apply locally: a listing gets them as narrowings on the thread's own
 columns (`INBOX+@unread+@attachments`, combining with Important-only and
 category tabs), a search as operators (`is:unread`, `is:starred`,
-`has:attachment`) after the typed query. They are per window, kept when
+`has:attachment`) after the typed query, which is grouped in
+parentheses so an `OR` is filtered as a whole. Clearing the search shows
+the listing as it is then. They are per window, kept when
 changing mailboxes, cleared when a notification reveals a thread, and not
 remembered between launches.
 
@@ -1807,7 +1809,8 @@ remembered between launches.
 (toolbar, Message menu ⇧⌘J, context menu, `!` in the thread list as in
 Gmail, VoiceOver's Actions) moves threads to Spam (adds `SPAM`, removes
 `INBOX`); in Spam the same command reads *Not Junk* and moves them to the
-Inbox. Both are undoable (§14.6a: "Moved 2 conversations to Spam") and go
+Inbox; it is not offered in Sent or Drafts. Both are undoable (§14.6a:
+"Moved 2 conversations to Spam") and go
 through the outbox as label changes. Agents and `modify_labels` still may
 not set `SPAM`: only these two user actions (`mark_junk`, `not_junk`) do.
 

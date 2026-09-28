@@ -42,10 +42,15 @@ struct ListFilterTests {
         model.listFilters = [.starred]
         try await waitFor("starred listing") { model.threads.mailboxID == "INBOX+@starred" }
         model.searchText = "plan"
-        #expect(model.filteredSearch == "plan is:starred")
-        try await waitFor("search ran") { model.threads.searchQuery == "plan is:starred" }
-        model.listFilters = []
-        try await waitFor("search ran again") { model.threads.searchQuery == "plan" }
+        #expect(model.filteredSearch == "(plan) is:starred", "grouped, so an OR is filtered whole")
+        try await waitFor("search ran") { model.threads.searchQuery == "(plan) is:starred" }
+        model.listFilters = [.unread]
+        try await waitFor("search ran again") { model.threads.searchQuery == "(plan) is:unread" }
+        // Clearing the search shows the listing as it is now.
+        model.searchText = ""
+        try await waitFor("back to the filtered Inbox") {
+            model.threads.searchQuery == nil && model.threads.mailboxID == "INBOX+@unread"
+        }
     }
 
     @Test func revealingAThreadClearsTheFilters() async throws {

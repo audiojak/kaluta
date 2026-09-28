@@ -27,6 +27,8 @@ final class AgentStore {
             /// An approved send held for Undo Send (spec §14.6a): it can be
             /// taken back until then.
             case sending(until: Date)
+            /// Taking the send back.
+            case undoing
             /// The user took the send back; the draft is open to review.
             case takenBack
         }
@@ -177,7 +179,7 @@ final class AgentStore {
             guard let until, proposal(actionID)?.state == .approved else { return }
             setProposal(actionID, .sending(until: until))
             try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow)))
-            if case .sending = proposal(actionID)?.state { setProposal(actionID, .approved) }
+            if case .sending = proposal(actionID)?.state { setProposal(actionID, .approved) } // not while undoing
         }
     }
 
@@ -185,9 +187,10 @@ final class AgentStore {
     /// editing and opens in the review composer.
     func undoSend(_ actionID: Int64) {
         guard let (_, draftID, state) = proposal(actionID), case .sending = state, let draftID, let takeBack else { return }
+        setProposal(actionID, .undoing) // a second click does nothing
         Task {
             let tookBack = await takeBack(draftID)
-            setProposal(actionID, tookBack ? .takenBack : .approved)
+            if proposal(actionID)?.state == .undoing { setProposal(actionID, tookBack ? .takenBack : .approved) }
         }
     }
 

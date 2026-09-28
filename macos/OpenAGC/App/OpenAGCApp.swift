@@ -173,7 +173,7 @@ struct MailCommands: Commands {
                 .disabled(noTargets)
             Button(model.isSpamMailbox ? "Not Junk" : "Mark as Junk") { model.toggleJunkSelection() }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
-                .disabled(noTargets)
+                .disabled(noTargets || !model.canJunk)
             Divider() // menu
             Button("Mark as Read or Unread") { model.toggleReadSelection() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])

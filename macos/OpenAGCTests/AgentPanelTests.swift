@@ -173,6 +173,8 @@ struct ApprovalCardTests {
         while state(7) == .approved, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(state(7) == .sending(until: until))
         agent.undoSend(7)
+        agent.undoSend(7) // a second click does nothing
+        #expect(state(7) == .undoing)
         while state(7) != .takenBack, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
         #expect(state(7) == .takenBack)
         #expect(tookBack == [3])

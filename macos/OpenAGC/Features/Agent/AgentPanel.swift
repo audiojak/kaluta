@@ -380,6 +380,11 @@ private struct ProposalCard: View {
                         .help("Take the message back and open it (until \(until.formatted(date: .omitted, time: .standard)))")
                 }
                 .accessibilityElement(children: .contain)
+            case .undoing:
+                HStack {
+                    ProgressView().controlSize(.mini)
+                    Text("Taking it back…").font(.caption).foregroundStyle(.secondary)
+                }
             case .takenBack:
                 Label("Not sent. The draft is open for you.", systemImage: "arrow.uturn.backward.circle")
                     .font(.caption).foregroundStyle(.secondary)

@@ -48,7 +48,7 @@ struct MessageToolbar: ToolbarContent {
                 model.toggleJunkSelection()
             }
             .help(model.isSpamMailbox ? "Not Junk (⇧⌘J)" : "Mark as Junk (⇧⌘J)")
-            .disabled(noTargets)
+            .disabled(noTargets || !model.canJunk)
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {
