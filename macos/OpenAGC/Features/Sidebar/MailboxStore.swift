@@ -16,6 +16,16 @@ final class MailboxStore {
 
     /// Inbox, Starred, Important, Sent, Drafts, Archive, Spam, Trash (Gmail's order).
     var systemMailboxes: [MailboxInfo] { mailboxes.filter { $0.kind != .label } }
+    /// Mail's Favorites: the mailboxes used most, at the top of the sidebar.
+    static let favoriteKinds: [MailboxKind] = [.inbox, .starred, .sent]
+    var favorites: [MailboxInfo] {
+        Self.favoriteKinds.compactMap { kind in mailboxes.first { $0.kind == kind } }
+    }
+    /// The account's other mailboxes, in Mail's order, above its labels.
+    var accountMailboxes: [MailboxInfo] {
+        let order: [MailboxKind] = [.important, .drafts, .spam, .trash, .archive]
+        return order.flatMap { kind in mailboxes.filter { $0.kind == kind } }
+    }
     var labels: [MailboxInfo] { mailboxes.filter { $0.kind == .label } }
 
     func reload() async {

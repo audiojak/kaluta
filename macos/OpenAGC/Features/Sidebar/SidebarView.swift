@@ -8,20 +8,21 @@ struct SidebarView: View {
 
     var body: some View {
         @Bindable var model = model
-        // Only the native list lives in the sidebar, so macOS 26 draws it as
-        // one glass panel; the account switcher sits in the sidebar's title
-        // bar and sync status in the window subtitle.
+        // Laid out like Mail: Favorites, then the account's own mailboxes
+        // with its labels under them, then Routines; sync status at the
+        // foot. The account switcher sits in the sidebar's title bar.
         List(selection: $model.selectedMailboxID) {
-            Section {
-                ForEach(model.mailboxes.systemMailboxes, id: \.id) { mailbox in
+            Section("Favorites") {
+                ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)
                 }
             }
-            if !model.mailboxes.labels.isEmpty {
-                Section("Labels") {
-                    ForEach(LabelTree.build(model.mailboxes.labels)) { node in
-                        LabelTreeRow(node: node, expansion: expansion)
-                    }
+            Section(model.accountSectionTitle) {
+                ForEach(model.mailboxes.accountMailboxes, id: \.id) { mailbox in
+                    MailboxRow(mailbox: mailbox)
+                }
+                ForEach(LabelTree.build(model.mailboxes.labels)) { node in
+                    LabelTreeRow(node: node, expansion: expansion)
                 }
             }
             // Routines open their own window rather than a mailbox (spec §11.5).
@@ -54,6 +55,7 @@ struct SidebarView: View {
         .task(id: model.openAccountID) { expansion.load(account: model.openAccountID) }
         .onChange(of: model.routinesRevision) { Task { await model.routines.load() } }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { SyncStatusView() }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 AccountMenuButton()

@@ -39,7 +39,7 @@ struct MainWindow: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 220)
         } content: {
             content
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
         } detail: {
             // The agent column sits beside the reader. (SwiftUI's
             // `.inspector` left its split item collapsed at zero width here.)
@@ -62,8 +62,10 @@ struct MainWindow: View {
                 }
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)
+            .toolbar { MessageToolbar() }
         }
-        .navigationSubtitle(windowSubtitle)
+        .navigationTitle(listTitle)
+        .navigationSubtitle(listSubtitle)
         // macOS 26: no toolbar background or separator line; content runs
         // under the toolbar with the system's soft scroll-edge effect, so no
         // line stops short at the floating sidebar's edge.
@@ -73,15 +75,25 @@ struct MainWindow: View {
         .onChange(of: model.searchFocusRequests) { searchFocused = true }
     }
 
-    /// "Inbox · Important only · Syncing over IMAP — 6,406 left", as Mail
-    /// puts mailbox status under the window title.
-    private var windowSubtitle: String {
+    private var selectedMailbox: MailboxInfo? {
+        model.mailboxes.mailboxes.first { $0.id == model.selectedMailboxID }
+    }
+
+    /// The list column's title, as Mail shows it: the mailbox's name.
+    private var listTitle: String {
+        if model.threads.searchQuery != nil { return "Search Results" }
+        return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
+    }
+
+    /// Under the title: "12 unread · Important only"; sync status is in
+    /// the sidebar's footer.
+    private var listSubtitle: String {
         var parts: [String] = []
-        if let id = model.selectedMailboxID, let mailbox = model.mailboxes.mailboxes.first(where: { $0.id == id }) {
-            parts.append(LabelTree.leafName(mailbox.name))
-            if id == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
+            parts.append("\(mailbox.unreadCount.formatted()) unread")
         }
-        if let status = SyncStatusView.subtitle(for: model) { parts.append(status) }
+        if model.selectedMailboxID == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        if model.isArchive { parts.append("Imported mailbox · cannot send") }
         return parts.joined(separator: " · ")
     }
 

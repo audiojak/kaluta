@@ -89,6 +89,7 @@
 		E84BD27D7D2BF39707A7E276 /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 601938BEED9E6F66CF748199 /* AccountSettings.swift */; };
 		F1C67B7F56BB5793575AA7DB /* ReaderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46BFDFDE09CC5207A0A048D0 /* ReaderStore.swift */; };
 		F55DCE790C44258F12C510F2 /* CoreEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0EEA46B16CBE10362B13CC /* CoreEventTests.swift */; };
+		F79978E7E6CDFE26B5F9C6D8 /* MessageToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A39D166713933009D25A50F /* MessageToolbar.swift */; };
 		F9BBF95D9CBEC5F60BC4CD61 /* agent-system-prompt.md in Resources */ = {isa = PBXBuildFile; fileRef = 6D322E3E16D6E19FF3D99CBF /* agent-system-prompt.md */; };
 /* End PBXBuildFile section */
 
@@ -142,6 +143,7 @@
 		24AC691869E94971A95182AF /* OpenAGCCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = OpenAGCCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		26F65D12222A0363EDB8FFE0 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2765848DA211F359D74EF196 /* AccountAvatarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAvatarTests.swift; sourceTree = "<group>"; };
+		2A39D166713933009D25A50F /* MessageToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageToolbar.swift; sourceTree = "<group>"; };
 		2A5694ECC8EA36F2A4119F98 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		2C8458B42683B1FC4F0EBB64 /* OpenAGC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenAGC.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		301600435566D43C1065E680 /* ThreadReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReaderView.swift; sourceTree = "<group>"; };
@@ -257,6 +259,7 @@
 				033CF7C15494E30BC67D425A /* AttachmentStrip.swift */,
 				6407F10744C6609C6D77A3E9 /* EmailDocument.swift */,
 				0F2806227B342184B9664E7D /* LinkSafety.swift */,
+				2A39D166713933009D25A50F /* MessageToolbar.swift */,
 				1CD3817AE3B32FC2F3B89845 /* MessageWebView.swift */,
 				46BFDFDE09CC5207A0A048D0 /* ReaderStore.swift */,
 				11B84FAD449704789E8707C7 /* SchemeHandlers.swift */,
@@ -762,6 +765,7 @@
 				B79B36EDE217EE06866A9F40 /* MailUndo.swift in Sources */,
 				C9F5E1202A2849397390D3AC /* MailboxStore.swift in Sources */,
 				DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */,
+				F79978E7E6CDFE26B5F9C6D8 /* MessageToolbar.swift in Sources */,
 				020FC5F4D626FA3D9FEC35D0 /* MessageWebView.swift in Sources */,
 				4FF62FFF28E05444455223CB /* NewMailNotifier.swift in Sources */,
 				691D6124014BCD1F910B8B27 /* OnboardingView.swift in Sources */,

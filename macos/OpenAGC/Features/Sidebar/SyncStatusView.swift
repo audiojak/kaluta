@@ -1,66 +1,57 @@
 import SwiftUI
 
-/// Sidebar footer: what sync is doing, in one line.
+/// The sidebar's footer, as in Mail: while mail downloads, a thin
+/// progress bar over "Downloading Messages" and what is left; otherwise
+/// nothing, unless sync is offline or paused.
 struct SyncStatusView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 6) {
-            switch model.syncDisplay {
-            case let .syncing(pending, headers):
-                ProgressView().controlSize(.mini)
-                Text(SyncStatusView.syncingText(pending: pending, headers: headers, transport: model.backfillTransport))
-                    .help(model.backfillTransport == "imap"
-                        ? "Downloading message bodies over IMAP (Settings › Accounts)" : "")
-            case .offline:
-                Image(systemName: "wifi.slash")
-                Text("Offline")
-            case .error:
-                Image(systemName: "exclamationmark.triangle")
-                Text("Sync paused")
-            case .idle:
-                if model.isArchive {
-                    Image(systemName: "archivebox")
-                    Text("Imported mailbox · cannot send")
-                } else if model.needsReauthentication {
-                    Image(systemName: "exclamationmark.triangle")
-                    Text("Not syncing — sign in again")
-                } else if let email = model.accountEmail, case .open = model.accountState, model.core?.currentAccountID != AppModel.demoAccountID {
-                    Text(email).lineLimit(1).truncationMode(.middle)
-                } else if case .open = model.accountState {
-                    Text("Demo mailbox")
+        if let lines = Self.footer(for: model) {
+            VStack(spacing: 3) {
+                if case .syncing = model.syncDisplay {
+                    ProgressView(value: model.syncProgress)
+                        .progressViewStyle(.linear)
+                        .controlSize(.mini)
+                        .frame(maxWidth: 150)
+                        .padding(.bottom, 2)
+                }
+                Text(lines.title)
+                    .font(.caption.weight(.medium))
+                if let detail = lines.detail {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            Spacer(minLength: 0)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .combine)
+            .help(model.backfillTransport == "imap" ? "Downloading over IMAP (Settings › Accounts)" : "")
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
-    /// "Syncing over IMAP — 7,258 left". Headers come first when some
-    /// mail downloads headers only (tiered download): "— headers 6,406 left".
-    static func syncingText(pending: UInt32, headers: UInt32 = 0, transport: String?) -> String {
-        let how = transport == "imap" ? "Syncing over IMAP" : "Syncing"
-        if headers > 0 { return "\(how) — headers \(headers.formatted()) left" }
-        return pending > 0 ? "\(how) — \(pending.formatted()) left" : "\(how)…"
-    }
-
-    /// Sync state as a phrase for the window subtitle, or nil when there is
-    /// nothing to say (idle and healthy).
+    /// The footer's two lines, or nil when there is nothing to say.
     @MainActor
-    static func subtitle(for model: AppModel) -> String? {
-        switch model.syncDisplay {
+    static func footer(for model: AppModel) -> (title: String, detail: String?)? {
+        footer(model.syncDisplay, transport: model.backfillTransport, needsSignIn: model.needsReauthentication)
+    }
+
+    static func footer(_ display: AppModel.SyncDisplay, transport: String?,
+                       needsSignIn: Bool) -> (title: String, detail: String?)? {
+        switch display {
         case let .syncing(pending, headers):
-            return syncingText(pending: pending, headers: headers, transport: model.backfillTransport)
-        case .offline: return "Offline"
-        case .error: return "Sync paused"
+            let how = transport == "imap" ? "Downloading over IMAP" : "Downloading Messages"
+            if headers > 0 { return (how, "headers for \(headers.formatted()) messages left") }
+            return (how, pending > 0 ? "\(pending.formatted()) left" : nil)
+        case .offline:
+            return ("Offline", "Changes are sent when you reconnect")
+        case .error:
+            return ("Sync Paused", "Trying again shortly")
         case .idle:
-            if model.isArchive { return "Imported mailbox · cannot send" }
-            if model.needsReauthentication { return "Not syncing — sign in again" }
-            if model.openAccountID == AppModel.demoAccountID { return "Demo mailbox" }
-            return nil
+            return needsSignIn ? ("Not Syncing", "Sign in again in Settings › Accounts") : nil
         }
     }
 }

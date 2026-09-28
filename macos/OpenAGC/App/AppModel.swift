@@ -18,6 +18,23 @@ final class AppModel {
         case failed(String)
     }
 
+    /// The most messages seen waiting in the current sync, for the
+    /// sidebar's progress bar; reset when sync goes idle.
+    private(set) var syncTotal: UInt32 = 0
+
+    /// How far the current download has got, 0…1.
+    var syncProgress: Double {
+        guard case let .syncing(pending, headers) = syncDisplay, syncTotal > 0 else { return 0 }
+        return 1 - Double(pending + headers) / Double(syncTotal)
+    }
+
+    /// The sidebar's heading for the open account's own mailboxes.
+    var accountSectionTitle: String {
+        if openAccountID == Self.demoAccountID { return "Demo Mailbox" }
+        let account = accounts.first { $0.id == openAccountID }
+        return account.map { $0.displayName ?? $0.email } ?? accountEmail ?? "Mailboxes"
+    }
+
     enum SyncDisplay: Equatable {
         /// `headers`: messages waiting for headers only (tiered download).
         case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline, error
@@ -58,7 +75,14 @@ final class AppModel {
         if case .open(let id) = accountState { return id }
         return nil
     }
-    private(set) var syncDisplay: SyncDisplay = .idle
+    private(set) var syncDisplay: SyncDisplay = .idle {
+        didSet {
+            switch syncDisplay {
+            case let .syncing(pending, headers): syncTotal = max(syncTotal, pending + headers)
+            default: syncTotal = 0
+            }
+        }
+    }
     /// How the open account's backfill downloads bodies ("imap", "rest",
     /// "imap-refused"), for the sidebar's sync line.
     private(set) var backfillTransport: String?

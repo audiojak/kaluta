@@ -138,16 +138,19 @@ struct IMAPSuggestionTests {
 }
 
 struct SyncStatusTextTests {
-    @Test func theSidebarSaysWhenItDownloadsOverIMAP() {
-        #expect(SyncStatusView.syncingText(pending: 7258, transport: "imap") == "Syncing over IMAP — 7,258 left")
-        #expect(SyncStatusView.syncingText(pending: 12, transport: "rest") == "Syncing — 12 left")
-        #expect(SyncStatusView.syncingText(pending: 0, transport: "imap") == "Syncing over IMAP…")
-        #expect(SyncStatusView.syncingText(pending: 3, transport: nil) == "Syncing — 3 left")
+    private func lines(_ d: AppModel.SyncDisplay, _ transport: String? = nil, signIn: Bool = false) -> [String?] {
+        guard let f = SyncStatusView.footer(d, transport: transport, needsSignIn: signIn) else { return [] }
+        return [f.title, f.detail]
     }
 
-    @Test func headersOnlyMailSaysHeadersFirst() {
-        #expect(SyncStatusView.syncingText(pending: 120, headers: 6406, transport: "imap")
-            == "Syncing over IMAP — headers 6,406 left")
-        #expect(SyncStatusView.syncingText(pending: 120, headers: 0, transport: "imap") == "Syncing over IMAP — 120 left")
+    @Test func theSidebarFooterSaysWhatIsDownloadingLikeMail() {
+        #expect(lines(.syncing(pending: 7258), "imap") == ["Downloading over IMAP", "7,258 left"])
+        #expect(lines(.syncing(pending: 12), "rest") == ["Downloading Messages", "12 left"])
+        #expect(lines(.syncing(pending: 0)) == ["Downloading Messages", nil])
+        #expect(lines(.syncing(pending: 120, headers: 6406), "imap")
+            == ["Downloading over IMAP", "headers for 6,406 messages left"])
+        #expect(lines(.offline).first == "Offline")
+        #expect(lines(.idle).isEmpty, "nothing to say when idle")
+        #expect(lines(.idle, signIn: true).first == "Not Syncing")
     }
 }
