@@ -1788,11 +1788,17 @@ first. Categories come from the Gmail API; IMAP-only accounts have none.
 Moving a thread to another category is not in scope (Gmail's filters
 decide).
 
-**Amendment (2026-09-28): list filters.** Planned. A filter button in the
-list column's header, as in Mail, narrows the current mailbox or search:
-Unread, Starred, With Attachments (combinable). An active filter fills the
-button and shows in the subtitle. Filters apply locally (`is:unread`,
-`is:starred`, `has:attachment`), per window, not remembered.
+**Amendment (2026-09-28): list filters.** Implemented 2026-09-28. A
+filter button in the list column's header (every mailbox and search), as
+in Mail, narrows the current mailbox or search: Unread, Starred, With
+Attachments (combinable, with Clear Filters). An active filter fills the
+button and shows in the subtitle ("Filtered: Unread, Starred"). Filters
+apply locally: a listing gets them as narrowings on the thread's own
+columns (`INBOX+@unread+@attachments`, combining with Important-only and
+category tabs), a search as operators (`is:unread`, `is:starred`,
+`has:attachment`) after the typed query. They are per window, kept when
+changing mailboxes, cleared when a notification reveals a thread, and not
+remembered between launches.
 
 **Amendment (2026-09-28): junk.** Implemented 2026-09-28. *Mark as Junk*
 (toolbar, Message menu ⇧⌘J, context menu, `!` in the thread list as in

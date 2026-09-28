@@ -425,6 +425,41 @@ fn the_inbox_splits_into_category_tabs_with_primary_as_everything_uncategorised(
     let important = db.read_blocking(|c| read::inbox_categories(c, Some("IMPORTANT"))).unwrap();
     assert_eq!(important.iter().map(|c| c.total).collect::<Vec<_>>(), [1, 1, 0, 0, 0]);
 
-    let too_narrow = db.read_blocking(|c| read::list_threads(c, "INBOX+A+B+C+D", None, 10));
+    let too_narrow = db.read_blocking(|c| read::list_threads(c, "INBOX+A+B+C+D+E+F+G", None, 10));
     assert!(too_narrow.is_err());
+}
+
+#[test]
+fn list_filters_narrow_any_mailbox_and_combine() {
+    let db = open("filters");
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX", "STARRED"])).unwrap();
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "UNREAD", "STARRED"])).unwrap();
+        let mut with_file = msg("m4", "t4", 4_000, &["INBOX"]);
+        with_file.attachments = vec![mail_store::IncomingAttachment {
+            part_id: Some("2".into()),
+            provider_attachment_id: None,
+            filename: "a.pdf".into(),
+            mime_type: "application/pdf".into(),
+            size: 10,
+            content_id: None,
+            is_inline: false,
+            data: None,
+        }];
+        w.upsert_message(&with_file).unwrap();
+    });
+    let ids = |mailbox: &'static str| {
+        db.read_blocking(move |c| read::list_threads(c, mailbox, None, 10))
+            .unwrap()
+            .rows
+            .iter()
+            .map(|t| t.id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids("INBOX+@unread"), ["t3", "t1"]);
+    assert_eq!(ids("INBOX+@starred"), ["t3", "t2"]);
+    assert_eq!(ids("INBOX+@unread+@starred"), ["t3"], "filters combine");
+    assert_eq!(ids("INBOX+@attachments"), ["t4"]);
+    assert_eq!(ids("STARRED+@unread"), ["t3"], "any mailbox");
 }

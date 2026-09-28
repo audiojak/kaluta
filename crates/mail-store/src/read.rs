@@ -104,15 +104,23 @@ pub const CATEGORIES: &[&str] = &["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CAT
 /// Inbox mail that Gmail never categorised is Primary too.
 pub const PRIMARY: &str = "CATEGORY_PERSONAL";
 
-/// At most this many narrowings after the mailbox (`INBOX+IMPORTANT+…`).
-const MAX_NARROWINGS: usize = 3;
+/// List filters (spec §14.3 amendment, filters), as narrowings: they test
+/// the thread's own columns rather than a label.
+pub const FILTER_UNREAD: &str = "@unread";
+pub const FILTER_STARRED: &str = "@starred";
+pub const FILTER_ATTACHMENTS: &str = "@attachments";
+
+/// At most this many narrowings after the mailbox
+/// (`INBOX+IMPORTANT+CATEGORY_SOCIAL+@unread+@starred+@attachments`).
+const MAX_NARROWINGS: usize = 6;
 
 /// Threads in a mailbox, newest first, keyset-paged: cost is O(page)
 /// however deep the user scrolls (spec §4.2). `mailbox` is a label id,
 /// optionally followed by `+`-joined labels the threads must also carry
 /// (`INBOX+IMPORTANT`: the Inbox's "Important only" view;
 /// `INBOX+CATEGORY_SOCIAL`: a category tab; `PRIMARY` narrows to threads
-/// in no other category). Ordered by the first label.
+/// in no other category; `@unread`, `@starred` and `@attachments` are the
+/// list filters). Ordered by the first label.
 pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limit: u32) -> StoreResult<ThreadPage> {
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     let (after_at, after_id) = match cursor {
@@ -159,6 +167,12 @@ pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limi
 /// The SQL that narrows `tl.thread_id` to threads also carrying `label`
 /// (or, for `PRIMARY`, carrying no other category), binding its values.
 fn narrowing_clause(label: &str, values: &mut Vec<rusqlite::types::Value>) -> String {
+    match label {
+        FILTER_UNREAD => return " AND t.unread_count > 0".into(),
+        FILTER_STARRED => return " AND t.is_starred".into(),
+        FILTER_ATTACHMENTS => return " AND t.has_attachments".into(),
+        _ => {}
+    }
     if label == PRIMARY {
         let first = values.len() + 1;
         values.extend(CATEGORIES.iter().map(|c| rusqlite::types::Value::from((*c).to_owned())));

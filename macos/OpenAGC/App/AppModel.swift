@@ -111,11 +111,28 @@ final class AppModel {
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID else { return nil }
-        guard id == "INBOX" else { return id }
-        var parts = ["INBOX"]
-        if inboxImportantOnly { parts.append("IMPORTANT") }
-        if let category = activeInboxCategory { parts.append(category) }
+        var parts = [id]
+        if id == "INBOX" {
+            if inboxImportantOnly { parts.append("IMPORTANT") }
+            if let category = activeInboxCategory { parts.append(category) }
+        }
+        parts += ListFilter.ordered(listFilters).map(\.rawValue)
         return parts.joined(separator: "+")
+    }
+
+    /// The list filters (spec §14.3 amendment, filters): per window, kept
+    /// across mailboxes, not remembered between launches.
+    var listFilters: Set<ListFilter> = [] {
+        didSet { if listFilters != oldValue { relist() } }
+    }
+
+    /// The search as the store runs it: the typed query plus the filters'
+    /// operators. Empty when nothing is typed (the filters then narrow the
+    /// mailbox instead).
+    var filteredSearch: String {
+        let typed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return "" }
+        return ([typed] + ListFilter.ordered(listFilters).map(\.searchOperator)).joined(separator: " ")
     }
 
     /// Show the list again after the Inbox's narrowing changed; the
@@ -126,7 +143,11 @@ final class AppModel {
         guard case .open = accountState else { return }
         Task {
             await reloadInboxCategories()
-            if let id = listMailboxID, id != threads.mailboxID || threads.searchQuery != nil { await threads.show(mailboxID: id) }
+            if !filteredSearch.isEmpty {
+                threads.search(filteredSearch)
+            } else if let id = listMailboxID, id != threads.mailboxID || threads.searchQuery != nil {
+                await threads.show(mailboxID: id)
+            }
         }
     }
 
@@ -171,7 +192,7 @@ final class AppModel {
     var selectedThreadID: String?
     /// The toolbar search field's text.
     var searchText = "" {
-        didSet { if searchText != oldValue { threads.search(searchText) } }
+        didSet { if searchText != oldValue { threads.search(filteredSearch) } }
     }
     /// Every selected thread; actions apply to all of them.
     var selectedThreadIDs: Set<String> = []
@@ -665,6 +686,7 @@ final class AppModel {
     /// category tab, and select it.
     func reveal(threadID: String) {
         if selectedMailboxID != "INBOX" { selectedMailboxID = "INBOX" }
+        listFilters = []
         searchText = ""
         selectedThreadIDs = []
         selectedThreadID = threadID
