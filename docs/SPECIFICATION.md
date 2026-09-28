@@ -1739,6 +1739,36 @@ Every target in §1.3 traces to one of these rules.
   Important-only switch, then a rule separating the title area from the
   messages.)*
 
+**Amendment (2026-09-28): Mail-like layout.** Implemented 2026-09-28. The
+sidebar reads Favorites (Inbox, Starred, Sent), then the account's other
+mailboxes with its labels under the account's name, then Routines; sync
+status is its footer (a thin progress bar, "Downloading Messages", what is
+left). The list column is titled with the mailbox and its unread count.
+The reader's toolbar carries New Message, Reply / Reply All / Forward,
+Archive / Trash, a Label menu, Star and the agent toggle, beside search.
+*(Planned: New Message at the reader's leading edge, as in Mail.)*
+
+**Amendment (2026-09-28): Gmail categories.** Planned. When the account
+uses Gmail's categories, the Inbox shows Mail-style tabs above the list:
+Primary, Promotions, Social, Updates, Forums (only those with mail), each
+a narrowed Inbox listing like Important-only (`INBOX+CATEGORY_…`; Primary
+is `CATEGORY_PERSONAL` or Inbox mail with no category). Tabs show unread
+counts; the chosen tab is remembered per account; "Show Categories" in
+the list header turns them off. Moving a thread to another category is
+not in scope (Gmail's filters decide).
+
+**Amendment (2026-09-28): list filters.** Planned. A filter button in the
+list column's header, as in Mail, narrows the current mailbox or search:
+Unread, Starred, With Attachments (combinable). An active filter fills the
+button and shows in the subtitle. Filters apply locally (`is:unread`,
+`is:starred`, `has:attachment`), per window, not remembered.
+
+**Amendment (2026-09-28): junk.** Planned. *Mark as Junk* (toolbar,
+Message menu ⇧⌘J, context menu) moves threads to Spam (adds `SPAM`,
+removes `INBOX`); in Spam, *Not Junk* moves them to the Inbox. Both are
+undoable (§14.6a) and go through the outbox. Agents and `modify_labels`
+still may not set `SPAM`: only these two user actions do.
+
 ### 14.4 Message rendering **(Verified)**
 
 Sanitization happens in Rust (`ammonia` 4.x) at sync time with a strict
@@ -1847,9 +1877,12 @@ when you mean undo": all these actions are reversible).
   back, and its notice does not pause, since the hold does not.
 - The outbox runs strictly in order: an op waiting to retry holds back
   the ones after it (an undo must never reach Gmail before the action it
-  reverses); held sends alone step aside until their time. The demo mailbox sends locally at once, so it offers
-  no Undo Send. Agent sends are held for the same delay but have no notice
-  of their own yet.
+  reverses); held sends alone step aside until their time.
+- The demo mailbox sends locally at once, so it offers no Undo Send.
+  Agent sends are held for the same delay but have no notice of their own
+  yet. *(Amended 2026-09-28, planned: an agent's approved send shows the
+  same "Sending… Undo" row on its approval card in the agent panel for the
+  hold; undo returns the draft to the review composer.)*
 
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 
