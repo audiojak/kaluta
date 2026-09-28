@@ -61,6 +61,10 @@ final class AppModel {
 
     static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
 
+    /// The open account's addresses, aliases included: rows show other
+    /// people, and "Me" only when it is just you.
+    private(set) var ownAddresses: Set<String> = []
+
     /// Every Inbox category with its counts, narrowed like the list
     /// (Important only); the tabs are `InboxCategories.visible` of these.
     private(set) var inboxCategoryCounts: [InboxCategory] = []
@@ -420,6 +424,7 @@ final class AppModel {
             showCategoriesLoaded = defaults.object(forKey: Self.showCategoriesKey(accountID)) as? Bool ?? true
             inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
             await reloadInboxCategories()
+            ownAddresses = await core.ownAddresses()
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email

@@ -338,6 +338,11 @@ final class CoreClient: Sendable {
         try await call { try await core.accountAddress() }
     }
 
+    /// The open account's own addresses (aliases too), lowercased.
+    func ownAddresses() async -> Set<String> {
+        Set((try? await call { try await core.ownAddresses() }) ?? [])
+    }
+
     func replyDraft(to messageID: String, all: Bool) async throws(CoreClientError) -> DraftInfo {
         try await call { try await core.replyDraft(messageId: messageID, replyAll: all) }
     }

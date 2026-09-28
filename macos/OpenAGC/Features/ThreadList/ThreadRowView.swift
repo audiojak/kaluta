@@ -72,10 +72,10 @@ final class ThreadRowView: NSTableCellView {
         return out
     }
 
-    func configure(with row: ThreadRow, chips: [Chip] = []) {
+    func configure(with row: ThreadRow, chips: [Chip] = [], me: Set<String> = []) {
         let unread = row.unreadCount > 0
         unreadDot.isHidden = !unread
-        senders.stringValue = Self.senderLine(row)
+        senders.stringValue = Self.senderLine(row, me: me)
         senders.font = TypeRole.rowSender(unread: unread)
         date.stringValue = RowDateFormatter.string(forMillis: row.lastMessageAt)
         let subjectText = row.subject.isEmpty ? "(no subject)" : row.subject
@@ -124,12 +124,41 @@ final class ThreadRowView: NSTableCellView {
     // MARK: - Content
 
     /// "Alex Rivera, Sam Chen (4)": up to three senders plus the count.
-    static func senderLine(_ row: ThreadRow) -> String {
-        let names = row.participants.prefix(3).map { $0.name ?? $0.email }
-        var line = names.isEmpty ? "(unknown sender)" : names.joined(separator: ", ")
-        if row.participants.count > 3 { line += " …" }
+    /// Who the thread is with, as Mail puts it: the other people, not you
+    /// (`me`: your addresses, lowercased); one by full name, several by
+    /// first name ("Jeffrey & Andre", "Himanshi, Darshan, Austin …");
+    /// "Me" when it is only you.
+    static func senderLine(_ row: ThreadRow, me: Set<String> = []) -> String {
+        let others = row.participants.filter { !me.contains($0.email.lowercased()) }
+        var line: String
+        switch others.count {
+        case 0: line = row.participants.isEmpty ? "(unknown sender)" : "Me"
+        case 1: line = fullName(others[0])
+        case 2: line = "\(firstName(others[0])) & \(firstName(others[1]))"
+        default:
+            line = others.prefix(3).map(firstName).joined(separator: ", ")
+            if others.count > 3 { line += " …" }
+        }
         if row.messageCount > 1 { line += " (\(row.messageCount))" }
         return line
+    }
+
+    private static func fullName(_ a: AddressInfo) -> String {
+        guard let name = a.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else { return a.email }
+        return name
+    }
+
+    /// "Jeffrey Priebe" → "Jeffrey"; "Le, Minh" → "Minh"; no name → the
+    /// address's local part.
+    static func firstName(_ a: AddressInfo) -> String {
+        guard let name = a.name?.trimmingCharacters(in: .whitespaces), !name.isEmpty else {
+            return String(a.email.split(separator: "@").first ?? Substring(a.email))
+        }
+        if let comma = name.firstIndex(of: ",") {
+            let given = name[name.index(after: comma)...].trimmingCharacters(in: .whitespaces)
+            if let first = given.split(separator: " ").first { return String(first) }
+        }
+        return String(name.split(separator: " ").first ?? Substring(name))
     }
 
     /// Gmail's importance marker (the yellow chevron).

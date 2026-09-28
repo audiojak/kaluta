@@ -123,9 +123,22 @@ impl Core {
         self.own_address().await
     }
 
+    /// Every address that is the user: the account's and the ones their
+    /// sent mail came from (aliases), lowercased. Thread rows say "Me" for
+    /// these rather than the user's own name.
+    pub async fn own_addresses(&self) -> Result<Vec<String>, CoreError> {
+        let account = self.own_address().await?.to_lowercase();
+        let db = self.db()?;
+        let mut sent = runtime::run(async move { Ok(db.read(read::sent_from_addresses).await?) }).await?;
+        if !sent.contains(&account) {
+            sent.insert(0, account);
+        }
+        Ok(sent)
+    }
+
     pub async fn reply_draft(&self, message_id: String, reply_all: bool) -> Result<DraftInfo, CoreError> {
         self.refuse_if_archive()?;
-        let me = vec![self.own_address().await?];
+        let me = self.own_addresses().await?;
         let db = self.db()?;
         runtime::run(
             async move { Ok(mail_sync::reply_draft(&db, &MessageId(message_id), reply_all, &me).await?.into()) },
@@ -391,6 +404,10 @@ impl AccountComposer {
 
     pub async fn account_address(&self) -> Result<String, CoreError> {
         self.scoped(self.core.account_address()).await
+    }
+
+    pub async fn own_addresses(&self) -> Result<Vec<String>, CoreError> {
+        self.scoped(self.core.own_addresses()).await
     }
 
     pub async fn reply_draft(&self, message_id: String, reply_all: bool) -> Result<DraftInfo, CoreError> {

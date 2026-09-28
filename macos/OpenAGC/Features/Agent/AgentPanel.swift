@@ -419,11 +419,12 @@ private struct ProposalCard: View {
 private struct ResultRow: View {
     let row: ThreadRow
     let selected: Bool
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.hair) {
             HStack {
-                Text(ThreadRowView.senderLine(row))
+                Text(ThreadRowView.senderLine(row, me: model.ownAddresses))
                     .fontWeight(row.unreadCount > 0 ? .semibold : .regular)
                     .lineLimit(1)
                 Spacer()

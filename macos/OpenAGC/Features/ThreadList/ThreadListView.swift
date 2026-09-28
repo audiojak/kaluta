@@ -108,7 +108,8 @@ struct ThreadListView: NSViewRepresentable {
             let view = tableView.makeView(withIdentifier: ThreadRowView.identifier, owner: nil) as? ThreadRowView
                 ?? ThreadRowView()
             view.configure(with: rows[row], chips: ThreadRowView.chips(for: rows[row], labels: model.chipLabels,
-                                                                     excluding: model.threads.mailboxID))
+                                                                     excluding: model.threads.mailboxID),
+                           me: model.ownAddresses)
             view.setAccessibilityCustomActions(accessibilityActions(for: rows[row]))
             model.threads.rowWillAppear(at: row)
             return view

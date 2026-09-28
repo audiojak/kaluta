@@ -331,6 +331,18 @@ pub fn get_message(conn: &Connection, id: &MessageId) -> StoreResult<Option<Mess
     Ok(get_thread(conn, &ThreadId(thread))?.and_then(|(_, messages)| messages.into_iter().find(|m| &m.id == id)))
 }
 
+/// The addresses the user sends from, learnt from mail they sent (the
+/// account's address and any aliases), lowercased.
+pub fn sent_from_addresses(conn: &Connection) -> StoreResult<Vec<String>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT DISTINCT lower(from_email) FROM messages
+             WHERE is_sent_by_me AND from_email IS NOT NULL AND from_email != '' LIMIT 50",
+        )?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?)
+}
+
 /// The stored message (not a draft) with this RFC 5322 Message-ID.
 pub fn message_for_rfc822(conn: &Connection, rfc822_id: &str) -> StoreResult<Option<String>> {
     Ok(conn
