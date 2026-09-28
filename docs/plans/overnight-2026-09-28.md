@@ -6,35 +6,35 @@ never push to `main` overnight.
 
 ## Order
 
-1. **Gmail categories as Inbox tabs** (spec §14.3 amendment 2026-09-28,
+1. **oagc-1x2** **Gmail categories as Inbox tabs** (spec §14.3 amendment 2026-09-28,
    categories). Narrowed listings `INBOX+CATEGORY_…` in the store (like
    `INBOX+IMPORTANT`), Primary = `CATEGORY_PERSONAL` or no category; tab
    bar above the list with unread counts, only categories that have mail;
    per-account remembered tab; "Show Categories" off switch; works with
    Important-only and search (search ignores tabs). Demo mailbox seeds
    categories so snapshots show them.
-2. **Junk / Not Junk** (§14.3 amendment, junk). Core user actions that may
+2. **oagc-1bc** **Junk / Not Junk** (§14.3 amendment, junk). Core user actions that may
    set `SPAM` (and remove `INBOX`), undoable with exact diffs (§14.6a),
    outbox to Gmail; toolbar button, Message menu ⇧⌘J, context menu, the
    Spam mailbox offers Not Junk. `modify_labels` and agents still refuse
    `SPAM`.
-3. **Undo for agent sends** (§14.6a amended). The approval card shows
+3. **oagc-73b** **Undo for agent sends** (§14.6a amended). The approval card shows
    "Sending… Undo" for the hold; undo cancels the held send and reopens
    the draft in the review composer; no notice in the demo (sends at once).
-4. **Finish test isolation.** Every `UserDefaults.standard` reached from
+4. **oagc-kuk** **Finish test isolation.** Every `UserDefaults.standard` reached from
    tests goes through injected defaults (`ReaderStore` remote-image allow
    list, `LabelExpansion`, `GoogleClientFields`, `@AppStorage` settings,
    `NewMailNotifier` keys); test Keychain services are deleted after use
    (`KeychainTests` and the test host's `ai.actual.openagc.tests`); a test
    asserts the real prefs plist is untouched across the Swift suite.
-5. **Large-mailbox test for tiered download.** A fake provider and fake
+5. **oagc-vaq** **Large-mailbox test for tiered download.** A fake provider and fake
    IMAP with 100,000 messages over two years; measure time to a browsable
    list (headers pass), queue sizes per tier, peak memory, store size;
    record numbers in the spec (§7.4) and keep an `#[ignore]` benchmark
    plus a fast 5,000-message regression test in the gate.
-6. If time remains: **list filters** (§14.3 amendment, filters): Unread,
+6. If time remains: **oagc-3ee** **list filters** (§14.3 amendment, filters): Unread,
    Starred, With Attachments from a header button.
-7. If time remains: **New Message at the reader's leading edge**, as in
+7. If time remains: **oagc-5rw** **New Message at the reader's leading edge**, as in
    Mail (an AppKit toolbar item if SwiftUI placement cannot do it).
 
 ## Checks before closing an issue
