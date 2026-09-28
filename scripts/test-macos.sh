@@ -9,6 +9,8 @@ ACTION="${1:-test}"
 shift || true
 
 "$ROOT/scripts/clean-test-scratch.sh"
+# Design-system rules that a grep can check (docs/design-system.md).
+"$ROOT/scripts/design-lint.sh" --strict
 mkdir -p "$ROOT/build"
 cd "$ROOT/macos"
 # Optional per-developer signing overrides (scripts/dev-signing.sh).

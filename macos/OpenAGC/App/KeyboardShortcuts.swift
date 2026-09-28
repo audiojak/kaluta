@@ -65,9 +65,9 @@ enum KeyboardShortcutGuide {
 struct KeyboardShortcutsView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Space.xxl) {
                 ForEach(KeyboardShortcutGuide.groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         Text(group.title).font(.headline)
                         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 4) {
                             ForEach(group.shortcuts, id: \.self) { s in
@@ -83,7 +83,7 @@ struct KeyboardShortcutsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            .padding(20)
+            .padding(Space.xxl)
         }
         .frame(minWidth: 460, minHeight: 520)
     }

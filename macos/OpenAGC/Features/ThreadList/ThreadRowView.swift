@@ -21,7 +21,7 @@ final class ThreadRowView: NSTableCellView {
         identifier = Self.identifier
         unreadDot.wantsLayer = true
         unreadDot.layer?.cornerRadius = Self.dotSize / 2
-        unreadDot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        unreadDot.layer?.backgroundColor = Tone.unreadNS.cgColor
         date.alignment = .right
         date.textColor = .secondaryLabelColor
         snippet.textColor = .secondaryLabelColor
@@ -56,18 +56,17 @@ final class ThreadRowView: NSTableCellView {
     /// snippet. Kept in the snippet line so rows keep their fixed height.
     static func snippetLine(_ snippet: String, chips: [Chip]) -> NSAttributedString {
         let out = NSMutableAttributedString()
-        let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+        let font = TypeRole.chip
         for chip in chips {
-            let tint = chip.color.flatMap(NSColor.init(hex:)) ?? .tertiaryLabelColor
             out.append(NSAttributedString(string: "\u{2009}\(LabelTree.leafName(chip.path))\u{2009}", attributes: [
                 .font: font,
                 .foregroundColor: NSColor.labelColor,
-                .backgroundColor: tint.withAlphaComponent(0.28),
+                .backgroundColor: Tone.chipFill(hex: chip.color),
             ]))
             out.append(NSAttributedString(string: " ", attributes: [.font: font]))
         }
         out.append(NSAttributedString(string: snippet, attributes: [
-            .font: NSFont.systemFont(ofSize: 12),
+            .font: TypeRole.rowSecondary,
             .foregroundColor: NSColor.secondaryLabelColor,
         ]))
         return out
@@ -77,10 +76,10 @@ final class ThreadRowView: NSTableCellView {
         let unread = row.unreadCount > 0
         unreadDot.isHidden = !unread
         senders.stringValue = Self.senderLine(row)
-        senders.font = .systemFont(ofSize: 13, weight: unread ? .semibold : .regular)
+        senders.font = TypeRole.rowSender(unread: unread)
         date.stringValue = RowDateFormatter.string(forMillis: row.lastMessageAt)
         let subjectText = row.subject.isEmpty ? "(no subject)" : row.subject
-        let subjectFont = NSFont.systemFont(ofSize: 12, weight: unread ? .medium : .regular)
+        let subjectFont = TypeRole.rowSubject(unread: unread)
         subject.font = subjectFont
         if Self.isImportant(row) {
             subject.attributedStringValue = Self.importantSubject(subjectText, font: subjectFont)
@@ -141,7 +140,7 @@ final class ThreadRowView: NSTableCellView {
     static func importantSubject(_ text: String, font: NSFont) -> NSAttributedString {
         let out = NSMutableAttributedString()
         let config = NSImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-            .applying(.init(paletteColors: [.systemYellow]))
+            .applying(.init(paletteColors: [Tone.importantNS]))
         if let marker = NSImage(systemSymbolName: "chevron.right.2", accessibilityDescription: "Important")?
             .withSymbolConfiguration(config) {
             let attachment = NSTextAttachment()

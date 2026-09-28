@@ -51,7 +51,7 @@ struct AccountSettings: View {
             Section("Data on this Mac") {
                 ForEach(orphans, id: \.id) { orphan in
                     HStack {
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: Space.hair) {
                             Text("Leftover mail from \(orphan.email ?? "an old sign-in")")
                             Text(ByteCountFormatter.string(fromByteCount: Int64(orphan.bytes), countStyle: .file))
                                 .font(.caption).foregroundStyle(.secondary)
@@ -126,10 +126,10 @@ struct AccountRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.m) {
                 AccountAvatar(account: account, size: 32)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Space.hair) {
                     Text(account.displayName ?? account.email).font(.body.weight(.medium))
                     if account.displayName != nil { Text(account.email).font(.caption).foregroundStyle(.secondary) }
                     Text(status).font(.caption).foregroundStyle(signedIn == false ? .orange : .secondary)
@@ -198,7 +198,7 @@ struct AccountRow: View {
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Space.hair)
         .task(id: account.id) {
             window = try? await model.core?.syncWindow(for: account.id)
             bodyWindow = account.kind == .gmail ? try? await model.core?.bodyWindow(for: account.id) : nil

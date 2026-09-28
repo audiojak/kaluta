@@ -54,10 +54,10 @@ private struct AgentRow: View {
 
     var body: some View {
         let status = AgentStatusText(provider)
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
             Image(systemName: status.symbol)
                 .foregroundStyle(status.isReady ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Space.hair) {
                 Text(provider.name).font(.headline)
                 Text(status.detail).font(.callout).foregroundStyle(.secondary)
                     .textSelection(.enabled)

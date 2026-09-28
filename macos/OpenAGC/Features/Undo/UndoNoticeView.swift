@@ -13,14 +13,14 @@ struct UndoNoticeView: View {
         let undo = model.undo
         ZStack(alignment: .bottom) {
             if let notice = undo.notice, notice.accountID == model.openAccountID {
-                HStack(spacing: 10) {
+                HStack(spacing: Space.m) {
                     Text(notice.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Button {
                         model.undoMailAction()
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: Space.xs) {
                             Text("Undo").fontWeight(.semibold)
                             Text("⌘Z").foregroundStyle(.secondary)
                         }
@@ -39,12 +39,10 @@ struct UndoNoticeView: View {
                     .accessibilityLabel("Close")
                 }
                 .font(.callout)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .glassEffect(.regular, in: .capsule)
+                .glassCapsule()
                 .onHover { undo.setPaused(.hover, $0) }
-                .padding(.bottom, 12)
-                .padding(.horizontal, 12)
+                .padding(.bottom, Space.l)
+                .padding(.horizontal, Space.l)
                 .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                 .id(notice.id)
             }

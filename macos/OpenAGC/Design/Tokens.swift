@@ -1,0 +1,119 @@
+import AppKit
+import SwiftUI
+
+// The design system's tokens (docs/design-system.md). Views outside
+// `Design/` use these instead of literal numbers and colours;
+// `scripts/design-lint.sh` checks it.
+
+/// The spacing scale, for padding and stack spacing. Nothing in between:
+/// when a layout seems to need 10, it gets 8 or 12.
+enum Space {
+    /// Inside chips and between a title and its subtitle.
+    static let hair: CGFloat = 2
+    /// Between an icon and its text; rows of a tight list.
+    static let xs: CGFloat = 4
+    /// Vertical padding of compact bars and banners.
+    static let s: CGFloat = 6
+    /// The default gap between controls; vertical padding of capsules.
+    static let m: CGFloat = 8
+    /// Horizontal padding of bars and banners in a column.
+    static let l: CGFloat = 12
+    /// Horizontal padding of glass capsules; padding of panels.
+    static let xl: CGFloat = 16
+    /// The reader's margins, as in Mail; gaps between sections.
+    static let xxl: CGFloat = 20
+    /// Padding of sheets.
+    static let xxxl: CGFloat = 24
+    /// Padding of full-window pages (onboarding).
+    static let page: CGFloat = 32
+}
+
+/// Corner radii. Capsules use `.capsule`, not a radius.
+enum Radius {
+    /// Label chips in rows.
+    static let chip: CGFloat = 4
+    /// Attachment tiles, small filled controls.
+    static let control: CGFloat = 6
+    /// Cards: approval cards, tool calls, previews.
+    static let card: CGFloat = 8
+    /// Floating panels.
+    static let panel: CGFloat = 12
+}
+
+/// Type roles. SwiftUI views use the `Font` values; the AppKit thread row
+/// uses the `NSFont` ones so both columns read at the same sizes.
+enum TypeRole {
+    /// A column's or sheet's title.
+    static let title = Font.title3.weight(.semibold)
+    /// Section headings in panels.
+    static let heading = Font.headline
+    /// Group labels inside a panel ("Find and summarise").
+    static let groupLabel = Font.subheadline.weight(.semibold)
+    /// Secondary text: bars, banners, notices, chips.
+    static let meta = Font.callout
+    /// Fine print under a control.
+    static let caption = Font.caption
+
+    /// Thread row: the senders line.
+    static func rowSender(unread: Bool) -> NSFont { .systemFont(ofSize: 13, weight: unread ? .semibold : .regular) }
+    /// Thread row: the subject line.
+    static func rowSubject(unread: Bool) -> NSFont { .systemFont(ofSize: 12, weight: unread ? .medium : .regular) }
+    /// Thread row: the snippet and the date.
+    static var rowSecondary: NSFont { .systemFont(ofSize: 12) }
+    /// A label chip's text, in rows and elsewhere.
+    static var chip: NSFont { .systemFont(ofSize: 11, weight: .medium) }
+}
+
+/// Semantic colours. Always system colours underneath, so light, dark,
+/// increased contrast and the user's accent colour all follow.
+enum Tone {
+    /// The unread dot: the user's accent colour, as in Mail.
+    static let unread = Color.accentColor
+    static let unreadNS = NSColor.controlAccentColor
+    /// Gmail's Important marker.
+    static let important = Color.yellow
+    static let importantNS = NSColor.systemYellow
+    /// A label with no colour of its own.
+    static let chipDefaultNS = NSColor.tertiaryLabelColor
+    /// How strongly a label's colour fills its chip.
+    static let chipFillOpacity: CGFloat = 0.28
+
+    /// A label chip's fill for a Gmail `#rrggbb` colour.
+    static func chipFill(hex: String?) -> NSColor {
+        (hex.flatMap(NSColor.init(hex:)) ?? chipDefaultNS).withAlphaComponent(chipFillOpacity)
+    }
+
+    /// Banner and card fills by intent.
+    enum Intent {
+        /// Needs the user (sign in again, approve a send).
+        case attention
+        /// Something to know (replying to, forwarding).
+        case info
+        /// A consequence to weigh (cannot send from here).
+        case caution
+        /// Nothing special: a resting card.
+        case neutral
+
+        var fill: AnyShapeStyle {
+            switch self {
+            case .attention: AnyShapeStyle(Color.yellow.opacity(0.14))
+            case .info: AnyShapeStyle(.tint.opacity(0.10))
+            case .caution: AnyShapeStyle(Color.orange.opacity(0.10))
+            case .neutral: AnyShapeStyle(.quaternary.opacity(0.45))
+            }
+        }
+
+        /// A card's outline; banners have none.
+        var stroke: AnyShapeStyle {
+            switch self {
+            case .attention: AnyShapeStyle(Color.yellow.opacity(0.6))
+            case .info, .caution, .neutral: AnyShapeStyle(Color.clear)
+            }
+        }
+    }
+
+    /// A highlighted (keyboard-selected) item inside glass.
+    static let highlight = AnyShapeStyle(.tint.opacity(0.25))
+    /// A small filled control resting on the background (attachments).
+    static let controlFill = AnyShapeStyle(.quaternary.opacity(0.6))
+}

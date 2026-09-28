@@ -31,7 +31,7 @@ struct ThreadReaderView: View {
     private func header(_ detail: ThreadDetail) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
-                .font(.title3.weight(.semibold))
+                .font(TypeRole.title)
                 .textSelection(.enabled)
                 .lineLimit(2)
             Spacer()
@@ -41,24 +41,16 @@ struct ThreadReaderView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
+        .padding(.horizontal, Space.xxl)
+        .padding(.top, Space.xl)
+        .padding(.bottom, Space.s)
     }
 
     private var remoteImagesBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "photo.badge.exclamationmark")
-                .foregroundStyle(.secondary)
-            Text("Remote images are hidden to protect your privacy.")
-                .font(.callout)
-            Spacer()
+        Banner("Remote images are hidden to protect your privacy.", systemImage: "photo.badge.exclamationmark",
+               intent: .neutral, inset: Space.xxl) {
             Button("Load Images") { model.reader.loadRemoteImagesForThread() }
             Button("Always from Sender") { model.reader.alwaysLoadRemoteImagesFromSenders() }
         }
-        .controlSize(.small)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.5))
     }
 }

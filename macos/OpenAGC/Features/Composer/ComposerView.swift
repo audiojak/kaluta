@@ -51,23 +51,12 @@ struct ComposerView: View {
         @Bindable var store = store
         return VStack(spacing: 0) {
             if let agent = request.agentName {
-                Label("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
-                      systemImage: "sparkles")
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.tint.opacity(0.1))
+                Banner("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
+                       systemImage: "sparkles", intent: .info)
             }
             header(store)
             if let error = store.saveError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.orange.opacity(0.1))
+                Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
             RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
                 .frame(maxHeight: .infinity)
@@ -139,21 +128,21 @@ struct ComposerView: View {
 
     private func row(_ label: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                 Text(label)
                     .foregroundStyle(.secondary)
                     .frame(width: 64, alignment: .trailing)
                 content()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.s)
+            InsetRule()
         }
     }
 
     private func quote(_ store: ComposerStore) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Divider()
+            InsetRule()
             Button {
                 showsQuote.toggle()
             } label: {
@@ -162,8 +151,8 @@ struct ComposerView: View {
                     .font(.callout)
             }
             .buttonStyle(.borderless)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.horizontal, Space.xl)
+            .padding(.vertical, Space.s)
             if showsQuote {
                 MessageWebView(html: Self.quoteDocument(store.quotedHTML), allowRemoteImages: false)
                     .frame(height: 220)
@@ -173,9 +162,9 @@ struct ComposerView: View {
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 ForEach(store.attachments, id: \.path) { attachment in
-                    HStack(spacing: 6) {
+                    HStack(spacing: Space.s) {
                         Image(systemName: "doc")
                         Text(attachment.filename).lineLimit(1)
                         Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
@@ -185,15 +174,15 @@ struct ComposerView: View {
                             .buttonStyle(.borderless)
                     }
                     .font(.callout)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, Space.xs)
                     .background(.quaternary, in: .capsule)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
         }
-        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .top) { InsetRule() }
     }
 
     /// The quote was sanitized by the core; show it under the reader's CSP.

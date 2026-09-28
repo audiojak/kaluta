@@ -8,13 +8,13 @@ struct SyncStatusView: View {
 
     var body: some View {
         if let lines = Self.footer(for: model) {
-            VStack(spacing: 3) {
+            VStack(spacing: Space.xs) {
                 if case .syncing = model.syncDisplay {
                     ProgressView(value: model.syncProgress)
                         .progressViewStyle(.linear)
                         .controlSize(.mini)
                         .frame(maxWidth: 150)
-                        .padding(.bottom, 2)
+                        .padding(.bottom, Space.hair)
                 }
                 Text(lines.title)
                     .font(.caption.weight(.medium))
@@ -26,8 +26,8 @@ struct SyncStatusView: View {
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
             .accessibilityElement(children: .combine)
             .help(model.backfillTransport == "imap" ? "Downloading over IMAP (Settings › Accounts)" : "")
         }

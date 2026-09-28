@@ -117,7 +117,7 @@ struct MailCommands: Commands {
             .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
-            Divider()
+            Divider() // menu
             // No shortcut: ⌘⇧I is Load Remote Images (spec §7.8 note).
             Button("Import Mailbox…") { Task { await model.beginImport() } }
                 .disabled(model.runningImport != nil)
@@ -142,11 +142,11 @@ struct MailCommands: Commands {
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
                     .disabled(!mailKey)
             }
-            Divider()
+            Divider() // menu
             Button("Check for New Mail") { model.core?.syncNow() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(!mailKey)
-            Divider()
+            Divider() // menu
         }
         CommandMenu("Message") {
             Button("Reply") { model.reply(all: false) }
@@ -161,7 +161,7 @@ struct MailCommands: Commands {
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(noReplyTarget || model.isArchive)
                 .help(model.isArchive ? AppModel.cannotSendReason : "")
-            Divider()
+            Divider() // menu
             Button("Archive") { model.archiveSelection() }
                 .keyboardShortcut("a", modifiers: [.command, .control])
                 .disabled(noTargets)
@@ -171,21 +171,21 @@ struct MailCommands: Commands {
             Button("Move to Trash") { model.trashSelection() }
                 .keyboardShortcut(.delete)
                 .disabled(noTargets)
-            Divider()
+            Divider() // menu
             Button("Mark as Read or Unread") { model.toggleReadSelection() }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(noTargets)
             Button("Star or Unstar") { model.toggleStarSelection() }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(noTargets)
-            Divider()
+            Divider() // menu
             Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k")
                 .disabled(!mailKey)
             Button(model.agent.isPresented ? "Hide Agent" : "Show Agent") { model.agent.isPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(!mailKey)
-            Divider()
+            Divider() // menu
             Button("Load Remote Images") { model.reader.loadRemoteImagesForThread() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(!mailKey || !model.reader.hasRemoteImages || model.reader.allowsRemoteImages)

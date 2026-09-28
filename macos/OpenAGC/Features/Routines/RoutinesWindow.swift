@@ -53,9 +53,9 @@ private struct RoutineList: View {
         List(selection: $store.selectedID) {
             ForEach(store.routines, id: \.id) { routine in
                 HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: Space.hair) {
                         Text(routine.name).font(.headline)
-                        HStack(spacing: 6) {
+                        HStack(spacing: Space.s) {
                             Text(RoutineRunner(rawValue: routine.runner)?.badge ?? routine.runner)
                             if routine.changedSincePublish { Text("· unpublished changes").foregroundStyle(.orange) }
                         }
@@ -73,7 +73,7 @@ private struct RoutineList: View {
                         .toggleStyle(.switch)
                         .controlSize(.mini)
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, Space.hair)
                 .tag(routine.id)
             }
         }
@@ -288,7 +288,7 @@ private struct RoutineEditor: View {
 
     private func actionBar() -> some View {
         let store = model.routines
-        return VStack(spacing: 6) {
+        return VStack(spacing: Space.s) {
             if let error = store.error {
                 Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -318,7 +318,7 @@ private struct RoutineEditor: View {
                     .disabled(!store.hasUnsavedChanges)
             }
         }
-        .padding(12)
+        .padding(Space.l)
         .background(.bar)
     }
 
@@ -390,7 +390,7 @@ private struct PreviewRowView: View {
             Spacer()
             if let bucket {
                 Text(bucket.labelName).font(.caption.monospaced())
-                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .padding(.horizontal, Space.s).padding(.vertical, Space.hair)
                     .background(RoutineEditorColors.color(bucket.color).opacity(0.2), in: .capsule)
             } else {
                 Text("Leave in inbox").font(.caption).foregroundStyle(.secondary)
@@ -458,7 +458,7 @@ private struct PromptEditor: View {
     @State private var text = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text("Prompt").font(.headline)
             Text("This is what the agent is told. Editing it by hand stops the settings from changing it until you reset.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -483,7 +483,7 @@ private struct PromptEditor: View {
                 .buttonStyle(.borderedProminent)
             }
         }
-        .padding(16)
+        .padding(Space.xl)
         .task {
             if let custom = draft.advancedPrompt {
                 text = custom
@@ -516,7 +516,7 @@ private struct HandoffSheet: View {
     private var isChatGPT: Bool { handoff.url.contains("chatgpt") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text(isChatGPT ? "Set up in ChatGPT" : "Set up at claude.ai").font(.headline)
             if isChatGPT {
                 Text("1. Copy the prompt and open ChatGPT.\n2. Start a new chat, paste the prompt and ask ChatGPT to “create a scheduled task” with it, \(handoff.scheduleText.lowercased()).\n3. Make sure the Gmail app is connected in ChatGPT.")
@@ -528,7 +528,7 @@ private struct HandoffSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 220)
-            .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: 6))
+            .background(.quaternary.opacity(0.4), in: .rect(cornerRadius: Radius.control))
             if !isChatGPT {
                 TextField("https://claude.ai/code/routines/trig_…", text: $pasted)
             }
@@ -543,7 +543,7 @@ private struct HandoffSheet: View {
                     .buttonStyle(.borderedProminent)
             }
         }
-        .padding(16)
+        .padding(Space.xl)
         .frame(width: 620)
     }
 }

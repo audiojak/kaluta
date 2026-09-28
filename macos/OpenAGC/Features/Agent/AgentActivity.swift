@@ -123,13 +123,13 @@ struct AgentActivityView: View {
                     ContentUnavailableView("No Agent Activity", systemImage: "list.bullet.rectangle")
                 }
             }
-            Divider()
+            PaneDivider()
             HStack {
                 Button("Export…", action: export).disabled(actions.isEmpty)
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
-            .padding(12)
+            .padding(Space.l)
         }
         .frame(minWidth: 640, minHeight: 420)
         .task { actions = (try? await model.core?.agentActions()) ?? [] }

@@ -33,7 +33,7 @@ struct ImportMailboxSheet: View {
     @State var draft: ImportDraft
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             Text("Import Mailbox").font(.title2.weight(.semibold))
             Text("The mail becomes its own account: searchable and ready for the agent, but it cannot send, and nothing is uploaded.")
                 .foregroundStyle(.secondary)
@@ -63,7 +63,7 @@ struct ImportMailboxSheet: View {
                 .disabled(draft.scan == nil || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(20)
+        .padding(Space.xxl)
         .frame(width: 460)
     }
 }
@@ -75,7 +75,7 @@ struct ImportProgressSheet: View {
 
     var body: some View {
         let status = model.imports[accountID]
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             Text(status?.done == true ? "Import finished" : "Importing mail…").font(.title3.weight(.semibold))
             if let status {
                 if status.done {
@@ -100,7 +100,7 @@ struct ImportProgressSheet: View {
                 }
             }
         }
-        .padding(20)
+        .padding(Space.xxl)
         .frame(width: 420)
     }
 

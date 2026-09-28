@@ -21,12 +21,12 @@ struct AgentPromptBar: View {
         @Bindable var model = model
         let agent = model.agent
         let chips = chips
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.m) {
             if !chips.isEmpty {
                 SuggestionChips(chips: chips, highlighted: highlighted) { model.choose($0) }
                     .transition(reduceMotion ? .identity : .opacity)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 Menu {
                     ForEach(agent.providers, id: \.id) { provider in
                         Button {
@@ -40,7 +40,7 @@ struct AgentPromptBar: View {
                         }
                         .disabled({ if case .ready = provider.status { false } else { true } }())
                     }
-                    Divider()
+                    Divider() // menu
                     Button("Agent Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
                 } label: {
                     Image(systemName: "sparkles")
@@ -85,9 +85,7 @@ struct AgentPromptBar: View {
                                   || !agent.isProviderReady)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .glassEffect(.regular, in: .capsule)
+            .glassCapsule()
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: chips)
         .task { await agent.loadProviders() }
@@ -132,14 +130,14 @@ struct SuggestionChips: View {
     let choose: (AgentSuggestion) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Space.xs) {
             ForEach(Array(chips.enumerated()), id: \.element.id) { index, chip in
                 Button { choose(chip) } label: {
                     Text(chip.text)
                         .lineLimit(1)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(index == highlighted ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.clear),
+                        .padding(.horizontal, Space.l)
+                        .padding(.vertical, Space.s)
+                        .background(index == highlighted ? Tone.highlight : AnyShapeStyle(.clear),
                                     in: .capsule)
                 }
                 .buttonStyle(.plain)
@@ -162,17 +160,17 @@ struct AgentCapabilitiesView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: Space.xxl) {
+                VStack(alignment: .leading, spacing: Space.xs) {
                     Label("Ask \(model.agent.providerName)", systemImage: "sparkles").font(.headline)
                     Text("It reads your mail here, on this Mac. Drafts wait for you, and sending always asks first.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(AgentSuggestions.groups(canDraft: !model.isArchive)) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         Label(group.title, systemImage: group.symbol)
-                            .font(.subheadline.weight(.semibold))
+                            .font(TypeRole.groupLabel)
                             .foregroundStyle(.secondary)
                         ForEach(group.examples) { example in
                             Button { model.choose(example) } label: {
@@ -192,7 +190,7 @@ struct AgentCapabilitiesView: View {
                     .accessibilityLabel(group.title)
                 }
             }
-            .padding(16)
+            .padding(Space.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -205,56 +203,17 @@ struct AgentInspector: View {
     var body: some View {
         let agent = model.agent
         VStack(spacing: 0) {
-            HStack {
-                Text(agent.providerName).font(.headline)
-                Spacer()
-                if agent.pendingProposals.count > 1 {
-                    Button("Approve All (\(agent.pendingProposals.count))") { agent.approveAll() }
-                        .controlSize(.small)
-                }
-                if agent.isRunning {
-                    ProgressView().controlSize(.small)
-                    Button("Stop") { agent.cancel() }
-                        .controlSize(.small)
-                }
-                Menu {
-                    if agent.history.isEmpty {
-                        Text("No earlier conversations")
-                    }
-                    ForEach(agent.history, id: \.sessionId) { conversation in
-                        Button(conversation.title.isEmpty ? "Untitled" : conversation.title) {
-                            Task { await agent.open(conversation) }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "clock.arrow.circlepath")
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .help("Earlier conversations")
-                .accessibilityLabel("Earlier conversations")
-                .onAppear { Task { await agent.loadHistory() } }
-                Button("New Conversation", systemImage: "square.and.pencil") { agent.newConversation() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .help("Start a new conversation")
-                    .disabled(agent.entries.isEmpty)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            Divider()
             if agent.entries.isEmpty {
                 AgentCapabilitiesView()
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 10) {
+                        LazyVStack(alignment: .leading, spacing: Space.m) {
                             ForEach(agent.entries) { entry in
                                 EntryView(entry: entry).id(entry.id)
                             }
                         }
-                        .padding(12)
+                        .padding(Space.l)
                     }
                     .onChange(of: agent.entries.last) { _, last in
                         if let last { proxy.scrollTo(last.id, anchor: .bottom) }
@@ -262,13 +221,55 @@ struct AgentInspector: View {
                 }
             }
             if let usage = agent.lastUsage {
-                Divider()
+                InsetRule()
                 Text(usage).font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.horizontal, 12).padding(.vertical, 4)
+                    .padding(.horizontal, Space.l).padding(.vertical, Space.xs)
             }
         }
+        // The transcript scrolls under the header; the system draws the edge.
+        .columnHeader { header(agent) }
+    }
 
+    private func header(_ agent: AgentStore) -> some View {
+        HStack {
+            Text(agent.providerName).font(TypeRole.heading)
+            Spacer()
+            if agent.pendingProposals.count > 1 {
+                Button("Approve All (\(agent.pendingProposals.count))") { agent.approveAll() }
+                    .controlSize(.small)
+            }
+            if agent.isRunning {
+                ProgressView().controlSize(.small)
+                Button("Stop") { agent.cancel() }
+                    .controlSize(.small)
+            }
+            Menu {
+                if agent.history.isEmpty {
+                    Text("No earlier conversations")
+                }
+                ForEach(agent.history, id: \.sessionId) { conversation in
+                    Button(conversation.title.isEmpty ? "Untitled" : conversation.title) {
+                        Task { await agent.open(conversation) }
+                    }
+                }
+            } label: {
+                Image(systemName: "clock.arrow.circlepath")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Earlier conversations")
+            .accessibilityLabel("Earlier conversations")
+            .onAppear { Task { await agent.loadHistory() } }
+            Button("New Conversation", systemImage: "square.and.pencil") { agent.newConversation() }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Start a new conversation")
+                .disabled(agent.entries.isEmpty)
+        }
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.m)
     }
 }
 
@@ -281,9 +282,8 @@ private struct EntryView: View {
         switch entry.kind {
         case let .prompt(text):
             Text(text)
-                .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.tint.opacity(0.12), in: .rect(cornerRadius: 8))
+                .card(.info, padding: Space.m)
                 .textSelection(.enabled)
         case let .reply(text):
             Text(LocalizedStringKey(text))
@@ -297,14 +297,14 @@ private struct EntryView: View {
             .foregroundStyle(.secondary)
         case let .tool(name, arguments, state, summary):
             DisclosureGroup(isExpanded: $expanded) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Space.xs) {
                     if !arguments.isEmpty { Text(arguments) }
                     if !summary.isEmpty { Text(summary).foregroundStyle(.secondary) }
                 }
                 .font(.caption.monospaced())
                 .textSelection(.enabled)
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: Space.s) {
                     switch state {
                     case .running: ProgressView().controlSize(.mini)
                     case .succeeded: Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
@@ -324,11 +324,11 @@ private struct EntryView: View {
                     ResultRow(row: row, selected: model.selectedThreadID == row.id)
                         .contentShape(.rect)
                         .onTapGesture { model.selectedThreadID = row.id }
-                    Divider()
+                    if row.id != rows.last?.id { InsetRule(inset: Space.m) }
                 }
             }
-            .background(.background, in: .rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+            .background(.background, in: .rect(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
         case let .error(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout)
@@ -350,7 +350,7 @@ private struct ProposalCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Label(summary, systemImage: Self.symbol(tool))
                 .font(.callout.weight(.medium))
                 .fixedSize(horizontal: false, vertical: true)
@@ -374,10 +374,7 @@ private struct ProposalCard: View {
                 Label("Declined", systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(state == .pending ? AnyShapeStyle(.yellow.opacity(0.12)) : AnyShapeStyle(.quaternary.opacity(0.4)),
-                    in: .rect(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(state == .pending ? .yellow.opacity(0.6) : .clear))
+        .card(state == .pending ? .attention : .neutral, padding: Space.m)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Proposed: \(summary)")
     }
@@ -398,7 +395,7 @@ private struct ResultRow: View {
     let selected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: Space.hair) {
             HStack {
                 Text(ThreadRowView.senderLine(row))
                     .fontWeight(row.unreadCount > 0 ? .semibold : .regular)
@@ -410,7 +407,7 @@ private struct ResultRow: View {
             Text(row.subject.isEmpty ? "(no subject)" : row.subject).font(.callout).lineLimit(1)
             Text(row.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
-        .padding(8)
+        .padding(Space.m)
         .background(selected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)

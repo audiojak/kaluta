@@ -50,7 +50,7 @@ struct AccountMenuItems: View {
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }
-        if !model.accounts.isEmpty { Divider() }
+        if !model.accounts.isEmpty { Divider() } // menu
         Button("Add Account…") { Task { await model.addAccount() } }
             .disabled(!GoogleClientConfiguration.effective().isUsable)
         Button("Accounts Settings…", action: openSettings)
@@ -80,7 +80,7 @@ extension AccountAvatar {
     static func menuImage(_ account: AccountSummary, current: Bool) -> NSImage {
         let view = AccountAvatar(account: account, size: 18)
             .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: current ? 2 : 0))
-            .padding(1)
+            .padding(Space.hair)
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
         let image = renderer.nsImage ?? NSImage()
