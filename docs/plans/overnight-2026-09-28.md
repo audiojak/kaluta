@@ -6,6 +6,24 @@ never push to `main` overnight.
 
 ## Order
 
+0. **oagc-ba5** **Design system** (docs/design-system.md, `macos/OpenAGC/Design/`).
+   Tokens (spacing 4/8/12/16/24, radii, type roles, semantic colours:
+   unread dot, label chips, separators), surfaces (glass capsule, bar,
+   card, banner), components (`ListHeaderBar`, `InsetRule`, `LabelChip`,
+   `NoticeCapsule`, `Banner`, `EmptyState`, toolbar groups) and rules:
+   no full-bleed dividers across column edges, nothing drawn under the
+   floating sidebar, no dividers inside glass, headers are safe-area bars
+   with the system's scroll-edge effect. Migrate the existing views;
+   `scripts/design-lint.sh` warns on literal paddings and raw `Divider()`
+   outside `Design/`. Snapshots of the main surfaces, light and dark, in
+   the doc.
+0b. **oagc-0cw** **List header rule under the floating sidebar** (maintainer's
+   screenshot). Confirm the cause with view-dump frames, then rebuild the
+   list header as `.safeAreaBar(edge: .top)` with
+   `.scrollEdgeEffectStyle(.hard, for: .top)`, so the system draws the
+   edge inside the column's visible area. Verify light and dark, sidebar
+   shown and hidden, with and without the Important-only row. The
+   category tabs (1) go in the same bar.
 1. **oagc-1x2** **Gmail categories as Inbox tabs** (spec §14.3 amendment 2026-09-28,
    categories). Narrowed listings `INBOX+CATEGORY_…` in the store (like
    `INBOX+IMPORTANT`), Primary = `CATEGORY_PERSONAL` or no category; tab
