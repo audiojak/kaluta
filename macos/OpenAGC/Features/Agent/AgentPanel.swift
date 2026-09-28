@@ -4,65 +4,197 @@ import SwiftUI
 /// "Ask Claude…" with the agent switcher. Sending opens the inspector.
 struct AgentPromptBar: View {
     @Environment(AppModel.self) private var model
-    @State private var text = ""
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
+    /// The chip ↑/↓/Tab moved to; Return chooses it.
+    @State private var highlighted: Int?
+    /// Escape hid the chips until the field is left or typed in.
+    @State private var chipsHidden = false
+
+    private var chips: [AgentSuggestion] {
+        guard focused, model.agentPromptDraft.isEmpty, !chipsHidden, model.agent.isProviderReady,
+              !model.agent.isRunning else { return [] }
+        return model.agentChips
+    }
 
     var body: some View {
+        @Bindable var model = model
         let agent = model.agent
-        HStack(spacing: 8) {
-            Menu {
-                ForEach(agent.providers, id: \.id) { provider in
-                    Button {
-                        agent.providerID = provider.id
-                    } label: {
-                        if provider.id == agent.providerID {
-                            Label(provider.name, systemImage: "checkmark")
-                        } else {
-                            Text(provider.name)
+        let chips = chips
+        VStack(alignment: .leading, spacing: 8) {
+            if !chips.isEmpty {
+                SuggestionChips(chips: chips, highlighted: highlighted) { model.choose($0) }
+                    .transition(reduceMotion ? .identity : .opacity)
+            }
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(agent.providers, id: \.id) { provider in
+                        Button {
+                            agent.providerID = provider.id
+                        } label: {
+                            if provider.id == agent.providerID {
+                                Label(provider.name, systemImage: "checkmark")
+                            } else {
+                                Text(provider.name)
+                            }
                         }
+                        .disabled({ if case .ready = provider.status { false } else { true } }())
                     }
-                    .disabled({ if case .ready = provider.status { false } else { true } }())
+                    Divider()
+                    Button("Agent Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+                } label: {
+                    Image(systemName: "sparkles")
                 }
-                Divider()
-                Button("Agent Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
-            } label: {
-                Image(systemName: "sparkles")
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("Choose the agent")
-            .accessibilityLabel("Choose the agent")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Choose the agent")
+                .accessibilityLabel("Choose the agent")
 
-            TextField("Ask \(agent.providerName)…", text: $text)
-                .textFieldStyle(.plain)
-                .focused($focused)
-                .onSubmit(send)
-                .disabled(!agent.isProviderReady)
-                .accessibilityLabel("Ask \(agent.providerName)")
+                TextField("Ask \(agent.providerName)…", text: $model.agentPromptDraft)
+                    .textFieldStyle(.plain)
+                    .focused($focused)
+                    .onSubmit(send)
+                    .disabled(!agent.isProviderReady)
+                    .accessibilityLabel("Ask \(agent.providerName)")
+                    .onKeyPress(.downArrow) { move(1, in: chips) }
+                    .onKeyPress(.tab) { move(1, in: chips) }
+                    .onKeyPress(.upArrow) { move(-1, in: chips) }
+                    .onKeyPress(.return) {
+                        guard let highlighted, chips.indices.contains(highlighted) else { return .ignored }
+                        self.highlighted = nil
+                        model.choose(chips[highlighted])
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        guard !chips.isEmpty else { return .ignored }
+                        chipsHidden = true
+                        highlighted = nil
+                        return .handled
+                    }
 
-            if agent.isRunning {
-                Button("Stop", systemImage: "stop.circle.fill") { agent.cancel() }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .help("Stop the agent")
-            } else {
-                Button("Send", systemImage: "arrow.up.circle.fill", action: send)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty || !agent.isProviderReady)
+                if agent.isRunning {
+                    Button("Stop", systemImage: "stop.circle.fill") { agent.cancel() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Stop the agent")
+                } else {
+                    Button("Send", systemImage: "arrow.up.circle.fill", action: send)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .disabled(model.agentPromptDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                                  || !agent.isProviderReady)
+                }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .glassEffect(.regular, in: .capsule)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .glassEffect(.regular, in: .capsule)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: chips)
         .task { await agent.loadProviders() }
         .onChange(of: model.agentFocusRequests) { focused = true }
+        .onChange(of: focused) { _, isFocused in
+            if !isFocused { chipsHidden = false }
+            highlighted = nil
+        }
+        .onChange(of: model.agentPromptDraft) { _, text in
+            if !text.isEmpty { chipsHidden = false }
+            highlighted = nil
+        }
+        .onChange(of: chips.count) { old, count in
+            // VoiceOver hears how many appeared, without focus moving.
+            guard count > 0, old == 0, let window = NSApp.mainWindow else { return }
+            NSAccessibility.post(element: window, notification: .announcementRequested, userInfo: [
+                .announcement: count == 1 ? "1 suggestion" : "\(count) suggestions",
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ])
+        }
+    }
+
+    private func move(_ step: Int, in chips: [AgentSuggestion]) -> KeyPress.Result {
+        guard !chips.isEmpty else { return .ignored }
+        let next = (highlighted ?? (step > 0 ? -1 : chips.count)) + step
+        highlighted = chips.indices.contains(next) ? next : (step > 0 ? 0 : chips.count - 1)
+        return .handled
     }
 
     private func send() {
-        let prompt = text
-        text = ""
+        let prompt = model.agentPromptDraft
+        guard !prompt.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        model.agentPromptDraft = ""
         Task { await model.askAgent(prompt) }
+    }
+}
+
+/// Up to four example prompts over the empty prompt field (spec §14.6b).
+struct SuggestionChips: View {
+    let chips: [AgentSuggestion]
+    let highlighted: Int?
+    let choose: (AgentSuggestion) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(chips.enumerated()), id: \.element.id) { index, chip in
+                Button { choose(chip) } label: {
+                    Text(chip.text)
+                        .lineLimit(1)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(index == highlighted ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.clear),
+                                    in: .capsule)
+                }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .accessibilityLabel(chip.text)
+                .accessibilityHint(chip.fillsOnly ? "Puts this in the field for you to finish" : "Asks the agent")
+            }
+        }
+        .font(.callout)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Suggestions")
+    }
+}
+
+/// The agent column before a conversation: what the agent can do, as
+/// example prompts in groups (spec §14.6b). Choosing one sends it, or
+/// fills the field when it needs the user's words.
+struct AgentCapabilitiesView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Ask \(model.agent.providerName)", systemImage: "sparkles").font(.headline)
+                    Text("It reads your mail here, on this Mac. Drafts wait for you, and sending always asks first.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(AgentSuggestions.groups(canDraft: !model.isArchive)) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(group.title, systemImage: group.symbol)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(group.examples) { example in
+                            Button { model.choose(example) } label: {
+                                Text("“\(example.text)”")
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .disabled(!model.agent.isProviderReady)
+                            .accessibilityLabel(example.text)
+                            .accessibilityHint(example.fillsOnly ? "Puts this in the prompt for you to finish"
+                                                                 : "Asks the agent")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(group.title)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 }
 
@@ -112,17 +244,21 @@ struct AgentInspector: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             Divider()
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(agent.entries) { entry in
-                            EntryView(entry: entry).id(entry.id)
+            if agent.entries.isEmpty {
+                AgentCapabilitiesView()
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(agent.entries) { entry in
+                                EntryView(entry: entry).id(entry.id)
+                            }
                         }
+                        .padding(12)
                     }
-                    .padding(12)
-                }
-                .onChange(of: agent.entries.last) { _, last in
-                    if let last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    .onChange(of: agent.entries.last) { _, last in
+                        if let last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
                 }
             }
             if let usage = agent.lastUsage {
@@ -132,12 +268,7 @@ struct AgentInspector: View {
                     .padding(.horizontal, 12).padding(.vertical, 4)
             }
         }
-        .overlay {
-            if agent.entries.isEmpty {
-                ContentUnavailableView("Ask About Your Mail", systemImage: "sparkles",
-                                       description: Text("“What needs a reply today?” “Summarize the thread with Alex.”"))
-            }
-        }
+
     }
 }
 

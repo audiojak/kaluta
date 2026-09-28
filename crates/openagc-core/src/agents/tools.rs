@@ -14,6 +14,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::{Core, CoreError};
+use mail_sync::LocalChange;
+
+fn ids(thread_ids: Vec<String>) -> Vec<ThreadId> {
+    thread_ids.into_iter().map(ThreadId).collect()
+}
 
 /// Most threads one search returns.
 pub(crate) const MAX_SEARCH: u32 = 50;
@@ -145,7 +150,7 @@ async fn approve_then_run(core: &Arc<Core>, session: &str, tool: Tool, arguments
     let outcome = match tool {
         Tool::Send | Tool::Forward => match proposal.draft_id {
             Some(draft) => match core.clone().send_draft(draft).await {
-                Ok(()) => Outcome::json(json!({ "sent": true, "draft_id": draft })),
+                Ok(_) => Outcome::json(json!({ "sent": true, "draft_id": draft })),
                 Err(e) => failed(e),
             },
             None => Outcome::error("failed", "no draft to send"),
@@ -155,7 +160,7 @@ async fn approve_then_run(core: &Arc<Core>, session: &str, tool: Tool, arguments
             match a {
                 Ok(a) => {
                     let n = a.thread_ids.len();
-                    match core.trash(a.thread_ids).await {
+                    match core.mutate_unrecorded(LocalChange::Trash { thread_ids: ids(a.thread_ids) }).await {
                         Ok(()) => Outcome::json(json!({ "trashed": n })),
                         Err(e) => failed(e),
                     }
@@ -337,6 +342,28 @@ fn message_json(m: &mail_domain::Message, body: Option<&str>, include_quoted: bo
     })
 }
 
+/// How long an agent's read waits for header-only bodies to download.
+const ENSURE_BODIES_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Download header-only bodies before a tool reads them (spec §7.4 tiered
+/// download). Failure is not the tool's: it answers with
+/// `body_available: false` and the bodies are fetched first later.
+async fn ensure_bodies(core: &Core, ids: Vec<MessageId>) {
+    let Some(service) = core.sync_service() else { return };
+    let fetch = service.engine().ensure_bodies(ids.clone());
+    match tokio::time::timeout(ENSURE_BODIES_WAIT, fetch).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "agent read: bodies not downloaded");
+            let _ = service.prioritize(ids).await;
+        }
+        Err(_) => {
+            tracing::warn!("agent read: bodies still downloading");
+            let _ = service.prioritize(ids).await;
+        }
+    }
+}
+
 async fn body_text(core: &Core, id: &MessageId) -> Result<Option<String>, Outcome> {
     let db = core.db().map_err(failed)?;
     let id = id.clone();
@@ -359,8 +386,23 @@ async fn get_thread(core: &Arc<Core>, session: &str, arguments: Value) -> Result
     }
     let db = core.db().map_err(failed)?;
     let lookup = id.clone();
-    let (summary, messages) =
+    let (_, messages) =
         db.read(move |c| read::get_thread(c, &lookup)).await.map_err(|e| failed(e.into()))?.ok_or_else(not_found)?;
+    let header_only: Vec<MessageId> =
+        messages.iter().filter(|m| m.body_state != mail_domain::BodyState::Full).map(|m| m.id.clone()).collect();
+    let messages = if header_only.is_empty() {
+        messages
+    } else {
+        ensure_bodies(core, header_only).await;
+        let lookup = id.clone();
+        db.read(move |c| read::get_thread(c, &lookup)).await.map_err(|e| failed(e.into()))?.ok_or_else(not_found)?.1
+    };
+    let lookup = id.clone();
+    let summary = db
+        .read(move |c| read::get_thread_summary(c, &lookup))
+        .await
+        .map_err(|e| failed(e.into()))?
+        .ok_or_else(not_found)?;
     let names = label_names(core).await?;
     let mut out = Vec::with_capacity(messages.len());
     for m in &messages {
@@ -394,6 +436,13 @@ async fn get_message(core: &Arc<Core>, session: &str, arguments: Value) -> Resul
     if !in_scope(core, session, &m.thread_id) {
         return Err(not_found());
     }
+    let m = if m.body_state == mail_domain::BodyState::Full {
+        m
+    } else {
+        ensure_bodies(core, vec![id.clone()]).await;
+        let lookup = id.clone();
+        db.read(move |c| read::get_message(c, &lookup)).await.map_err(|e| failed(e.into()))?.ok_or_else(not_found)?
+    };
     let body = body_text(core, &id).await?;
     let mut value = message_json(&m, body.as_deref(), a.include_quoted);
     value["thread_id"] = json!(m.thread_id);
@@ -430,6 +479,16 @@ async fn attachment_text(core: &Arc<Core>, session: &str, arguments: Value) -> R
     let not_found = || Outcome::error("not_found", "no such attachment on that message");
     let row: i64 = a.attachment_id.parse().map_err(|_| not_found())?;
     let db = core.db().map_err(failed)?;
+    // A header-only message has no attachment rows yet (tiered download).
+    let named = MessageId(a.message_id.clone());
+    let lookup = named.clone();
+    let message = db.read(move |c| read::get_message(c, &lookup)).await.map_err(|e| failed(e.into()))?;
+    if let Some(m) = message
+        && m.body_state != mail_domain::BodyState::Full
+        && in_scope(core, session, &m.thread_id)
+    {
+        ensure_bodies(core, vec![named]).await;
+    }
     let source = db.read(move |c| read::attachment_source(c, row)).await.map_err(|e| failed(e.into()))?;
     // The attachment must belong to the message named, and be in scope.
     let source = source.filter(|s| s.message_id.as_str() == a.message_id).ok_or_else(not_found)?;
@@ -645,9 +704,11 @@ async fn change_threads(core: &Arc<Core>, arguments: Value, change: ThreadChange
     let a: ThreadsArgs = args(arguments)?;
     let n = a.thread_ids.len();
     let (done, key) = match change {
-        ThreadChange::Archive => (core.archive(a.thread_ids).await, "archived"),
-        ThreadChange::Read(true) => (core.set_read(a.thread_ids, true).await, "marked_read"),
-        ThreadChange::Read(false) => (core.set_read(a.thread_ids, false).await, "marked_unread"),
+        ThreadChange::Archive => (core.mutate_unrecorded(LocalChange::archive(ids(a.thread_ids))).await, "archived"),
+        ThreadChange::Read(read) => (
+            core.mutate_unrecorded(LocalChange::set_read(ids(a.thread_ids), read)).await,
+            if read { "marked_read" } else { "marked_unread" },
+        ),
     };
     done.map_err(failed)?;
     Ok(Outcome::json(json!({ key: n })))
@@ -688,7 +749,12 @@ async fn label_threads(core: &Arc<Core>, arguments: Value, add: bool) -> Result<
     }
     let n = a.thread_ids.len();
     let (plus, minus) = if add { (vec![label.id.0.clone()], vec![]) } else { (vec![], vec![label.id.0.clone()]) };
-    core.modify_labels(a.thread_ids, plus, minus).await.map_err(failed)?;
+    let change = LocalChange::Labels {
+        thread_ids: ids(a.thread_ids),
+        add: plus.into_iter().map(LabelId).collect(),
+        remove: minus.into_iter().map(LabelId).collect(),
+    };
+    core.mutate_unrecorded(change).await.map_err(failed)?;
     Ok(Outcome::json(json!({ "label": label.name, if add { "labeled" } else { "unlabeled" }: n })))
 }
 

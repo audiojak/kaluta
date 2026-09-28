@@ -767,7 +767,7 @@ to `imap.gmail.com`.
 *Not in scope.* IMAP as the sole provider (non-Gmail accounts), IDLE push,
 and label writes over IMAP.
 
-**Amendment (2026-09-27): tiered download.** Planned. With IMAP, headers
+**Amendment (2026-09-27): tiered download.** Implemented. With IMAP, headers
 are cheap and bodies are not; most old mail is never opened. So an account
 using IMAP downloads in two tiers:
 
@@ -785,18 +785,46 @@ Details:
 1. Queue: ids outside the body window are listed with a *headers-only*
    priority that the body backfill never drains; the headers pass covers
    them. Widening the body window moves them to body priorities.
+   *(Implemented: each age tier has its own priority, 3 = six months,
+   4 = a year, 5 = older, and headers-only is that priority + 10. The
+   headers pass stores their headers and drops them from the queue. The
+   tiering a queue was listed under is recorded in `sync_state`; when sync
+   starts with another one (IMAP turned on or off, another body window) the
+   window's phases are re-listed. If the source stops offering cheap
+   headers mid-run (IMAP refused), the headers-only tier is promoted to
+   body fetches rather than left unlisted. A header-only refresh keeps an
+   existing snippet.)*
 2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
    available, else REST) and store them; agent tools (`mail_get_thread`,
    `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
 3. Search: free-text queries also run server search when the account has
    header-only mail in the searched mailbox, not only when local results
    are few; header-only rows match on headers locally in the meantime.
+   *(Implemented per account rather than per mailbox: any header-only
+   message, found through a partial index, makes a query with a word or
+   phrase outside an operator ask Gmail after the usual pause. Matches that
+   are stored with headers only download their bodies like an opened
+   message.)*
 4. Snippets: a partial fetch of the first bytes of the text part
    (`BODY.PEEK[1]<0.2048>`, decoded best effort) gives list snippets
-   without whole bodies.
+   without whole bodies. *(Implemented as `BODY.PEEK[TEXT]<0.2048>` in the
+   same command as the headers, for every message: the header block plus
+   those bytes, cut back to the last whole line, go through `mail-mime` like
+   a full message, which handles multipart, quoted-printable, base64,
+   charsets and HTML-only mail alike. `RFC822.SIZE` gives the true size;
+   header bytes count towards the daily IMAP budget.)*
 5. Accounts on the REST API keep today's behaviour (bodies for the whole
    window): headers cost the same quota there. Settings suggests IMAP for
    large mailboxes and hides the body-window choice without it.
+   *(Implemented: Settings › Accounts shows "Full messages for: Last 30
+   days / Last 6 months / Everything downloaded" under the IMAP toggle when
+   it is on, and otherwise, above 20,000 stored messages, a one-line nudge
+   towards IMAP. `SyncStatus` carries `pending_headers`; the sync line reads
+   "Syncing over IMAP — headers 6,406 left" while headers-only mail is
+   queued, then the body count.)*
+
+*Status (2026-09-27): implemented (oagc-m90), tested against the fakes
+only.*
 
 Trade-off, accepted: text search over old mail waits on Gmail's server
 search, and an agent reading old mail pauses while it downloads.
@@ -1763,7 +1791,7 @@ in the composer for review with a "Created by Claude" badge.
 
 ### 14.6a Acknowledgement and undo **(Amendment 2026-09-27)**
 
-Planned. Every mail action the user takes shows a short acknowledgement
+Implemented 2026-09-27 (oagc-82v). Every mail action the user takes shows a short acknowledgement
 with a way back, instead of any confirmation dialog ("never use a warning
 when you mean undo": all these actions are reversible).
 
@@ -1795,9 +1823,37 @@ when you mean undo": all these actions are reversible).
   "Sending… Undo ⌘Z", and undo returns the message to an open composer.
   Agent sends, approved by the user, use the same delay.
 
+*Implementation notes.*
+- The core records each user action in the account's store
+  (`undo_actions`, last 50) as per-message diffs and returns an
+  `UndoToken` (account, action id); `undo_action`/`redo_action` apply the
+  exact inverse or the original as outbox ops in the token's own account.
+  Trash is undone with Gmail's `messages.untrash` (outbox `Untrash`), then
+  the recorded labels. An action that changed nothing returns no token and
+  shows no notice. Agent tools use an unrecorded path.
+- Swift keeps one `UndoManager` per account; Edit › Undo/Redo is
+  replaced by a command group that sends `undo:`/`redo:` down the
+  responder chain when a text view is first responder or another window is
+  key, so fields and the composer keep their own undo.
+- The notice is a glass capsule over the bottom of the thread list.
+- Undo Send: held sends sit in the outbox with `next_attempt_at` set; the
+  drain claims an op (`in_flight`) before calling Gmail, so cancelling can
+  only remove a send that has not started. Undo removes the optimistic
+  Sent copy, returns the draft to editing and reopens it; there is no
+  redo. The notice lasts as long as the hold. *Decision:* quitting sends
+  held messages at once (the app waits up to 5 s for every send not yet
+  handed to Gmail, held or not; any not delivered go at the next launch).
+  Only a send never attempted and still within its hold can be taken
+  back, and its notice does not pause, since the hold does not.
+- The outbox runs strictly in order: an op waiting to retry holds back
+  the ones after it (an undo must never reach Gmail before the action it
+  reverses); held sends alone step aside until their time. The demo mailbox sends locally at once, so it offers
+  no Undo Send. Agent sends are held for the same delay but have no notice
+  of their own yet.
+
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 
-Planned. The prompt capsule ("Ask Claude…") gives no hint of what an agent
+Implemented 2026-09-27 (oagc-gra). The prompt capsule ("Ask Claude…") gives no hint of what an agent
 can do; most users will not guess. Suggestions show examples, drawn from
 the tools that exist (§10.2), so nothing is promised that a tool cannot do.
 
@@ -1833,6 +1889,17 @@ the tools that exist (§10.2), so nothing is promised that a tool cannot do.
 - **Accessibility.** Chips are buttons with full labels; VoiceOver
   announces "4 suggestions" when they appear; Reduce Motion disables the
   fade.
+
+*Implementation notes.* `AgentSuggestions` (Swift, pure) builds the groups
+and chips; up to two recent prompts that fit the context come first (one
+mentioning "this"/"here" fits a single selection, "these"/"results" several
+or a search, anything else no selection), then the context's examples, the
+most relevant fixed and the rest rotated by day. *Decision:* the archive
+chip reads "Archive these (reversible)", not "(you can undo)": agent
+actions are not on the ⌘Z stack (§14.6a), though they can be moved back.
+The empty state replaces the transcript area (header kept); the chips sit
+above the capsule. Settings › Agents › Clear Suggestions History forgets
+the recent prompts (UserDefaults, per account).
 
 ### 14.7 Other native behaviors
 

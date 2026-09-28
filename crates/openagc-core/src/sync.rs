@@ -51,7 +51,11 @@ impl SyncObserver for EventObserver {
             SyncPhase::Backfilling | SyncPhase::Incremental => SyncState::Syncing,
             SyncPhase::Idle => SyncState::Idle,
         };
-        self.events.emit(CoreEvent::SyncStatus { state, pending: progress.queued.min(u32::MAX as u64) as u32 });
+        self.events.emit(CoreEvent::SyncStatus {
+            state,
+            pending: progress.queued.min(u32::MAX as u64) as u32,
+            pending_headers: progress.headers.min(u32::MAX as u64) as u32,
+        });
     }
 }
 
@@ -152,6 +156,12 @@ impl SyncService {
             }
             Ok(false) => {
                 if let Err(e) = self.retrying(|| self.engine.ensure_window()).await {
+                    self.fail(e);
+                    return;
+                }
+                // Tiered download (spec §7.4): IMAP on or off since the
+                // queue was listed re-lists the window.
+                if let Err(e) = self.retrying(|| self.engine.ensure_tiers()).await {
                     self.fail(e);
                     return;
                 }
@@ -329,7 +339,7 @@ impl SyncService {
     }
 
     fn status(&self, state: SyncState, pending: u32) {
-        self.events.emit(CoreEvent::SyncStatus { state, pending });
+        self.events.emit(CoreEvent::SyncStatus { state, pending, pending_headers: 0 });
     }
 
     fn offline_or_error(&self, e: &SyncError) {

@@ -71,7 +71,7 @@ struct SchemeHandlerTests {
 @MainActor
 struct ReaderStoreTests {
     @Test func loadsAThreadWithBodiesAndDecidesRemoteImages() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         let first = try #require(model.threads.rows.first)

@@ -54,7 +54,7 @@ struct NotificationTests {
     }
 
     @Test func clickingANotificationRevealsTheThread() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         let row = try #require(model.threads.rows.dropFirst(3).first)
@@ -80,11 +80,11 @@ struct NotificationTests {
     }
 
     @Test func clickingANotificationForAnotherAccountSwitchesToIt() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 20)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 20)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         #expect(model.openAccountID == "work")
         #expect(model.notificationTag(for: "home") == .init(id: "home", label: "home@example.com"))
@@ -95,15 +95,19 @@ struct NotificationTests {
     }
 
     @Test func removingTheShownAccountOpensTheNextThenOnboarding() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 10)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 10)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         try await core.setSyncWindow(.year, for: "home")
         #expect(try await core.syncWindow(for: "home") == .year)
         #expect(try await core.syncWindow(for: "work") == .halfYear, "per account")
+        #expect(try await core.bodyWindow(for: "home") == .month, "tiered download: 30 days by default")
+        try await core.setBodyWindow(.window, for: "home")
+        #expect(try await core.bodyWindow(for: "home") == .window)
+        #expect(try await core.bodyWindow(for: "work") == .month, "per account")
         await model.removeAccount("work")
         #expect(model.openAccountID == "home")
         #expect(model.accounts.map(\.id) == ["home"])
@@ -124,11 +128,29 @@ struct NotificationTests {
     }
 }
 
+struct IMAPSuggestionTests {
+    @Test func onlyLargeMailboxesWithoutIMAPAreNudged() {
+        #expect(AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 25_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 5_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: true, storedMessages: 25_000))
+        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: nil))
+    }
+}
+
 struct SyncStatusTextTests {
-    @Test func theSidebarSaysWhenItDownloadsOverIMAP() {
-        #expect(SyncStatusView.syncingText(pending: 7258, transport: "imap") == "Syncing over IMAP — 7,258 left")
-        #expect(SyncStatusView.syncingText(pending: 12, transport: "rest") == "Syncing — 12 left")
-        #expect(SyncStatusView.syncingText(pending: 0, transport: "imap") == "Syncing over IMAP…")
-        #expect(SyncStatusView.syncingText(pending: 3, transport: nil) == "Syncing — 3 left")
+    private func lines(_ d: AppModel.SyncDisplay, _ transport: String? = nil, signIn: Bool = false) -> [String?] {
+        guard let f = SyncStatusView.footer(d, transport: transport, needsSignIn: signIn) else { return [] }
+        return [f.title, f.detail]
+    }
+
+    @Test func theSidebarFooterSaysWhatIsDownloadingLikeMail() {
+        #expect(lines(.syncing(pending: 7258), "imap") == ["Downloading over IMAP", "7,258 left"])
+        #expect(lines(.syncing(pending: 12), "rest") == ["Downloading Messages", "12 left"])
+        #expect(lines(.syncing(pending: 0)) == ["Downloading Messages", nil])
+        #expect(lines(.syncing(pending: 120, headers: 6406), "imap")
+            == ["Downloading over IMAP", "headers for 6,406 messages left"])
+        #expect(lines(.offline).first == "Offline")
+        #expect(lines(.idle).isEmpty, "nothing to say when idle")
+        #expect(lines(.idle, signIn: true).first == "Not Syncing")
     }
 }

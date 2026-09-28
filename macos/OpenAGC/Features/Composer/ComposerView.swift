@@ -35,7 +35,11 @@ struct ComposerView: View {
             await store.load(request)
         }
         .onChange(of: store?.phase) { _, phase in
-            if phase == .sent { dismiss() }
+            guard phase == .sent else { return }
+            if let store, let draftID = store.heldSend, let account = store.accountID ?? model.openAccountID {
+                model.sendHeld(draftID: draftID, accountID: account)
+            }
+            dismiss()
         }
         .onDisappear {
             guard let store else { return }

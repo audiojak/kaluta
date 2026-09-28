@@ -180,16 +180,121 @@ impl Core {
         }
     }
 
+    /// How long sends wait so they can be undone (Settings › General ›
+    /// Undo send; 0 turns it off). Agents' approved sends wait too.
+    pub fn set_send_delay(&self, seconds: u32) {
+        self.send_delay_ms.store(u64::from(seconds.min(60)) * 1000, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Undo Send: take back a send still waiting out its delay. The draft
+    /// returns to editing (the app reopens it). `false` if it has already
+    /// gone, or went while this ran.
+    pub async fn cancel_send(&self, draft_id: i64) -> Result<bool, CoreError> {
+        let db = self.db()?;
+        let events = self.account_events();
+        let service = self.sync_service();
+        runtime::run(async move {
+            let now = mail_sync::now_millis();
+            let changes = db.write(move |tx| mail_store::outbox::cancel_send(tx, draft_id, now)).await?;
+            let Some(changes) = changes else { return Ok(false) };
+            mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events }, &changes);
+            if let Some(service) = service {
+                service.outbox_changed();
+            }
+            Ok(true)
+        })
+        .await
+    }
+
+    /// [`Core::held_send_count`] without waiting on the runtime, for the
+    /// app's quit handler (it must answer on the main thread at once). A
+    /// pooled read; well under a millisecond.
+    pub fn held_send_count_now(&self) -> u32 {
+        let stores: Vec<mail_store::Db> =
+            self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
+        let now = mail_sync::now_millis();
+        stores.iter().map(|db| db.read_blocking(move |c| mail_store::outbox::held_sends(c, now)).unwrap_or(0)).sum()
+    }
+
+    /// Sends quitting should wait for, answered at once (the quit handler
+    /// cannot wait to ask): held, due, or on their way to Gmail.
+    pub fn unsent_send_count_now(&self) -> u32 {
+        let stores: Vec<mail_store::Db> =
+            self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
+        stores.iter().map(|db| db.read_blocking(mail_store::outbox::unsent_sends).unwrap_or(0)).sum()
+    }
+
+    /// Sends waiting out their Undo Send delay, in every account.
+    pub async fn held_send_count(&self) -> u32 {
+        let stores: Vec<mail_store::Db> =
+            self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.values().cloned().collect();
+        runtime::run(async move {
+            let now = mail_sync::now_millis();
+            let mut held = 0;
+            for db in stores {
+                held += db.read(move |c| mail_store::outbox::held_sends(c, now)).await.unwrap_or(0);
+            }
+            Ok::<_, CoreError>(held)
+        })
+        .await
+        .unwrap_or(0)
+    }
+
+    /// The app is quitting: every held send goes now rather than waiting
+    /// out its delay (spec §14.6a decision). Waits up to `timeout_ms` for
+    /// them to reach Gmail; any not sent by then go at the next launch.
+    /// Returns how many are still waiting.
+    pub async fn send_held_now(&self, timeout_ms: u32) -> u32 {
+        let stores: Vec<(String, mail_store::Db)> = self
+            .open_accounts
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .stores
+            .iter()
+            .map(|(id, db)| (id.clone(), db.clone()))
+            .collect();
+        let services: Vec<std::sync::Arc<crate::sync::SyncService>> =
+            stores.iter().filter_map(|(id, _)| self.accounts_sync_service(id)).collect();
+        runtime::run(async move {
+            let now = mail_sync::now_millis();
+            for (_, db) in &stores {
+                db.write(move |tx| mail_store::outbox::release_held_sends(tx, now)).await.unwrap_or(0);
+            }
+            for service in &services {
+                service.outbox_changed();
+            }
+            // Wait for every send not yet handed over, whether it was
+            // released just now or its hold ran out a moment before.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(u64::from(timeout_ms));
+            loop {
+                let mut waiting = 0;
+                for (_, db) in &stores {
+                    waiting += db.read(mail_store::outbox::unsent_sends).await.unwrap_or(0);
+                }
+                if waiting == 0 || std::time::Instant::now() >= deadline {
+                    return Ok::<_, CoreError>(waiting);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .unwrap_or(0)
+    }
+
     /// Send a saved draft. With Gmail connected it goes through the outbox
-    /// (retried if offline); the demo mailbox "sends" locally.
-    pub async fn send_draft(&self, id: i64) -> Result<(), CoreError> {
+    /// (retried if offline), held for the Undo Send delay; the demo
+    /// mailbox "sends" locally at once. Returns whether it is held, so can
+    /// still be taken back with [`Core::cancel_send`].
+    pub async fn send_draft(&self, id: i64) -> Result<bool, CoreError> {
         self.refuse_if_archive()?;
         let from = EmailAddress::new(None, &self.own_address().await?);
         let db = self.db()?;
         let service = self.sync_service();
         let events = self.account_events();
+        let hold = self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed) as mail_domain::Millis;
         runtime::run(async move {
-            let changes = mail_sync::send_draft(&db, id, from, service.is_some()).await.map_err(|e| match e {
+            let queue = service.is_some();
+            let changes = mail_sync::send_draft(&db, id, from, queue, hold).await.map_err(|e| match e {
                 mail_sync::SyncError::Store(mail_store::StoreError::Invalid(m)) => {
                     CoreError::new(ErrorKind::InvalidInput, m)
                 }
@@ -199,7 +304,7 @@ impl Core {
             if let Some(service) = service {
                 service.outbox_changed();
             }
-            Ok(())
+            Ok(queue && hold > 0)
         })
         .await
     }
@@ -270,8 +375,12 @@ impl AccountComposer {
         self.scoped(self.core.delete_draft(id)).await
     }
 
-    pub async fn send_draft(&self, id: i64) -> Result<(), CoreError> {
+    pub async fn send_draft(&self, id: i64) -> Result<bool, CoreError> {
         self.scoped(self.core.send_draft(id)).await
+    }
+
+    pub async fn cancel_send(&self, draft_id: i64) -> Result<bool, CoreError> {
+        self.scoped(self.core.cancel_send(draft_id)).await
     }
 
     pub fn flush_drafts(&self) {
@@ -391,5 +500,82 @@ mod tests {
         block_on(core.delete_draft(id)).unwrap();
         assert!(wait_until(|| fake.drafts().is_empty()), "server copy deleted");
         core.stop_sync();
+    }
+
+    fn draft_to(subject: &str) -> super::DraftInfo {
+        super::DraftInfo {
+            id: 0,
+            thread_id: None,
+            in_reply_to_message_id: None,
+            to: vec![crate::ffi::AddressInfo { name: None, email: "sam@example.com".into() }],
+            cc: vec![],
+            bcc: vec![],
+            subject: subject.into(),
+            body_html: "<p>Hello</p>".into(),
+            quoted_html: String::new(),
+            attachments: vec![],
+            status: super::DraftStatus::Editing,
+            error: None,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn a_held_send_can_be_taken_back_and_quitting_sends_it_at_once() {
+        use mail_domain::MessageId;
+        let dir = std::env::temp_dir().join(format!("openagc-core-undosend-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            Arc::new(Noop),
+        )
+        .unwrap();
+        block_on(core.clone().open_account("acct".into())).unwrap();
+        let fake = Arc::new(provider_api::fake::FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        core.start_sync_with(fake.clone()).unwrap();
+        assert!(wait_until(|| block_on(core.account_address()).is_ok_and(|a| a == "me@example.com")));
+        core.set_send_delay(30);
+
+        // Sent, held, then taken back: nothing reaches Gmail, the draft is
+        // editable again and the Sent copy is gone.
+        let id = block_on(core.save_draft(draft_to("Held"))).unwrap();
+        assert!(block_on(core.send_draft(id)).unwrap(), "held");
+        assert_eq!(block_on(core.held_send_count()), 1);
+        assert_eq!(core.held_send_count_now(), 1);
+        assert!(block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held"));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(fake.message(&MessageId::new("sent1")).is_none(), "held, not sent");
+        assert!(block_on(core.cancel_send(id)).unwrap());
+        let back = block_on(core.get_draft(id)).unwrap().expect("the draft is back");
+        assert_eq!(back.status, super::DraftStatus::Editing);
+        assert!(
+            !block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held")
+        );
+        assert!(!block_on(core.cancel_send(id)).unwrap(), "nothing left to take back");
+
+        // A send already tried (it timed out after Gmail may have taken
+        // it) cannot be taken back: that could mean sending it twice.
+        block_on(core.send_draft(id)).unwrap();
+        let db = core.db().unwrap();
+        db.write_blocking(|tx| Ok(tx.execute("UPDATE outbox SET attempts = 1 WHERE kind = 'send'", [])?)).unwrap();
+        assert!(!block_on(core.cancel_send(id)).unwrap(), "already attempted");
+        db.write_blocking(|tx| Ok(tx.execute("UPDATE outbox SET attempts = 0 WHERE kind = 'send'", [])?)).unwrap();
+        assert_eq!(core.unsent_send_count_now(), 1);
+
+        // Then the app quits: it goes at once.
+        assert_eq!(block_on(core.send_held_now(5_000)), 0, "delivered before quitting");
+        assert!(fake.message(&MessageId::new("sent1")).is_some());
+        assert_eq!(core.unsent_send_count_now(), 0);
+        assert!(!block_on(core.cancel_send(id)).unwrap(), "too late to take back");
+
+        // No delay: straight out.
+        core.set_send_delay(0);
+        let id = block_on(core.save_draft(draft_to("Now"))).unwrap();
+        assert!(!block_on(core.send_draft(id)).unwrap(), "not held");
+        assert_eq!(block_on(core.held_send_count()), 0);
+        assert!(wait_until(|| fake.message(&MessageId::new("sent2")).is_some()));
+        core.stop_sync();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

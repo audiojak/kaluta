@@ -60,14 +60,19 @@ final class ThreadListStore {
             searchQuery = query
             nextCursor = nil
             await load(replacing: true, limit: Self.pageSize)
-            await searchServerIfFew(query)
+            await searchServerIfNeeded(query)
         }
     }
 
-    /// Few local results: ask Gmail too, for mail outside the sync window,
-    /// after a pause so typing does not spend quota (spec §7.4 follow-up).
-    private func searchServerIfFew(_ query: String) async {
-        guard let core, searchError == nil, rows.count < Self.serverSearchBelow else { return }
+    /// Ask Gmail too, after a pause so typing does not spend quota: when
+    /// few results are local (mail outside the sync window, spec §7.4
+    /// follow-up), or when the query has free text and some mail here has
+    /// headers only, so its bodies could match (tiered download).
+    private func searchServerIfNeeded(_ query: String) async {
+        guard let core, searchError == nil else { return }
+        if rows.count >= Self.serverSearchBelow {
+            guard Self.hasFreeText(query), await core.hasHeaderOnlyMail() else { return }
+        }
         try? await Task.sleep(for: Self.serverSearchDelay)
         guard !Task.isCancelled, searchQuery == query else { return }
         isSearchingServer = true
@@ -76,6 +81,25 @@ final class ThreadListStore {
         guard !Task.isCancelled, searchQuery == query, arrived > 0 else { return }
         nextCursor = nil
         await load(replacing: true, limit: Self.pageSize)
+    }
+
+    /// Whether a query has words to find in bodies, not only operators
+    /// (`from:`, `is:unread`, `label:…`). Quoted phrases count as words.
+    nonisolated static func hasFreeText(_ query: String) -> Bool {
+        var inQuotes = false
+        var token = ""
+        var found = false
+        func finish() {
+            let bare = token.hasPrefix("-") ? String(token.dropFirst()) : token
+            if !bare.isEmpty, !bare.contains(":") || bare.hasPrefix("\"") { found = true }
+            token = ""
+        }
+        for ch in query {
+            if ch == "\"" { inQuotes.toggle() }
+            if ch.isWhitespace, !inQuotes { finish() } else { token.append(ch) }
+        }
+        finish()
+        return found
     }
 
     static let serverSearchBelow = 20

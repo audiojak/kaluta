@@ -229,6 +229,11 @@ impl MailProvider for GmailProvider {
         self.http.empty(cost::TRASH, Priority::Interactive, |c| c.post(&url)).await
     }
 
+    async fn restore_from_trash(&self, id: &MessageId) -> ProviderResult<()> {
+        let url = self.url(&format!("messages/{}/untrash", id.as_str()));
+        self.http.empty(cost::TRASH, Priority::Interactive, |c| c.post(&url)).await
+    }
+
     async fn send(&self, raw: &[u8], thread: Option<&ThreadId>) -> ProviderResult<MessageId> {
         let url = self.url("messages/send");
         let mut body = json!({ "raw": encode_base64url(raw) });

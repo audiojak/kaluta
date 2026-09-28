@@ -22,8 +22,8 @@ struct AgentSettingsTests {
 @MainActor
 struct AgentPermissionTests {
     @Test func thePolicyFollowsTheUsersChoices() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
+        let dir = CoreClient.testScratch()
+        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         defaults.set(["mail_archive"], forKey: AppModel.agentApprovalKey)
         model.applyAgentPolicy()

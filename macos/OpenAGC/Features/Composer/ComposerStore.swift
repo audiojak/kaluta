@@ -45,6 +45,10 @@ final class ComposerStore {
     /// Set after a save fails; cleared by the next good one.
     private(set) var saveError: String?
     private(set) var lastSaved: Date?
+    /// The draft just sent, if it is held for Undo Send (spec §14.6a).
+    private(set) var heldSend: Int64?
+    /// The account the composer sends as.
+    var accountID: String? { core?.accountID }
 
     var to: [AddressInfo] = [] { didSet { edited() } }
     var cc: [AddressInfo] = [] { didSet { edited() } }
@@ -221,7 +225,7 @@ final class ComposerStore {
         guard saveError == nil, draftID != 0 else { return }
         phase = .sending
         do {
-            try await core.sendDraft(draftID)
+            if try await core.sendDraft(draftID) { heldSend = draftID }
             phase = .sent
         } catch {
             phase = .editing

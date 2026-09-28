@@ -9,11 +9,11 @@ struct AccountSwitchTests {
     struct Timeout: Error {}
 
     private func twoAccounts() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 40)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 12)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         return model
     }
@@ -53,7 +53,7 @@ struct AccountSwitchTests {
     @Test func aComposerStaysOnItsAccountAfterASwitch() async throws {
         let model = try await twoAccounts()
         let store = ComposerStore(core: model.core, account: "work",
-                                  attachmentsDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+                                  attachmentsDirectory: CoreClient.testScratch())
         await store.load(.new(to: "someone@example.com"))
         await model.switchAccount(to: "home")
         store.subject = "Written on work"
@@ -70,7 +70,7 @@ struct AccountSwitchTests {
 @MainActor
 struct OrphanedStoreTests {
     @Test func leftoverStoresAreListedAndDeletable() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("kept", email: "me@example.com", threads: 5)

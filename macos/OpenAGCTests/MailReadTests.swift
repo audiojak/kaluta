@@ -4,7 +4,7 @@ import Testing
 
 struct MailReadTests {
     private func seededClient(threads: UInt32 = 120) async throws -> CoreClient {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let client = try CoreClient(dataDirectory: dir)
         try await client.openAccount("test-account")
         try await client.seedDemoMailbox(threads: threads)
@@ -12,7 +12,7 @@ struct MailReadTests {
     }
 
     @Test func readsBeforeAnAccountIsOpenFailWithNotFound() async throws {
-        let client = try CoreClient(dataDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+        let client = try CoreClient(dataDirectory: CoreClient.testScratch())
         await #expect(throws: CoreClientError.self) { try await client.mailboxes() }
         do {
             _ = try await client.mailboxes()

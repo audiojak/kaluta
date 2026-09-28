@@ -137,6 +137,12 @@ pub trait BackfillSource: Send + Sync {
     async fn fetch_headers(&self, _ids: &[MessageId]) -> ProviderResult<Option<Vec<FetchedMessage>>> {
         Ok(None)
     }
+    /// Whether [`BackfillSource::fetch_headers`] is cheap here at all (it
+    /// may still answer `None` for a while, e.g. over its daily budget).
+    /// Decides tiered download (spec §7.4 amendment 2026-09-27).
+    fn cheap_headers(&self) -> bool {
+        false
+    }
     /// A short name for logs and diagnostics ("rest", "imap").
     fn name(&self) -> &'static str;
 }
@@ -168,6 +174,8 @@ pub trait MailProvider: Send + Sync {
     async fn changes_since(&self, cursor: &SyncCursor) -> ProviderResult<ChangeSet>;
     async fn modify_labels(&self, op: &LabelOp) -> ProviderResult<()>;
     async fn move_to_trash(&self, id: &MessageId) -> ProviderResult<()>;
+    /// Take a message out of Trash (undo of a trash, spec §14.6a).
+    async fn restore_from_trash(&self, id: &MessageId) -> ProviderResult<()>;
     /// Send raw RFC 5322 bytes, threaded into `thread` when given.
     async fn send(&self, raw: &[u8], thread: Option<&ThreadId>) -> ProviderResult<MessageId>;
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>>;

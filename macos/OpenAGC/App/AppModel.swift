@@ -18,8 +18,26 @@ final class AppModel {
         case failed(String)
     }
 
+    /// The most messages seen waiting in the current sync, for the
+    /// sidebar's progress bar; reset when sync goes idle.
+    private(set) var syncTotal: UInt32 = 0
+
+    /// How far the current download has got, 0…1.
+    var syncProgress: Double {
+        guard case let .syncing(pending, headers) = syncDisplay, syncTotal > 0 else { return 0 }
+        return 1 - Double(pending + headers) / Double(syncTotal)
+    }
+
+    /// The sidebar's heading for the open account's own mailboxes.
+    var accountSectionTitle: String {
+        if openAccountID == Self.demoAccountID { return "Demo Mailbox" }
+        let account = accounts.first { $0.id == openAccountID }
+        return account.map { $0.displayName ?? $0.email } ?? accountEmail ?? "Mailboxes"
+    }
+
     enum SyncDisplay: Equatable {
-        case idle, syncing(pending: UInt32), offline, error
+        /// `headers`: messages waiting for headers only (tiered download).
+        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline, error
     }
 
     static let demoAccountID = "demo"
@@ -57,7 +75,14 @@ final class AppModel {
         if case .open(let id) = accountState { return id }
         return nil
     }
-    private(set) var syncDisplay: SyncDisplay = .idle
+    private(set) var syncDisplay: SyncDisplay = .idle {
+        didSet {
+            switch syncDisplay {
+            case let .syncing(pending, headers): syncTotal = max(syncTotal, pending + headers)
+            default: syncTotal = 0
+            }
+        }
+    }
     /// How the open account's backfill downloads bodies ("imap", "rest",
     /// "imap-refused"), for the sidebar's sync line.
     private(set) var backfillTransport: String?
@@ -109,6 +134,8 @@ final class AppModel {
     /// Where each account's window was (mailbox, thread), restored on switch.
     @ObservationIgnored private var placeByAccount: [String: (mailbox: String?, thread: String?)] = [:]
     let routines: RoutinesStore
+    /// Undo for the user's mail actions, one stack per account (spec §14.6a).
+    let undo: MailUndo
     let core: CoreClient?
 
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
@@ -121,15 +148,23 @@ final class AppModel {
     /// touch the real app's (the test host *is* the app).
     @ObservationIgnored let defaults: UserDefaults
 
-    init(core: CoreClient?, defaults: UserDefaults = .standard) {
+    /// `defaults` defaults to the app's preferences, which are a throwaway
+    /// suite under tests and scratch runs (`CoreClient.appDefaults`).
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
         self.core = core
         self.defaults = defaults
         accountEmail = defaults.string(forKey: "accountEmail")
+        undoSendSeconds = (defaults.object(forKey: Self.undoSendKey) as? Int).map { UInt32(clamping: $0) } ?? 10
         mailboxes = MailboxStore(core: core)
         threads = ThreadListStore(core: core)
         reader = ReaderStore(core: core)
         fallbackAgent = AgentStore(core: core)
         routines = RoutinesStore(core: core)
+        undo = MailUndo(core: core)
+        undo.onError = { [weak self] message in
+            self?.logger.error("undo failed: \(message, privacy: .private)")
+            Task { await self?.threads.refresh() }
+        }
     }
 
     /// Open the remembered account, or the demo when asked for on launch.
@@ -141,6 +176,7 @@ final class AppModel {
         }
         listenForEvents(from: core)
         applyAgentPolicy()
+        core.setSendDelay(seconds: undoSendSeconds)
         notifier.openThread = { [weak self] thread, account in
             guard let self else { return }
             Task { await self.reveal(threadID: thread, in: account) }
@@ -349,7 +385,53 @@ final class AppModel {
     func askAgent(_ prompt: String) async {
         let context = PromptContextInfo(mailboxId: selectedMailboxID, selectedThreadIds: actionTargets,
                                         searchQuery: threads.searchQuery)
+        if let id = openAccountID {
+            RecentPrompts(defaults: defaults).record(prompt, for: id)
+            recentPromptsRevision += 1
+        }
         await agent.send(prompt, context: context)
+    }
+
+    // MARK: Agent suggestions (spec §14.6b)
+
+    /// The prompt capsule's text, shared so a suggestion can fill it.
+    var agentPromptDraft = ""
+    /// Bumped when recent prompts change, so chips recompute.
+    private(set) var recentPromptsRevision = 0
+
+    /// What is on screen, for the suggestions.
+    var suggestionContext: SuggestionContext {
+        let targets = actionTargets
+        let mailbox = mailboxes.mailboxes.first { $0.id == selectedMailboxID }
+        let attachment = targets.count == 1 && reader.detail?.thread.id == targets.first && !reader.attachments.isEmpty
+        return SuggestionContext(selectedCount: targets.count, mailboxID: selectedMailboxID,
+                                 unreadInMailbox: Int(mailbox?.unreadCount ?? 0), searchQuery: threads.searchQuery,
+                                 hasAttachment: attachment, canDraft: !isArchive)
+    }
+
+    /// Up to four chips over the empty prompt field.
+    var agentChips: [AgentSuggestion] {
+        _ = recentPromptsRevision
+        let recent = openAccountID.map { RecentPrompts(defaults: defaults).prompts(for: $0) } ?? []
+        return AgentSuggestions.chips(for: suggestionContext, recent: recent, day: AgentSuggestions.today())
+    }
+
+    /// A suggestion was chosen: send it, or put it in the field when it
+    /// needs the user's words.
+    func choose(_ suggestion: AgentSuggestion) {
+        if suggestion.fillsOnly {
+            agentPromptDraft = suggestion.fillText
+            focusAgentPrompt()
+        } else {
+            agentPromptDraft = ""
+            Task { await askAgent(suggestion.text) }
+        }
+    }
+
+    /// Settings › Agents › Clear Suggestions History.
+    func clearSuggestionHistory() {
+        RecentPrompts(defaults: defaults).clear(accounts.map(\.id) + [openAccountID].compactMap { $0 })
+        recentPromptsRevision += 1
     }
 
     // MARK: Notifications
@@ -556,14 +638,19 @@ final class AppModel {
     }
 
     /// Archive (or trash): rows leave at once and the next row is selected.
-    func archiveSelection() { removeFromList(action: { core, ids in try await core.archive(ids) }) }
-    func trashSelection() { removeFromList(action: { core, ids in try await core.trash(ids) }) }
+    func archiveSelection() {
+        removeFromList(.archive) { core, ids in try await core.archive(ids) }
+    }
+
+    func trashSelection() {
+        removeFromList(.trash) { core, ids in try await core.trash(ids) }
+    }
 
     func moveSelectionToInbox() {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         if selectedMailboxID != "INBOX" { dropFromList(ids) }
-        Task { await perform { try await core.moveToInbox(ids) } }
+        Task { await perform(UndoableAction(kind: .moveToInbox, count: ids.count)) { try await core.moveToInbox(ids) } }
     }
 
     /// Toggle read: if any target is unread, mark all read; else all unread.
@@ -572,7 +659,8 @@ final class AppModel {
         guard let core, !ids.isEmpty else { return }
         let anyUnread = threads.rows.contains { ids.contains($0.id) && $0.unreadCount > 0 }
         threads.optimisticallyUpdate(Set(ids)) { $0.unreadCount = anyUnread ? 0 : max($0.unreadCount, 1) }
-        Task { await perform { try await core.setRead(ids, anyUnread) } }
+        let action = UndoableAction(kind: anyUnread ? .read : .unread, count: ids.count)
+        Task { await perform(action) { try await core.setRead(ids, anyUnread) } }
     }
 
     func toggleStarSelection() {
@@ -581,17 +669,88 @@ final class AppModel {
         let allStarred = threads.rows.filter { ids.contains($0.id) }.allSatisfy(\.isStarred)
         threads.optimisticallyUpdate(Set(ids)) { $0.isStarred = !allStarred }
         if selectedMailboxID == "STARRED", allStarred { dropFromList(ids) }
-        Task { await perform { try await core.setStarred(ids, !allStarred) } }
+        let action = UndoableAction(kind: allStarred ? .unstar : .star, count: ids.count)
+        Task { await perform(action) { try await core.setStarred(ids, !allStarred) } }
     }
 
     func setLabel(_ labelID: String, applied: Bool) {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         if !applied, selectedMailboxID == labelID { dropFromList(ids) }
+        let name = labelName(labelID)
+        let action = UndoableAction(kind: applied ? .label(name) : .unlabel(name), count: ids.count)
         Task {
-            await perform {
+            await perform(action) {
                 try await core.modifyLabels(ids, add: applied ? [labelID] : [], remove: applied ? [] : [labelID])
             }
+        }
+    }
+
+    /// A label's last path segment, for the notice.
+    private func labelName(_ labelID: String) -> String {
+        mailboxes.mailboxes.first { $0.labelId == labelID }.map { LabelTree.leafName($0.name) } ?? "label"
+    }
+
+    // MARK: Undo (spec §14.6a)
+
+    static let undoSendKey = "undoSendSeconds"
+    static let undoSendChoices: [UInt32] = [0, 5, 10, 20, 30]
+
+    /// Settings › General › Undo send: how long a send waits (0 = off).
+    var undoSendSeconds: UInt32 = 10 {
+        didSet {
+            defaults.set(Int(undoSendSeconds), forKey: Self.undoSendKey)
+            core?.setSendDelay(seconds: undoSendSeconds)
+        }
+    }
+
+    /// A composer sent a message that is held: offer to take it back.
+    func sendHeld(draftID: Int64, accountID: String) {
+        guard let core else { return }
+        undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
+            guard let self else { return }
+            if await core.cancelSend(draftID, in: accountID) {
+                if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
+                self.compose(.draft(id: draftID))
+            } else {
+                self.undo.show("Already sent", accountID: accountID)
+            }
+        }
+    }
+
+
+    /// Undo the open account's last mail action (the notice's button, and
+    /// ⌘Z when no text is being edited).
+    func undoMailAction() {
+        undo.undo(in: openAccountID)
+    }
+
+    func redoMailAction() {
+        undo.redo(in: openAccountID)
+    }
+
+    /// Whether ⌘Z belongs to text being edited: a text view is first
+    /// responder in the key window (a field, the composer), or the key
+    /// window is not the mail window.
+    static func textOwnsUndo() -> Bool {
+        guard let window = NSApp.keyWindow else { return false }
+        return window.firstResponder is NSText || window.firstResponder is NSTextView
+    }
+
+    /// Edit › Undo: text keeps its own undo while it is being edited.
+    func undoCommand(mailWindowKey: Bool) {
+        if Self.textOwnsUndo() || !mailWindowKey {
+            NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
+        } else {
+            undoMailAction()
+        }
+    }
+
+    func redoCommand(mailWindowKey: Bool) {
+        if Self.textOwnsUndo() || !mailWindowKey {
+            NSApp.sendAction(Selector(("redo:")), to: nil, from: nil)
+        } else {
+            redoMailAction()
         }
     }
 
@@ -610,7 +769,9 @@ final class AppModel {
             let label = try await core.createLabel(path)
             await mailboxes.reload()
             if applyToTargets, !ids.isEmpty {
-                try await core.modifyLabels(ids, add: [label.id], remove: [])
+                if let token = try await core.modifyLabels(ids, add: [label.id], remove: []) {
+                    undo.record(token, UndoableAction(kind: .label(LabelTree.leafName(label.name)), count: ids.count))
+                }
                 await mailboxes.reload()
                 await threads.refresh()
             }
@@ -623,7 +784,8 @@ final class AppModel {
     /// Label threads dropped on a sidebar label (they need not be selected).
     func addLabel(_ labelID: String, toThreads ids: [String]) {
         guard let core, !ids.isEmpty else { return }
-        Task { await perform { try await core.modifyLabels(ids, add: [labelID], remove: []) } }
+        let action = UndoableAction(kind: .label(labelName(labelID)), count: ids.count)
+        Task { await perform(action) { try await core.modifyLabels(ids, add: [labelID], remove: []) } }
     }
 
     func dismissFailedChanges() {
@@ -631,11 +793,14 @@ final class AppModel {
         Task { try? await core.clearFailedChanges() }
     }
 
-    private func removeFromList(action: @escaping @Sendable (CoreClient, [String]) async throws -> Void) {
+    private func removeFromList(
+        _ kind: UndoableAction.Kind,
+        action: @escaping @Sendable (CoreClient, [String]) async throws -> UndoToken?
+    ) {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
         dropFromList(ids)
-        Task { await perform { try await action(core, ids) } }
+        Task { await perform(UndoableAction(kind: kind, count: ids.count)) { try await action(core, ids) } }
     }
 
     /// Remove rows and move the selection to the row after the last one
@@ -651,9 +816,11 @@ final class AppModel {
         selectedThreadID = next?.id
     }
 
-    private func perform(_ body: () async throws -> Void) async {
+    /// Run an action; if it changed anything, put it on the undo stack and
+    /// acknowledge it.
+    private func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
         do {
-            try await body()
+            if let token = try await body() { undo.record(token, action) }
         } catch {
             logger.error("action failed: \(String(describing: error), privacy: .private)")
             // The store was not changed; bring the list back in line.
@@ -775,11 +942,13 @@ final class AppModel {
                 needsReauthentication = true
                 reauthenticationReason = .googleRejected
             }
-        case let .syncStatus(state, pending):
+        case let .syncStatus(state, pending, headers):
             refreshTransport()
             switch state {
             case .idle: syncDisplay = .idle
-            case .bootstrapping, .syncing: syncDisplay = pending > 0 || state == .bootstrapping ? .syncing(pending: pending) : .idle
+            case .bootstrapping, .syncing:
+                syncDisplay = pending + headers > 0 || state == .bootstrapping
+                    ? .syncing(pending: pending, headers: headers) : .idle
             case .offline: syncDisplay = .offline
             case .error: syncDisplay = .error
             }

@@ -43,6 +43,44 @@ impl SyncWindow {
     }
 }
 
+/// How much of the window comes down as full messages when headers are
+/// cheap (spec §7.4 amendment 2026-09-27, tiered download). The Inbox
+/// always does; the rest of the window gets headers only, and bodies on
+/// demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BodyWindow {
+    #[default]
+    Month,
+    HalfYear,
+    /// Everything in the sync window.
+    Window,
+}
+
+impl BodyWindow {
+    pub const ALL: [BodyWindow; 3] = [Self::Month, Self::HalfYear, Self::Window];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Month => "30d",
+            Self::HalfYear => "6m",
+            Self::Window => "window",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|w| w.as_str() == s)
+    }
+
+    /// The first phase priority listed for headers only.
+    fn headers_from(self) -> Option<u8> {
+        match self {
+            Self::Month => Some(3),
+            Self::HalfYear => Some(4),
+            Self::Window => None,
+        }
+    }
+}
+
 /// One backfill phase: a priority and the provider list filter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Phase {
@@ -52,23 +90,38 @@ pub struct Phase {
 }
 
 /// Backfill phases for a window, most urgent first (spec §7.4). Each lists
-/// message ids into the queue at its priority.
+/// message ids into the queue at its priority. Every age tier has its own
+/// priority (3 = six months, 4 = a year, 5 = older) so the body window can
+/// cut between them.
 pub fn phases_for(window: SyncWindow) -> Vec<Phase> {
     let mut phases = vec![
         Phase { priority: 0, labels: &["INBOX"], query: Some("is:unread".into()) },
         Phase { priority: 1, labels: &["INBOX"], query: None },
         Phase { priority: 2, labels: &[], query: Some("newer_than:30d".into()) },
     ];
+    let half = Phase { priority: 3, labels: &[], query: Some("newer_than:180d".into()) };
+    let year = Phase { priority: 4, labels: &[], query: Some("newer_than:365d".into()) };
     match window {
         SyncWindow::Month => {}
-        SyncWindow::HalfYear => phases.push(Phase { priority: 3, labels: &[], query: Some("newer_than:180d".into()) }),
-        SyncWindow::Year => phases.push(Phase { priority: 3, labels: &[], query: Some("newer_than:365d".into()) }),
-        SyncWindow::Everything => {
-            phases.push(Phase { priority: 3, labels: &[], query: Some("newer_than:365d".into()) });
-            phases.push(Phase { priority: 4, labels: &[], query: None });
-        }
+        SyncWindow::HalfYear => phases.push(half),
+        SyncWindow::Year => phases.extend([half, year]),
+        SyncWindow::Everything => phases.extend([half, year, Phase { priority: 5, labels: &[], query: None }]),
     }
     phases
+}
+
+/// The queue priority for a phase: headers only from `headers_from` on.
+fn queue_priority(phase: &Phase, headers_from: Option<u8>) -> u8 {
+    match headers_from {
+        Some(cut) if phase.priority >= cut => phase.priority + queue::HEADERS_ONLY,
+        _ => phase.priority,
+    }
+}
+
+/// Which tiering a queue was listed under, recorded so a change (IMAP on
+/// or off, another body window) re-lists it.
+fn tiers_tag(headers_from: Option<u8>) -> String {
+    headers_from.map_or_else(|| "flat".to_owned(), |cut| format!("headers-from-{cut}"))
 }
 
 /// Phases listed before backfill starts, so the inbox fills first.
@@ -81,6 +134,8 @@ const KEY_CURSOR: &str = "history_cursor";
 const KEY_BOOTSTRAPPED: &str = "bootstrap_listed";
 const KEY_EMAIL: &str = "account_email";
 pub const KEY_WINDOW: &str = "sync_window";
+pub const KEY_BODY_WINDOW: &str = "body_window";
+const KEY_TIERS: &str = "queue_tiers";
 
 /// Receives what sync changed; the core turns it into UI events.
 pub trait SyncObserver: Send + Sync {
@@ -101,6 +156,8 @@ pub struct SyncProgress {
     pub phase: SyncPhase,
     /// Messages still waiting for a full fetch.
     pub queued: u64,
+    /// Messages waiting for headers only (tiered download).
+    pub headers: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -156,6 +213,10 @@ pub struct SyncEngine {
     /// Label changes OpenAGC itself pushed recently, so history sync can
     /// tell them from changes made elsewhere (spec §11.6).
     pub(crate) own_changes: std::sync::Mutex<Vec<OwnChange>>,
+    /// Queued ids the headers pass asked for and did not get (gone from
+    /// All Mail since they were listed): left to the body backfill, which
+    /// falls back to the API, and not asked for again.
+    headers_missed: std::sync::Mutex<std::collections::HashSet<MessageId>>,
 }
 
 /// One label change the outbox pushed.
@@ -189,6 +250,7 @@ impl SyncEngine {
             observer,
             drain_lock: tokio::sync::Mutex::new(()),
             own_changes: std::sync::Mutex::new(Vec::new()),
+            headers_missed: Default::default(),
         }
     }
 
@@ -236,11 +298,18 @@ impl SyncEngine {
             })
             .await?;
         let window = self.window().await?;
-        // Record the window so a later default change does not widen it.
-        self.db.write(move |tx| read::set_sync_state(tx, KEY_WINDOW, window.as_str())).await?;
+        let headers_from = self.headers_from().await?;
+        // Record the window so a later default change does not widen it,
+        // and the tiering the queue is listed under.
+        self.db
+            .write(move |tx| {
+                read::set_sync_state(tx, KEY_WINDOW, window.as_str())?;
+                read::set_sync_state(tx, KEY_TIERS, &tiers_tag(headers_from))
+            })
+            .await?;
         let phases = phases_for(window);
         for phase in &phases[..INBOX_PHASES] {
-            self.list_phase(phase).await?;
+            self.list_phase_with(phase, false, headers_from).await?;
         }
         self.report(SyncPhase::Listing).await;
         Ok(())
@@ -259,8 +328,9 @@ impl SyncEngine {
     /// Bootstrap step 2 (slow, can run alongside backfill): queue the rest.
     pub async fn bootstrap_list_rest(&self) -> SyncResult<()> {
         let phases = phases_for(self.window().await?);
+        let headers_from = self.headers_from().await?;
         for phase in &phases[INBOX_PHASES..] {
-            self.list_phase(phase).await?;
+            self.list_phase_with(phase, false, headers_from).await?;
         }
         self.db.write(|tx| read::set_sync_state(tx, KEY_BOOTSTRAPPED, "1")).await?;
         self.report(SyncPhase::Backfilling).await;
@@ -278,19 +348,64 @@ impl SyncEngine {
     /// downloads more and narrowing stops downloading older mail. Mail
     /// already stored is kept either way.
     pub async fn set_window(&self, window: SyncWindow) -> SyncResult<()> {
+        self.db.write(move |tx| read::set_sync_state(tx, KEY_WINDOW, window.as_str())).await?;
+        self.relist_window().await
+    }
+
+    /// Which part of the window gets full messages when headers are cheap.
+    pub async fn body_window(&self) -> SyncResult<BodyWindow> {
+        let stored = self.db.read(|c| read::sync_state(c, KEY_BODY_WINDOW)).await?;
+        Ok(stored.as_deref().and_then(BodyWindow::parse).unwrap_or_default())
+    }
+
+    /// Change the body window. Widening queues bodies for header-only mail
+    /// now inside it; narrowing stops fetching bodies outside it (bodies
+    /// already stored are kept).
+    pub async fn set_body_window(&self, body_window: BodyWindow) -> SyncResult<()> {
+        self.db.write(move |tx| read::set_sync_state(tx, KEY_BODY_WINDOW, body_window.as_str())).await?;
+        self.ensure_tiers().await
+    }
+
+    /// The first phase priority listed for headers only, or `None` when
+    /// every phase gets bodies: the source cannot fetch headers cheaply
+    /// (REST), or the body window is the whole sync window.
+    async fn headers_from(&self) -> SyncResult<Option<u8>> {
+        let cheap = self.backfill.read().unwrap_or_else(|e| e.into_inner()).cheap_headers();
+        Ok(if cheap { self.body_window().await?.headers_from() } else { None })
+    }
+
+    /// Re-list the window's own phases if the queue was listed under
+    /// another tiering (IMAP turned on or off, the body window changed, or
+    /// an account from before tiers). Called when sync starts.
+    pub async fn ensure_tiers(&self) -> SyncResult<()> {
+        let want = tiers_tag(self.headers_from().await?);
+        let have = self.db.read(|c| read::sync_state(c, KEY_TIERS)).await?;
+        // A queue from before tiers was listed flat.
+        if have.as_deref().unwrap_or("flat") != want {
+            tracing::info!(tiers = %want, "re-listing the sync window for tiered download");
+            self.relist_window().await?;
+        }
+        self.db.write(move |tx| read::set_sync_state(tx, KEY_TIERS, &want)).await?;
+        Ok(())
+    }
+
+    /// Drop queued fetches beyond the shared phases and list the window's
+    /// own phases again under the current window and tiering.
+    async fn relist_window(&self) -> SyncResult<()> {
         let bootstrapped = self
             .db
             .write(move |tx| {
-                read::set_sync_state(tx, KEY_WINDOW, window.as_str())?;
                 queue::clear_from_priority(tx, FIXED_PHASES as u8)?;
                 read::sync_state(tx, KEY_BOOTSTRAPPED)
             })
             .await?
             .is_some();
         if bootstrapped {
-            for phase in &phases_for(window)[FIXED_PHASES..] {
-                self.list_phase(phase).await?;
+            let headers_from = self.headers_from().await?;
+            for phase in &phases_for(self.window().await?)[FIXED_PHASES..] {
+                self.list_phase_with(phase, false, headers_from).await?;
             }
+            self.db.write(move |tx| read::set_sync_state(tx, KEY_TIERS, &tiers_tag(headers_from))).await?;
             self.report(SyncPhase::Backfilling).await;
         }
         Ok(())
@@ -330,8 +445,9 @@ impl SyncEngine {
     /// stored (labels and bodies come back current). The user's repair
     /// button; also useful after a bug in a fetch path.
     pub async fn refetch_all(&self) -> SyncResult<u64> {
+        let headers_from = self.headers_from().await?;
         for phase in &phases_for(self.window().await?) {
-            self.list_phase_with(phase, true).await?;
+            self.list_phase_with(phase, true, headers_from).await?;
         }
         let queued = self.db.read(queue::len).await?;
         self.report(SyncPhase::Backfilling).await;
@@ -340,46 +456,95 @@ impl SyncEngine {
 
     /// Headers-first (spec §7.4 IMAP amendment): store header-only rows for
     /// up to `max` queued messages that have no row yet, so the list is
-    /// browsable before their bodies arrive. They stay queued for bodies.
-    /// Returns how many were stored; 0 when the source cannot do it cheaply
-    /// or nothing is left.
+    /// browsable before their bodies arrive (they stay queued for bodies),
+    /// then for the headers-only tier (tiered download), which leaves the
+    /// queue. Returns the progress made (rows stored plus headers-only ids
+    /// finished); 0 when the source cannot do it now or nothing is left.
     pub async fn headers_pass(&self, max: usize) -> SyncResult<usize> {
-        let ids = self.db.read(move |c| queue::without_rows(c, max)).await?;
+        let missed = self.headers_missed.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let skip = missed.len();
+        let ids: Vec<MessageId> = self
+            .db
+            .read(move |c| queue::for_headers(c, max + skip))
+            .await?
+            .into_iter()
+            .filter(|id| !missed.contains(id))
+            .take(max)
+            .collect();
         if ids.is_empty() {
             return Ok(0);
         }
         let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let Some(headers) = source.fetch_headers(&ids).await? else { return Ok(0) };
+        let Some(headers) = source.fetch_headers(&ids).await? else {
+            if !source.cheap_headers() {
+                // Headers cost as much as bodies now (IMAP refused): fetch
+                // the headers-only tier in full rather than never.
+                let promoted = self.db.write(queue::promote_headers_only).await?;
+                if promoted > 0 {
+                    tracing::info!(promoted, "headers-only messages queued for bodies");
+                }
+            }
+            return Ok(0);
+        };
         let incoming: Vec<_> = headers.into_iter().map(to_incoming).collect();
+        let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
         let stored = incoming.len();
-        let changes = self
+        let requested = ids.clone();
+        let (changes, dropped) = self
             .db
             .write(move |tx| {
                 let mut w = MailWriter::new(tx);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
-                w.finish()
+                // Headers-only ids are done, found or not (a message the
+                // source no longer has is not coming back).
+                let dropped = queue::remove_headers_only(tx, &requested)?;
+                Ok((w.finish()?, dropped))
             })
             .await?;
+        // Ids waiting for bodies that the source did not return stay for
+        // the body backfill; this pass stops asking for them.
+        {
+            let mut missed = self.headers_missed.lock().unwrap_or_else(|e| e.into_inner());
+            missed.extend(ids.into_iter().filter(|id| !returned.contains(id)));
+        }
         self.publish(&changes);
-        Ok(stored)
+        self.report(SyncPhase::Backfilling).await;
+        // Progress, not ids asked for: a pass that stored nothing and
+        // dropped nothing must end the loop.
+        Ok(stored + dropped)
     }
 
     /// Search Gmail itself for `query` and download up to `max` matching
-    /// messages this store does not have (mail outside the sync window;
-    /// spec §7.4 follow-up). Interactive priority: the user is waiting.
-    /// Returns how many were downloaded.
+    /// messages this store does not have in full (mail outside the sync
+    /// window, spec §7.4 follow-up; header-only mail, tiered download).
+    /// Interactive: the user is waiting. Returns how many were downloaded.
     pub async fn search_server(&self, query: &str, max: usize) -> SyncResult<usize> {
         let filter = ListFilter { label_ids: vec![], query: Some(query.to_owned()), include_spam_trash: false };
         let page = self.provider.list_message_ids(&filter, None).await?;
         let ids: Vec<MessageId> = page.ids.into_iter().map(|(id, _)| id).take(max).collect();
+        // Matches stored with headers only get their bodies too (tiered
+        // download), the same way an opened message does.
+        self.ensure_bodies(ids).await
+    }
+
+    /// Download these messages' bodies now if they are not stored in full
+    /// (spec §7.4 tiered download: a header-only message the user opens or
+    /// an agent reads). Over IMAP when the source is IMAP, else over the
+    /// API at interactive priority. Returns how many were downloaded.
+    pub async fn ensure_bodies(&self, ids: Vec<MessageId>) -> SyncResult<usize> {
         let missing = self.db.read(move |c| queue::missing(c, &ids)).await?;
         if missing.is_empty() {
             return Ok(0);
         }
-        let fetched = self.provider.fetch_messages(&missing, Priority::Interactive).await?;
-        let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let fetched = if source.cheap_headers() {
+            source.fetch(&missing).await?
+        } else {
+            self.provider.fetch_messages(&missing, Priority::Interactive).await?
+        };
+        let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
         let count = incoming.len();
         let changes = self
             .db
@@ -388,11 +553,13 @@ impl SyncEngine {
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
-                queue::remove(tx, &missing)?;
+                let done: Vec<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
+                queue::remove(tx, &done)?;
                 w.finish()
             })
             .await?;
         self.publish(&changes);
+        self.report(SyncPhase::Backfilling).await;
         Ok(count)
     }
 
@@ -592,19 +759,16 @@ impl SyncEngine {
                 Ok(())
             })
             .await?;
+        let headers_from = self.headers_from().await?;
         for phase in &phases_for(self.window().await?) {
-            self.list_phase_with(phase, true).await?;
+            self.list_phase_with(phase, true, headers_from).await?;
         }
         self.db.write(|tx| read::set_sync_state(tx, KEY_BOOTSTRAPPED, "1")).await?;
         Ok(())
     }
 
-    async fn list_phase(&self, phase: &Phase) -> SyncResult<()> {
-        self.list_phase_with(phase, false).await
-    }
-
-    async fn list_phase_with(&self, phase: &Phase, refetch: bool) -> SyncResult<()> {
-        let priority = phase.priority;
+    async fn list_phase_with(&self, phase: &Phase, refetch: bool, headers_from: Option<u8>) -> SyncResult<()> {
+        let priority = queue_priority(phase, headers_from);
         let filter = ListFilter {
             label_ids: phase.labels.iter().map(|l| LabelId::new(*l)).collect(),
             query: phase.query.clone(),
@@ -642,8 +806,8 @@ impl SyncEngine {
     }
 
     async fn report(&self, phase: SyncPhase) {
-        let queued = self.db.read(queue::len).await.unwrap_or(0);
-        let phase = if queued == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
-        self.observer.progress(SyncProgress { phase, queued });
+        let (queued, headers) = self.db.read(queue::counts).await.unwrap_or((0, 0));
+        let phase = if queued + headers == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
+        self.observer.progress(SyncProgress { phase, queued, headers });
     }
 }

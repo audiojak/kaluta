@@ -571,7 +571,14 @@ impl Core {
                 } else {
                     vec!["INBOX".to_owned()]
                 };
-                self.modify_labels(vec![thread], add, vec![label.id.0.clone()]).await?;
+                // Not on the user's undo stack (spec §14.6a): a run's own
+                // Undo must not push the user's actions out of it.
+                let change = mail_sync::LocalChange::Labels {
+                    thread_ids: vec![mail_domain::ThreadId(thread)],
+                    add: add.into_iter().map(mail_domain::LabelId).collect(),
+                    remove: vec![label.id.clone()],
+                };
+                self.mutate_unrecorded(change).await?;
                 restored += 1;
             }
             let now = mail_sync::now_millis();

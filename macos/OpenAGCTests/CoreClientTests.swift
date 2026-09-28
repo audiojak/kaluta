@@ -5,7 +5,7 @@ import Testing
 
 struct CoreClientTests {
     private func tempDir() -> URL {
-        FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        CoreClient.testScratch()
     }
 
     @Test func pingRoundTripsThroughRust() throws {
@@ -42,7 +42,7 @@ struct CoreClientTests {
 @MainActor
 struct AccountRegistryFFITests {
     @Test func aFreshDataDirectoryHasNoAccountsAndTheDemoIsNeverListed() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         #expect(try await core.accounts().isEmpty)
         try await core.setCurrentAccount("demo")

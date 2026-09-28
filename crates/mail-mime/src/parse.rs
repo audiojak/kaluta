@@ -7,7 +7,7 @@
 //! one decoder for encoded words, address lists, dates and charsets.
 
 use mail_domain::{EmailAddress, Millis};
-use mail_parser::{Address, HeaderValue, MessageParser, MimeHeaders, PartType};
+use mail_parser::{Address, Encoding, HeaderValue, MessageParser, MessagePart, MimeHeaders, PartType};
 
 /// A message as parsed from MIME. `html` is the original, unsanitized HTML.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -60,8 +60,8 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage, ParseError> {
     for &id in &msg.text_body {
         if let Some(part) = msg.parts.get(id as usize) {
             match &part.body {
-                PartType::Text(t) => texts.push(t.to_string()),
-                PartType::Html(h) => htmls.push(h.to_string()),
+                PartType::Text(t) => texts.push(repair_text(part, t, raw.as_ref())),
+                PartType::Html(h) => htmls.push(repair_text(part, h, raw.as_ref())),
                 _ => {}
             }
         }
@@ -70,8 +70,10 @@ pub fn parse(raw: &[u8]) -> Result<ParsedMessage, ParseError> {
     // otherwise synthesizes HTML from the text part.
     let mut real_html = Vec::new();
     for &id in &msg.html_body {
-        if let Some(PartType::Html(h)) = msg.parts.get(id as usize).map(|p| &p.body) {
-            real_html.push(h.to_string());
+        if let Some(part) = msg.parts.get(id as usize)
+            && let PartType::Html(h) = &part.body
+        {
+            real_html.push(repair_text(part, h, raw.as_ref()));
         }
     }
     let html = if real_html.is_empty() { None } else { Some(real_html.join("\n<hr>\n")) };
@@ -138,9 +140,66 @@ pub fn decode_text_part(data: &[u8], content_type: &str) -> String {
         return String::from_utf8_lossy(data).into_owned();
     };
     match msg.parts.first().map(|p| &p.body) {
+        Some(PartType::Text(t)) | Some(PartType::Html(t)) if t.contains('\u{FFFD}') && claims_utf8(&msg.parts[0]) => {
+            utf8_or_cp1252(data)
+        }
         Some(PartType::Text(t)) | Some(PartType::Html(t)) => t.to_string(),
-        _ => String::from_utf8_lossy(data).into_owned(),
+        _ => utf8_or_cp1252(data),
     }
+}
+
+/// A part labelled UTF-8 (or with no charset, which mail-parser reads as
+/// UTF-8) whose bytes are not valid UTF-8 comes out with U+FFFD for every
+/// bad byte. In practice those bytes are Windows-1252 from a mailer that
+/// mislabels its output (oagc-u40): decode them as such, keeping the valid
+/// UTF-8 around them. Other declared charsets are left to mail-parser.
+fn repair_text(part: &MessagePart<'_>, decoded: &str, raw: &[u8]) -> String {
+    if !decoded.contains('\u{FFFD}') || !claims_utf8(part) {
+        return decoded.to_owned();
+    }
+    let body = raw.get(part.raw_body_offset() as usize..part.raw_end_offset() as usize).unwrap_or_default();
+    let bytes = match part.encoding {
+        Encoding::None => Some(body.to_vec()),
+        Encoding::QuotedPrintable => mail_parser::decoders::quoted_printable::quoted_printable_decode(body),
+        Encoding::Base64 => mail_parser::decoders::base64::base64_decode(body),
+    };
+    bytes.map(|b| utf8_or_cp1252(&b)).unwrap_or_else(|| decoded.to_owned())
+}
+
+fn claims_utf8(part: &MessagePart<'_>) -> bool {
+    match part.content_type().and_then(|ct| ct.attribute("charset")) {
+        None => true,
+        Some(c) => {
+            let c = c.trim().to_ascii_lowercase();
+            c == "utf-8" || c == "utf8"
+        }
+    }
+}
+
+/// UTF-8 where the bytes are valid; each invalid byte as Windows-1252.
+fn utf8_or_cp1252(bytes: &[u8]) -> String {
+    let cp1252 = mail_parser::decoders::charsets::map::charset_decoder(b"windows-1252");
+    let mut out = String::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while !rest.is_empty() {
+        match std::str::from_utf8(rest) {
+            Ok(valid) => {
+                out.push_str(valid);
+                break;
+            }
+            Err(e) => {
+                let (good, bad) = rest.split_at(e.valid_up_to());
+                out.push_str(std::str::from_utf8(good).unwrap_or_default());
+                let n = e.error_len().unwrap_or(bad.len());
+                match cp1252 {
+                    Some(decode) => out.push_str(&decode(&bad[..n])),
+                    None => out.extend(bad[..n].iter().map(|&b| char::from(b))),
+                }
+                rest = &bad[n..];
+            }
+        }
+    }
+    out
 }
 
 /// Plain text from HTML, for search, agents and the text/plain alternative.

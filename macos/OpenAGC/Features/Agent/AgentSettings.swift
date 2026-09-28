@@ -30,6 +30,12 @@ struct AgentSettings: View {
                 Button(checking ? "Checking…" : "Check Again") { Task { await load(refresh: true) } }
                     .disabled(checking)
             }
+            Section {
+                Button("Clear Suggestions History") { model.clearSuggestionHistory() }
+            } footer: {
+                Text("Suggestions over the prompt start with things you have asked before, remembered on this Mac for each account.")
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .task { await load(refresh: false) }

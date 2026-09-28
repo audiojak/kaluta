@@ -124,7 +124,10 @@ pub enum CoreEvent {
     },
     SyncStatus {
         state: SyncState,
+        /// Messages waiting for bodies.
         pending: u32,
+        /// Messages waiting for headers only (tiered download, spec §7.4).
+        pending_headers: u32,
     },
     OutboxStatus {
         pending: u32,

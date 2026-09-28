@@ -41,13 +41,13 @@ struct ArchiveAccountTests {
     }
 
     @Test func anImportedMailboxIsAListedAccountThatNeedsNoSignIn() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "Old Mail.mbox")
         try Self.mbox(at: file)
         let core = try CoreClient(dataDirectory: dir.appending(path: "data"))
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
 
         let scan = try await core.scanMailbox(file.path)
@@ -67,13 +67,13 @@ struct ArchiveAccountTests {
     }
 
     @Test func theImportSheetSuggestsANameAndAddressAndTheNewAccountOpensWhenDone() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "Work 2019.mbox")
         try Self.mbox(at: file)
         let model = AppModel(core: try CoreClient(dataDirectory: dir.appending(path: "data")),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
 
         await model.prepareImport(path: file.path)
@@ -92,11 +92,11 @@ struct ArchiveAccountTests {
     }
 
     @Test func aPathWithNoMailboxesExplainsWhy() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let model = AppModel(core: try CoreClient(dataDirectory: dir.appending(path: "data")),
-                             defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.prepareImport(path: dir.path)
         #expect(model.importDraft?.scan == nil)
         #expect(model.importDraft?.error?.contains("no .mbox files") == true)
@@ -114,13 +114,13 @@ struct ArchiveAccountTests {
 @MainActor
 struct ArchiveCannotSendTests {
     @Test func inAnArchiveTheWindowOffersNoComposingAndTheCoreRefusesAnyway() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appending(path: "old.mbox")
         try ArchiveAccountTests.mbox(at: file)
         let core = try CoreClient(dataDirectory: dir.appending(path: "data"))
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
         #expect(!model.isArchive)
         let id = try await core.startImport(path: file.path, name: "Old", myAddresses: ["owner@example.com"])

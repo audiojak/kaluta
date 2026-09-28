@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct AttachmentTests {
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model
@@ -48,7 +48,7 @@ struct AttachmentTests {
 @MainActor
 struct PDFTextTests {
     @Test func pdfKitExtractsTheDemoAttachmentsText() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let core = try CoreClient(dataDirectory: dir)
         try await core.openAccount(AppModel.demoAccountID)
         try await core.seedDemoMailbox(threads: 200)

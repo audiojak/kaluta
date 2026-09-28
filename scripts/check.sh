@@ -9,7 +9,11 @@ step() { printf '== %s\n' "$*"; }
 step fmt;        cargo fmt --all --check
 step clippy;     cargo clippy --workspace --all-targets --locked --quiet -- -D warnings
 step test
-if ! out=$(cargo test --workspace --locked 2>&1); then
+# Tests make scratch data directories under the temp dir and leave them
+# (a crashed test cannot clean up); give the run its own, removed after.
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/openagc-tests.XXXXXX")"
+trap 'rm -rf "$SCRATCH"' EXIT
+if ! out=$(TMPDIR="$SCRATCH/" cargo test --workspace --locked 2>&1); then
   echo "$out" | grep -E 'FAILED|panicked|^error|left:|right:' | head -40
   exit 1
 fi

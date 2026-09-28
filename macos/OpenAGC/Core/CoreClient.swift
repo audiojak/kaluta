@@ -49,6 +49,27 @@ final class CoreClient: Sendable {
         KeychainSecretStore(service: isRunningTests ? "ai.actual.openagc.tests" : "ai.actual.openagc")
     }
 
+    /// Where the app's tests put scratch data: one directory per test-host
+    /// process, which scripts/test-macos.sh removes after the run (and the
+    /// sweeper after an hour), so tests need not clean up one by one.
+    static let testScratchRoot = FileManager.default.temporaryDirectory
+        .appending(path: "openagc-apptests-\(ProcessInfo.processInfo.processIdentifier)", directoryHint: .isDirectory)
+
+    /// A fresh scratch directory for a test.
+    static func testScratch() -> URL {
+        testScratchRoot.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+    }
+
+    /// The app's preferences, or a throwaway suite when the app is hosting
+    /// tests or running on a scratch data directory (snapshots,
+    /// automation): those must never write the real app's preferences
+    /// (the test host and snapshots share its bundle id).
+    static func appDefaults() -> UserDefaults {
+        let scratch = isRunningTests || !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
+        guard scratch else { return .standard }
+        return UserDefaults(suiteName: "openagc-scratch-\(UUID().uuidString)") ?? .standard
+    }
+
     static var isRunningTests: Bool {
         let env = ProcessInfo.processInfo.environment
         return env["XCTestConfigurationFilePath"] != nil || env["XCTestBundlePath"] != nil
@@ -108,6 +129,17 @@ final class CoreClient: Sendable {
     /// arrived (0 for accounts without a server).
     func searchServer(_ query: String, limit: UInt32) async throws(CoreClientError) -> UInt32 {
         try await call { try await core.searchServer(query: query, limit: limit) }
+    }
+
+    /// Some mail is stored with headers only (tiered download).
+    func hasHeaderOnlyMail() async -> Bool {
+        (try? await call { try await core.hasHeaderOnlyMail() }) ?? false
+    }
+
+    /// Download header-only bodies now (tiered download, spec §7.4); on
+    /// failure the core queues them first instead.
+    func ensureBodies(_ ids: [String]) async {
+        _ = try? await call { try await core.ensureBodies(messageIds: ids) }
     }
 
     /// Download these messages' bodies next (opened with headers only).
@@ -185,28 +217,45 @@ final class CoreClient: Sendable {
 
     // MARK: Mutations (applied locally at once, then pushed to Gmail)
 
-    func archive(_ threadIDs: [String]) async throws(CoreClientError) {
+    // Each returns a token for undo (spec §14.6a), or nil if nothing changed.
+
+    @discardableResult
+    func archive(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.archive(threadIds: threadIDs) }
     }
 
-    func moveToInbox(_ threadIDs: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func moveToInbox(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.moveToInbox(threadIds: threadIDs) }
     }
 
-    func setRead(_ threadIDs: [String], _ read: Bool) async throws(CoreClientError) {
+    @discardableResult
+    func setRead(_ threadIDs: [String], _ read: Bool) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.setRead(threadIds: threadIDs, read: read) }
     }
 
-    func setStarred(_ threadIDs: [String], _ starred: Bool) async throws(CoreClientError) {
+    @discardableResult
+    func setStarred(_ threadIDs: [String], _ starred: Bool) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.setStarred(threadIds: threadIDs, starred: starred) }
     }
 
-    func modifyLabels(_ threadIDs: [String], add: [String], remove: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func modifyLabels(_ threadIDs: [String], add: [String], remove: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.modifyLabels(threadIds: threadIDs, add: add, remove: remove) }
     }
 
-    func trash(_ threadIDs: [String]) async throws(CoreClientError) {
+    @discardableResult
+    func trash(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.trash(threadIds: threadIDs) }
+    }
+
+    /// Reverse a recorded action exactly, in its own account.
+    func undo(_ token: UndoToken) async throws(CoreClientError) {
+        try await call { try await core.undoAction(token: token) }
+    }
+
+    func redo(_ token: UndoToken) async throws(CoreClientError) {
+        try await call { try await core.redoAction(token: token) }
     }
 
     func outboxStatus() async throws(CoreClientError) -> (pending: UInt32, failed: UInt32) {
@@ -283,9 +332,32 @@ final class CoreClient: Sendable {
         try await call { try await core.deleteDraft(id: id) }
     }
 
-    func sendDraft(_ id: Int64) async throws(CoreClientError) {
+    /// Returns whether the send is held for Undo Send.
+    @discardableResult
+    func sendDraft(_ id: Int64) async throws(CoreClientError) -> Bool {
         try await call { try await core.sendDraft(id: id) }
     }
+
+    /// Undo Send: take back a held send in `accountID`; false if it went.
+    func cancelSend(_ draftID: Int64, in accountID: String) async -> Bool {
+        let composer = composer(for: accountID)
+        return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
+    }
+
+    /// How long sends wait so they can be undone (0 = off).
+    func setSendDelay(seconds: UInt32) { core.setSendDelay(seconds: seconds) }
+
+    /// Quitting: send every held message now; waits up to `timeout` and
+    /// returns how many are still going.
+    func sendHeldNow(timeout: Duration) async -> UInt32 {
+        await core.sendHeldNow(timeoutMs: UInt32(timeout.components.seconds * 1000))
+    }
+
+    func heldSendCount() async -> UInt32 { await core.heldSendCount() }
+
+    /// Sends quitting should wait for (held, due or on their way),
+    /// answered at once: the quit handler cannot wait to ask.
+    func unsentSendCountNow() -> UInt32 { core.unsentSendCountNow() }
 
     /// Mirror edited drafts to Gmail now instead of at the next 30 s tick.
     func flushDrafts() { core.flushDrafts() }
@@ -521,6 +593,15 @@ final class CoreClient: Sendable {
         try await call { try await core.setSyncWindow(window: window) }
     }
 
+    /// Which part of the download range gets full messages over IMAP.
+    func bodyWindow(for accountID: String) async throws(CoreClientError) -> BodyWindow {
+        try await call { try await core.bodyWindowFor(accountId: accountID) }
+    }
+
+    func setBodyWindow(_ window: BodyWindow, for accountID: String) async throws(CoreClientError) {
+        try await call { try await core.setBodyWindowFor(accountId: accountID, bodyWindow: window) }
+    }
+
     func signOut(_ accountID: String) async throws(CoreClientError) {
         try await call { try await core.signOut(accountId: accountID) }
     }
@@ -641,6 +722,8 @@ typealias DraftStatus = OpenAGCCore.DraftStatus
 typealias LabelInfo = OpenAGCCore.LabelInfo
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
+typealias BodyWindow = OpenAGCCore.BodyWindow
+typealias UndoToken = OpenAGCCore.UndoToken
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias ImportStatus = OpenAGCCore.ImportStatus
@@ -684,7 +767,7 @@ enum CoreClientEvent: Sendable, Equatable {
     }
 
     case threadsChanged(mailboxID: String, hint: ThreadChangeHint)
-    case syncStatus(SyncState, pending: UInt32)
+    case syncStatus(SyncState, pending: UInt32, headers: UInt32)
     case outboxStatus(pending: UInt32, failed: UInt32)
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
@@ -760,8 +843,8 @@ private extension CoreClientEvent {
             self = .threadsChanged(mailboxID: mailboxId, hint: ThreadChangeHint(
                 inserted: hint.inserted, updated: hint.updated,
                 removed: hint.removed, invalidate: hint.invalidate))
-        case let .syncStatus(state, pending):
-            self = .syncStatus(SyncState(state), pending: pending)
+        case let .syncStatus(state, pending, pendingHeaders):
+            self = .syncStatus(SyncState(state), pending: pending, headers: pendingHeaders)
         case let .outboxStatus(pending, failed):
             self = .outboxStatus(pending: pending, failed: failed)
         case let .error(kind, message):

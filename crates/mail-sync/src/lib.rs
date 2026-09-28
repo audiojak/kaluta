@@ -12,8 +12,9 @@ pub use attachments::{AttachmentFile, attachment_file, safe_filename};
 pub use compose::{forward_draft, reply_draft, schedule_draft_sync, send_draft};
 pub use convert::to_incoming;
 pub use engine::{
-    BACKFILL_BATCH, ExternalLabelChange, INBOX_PHASES, IncrementalReport, KEY_WINDOW, NewMail, Phase, SyncEngine,
-    SyncObserver, SyncPhase, SyncProgress, SyncWindow, phases_for,
+    BACKFILL_BATCH, BodyWindow, ExternalLabelChange, INBOX_PHASES, IncrementalReport, KEY_BODY_WINDOW, KEY_WINDOW,
+    NewMail, Phase, SyncEngine, SyncObserver, SyncPhase, SyncProgress, SyncWindow, phases_for,
 };
 pub use error::{SyncError, SyncResult};
-pub use outbox::{DrainReport, LocalChange, MAX_ATTEMPTS, apply_local_change, now_millis};
+pub use mail_store::undo::MessageDiff;
+pub use outbox::{DrainReport, LocalChange, MAX_ATTEMPTS, apply_local_change, apply_local_change_recorded, now_millis};

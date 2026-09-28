@@ -139,7 +139,15 @@ pub(crate) async fn draft_raw(db: &Db, draft: DraftRecord, from: &EmailAddress) 
 
 /// Freeze a saved draft into MIME and queue it (or, with no provider,
 /// "send" it locally). An optimistic copy appears in Sent at once.
-pub async fn send_draft(db: &Db, draft_id: i64, from: EmailAddress, queue: bool) -> SyncResult<ThreadChanges> {
+/// Send a saved draft. Queued sends wait `hold_ms` in the outbox first
+/// (Undo Send, spec §14.6a); see `mail_store::outbox::cancel_send`.
+pub async fn send_draft(
+    db: &Db,
+    draft_id: i64,
+    from: EmailAddress,
+    queue: bool,
+    hold_ms: Millis,
+) -> SyncResult<ThreadChanges> {
     let draft = db
         .read(move |c| drafts::get(c, draft_id))
         .await?
@@ -192,7 +200,8 @@ pub async fn send_draft(db: &Db, draft_id: i64, from: EmailAddress, queue: bool)
             if queue {
                 drafts::set_state(tx, draft_id, DraftState::Sending, None)?;
                 drafts::set_rfc822_id(tx, draft_id, &rfc822_id)?;
-                outbox::enqueue(tx, &op, now)?;
+                let not_before = (hold_ms > 0).then_some(now + hold_ms);
+                outbox::enqueue_held(tx, &op, now, not_before)?;
             } else {
                 drafts::discard(tx, draft_id, now)?;
             }

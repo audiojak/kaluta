@@ -79,7 +79,7 @@ struct ComposerTests {
     // MARK: Store
 
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model
@@ -112,8 +112,7 @@ struct ComposerTests {
     @Test func replyStartsEmptyAboveTheQuoteAndAutosaves() async throws {
         let model = try await demo()
         let message = try await latestMessage(model)
-        let store = ComposerStore(core: model.core, attachmentsDirectory: FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString))
+        let store = ComposerStore(core: model.core, attachmentsDirectory: CoreClient.testScratch())
         await store.load(.reply(messageID: message.id, all: false))
         #expect(store.phase == .editing)
         #expect(store.subject.hasPrefix("Re:"))
@@ -139,8 +138,7 @@ struct ComposerTests {
 
     @Test func sendingDeletesTheDraftAndLandsInSent() async throws {
         let model = try await demo()
-        let store = ComposerStore(core: model.core, attachmentsDirectory: FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString))
+        let store = ComposerStore(core: model.core, attachmentsDirectory: CoreClient.testScratch())
         await store.load(.new(to: "friend@example.com"))
         #expect(!store.canSend || store.to.count == 1)
         store.subject = "Composer test"
@@ -154,7 +152,7 @@ struct ComposerTests {
 
     @Test func attachmentsAreCopiedAndRemovable() async throws {
         let model = try await demo()
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let root = CoreClient.testScratch()
         let store = ComposerStore(core: model.core, attachmentsDirectory: root.appending(path: "copies"))
         await store.load(.new(to: nil))
         let original = root.appending(path: "notes.txt")
@@ -175,8 +173,7 @@ struct ComposerTests {
 
     @Test func discardDeletesASavedDraft() async throws {
         let model = try await demo()
-        let store = ComposerStore(core: model.core, attachmentsDirectory: FileManager.default.temporaryDirectory
-            .appending(path: UUID().uuidString))
+        let store = ComposerStore(core: model.core, attachmentsDirectory: CoreClient.testScratch())
         await store.load(.new(to: "friend@example.com"))
         store.subject = "Throwaway"
         await store.save()

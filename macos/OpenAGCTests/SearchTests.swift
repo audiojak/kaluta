@@ -5,7 +5,7 @@ import Testing
 @MainActor
 struct SearchTests {
     private func demo() async throws -> AppModel {
-        let model = AppModel(core: try CoreClient(dataDirectory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         await model.start(openDemo: true)
         return model
     }
@@ -64,10 +64,28 @@ struct SearchTests {
 @MainActor
 struct ServerSearchTests {
     @Test func accountsWithoutAServerNeverAskGmail() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let core = try CoreClient(dataDirectory: dir)
         try await core.setCurrentAccount("demo")
         #expect(try await core.searchServer("anything", limit: 10) == 0, "no sync service: nothing to ask")
+    }
+
+    @Test func freeTextIsWordsOrPhrasesNotOperators() {
+        #expect(ThreadListStore.hasFreeText("invoice"))
+        #expect(ThreadListStore.hasFreeText("from:billing invoice"))
+        #expect(ThreadListStore.hasFreeText("\"quarterly plan\""))
+        #expect(ThreadListStore.hasFreeText("-draft"))
+        #expect(!ThreadListStore.hasFreeText("from:billing is:unread"))
+        #expect(!ThreadListStore.hasFreeText("subject:\"quarterly plan\" -label:work"))
+        #expect(!ThreadListStore.hasFreeText("  "))
+    }
+
+    @Test func theDemoMailboxHasNoHeaderOnlyMail() async throws {
+        let dir = CoreClient.testScratch()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let core = try CoreClient(dataDirectory: dir)
+        try await core.setCurrentAccount("demo")
+        #expect(await core.hasHeaderOnlyMail() == false)
     }
 }

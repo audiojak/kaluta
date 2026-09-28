@@ -9,6 +9,14 @@ use crate::ffi::LabelInfo;
 use crate::sync::EventObserver;
 use crate::{Core, CoreError, ErrorKind, runtime};
 
+/// A user action that can be undone (spec §14.6a): which account's store
+/// holds it, and its id there.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct UndoToken {
+    pub account_id: String,
+    pub action_id: i64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct OutboxStatus {
     pub pending: u32,
@@ -31,23 +39,56 @@ fn threads(ids: Vec<String>) -> Result<Vec<ThreadId>, CoreError> {
 }
 
 impl Core {
-    async fn mutate(&self, change: LocalChange) -> Result<(), CoreError> {
+    /// Apply a change to the account this work acts on. With `record`, it
+    /// is kept as an undoable action of that kind and its token returned.
+    async fn apply(&self, change: LocalChange, record: Option<&str>) -> Result<Option<UndoToken>, CoreError> {
         let service = self.sync_service();
         let db = self.db()?;
         let events = self.account_events();
-        runtime::run(async move {
-            match service {
+        let account_id = self.effective_account_id();
+        let record = record.map(str::to_owned);
+        let action = runtime::run(async move {
+            let action = match service {
                 Some(service) => {
-                    service.engine().apply_change(change, true).await?;
+                    let (_, action) = service.engine().apply_change_recorded(change, record).await?;
                     service.outbox_changed();
+                    action
                 }
                 // No provider (the demo mailbox): local only.
                 None => {
-                    let changes = mail_sync::apply_local_change(&db, change, false).await?;
+                    let (changes, action) = mail_sync::apply_local_change_recorded(&db, change, false, record).await?;
                     mail_sync::SyncObserver::threads_changed(&EventObserver { events }, &changes);
+                    action
                 }
-            }
-            Ok(())
+            };
+            Ok(action)
+        })
+        .await?;
+        Ok(action.zip(account_id).map(|(action_id, account_id)| UndoToken { account_id, action_id }))
+    }
+
+    /// A user's action: recorded for undo.
+    async fn mutate(&self, change: LocalChange, kind: &str) -> Result<Option<UndoToken>, CoreError> {
+        self.apply(change, Some(kind)).await
+    }
+
+    /// An agent's or a routine's action: not on the user's undo stack
+    /// (they have the activity log and a run's Undo, spec §14.6a).
+    pub(crate) async fn mutate_unrecorded(&self, change: LocalChange) -> Result<(), CoreError> {
+        self.apply(change, None).await.map(|_| ())
+    }
+
+    /// Apply a recorded action's diffs, or their inverse, in its account.
+    async fn replay(&self, token: UndoToken, inverse: bool) -> Result<(), CoreError> {
+        let account = token.account_id.clone();
+        crate::registry::scoped(Some(account), async move {
+            let db = self.db()?;
+            let id = token.action_id;
+            let action = runtime::run(async move { Ok(db.read(move |c| mail_store::undo::get(c, id)).await?) })
+                .await?
+                .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "that action can no longer be undone"))?;
+            let diffs = if inverse { action.diffs.iter().map(|d| d.inverse()).collect() } else { action.diffs };
+            self.apply(LocalChange::Exact { diffs }, None).await.map(|_| ())
         })
         .await
     }
@@ -55,20 +96,34 @@ impl Core {
 
 #[uniffi::export]
 impl Core {
-    pub async fn archive(&self, thread_ids: Vec<String>) -> Result<(), CoreError> {
-        self.mutate(LocalChange::archive(threads(thread_ids)?)).await
+    /// The mutations below return a token for undo (spec §14.6a), or none
+    /// when nothing changed (archiving what is already archived).
+    pub async fn archive(&self, thread_ids: Vec<String>) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::archive(threads(thread_ids)?), "archive").await
     }
 
-    pub async fn move_to_inbox(&self, thread_ids: Vec<String>) -> Result<(), CoreError> {
-        self.mutate(LocalChange::move_to_inbox(threads(thread_ids)?)).await
+    pub async fn move_to_inbox(&self, thread_ids: Vec<String>) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::move_to_inbox(threads(thread_ids)?), "move_to_inbox").await
     }
 
-    pub async fn set_read(&self, thread_ids: Vec<String>, read: bool) -> Result<(), CoreError> {
-        self.mutate(LocalChange::set_read(threads(thread_ids)?, read)).await
+    pub async fn set_read(&self, thread_ids: Vec<String>, read: bool) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::set_read(threads(thread_ids)?, read), if read { "read" } else { "unread" }).await
     }
 
-    pub async fn set_starred(&self, thread_ids: Vec<String>, starred: bool) -> Result<(), CoreError> {
-        self.mutate(LocalChange::set_starred(threads(thread_ids)?, starred)).await
+    pub async fn set_starred(&self, thread_ids: Vec<String>, starred: bool) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::set_starred(threads(thread_ids)?, starred), if starred { "star" } else { "unstar" })
+            .await
+    }
+
+    /// Reverse a recorded action exactly: per message, only the labels it
+    /// changed, whatever happened since. Works in the token's account.
+    pub async fn undo_action(&self, token: UndoToken) -> Result<(), CoreError> {
+        self.replay(token, true).await
+    }
+
+    /// Apply an undone action again.
+    pub async fn redo_action(&self, token: UndoToken) -> Result<(), CoreError> {
+        self.replay(token, false).await
     }
 
     /// Add/remove user labels. System labels that change a message's
@@ -78,17 +133,24 @@ impl Core {
         thread_ids: Vec<String>,
         add: Vec<String>,
         remove: Vec<String>,
-    ) -> Result<(), CoreError> {
+    ) -> Result<Option<UndoToken>, CoreError> {
         let protected = |l: &String| system_labels::PROTECTED.contains(&l.as_str());
         if add.iter().chain(&remove).any(protected) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "spam, trash, draft and sent are not labels to set"));
         }
+        let kind = if remove.is_empty() {
+            "label"
+        } else if add.is_empty() {
+            "unlabel"
+        } else {
+            "relabel"
+        };
         let change = LocalChange::Labels {
             thread_ids: threads(thread_ids)?,
             add: add.into_iter().map(LabelId).collect(),
             remove: remove.into_iter().map(LabelId).collect(),
         };
-        self.mutate(change).await
+        self.mutate(change, kind).await
     }
 
     /// Create a user label, or return the one with that name (spec §10.2,
@@ -105,8 +167,8 @@ impl Core {
         self.create_single_label(name, color).await
     }
 
-    pub async fn trash(&self, thread_ids: Vec<String>) -> Result<(), CoreError> {
-        self.mutate(LocalChange::Trash { thread_ids: threads(thread_ids)? }).await
+    pub async fn trash(&self, thread_ids: Vec<String>) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::Trash { thread_ids: threads(thread_ids)? }, "trash").await
     }
 
     pub async fn outbox_status(&self) -> Result<OutboxStatus, CoreError> {
@@ -311,5 +373,117 @@ mod tests {
         let deeper = block_on(core.create_label("Sorted/Later/Soon".into(), None)).unwrap();
         assert_eq!(deeper.id, "Label_3", "existing parents are reused");
         core.stop_sync();
+    }
+
+    fn labels_of(fake: &FakeProvider, id: &str) -> Vec<String> {
+        fake.message(&MessageId::new(id)).unwrap().label_ids.into_iter().map(|l| l.0).collect()
+    }
+
+    fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
+        for _ in 0..300 {
+            if ok() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    fn seeded(id: &str, thread: &str, labels: &[&str]) -> FetchedMessage {
+        FetchedMessage {
+            id: MessageId::new(id),
+            thread_id: ThreadId::new(thread),
+            label_ids: labels.iter().map(|l| LabelId::new(*l)).collect(),
+            internal_date: 1_790_000_000_000,
+            from: Some(EmailAddress::new(None, "a@example.com")),
+            body: Some(FetchedBody { text: Some("hi".into()), html: None, attachments: vec![] }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn undo_reverses_exactly_what_the_action_changed() {
+        let core = core("undo-exact");
+        block_on(core.clone().open_account("demo".into())).unwrap();
+        block_on(core.debug_seed_demo_mailbox(40)).unwrap();
+        let inbox = inbox_ids(&core);
+        let (a, b) = (inbox[0].clone(), inbox[1].clone());
+        // b is already archived before the action.
+        assert!(block_on(core.archive(vec![b.clone()])).unwrap().is_some());
+        let token = block_on(core.archive(vec![a.clone(), b.clone()])).unwrap().expect("a changed");
+        assert_eq!(token.account_id, "demo");
+        assert!(!inbox_ids(&core).contains(&a));
+
+        block_on(core.undo_action(token.clone())).unwrap();
+        let now = inbox_ids(&core);
+        assert!(now.contains(&a), "undo brings back what the action archived");
+        assert!(!now.contains(&b), "but not a thread that was already archived");
+
+        block_on(core.redo_action(token.clone())).unwrap();
+        assert!(!inbox_ids(&core).contains(&a), "redo archives it again");
+        block_on(core.undo_action(token)).unwrap();
+        assert!(inbox_ids(&core).contains(&a));
+
+        // Nothing changed, nothing to undo.
+        assert!(block_on(core.archive(vec![b])).unwrap().is_none());
+    }
+
+    #[test]
+    fn undo_reaches_the_server_for_labels_and_trash_even_after_sync() {
+        let core = core("undo-synced");
+        block_on(core.clone().open_account("acct".into())).unwrap();
+        let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        fake.seed(seeded("m1", "t1", &["INBOX", "UNREAD"]));
+        fake.seed(seeded("m2", "t2", &["INBOX"]));
+        fake.seed(seeded("m3", "t3", &["Label_9"]));
+        core.start_sync_with(fake.clone()).unwrap();
+        wait_until("bootstrap", || inbox_ids(&core).len() == 2);
+
+        // Multi-thread archive, synced, then history applied, then undo.
+        let token = block_on(core.archive(vec!["t1".into(), "t2".into(), "t3".into()])).unwrap().unwrap();
+        wait_until("server archived", || !labels_of(&fake, "m1").contains(&"INBOX".into()));
+        core.sync_now();
+        std::thread::sleep(Duration::from_millis(100));
+        block_on(core.undo_action(token)).unwrap();
+        assert_eq!(inbox_ids(&core).len(), 2, "local at once");
+        wait_until("server back in the Inbox", || {
+            labels_of(&fake, "m1").contains(&"INBOX".into()) && labels_of(&fake, "m2").contains(&"INBOX".into())
+        });
+        assert!(!labels_of(&fake, "m3").contains(&"INBOX".into()), "t3 was never in the Inbox");
+        assert!(labels_of(&fake, "m1").contains(&"UNREAD".into()), "other labels untouched");
+
+        // Trash and undo: out of Trash on the server, back in the Inbox.
+        let token = block_on(core.trash(vec!["t2".into()])).unwrap().unwrap();
+        wait_until("server trashed", || labels_of(&fake, "m2").contains(&"TRASH".into()));
+        block_on(core.undo_action(token.clone())).unwrap();
+        wait_until("server untrashed", || {
+            let l = labels_of(&fake, "m2");
+            !l.contains(&"TRASH".into()) && l.contains(&"INBOX".into())
+        });
+        // Redo trashes it again.
+        block_on(core.redo_action(token)).unwrap();
+        wait_until("server trashed again", || labels_of(&fake, "m2").contains(&"TRASH".into()));
+        assert!(!inbox_ids(&core).contains(&"t2".to_owned()));
+        core.stop_sync();
+    }
+
+    #[test]
+    fn tokens_only_work_in_their_own_account_and_the_last_fifty_are_kept() {
+        let core = core("undo-accounts");
+        block_on(core.clone().open_account("demo".into())).unwrap();
+        block_on(core.debug_seed_demo_mailbox(20)).unwrap();
+        let t = inbox_ids(&core)[0].clone();
+        let mut last = None;
+        for i in 0..60 {
+            last = block_on(core.set_starred(vec![t.clone()], i % 2 == 0)).unwrap();
+        }
+        let last = last.unwrap();
+        let first = super::UndoToken { account_id: "demo".into(), action_id: last.action_id - 59 };
+        assert_eq!(block_on(core.undo_action(first)).unwrap_err().kind(), crate::ErrorKind::NotFound, "pruned");
+        let kept = super::UndoToken { account_id: "demo".into(), action_id: last.action_id - 49 };
+        block_on(core.undo_action(kept)).unwrap();
+
+        let foreign = super::UndoToken { account_id: "work".into(), action_id: last.action_id };
+        assert!(block_on(core.undo_action(foreign)).is_err(), "another account's store has no such action");
     }
 }

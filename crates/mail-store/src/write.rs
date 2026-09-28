@@ -165,7 +165,8 @@ impl<'t> MailWriter<'t> {
                 self.tx
                     .prepare_cached(
                         "UPDATE messages SET thread_id = ?2, rfc822_message_id = ?3, in_reply_to = ?4,
-                           references_json = ?5, from_name = ?6, from_email = ?7, subject = ?8, snippet = ?9,
+                           references_json = ?5, from_name = ?6, from_email = ?7, subject = ?8,
+                           snippet = CASE WHEN ?18 OR ?9 != '' THEN ?9 ELSE snippet END,
                            date = ?10, internal_date = ?11, size_estimate = ?12, body_state = ?13,
                            is_read = ?14, is_starred = ?15, is_draft = ?16, is_sent_by_me = ?17,
                            has_attachments = CASE WHEN ?18 THEN ?19 ELSE has_attachments END,

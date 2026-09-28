@@ -41,9 +41,10 @@ struct DraftClient: Sendable {
         return try await CoreClient.bridge { try await pinned.saveDraft(draft: draft) }
     }
 
-    func sendDraft(_ id: Int64) async throws(CoreClientError) {
+    /// Returns whether the send is held for Undo Send.
+    func sendDraft(_ id: Int64) async throws(CoreClientError) -> Bool {
         guard let pinned else { return try await core.sendDraft(id) }
-        try await CoreClient.bridge { try await pinned.sendDraft(id: id) }
+        return try await CoreClient.bridge { try await pinned.sendDraft(id: id) }
     }
 
     func deleteDraft(_ id: Int64) async throws(CoreClientError) {

@@ -54,9 +54,7 @@ struct OpenAGCApp: App {
 
     /// The app's preferences; a throwaway suite when hosting tests, so the
     /// remembered account is never read or changed by a test run.
-    private static let defaults: UserDefaults = CoreClient.isRunningTests
-        ? UserDefaults(suiteName: "openagc-test-host-\(UUID().uuidString)") ?? .standard
-        : .standard
+    private static let defaults: UserDefaults = CoreClient.appDefaults()
 
     private static func makeCore() -> CoreClient? {
         do {
@@ -67,7 +65,7 @@ struct OpenAGCApp: App {
             // accounts, read their Keychain items or start a real sync: it
             // gets a fresh scratch directory like any snapshot run.
             let scratch = CoreClient.isRunningTests
-                ? FileManager.default.temporaryDirectory.appending(path: "openagc-test-host-\(UUID().uuidString)").path
+                ? CoreClient.testScratchRoot.appending(path: "test-host-\(UUID().uuidString)").path
                 : nil
             if let override = scratch ?? UserDefaults.standard.string(forKey: "OpenAGCDataDirectory"), !override.isEmpty {
                 let dir = URL(filePath: override, directoryHint: .isDirectory)
@@ -105,6 +103,18 @@ struct MailCommands: Commands {
                 .keyboardShortcut("n")
                 .disabled(model.isArchive)
                 .help(model.isArchive ? AppModel.cannotSendReason : "")
+        }
+        // Mail actions undo per account; text being edited keeps its own
+        // undo (spec §14.6a).
+        CommandGroup(replacing: .undoRedo) {
+            Button(mailKey ? model.undo.undoTitle(in: model.openAccountID) : "Undo") {
+                model.undoCommand(mailWindowKey: mailKey)
+            }
+            .keyboardShortcut("z")
+            Button(mailKey ? model.undo.redoTitle(in: model.openAccountID) : "Redo") {
+                model.redoCommand(mailWindowKey: mailKey)
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
         }
         CommandGroup(after: .newItem) {
             Divider()

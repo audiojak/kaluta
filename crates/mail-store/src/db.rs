@@ -22,6 +22,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0003_attachment_data.sql"),
     include_str!("../migrations/0004_routines.sql"),
     include_str!("../migrations/0005_backfill_order.sql"),
+    include_str!("../migrations/0006_header_only_index.sql"),
+    include_str!("../migrations/0007_undo.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;

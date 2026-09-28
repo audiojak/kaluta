@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Remove scratch directories that earlier test runs left in $TMPDIR:
+# Remove scratch directories that earlier test runs left in $TMPDIR (and
+# their throwaway preference files):
 # `openagc-*` (Rust tests) and UUID-named OpenAGC data directories (Swift
 # tests), when older than an hour so a concurrent run is never disturbed.
 # Called by gate.sh and test-macos.sh; safe to run by hand.
@@ -11,3 +12,8 @@ find "$TMP" -maxdepth 1 -type d -mmin +60 \
   while IFS= read -r dir; do
     if [[ -d "$dir/accounts" || -f "$dir/mail.sqlite" || -d "$dir/agents" ]]; then rm -rf "$dir"; fi
   done
+# Throwaway preference suites from the app's tests (openagc-tests-<UUID>,
+# openagc-scratch-<UUID>, ai.actual.openagc.tests.<UUID>); never the app's own.
+find "$HOME/Library/Preferences" -maxdepth 1 -mmin +60 \
+  -regex '.*/\(openagc-tests-\|openagc-scratch-\|ai\.actual\.openagc\.tests\.\)[0-9A-F]\{8\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{4\}-[0-9A-F]\{12\}\.plist' \
+  -delete 2>/dev/null || true

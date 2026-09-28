@@ -7,7 +7,7 @@ struct SidebarTreeTests {
     struct Timeout: Error {}
 
     private func demo() async throws -> AppModel {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir))
         await model.start(openDemo: true)
         return model
@@ -34,7 +34,7 @@ struct SidebarTreeTests {
 
     @Test func expansionIsRememberedPerAccount() {
         let a = "a", b = "b"
-        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "test-\(UUID().uuidString)")!)
+        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         expansion.load(account: a)
         expansion.set("Customers", true)
         expansion.set("Projects/Launch", true)
@@ -70,9 +70,9 @@ struct SidebarTreeTests {
 @MainActor
 struct ImportantOnlyTests {
     @Test func theInboxCanShowOnlyImportantThreadsAndRemembersItPerAccount() async throws {
-        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let defaults = try #require(UserDefaults(suiteName: "test-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         await model.start(openDemo: true)
         let core = try #require(model.core)

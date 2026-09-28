@@ -14,6 +14,7 @@ pub mod queue;
 pub mod read;
 pub mod routines;
 pub mod search;
+pub mod undo;
 mod write;
 
 pub use db::{Db, READER_COUNT, schema_version};
