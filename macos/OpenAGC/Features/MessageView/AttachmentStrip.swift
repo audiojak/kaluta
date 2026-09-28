@@ -65,7 +65,7 @@ struct AttachmentStrip: View {
             Button("Save As…") { perform(attachment) { save($0) } }
             Button("Show in Finder") { perform(attachment) { NSWorkspace.shared.activateFileViewerSelecting([$0]) } }
         }
-        .help("\(attachment.filename) — click to preview, double-click to open")
+        .hoverHelp("\(attachment.filename) — click to preview, double-click to open")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Open") { perform(attachment) { NSWorkspace.shared.open($0) } }

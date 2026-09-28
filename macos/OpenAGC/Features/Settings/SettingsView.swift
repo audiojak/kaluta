@@ -42,27 +42,27 @@ private struct GeneralSettings: View {
                         Text(seconds == 0 ? "Off" : "\(seconds) seconds").tag(seconds)
                     }
                 }
-                .help("How long a sent message waits so you can take it back")
+                .hoverHelp("How long a sent message waits so you can take it back")
                 Text("Messages wait this long before they go, so you can take one back with Undo (⌘Z). Quitting sends them at once.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             Section("New Mail") {
                 Toggle("Notify me about new mail in the Inbox", isOn: $notify)
-                    .help("Show a notification when new mail arrives in the Inbox")
+                    .hoverHelp("Show a notification when new mail arrives in the Inbox")
                 Toggle("Show unread count on the Dock icon", isOn: $badge)
-                    .help("Badge the Dock icon with the Inbox's unread count")
+                    .hoverHelp("Badge the Dock icon with the Inbox's unread count")
                     .onChange(of: badge) { model.updateBadge() }
             }
             Section("Updates") {
                 if updater.isConfigured {
                     Toggle("Check for updates automatically", isOn: Binding(
                         get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
-                        .help("Look for new versions of OpenAGC in the background")
+                        .hoverHelp("Look for new versions of OpenAGC in the background")
                     Toggle("Include beta versions", isOn: $betas)
-                        .help("Also offer beta versions when checking for updates")
+                        .hoverHelp("Also offer beta versions when checking for updates")
                     Button("Check Now") { updater.checkForUpdates() }
-                        .help("Look for a new version of OpenAGC now")
+                        .hoverHelp("Look for a new version of OpenAGC now")
                         .disabled(!updater.canCheckForUpdates)
                 } else {
                     Text("This build does not update itself. Official releases do.")

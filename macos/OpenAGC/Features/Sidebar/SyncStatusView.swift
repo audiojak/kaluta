@@ -29,7 +29,7 @@ struct SyncStatusView: View {
             .padding(.horizontal, Space.l)
             .padding(.vertical, Space.m)
             .accessibilityElement(children: .combine)
-            .help(model.backfillTransport == "imap" ? "Downloading over IMAP (Settings › Accounts)" : "")
+            .hoverHelp(model.backfillTransport == "imap" ? "Downloading over IMAP (Settings › Accounts)" : "")
         }
     }
 

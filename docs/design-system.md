@@ -118,12 +118,17 @@ is only for "approved".
   and at most one sentence.
 - **Menus** keep `Divider()` as their separator; mark the line `// menu`.
 - **Hover descriptions:** every button, menu button, toggle and picker
-  has a `.help(...)` saying what it does, in a short sentence without a
+  has a `.hoverHelp(...)` saying what it does, in a short sentence without a
   full stop, with its shortcut in parentheses when it has one ("Archive
   (E)"). Menu items, context-menu items and confirmation-dialog buttons
   show no tooltips on macOS and are exempt (mark `// no-help: <why>`
   where the check cannot tell). `scripts/help-lint.py --strict` runs in
-  `test-macos.sh`.
+  `test-macos.sh`. Why not plain `.help`: on macOS 26 SwiftUI's tool tips
+  do not appear in column-header bars or on buttons in Settings forms
+  (checked by hovering, 2026-09-28), and never reach the window toolbar.
+  `.hoverHelp` adds an AppKit tool tip over the control that lets clicks
+  through; toolbar buttons keep `.help` and `ToolbarHelp`, which
+  `ToolbarToolTips` copies onto the toolbar items.
 
 ### Toolbar
 

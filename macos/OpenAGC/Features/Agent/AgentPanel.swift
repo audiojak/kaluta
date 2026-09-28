@@ -47,7 +47,7 @@ struct AgentPromptBar: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Choose the agent")
+                .hoverHelp("Choose the agent")
                 .accessibilityLabel("Choose the agent")
 
                 TextField("Ask \(agent.providerName)…", text: $model.agentPromptDraft)
@@ -76,14 +76,14 @@ struct AgentPromptBar: View {
                     Button("Stop", systemImage: "stop.circle.fill") { agent.cancel() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
-                        .help("Stop the agent")
+                        .hoverHelp("Stop the agent")
                 } else {
                     Button("Send", systemImage: "arrow.up.circle.fill", action: send)
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
                         .disabled(model.agentPromptDraft.trimmingCharacters(in: .whitespaces).isEmpty
                                   || !agent.isProviderReady)
-                        .help("Ask \(agent.providerName) (Return)")
+                        .hoverHelp("Ask \(agent.providerName) (Return)")
                 }
             }
             .glassCapsule()
@@ -143,7 +143,7 @@ struct SuggestionChips: View {
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .capsule)
-                .help(chip.fillsOnly ? "Put this in the field for you to finish" : "Ask the agent this")
+                .hoverHelp(chip.fillsOnly ? "Put this in the field for you to finish" : "Ask the agent this")
                 .accessibilityLabel(chip.text)
                 .accessibilityHint(chip.fillsOnly ? "Puts this in the field for you to finish" : "Asks the agent")
             }
@@ -183,7 +183,7 @@ struct AgentCapabilitiesView: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(.tint)
                             .disabled(!model.agent.isProviderReady)
-                            .help(example.fillsOnly ? "Put this in the prompt for you to finish" : "Ask the agent this")
+                            .hoverHelp(example.fillsOnly ? "Put this in the prompt for you to finish" : "Ask the agent this")
                             .accessibilityLabel(example.text)
                             .accessibilityHint(example.fillsOnly ? "Puts this in the prompt for you to finish"
                                                                  : "Asks the agent")
@@ -240,13 +240,13 @@ struct AgentInspector: View {
             Spacer()
             if agent.pendingProposals.count > 1 {
                 Button("Approve All (\(agent.pendingProposals.count))") { agent.approveAll() }
-                    .help("Approve every action the agent is waiting on")
+                    .hoverHelp("Approve every action the agent is waiting on")
                     .controlSize(.small)
             }
             if agent.isRunning {
                 ProgressView().controlSize(.small)
                 Button("Stop") { agent.cancel() }
-                    .help("Stop the agent's current turn")
+                    .hoverHelp("Stop the agent's current turn")
                     .controlSize(.small)
             }
             Menu {
@@ -264,13 +264,13 @@ struct AgentInspector: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("Earlier conversations")
+            .hoverHelp("Earlier conversations")
             .accessibilityLabel("Earlier conversations")
             .onAppear { Task { await agent.loadHistory() } }
             Button("New Conversation", systemImage: "square.and.pencil") { agent.newConversation() }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .help("Start a new conversation")
+                .hoverHelp("Start a new conversation")
                 .disabled(agent.entries.isEmpty)
         }
         .padding(.horizontal, Space.l)
@@ -366,13 +366,13 @@ private struct ProposalCard: View {
                         Button("Review…") {
                             model.compose(.review(draftID: draftID, agent: model.agent.providerName))
                         }
-                        .help("Open the message in a composer to read or edit it first")
+                        .hoverHelp("Open the message in a composer to read or edit it first")
                     }
                     Spacer()
                     Button("Reject", role: .destructive) { model.agent.resolve(actionID, approve: false) }
-                        .help("Don't let the agent do this")
+                        .hoverHelp("Don't let the agent do this")
                     Button("Approve") { model.agent.resolve(actionID, approve: true) }
-                        .help("Let the agent do this")
+                        .hoverHelp("Let the agent do this")
                         .buttonStyle(.borderedProminent)
                 }
                 .controlSize(.small)
@@ -385,7 +385,7 @@ private struct ProposalCard: View {
                     Spacer()
                     Button("Undo") { model.agent.undoSend(actionID) }
                         .controlSize(.small)
-                        .help("Take the message back and open it (until \(until.formatted(date: .omitted, time: .standard)))")
+                        .hoverHelp("Take the message back and open it (until \(until.formatted(date: .omitted, time: .standard)))")
                 }
                 .accessibilityElement(children: .contain)
             case .undoing:

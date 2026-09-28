@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Components (docs/design-system.md). Small on purpose: each exists
@@ -123,12 +124,36 @@ struct CapsuleTabs: View {
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
-                .help(tab.count > 0 ? "\(tab.title), \(tab.count) \(countNoun)" : tab.title)
+                .hoverHelp(tab.count > 0 ? "\(tab.title), \(tab.count) \(countNoun)" : tab.title)
                 .accessibilityLabel(tab.title)
                 .accessibilityValue(tab.count > 0 ? "\(tab.count) \(countNoun)" : "")
                 .accessibilityAddTraits(chosen ? [.isSelected] : [])
             }
         }
         .accessibilityElement(children: .contain)
+    }
+}
+
+extension View {
+    /// `.help` that also shows where SwiftUI's own tool tips do not: in a
+    /// `.columnHeader` bar (safe-area bars) on macOS 26 nothing appears on
+    /// hover. Adds an AppKit tool tip over the control that lets every
+    /// click through.
+    func hoverHelp(_ text: String) -> some View {
+        help(text).overlay(ToolTipArea(text: text))
+    }
+}
+
+private struct ToolTipArea: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> PassThroughToolTipView { PassThroughToolTipView() }
+
+    func updateNSView(_ view: PassThroughToolTipView, context: Context) {
+        if view.toolTip != text { view.toolTip = text }
+    }
+
+    final class PassThroughToolTipView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

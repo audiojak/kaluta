@@ -61,8 +61,8 @@ struct ListFilterMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(active ? "Filtered: \(ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))"
-                     : "Filter")
+        .hoverHelp(active ? "Filtered: \(ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))"
+                          : "Filter: show only unread, starred or with attachments")
         .accessibilityValue(active ? ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ") : "None")
     }
 }

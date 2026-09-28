@@ -50,9 +50,9 @@ struct ThreadReaderView: View {
         Banner("Remote images are hidden to protect your privacy.", systemImage: "photo.badge.exclamationmark",
                intent: .neutral, inset: Space.xxl) {
             Button("Load Images") { model.reader.loadRemoteImagesForThread() }
-                .help("Show remote images in this conversation only (⇧⌘I)")
+                .hoverHelp("Show remote images in this conversation only (⇧⌘I)")
             Button("Always from Sender") { model.reader.alwaysLoadRemoteImagesFromSenders() }
-                .help("Always show remote images from these senders (change in Settings › Privacy)")
+                .hoverHelp("Always show remote images from these senders (change in Settings › Privacy)")
         }
     }
 }

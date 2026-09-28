@@ -25,7 +25,7 @@ struct UndoNoticeView: View {
                             Text("⌘Z").foregroundStyle(.secondary)
                         }
                     }
-                    .help("Undo this (⌘Z)")
+                    .hoverHelp("Undo this (⌘Z)")
                     .buttonStyle(.plain)
                     .focused($focused)
                     .accessibilityLabel("Undo")
@@ -35,7 +35,7 @@ struct UndoNoticeView: View {
                     } label: {
                         Image(systemName: "xmark").font(.caption.weight(.semibold))
                     }
-                    .help("Dismiss")
+                    .hoverHelp("Dismiss")
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Close")

@@ -102,7 +102,7 @@ struct MailCommands: Commands {
             Button("New Message") { model.compose(.new(to: nil)) }
                 .keyboardShortcut("n")
                 .disabled(model.isArchive)
-                .help(model.isArchive ? AppModel.cannotSendReason : "")
+                .hoverHelp(model.isArchive ? AppModel.cannotSendReason : "")
         }
         // Mail actions undo per account; text being edited keeps its own
         // undo (spec §14.6a).
@@ -152,15 +152,15 @@ struct MailCommands: Commands {
             Button("Reply") { model.reply(all: false) }
                 .keyboardShortcut("r")
                 .disabled(noReplyTarget || model.isArchive)
-                .help(model.isArchive ? AppModel.cannotSendReason : "")
+                .hoverHelp(model.isArchive ? AppModel.cannotSendReason : "")
             Button("Reply All") { model.reply(all: true) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(noReplyTarget || model.isArchive)
-                .help(model.isArchive ? AppModel.cannotSendReason : "")
+                .hoverHelp(model.isArchive ? AppModel.cannotSendReason : "")
             Button("Forward") { model.forward() }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(noReplyTarget || model.isArchive)
-                .help(model.isArchive ? AppModel.cannotSendReason : "")
+                .hoverHelp(model.isArchive ? AppModel.cannotSendReason : "")
             Divider() // menu
             Button("Archive") { model.archiveSelection() }
                 .keyboardShortcut("a", modifiers: [.command, .control])

@@ -83,7 +83,7 @@ struct LabelPickerView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
-                        .help("Create the label \(path) and apply it")
+                        .hoverHelp("Create the label \(path) and apply it")
                         .buttonStyle(.plain)
                         .padding(.vertical, Space.xs)
                     }
@@ -115,7 +115,7 @@ struct LabelPickerView: View {
         .contentShape(Rectangle())
         if let id = row.node.mailbox?.labelId {
             Button { toggle(id, row.state) } label: { content }
-                .help("\(row.state == .on ? "Remove" : "Apply") the label \(row.node.path)")
+                .hoverHelp("\(row.state == .on ? "Remove" : "Apply") the label \(row.node.path)")
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(row.node.path), \(row.state == .on ? "applied" : "not applied")")
         } else {

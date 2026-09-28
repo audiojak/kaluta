@@ -143,6 +143,7 @@ enum ToolbarHelp {
         case "Hide Sidebar": "Hide the sidebar"
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
+        case "New Routine": "Create a routine that sorts important mail on a schedule"
         default: nil
         }
     }

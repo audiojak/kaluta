@@ -42,7 +42,7 @@ struct SidebarView: View {
                                 .padding(.leading, Self.activityIndent)
                         }
                     }
-                    .help("Open \(routine.name) in the Routines window")
+                    .hoverHelp("Open \(routine.name) in the Routines window")
                     .buttonStyle(.plain)
                 }
                 Button {
@@ -51,7 +51,7 @@ struct SidebarView: View {
                     Label(model.routines.routines.isEmpty ? "Set Up a Routine…" : "Manage Routines…", systemImage: "plus.circle")
                         .foregroundStyle(.secondary)
                 }
-                .help("Open the Routines window")
+                .hoverHelp("Open the Routines window")
                 .buttonStyle(.plain)
             }
         }

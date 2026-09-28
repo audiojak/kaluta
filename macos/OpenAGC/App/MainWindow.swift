@@ -172,7 +172,7 @@ struct MainWindow: View {
                 Toggle("Important only", isOn: $model.inboxImportantOnly)
                     .toggleStyle(.switch)
                     .controlSize(.mini)
-                    .help("Show only the Inbox threads Gmail marked Important")
+                    .hoverHelp("Show only the Inbox threads Gmail marked Important")
             }
             ListFilterMenu()
             if categories {
@@ -186,7 +186,7 @@ struct MainWindow: View {
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
                 .fixedSize()
-                .help("View Options")
+                .hoverHelp("View options: Important Only, Show Categories")
             }
         }
     }
@@ -208,7 +208,7 @@ private struct ReauthenticationBanner: View {
         Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
                intent: .attention) {
             Button("Sign In") { Task { await model.signIn(with: .effective()) } }
-                .help("Sign in to Google again to keep syncing this account")
+                .hoverHelp("Sign in to Google again to keep syncing this account")
         }
     }
 }
