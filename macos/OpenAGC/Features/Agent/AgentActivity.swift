@@ -19,6 +19,7 @@ struct AgentPermissionsSettings: View {
             Section {
                 ForEach(model.core?.configurableAgentTools ?? [], id: \.self) { tool in
                     Toggle(AgentStore.toolTitle(tool), isOn: binding(for: tool))
+                        .help("Ask you before an agent can \(AgentStore.toolTitle(tool).lowercased())")
                 }
             } header: {
                 Text("Ask Before")
@@ -32,6 +33,7 @@ struct AgentPermissionsSettings: View {
                         Label("A key is saved in your Keychain.", systemImage: "key.fill")
                         Spacer()
                         Button("Remove", role: .destructive, action: removeKey)
+                            .help("Delete the saved API key from your Keychain")
                     }
                 } else {
                     HStack {
@@ -39,6 +41,7 @@ struct AgentPermissionsSettings: View {
                             .textContentType(.password)
                         Button("Save", action: saveKey)
                             .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                            .help("Save this key in your Keychain for the claude tool")
                     }
                 }
                 if let keyError {
@@ -52,6 +55,7 @@ struct AgentPermissionsSettings: View {
             }
             Section {
                 Button("Show Activity…") { showsActivity = true }
+                    .help("See every tool call agents made and what they changed")
             } footer: {
                 Text("Every tool call an agent made, what was decided and what it touched.")
                     .foregroundStyle(.secondary)
@@ -126,8 +130,10 @@ struct AgentActivityView: View {
             PaneDivider()
             HStack {
                 Button("Export…", action: export).disabled(actions.isEmpty)
+                    .help("Save the activity log as a file")
                 Spacer()
                 Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                    .help("Close the activity log (Return)")
             }
             .padding(Space.l)
         }

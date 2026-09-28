@@ -83,6 +83,7 @@ struct AgentPromptBar: View {
                         .buttonStyle(.borderless)
                         .disabled(model.agentPromptDraft.trimmingCharacters(in: .whitespaces).isEmpty
                                   || !agent.isProviderReady)
+                        .help("Ask \(agent.providerName) (Return)")
                 }
             }
             .glassCapsule()
@@ -142,6 +143,7 @@ struct SuggestionChips: View {
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .capsule)
+                .help(chip.fillsOnly ? "Put this in the field for you to finish" : "Ask the agent this")
                 .accessibilityLabel(chip.text)
                 .accessibilityHint(chip.fillsOnly ? "Puts this in the field for you to finish" : "Asks the agent")
             }
@@ -181,6 +183,7 @@ struct AgentCapabilitiesView: View {
                             .buttonStyle(.plain)
                             .foregroundStyle(.tint)
                             .disabled(!model.agent.isProviderReady)
+                            .help(example.fillsOnly ? "Put this in the prompt for you to finish" : "Ask the agent this")
                             .accessibilityLabel(example.text)
                             .accessibilityHint(example.fillsOnly ? "Puts this in the prompt for you to finish"
                                                                  : "Asks the agent")
@@ -237,11 +240,13 @@ struct AgentInspector: View {
             Spacer()
             if agent.pendingProposals.count > 1 {
                 Button("Approve All (\(agent.pendingProposals.count))") { agent.approveAll() }
+                    .help("Approve every action the agent is waiting on")
                     .controlSize(.small)
             }
             if agent.isRunning {
                 ProgressView().controlSize(.small)
                 Button("Stop") { agent.cancel() }
+                    .help("Stop the agent's current turn")
                     .controlSize(.small)
             }
             Menu {
@@ -361,10 +366,13 @@ private struct ProposalCard: View {
                         Button("Review…") {
                             model.compose(.review(draftID: draftID, agent: model.agent.providerName))
                         }
+                        .help("Open the message in a composer to read or edit it first")
                     }
                     Spacer()
                     Button("Reject", role: .destructive) { model.agent.resolve(actionID, approve: false) }
+                        .help("Don't let the agent do this")
                     Button("Approve") { model.agent.resolve(actionID, approve: true) }
+                        .help("Let the agent do this")
                         .buttonStyle(.borderedProminent)
                 }
                 .controlSize(.small)

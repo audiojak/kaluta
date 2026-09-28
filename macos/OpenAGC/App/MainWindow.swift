@@ -207,6 +207,7 @@ private struct ReauthenticationBanner: View {
         Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
                intent: .attention) {
             Button("Sign In") { Task { await model.signIn(with: .effective()) } }
+                .help("Sign in to Google again to keep syncing this account")
         }
     }
 }

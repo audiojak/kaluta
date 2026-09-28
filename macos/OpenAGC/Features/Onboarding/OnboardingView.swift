@@ -30,6 +30,7 @@ struct OnboardingView: View {
                         Text("Finish signing in with Google in your browser…")
                         Spacer()
                         Button("Cancel") { model.cancelSignIn() }
+                            .help("Stop waiting for the sign-in in your browser")
                     }
                 } else {
                     HStack {
@@ -41,7 +42,9 @@ struct OnboardingView: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                         .disabled(!client.isUsable)
+                        .help("Sign in with Google in your browser to add your Gmail")
                         Button("Explore a Demo Mailbox") { Task { await model.openDemoMailbox() } }
+                            .help("Try OpenAGC with made-up mail; nothing leaves this Mac")
                             .controlSize(.large)
                     }
                     if !client.isUsable {
@@ -108,9 +111,11 @@ private struct OnboardingAgents: View {
                 Picker("Ask by default", selection: Bindable(agent).providerID) {
                     ForEach(ready, id: \.id) { Text($0.name).tag($0.id) }
                 }
+                .help("Which agent the prompt asks unless you choose another")
                 .fixedSize()
             }
             Button("Check Again") { Task { await agent.loadProviders(refresh: true) } }
+                .help("Look again for the Claude Code and Codex command-line tools")
                 .controlSize(.small)
         }
         .task { await agent.loadProviders() }

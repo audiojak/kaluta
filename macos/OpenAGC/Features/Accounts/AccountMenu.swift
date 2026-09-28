@@ -42,7 +42,7 @@ struct AccountMenuItems: View {
 
     var body: some View {
         ForEach(Array(model.accounts.enumerated()), id: \.element.id) { index, account in
-            Button {
+            Button { // no-help: menu item
                 Task { await model.switchAccount(to: account.id) }
             } label: {
                 Image(nsImage: AccountAvatar.menuImage(account, current: account.id == model.openAccountID))
@@ -51,9 +51,9 @@ struct AccountMenuItems: View {
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }
         if !model.accounts.isEmpty { Divider() } // menu
-        Button("Add Account…") { Task { await model.addAccount() } }
+        Button("Add Account…") { Task { await model.addAccount() } } // no-help: menu item
             .disabled(!GoogleClientConfiguration.effective().isUsable)
-        Button("Accounts Settings…", action: openSettings)
+        Button("Accounts Settings…", action: openSettings) // no-help: menu item
     }
 
     /// "Work Me — work@example.com (12)".

@@ -28,10 +28,12 @@ struct AgentSettings: View {
             }
             Section {
                 Button(checking ? "Checking…" : "Check Again") { Task { await load(refresh: true) } }
+                    .help("Look again for the Claude Code and Codex command-line tools")
                     .disabled(checking)
             }
             Section {
                 Button("Clear Suggestions History") { model.clearSuggestionHistory() }
+                    .help("Forget the prompts you've sent, which suggestions offer first")
             } footer: {
                 Text("Suggestions over the prompt start with things you have asked before, remembered on this Mac for each account.")
                     .foregroundStyle(.secondary)

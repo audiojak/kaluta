@@ -117,6 +117,13 @@ is only for "approved".
 - **Empty states**: `ContentUnavailableView`, with a title, an SF Symbol
   and at most one sentence.
 - **Menus** keep `Divider()` as their separator; mark the line `// menu`.
+- **Hover descriptions:** every button, menu button, toggle and picker
+  has a `.help(...)` saying what it does, in a short sentence without a
+  full stop, with its shortcut in parentheses when it has one ("Archive
+  (E)"). Menu items, context-menu items and confirmation-dialog buttons
+  show no tooltips on macOS and are exempt (mark `// no-help: <why>`
+  where the check cannot tell). `scripts/help-lint.py --strict` runs in
+  `test-macos.sh`.
 
 ### Toolbar
 

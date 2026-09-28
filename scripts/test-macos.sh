@@ -11,6 +11,8 @@ shift || true
 "$ROOT/scripts/clean-test-scratch.sh"
 # Design-system rules that a grep can check (docs/design-system.md).
 "$ROOT/scripts/design-lint.sh" --strict
+# Every button, menu button, toggle and picker has a hover description.
+"$ROOT/scripts/help-lint.py" --strict
 # Test isolation: settings go through CoreClient.appDefaults() (a scratch
 # suite under tests and snapshots); .standard is only for reading launch
 # arguments, in the files listed here.

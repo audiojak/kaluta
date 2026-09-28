@@ -41,6 +41,7 @@ private struct NewRoutineMenu: View {
                 }
             }
         }
+        .help("Create a routine that sorts important mail on a schedule")
         .fixedSize()
     }
 }
@@ -72,6 +73,7 @@ private struct RoutineList: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.mini)
+                        .help("\(routine.enabled ? "Pause" : "Resume") this routine's schedule")
                 }
                 .padding(.vertical, Space.hair)
                 .tag(routine.id)
@@ -117,6 +119,7 @@ private struct RoutineEditor: View {
             Picker("Runs on", selection: d.runner) {
                 ForEach(RoutineRunner.allCases) { Text($0.title).tag($0.rawValue) }
             }
+            .help("Where the routine runs: here on this Mac, or in Claude's or ChatGPT's cloud")
             Text(model.routines.runner.explanation)
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -126,6 +129,7 @@ private struct RoutineEditor: View {
                     Text("Claude").tag("claude-code")
                     Text("Codex").tag("codex")
                 }
+                .help("Which agent runs this routine on this Mac")
                 LaunchAtLoginToggle()
             }
             if let url = d.wrappedValue.cloud.routineUrl, let link = URL(string: url) {
@@ -149,6 +153,7 @@ private struct RoutineEditor: View {
             Picker("Repeat", selection: Binding(get: { parsed.0 }, set: { set($0, parsed.hour, parsed.minute, parsed.weekday) })) {
                 ForEach(SchedulePreset.allCases) { Text($0.title).tag($0) }
             }
+            .help("How often the routine runs")
             switch parsed.0 {
             case .hourly:
                 Stepper("At minute \(parsed.minute)", value: Binding(get: { parsed.minute }, set: { set(.hourly, parsed.hour, $0, parsed.weekday) }), in: 0...59)
@@ -159,6 +164,7 @@ private struct RoutineEditor: View {
                             Text(Calendar.current.weekdaySymbols[(["SU", "MO", "TU", "WE", "TH", "FR", "SA"].firstIndex(of: day) ?? 0)]).tag(day)
                         }
                     }
+                    .help("The day of the week it runs")
                 }
                 DatePicker("Time", selection: Binding(
                     get: { Calendar.current.date(bySettingHour: parsed.hour, minute: parsed.minute, second: 0, of: .now) ?? .now },
@@ -193,9 +199,13 @@ private struct RoutineEditor: View {
     private func leaveAlone(_ d: Binding<RoutineDefinition>) -> some View {
         Section {
             Toggle("Conversations with real people", isOn: d.leaveAlone.humanThreads)
+                .help("Never file threads with a person on the other end")
             Toggle("Threads you have replied to", isOn: d.leaveAlone.repliedByMe)
+                .help("Never file threads you've taken part in")
             Toggle("Starred threads", isOn: d.leaveAlone.starred)
+                .help("Never file starred threads")
             Toggle("Spam and Trash", isOn: d.leaveAlone.spamTrash)
+                .help("Never touch mail in Spam or Trash")
             LinesField(title: "Other rules, one per line", lines: d.leaveAlone.custom)
         } header: {
             Text("Leave alone")
@@ -215,10 +225,13 @@ private struct RoutineEditor: View {
                     BucketEditor(bucket: $bucket, others: d.wrappedValue.buckets.filter { $0.id != bucket.id })
                     HStack {
                         Button("Move Up") { d.wrappedValue.buckets.swapAt(index, index - 1) }.disabled(index == 0)
+                            .help("Check this bucket earlier; a thread gets the first bucket that fits")
                         Button("Move Down") { d.wrappedValue.buckets.swapAt(index, index + 1) }
+                            .help("Check this bucket later")
                             .disabled(index == d.wrappedValue.buckets.count - 1)
                         Spacer()
                         Button("Remove", role: .destructive) { d.wrappedValue.buckets.removeAll { $0.id == bucket.id } }
+                            .help("Delete this bucket from the routine")
                     }
                     .controlSize(.small)
                 } label: {
@@ -236,6 +249,7 @@ private struct RoutineEditor: View {
                 d.wrappedValue.buckets.append(bucket)
                 expanded.insert(bucket.id)
             }
+            .help("Add another label the routine can file mail into")
         } header: {
             Text("Buckets")
         } footer: {
@@ -247,11 +261,14 @@ private struct RoutineEditor: View {
     private func reportAndAdvanced(_ d: Binding<RoutineDefinition>) -> some View {
         Section("Report and prompt") {
             Toggle("Count what went where", isOn: d.report.counts)
+                .help("Include how many threads went to each bucket in the report")
             Stepper("At most \(d.wrappedValue.report.maxLines) lines", value: d.report.maxLines, in: 5...50)
             Toggle("Leave unmatched automated mail and list it", isOn: Binding(
                 get: { d.wrappedValue.unmatched.kind == "leave_and_report" },
                 set: { d.wrappedValue.unmatched = $0 ? .init(kind: "leave_and_report", label: nil) : .init(kind: "apply_label", label: "Other") }))
+                .help("Keep automated mail that fits no bucket in the Inbox and list it in the report, instead of labelling it Other")
             Button(d.wrappedValue.advancedPrompt == nil ? "Edit Prompt…" : "Edit Hand-Written Prompt…") { editingPrompt = true }
+                .help("See or hand-edit the prompt the agent gets")
         }
     }
 
@@ -281,6 +298,7 @@ private struct RoutineEditor: View {
                 Spacer()
                 if store.runner == .claudeCloud, store.draft?.cloud.triggerId != nil {
                     Button("Check Claude") { Task { await store.refreshCloudRuns() } }.controlSize(.small)
+                        .help("Fetch this routine's latest runs from claude.ai")
                 }
             }
         }
@@ -298,6 +316,7 @@ private struct RoutineEditor: View {
             }
             HStack {
                 Button("Delete", role: .destructive) { Task { await store.delete() } }
+                    .help("Delete this routine; mail it filed keeps its labels")
                 Spacer()
                 if let busy = store.busy {
                     ProgressView().controlSize(.small)
@@ -306,13 +325,16 @@ private struct RoutineEditor: View {
                 Button("Preview") { Task { await store.startPreview() } }
                     .help("Classify the current mail without changing anything (runs here, with your agent)")
                 Button("Run Now") { Task { await store.runNow(model: model) } }
+                    .help("Run the routine once now")
                     .disabled(store.runner == .chatGptCloud || store.runner == .claudeDesktop
                         || (store.runner == .claudeCloud && store.draft?.cloud.triggerId == nil))
                 Button(publishTitle(store.runner)) { Task { await store.publish() } }
                     .disabled(store.runner == .local || model.isArchive)
                     .help(model.isArchive ? "An imported mailbox lives only on this Mac; run the routine locally." : "")
                 Button("Revert") { store.revert() }.disabled(!store.hasUnsavedChanges)
+                    .help("Throw away unsaved changes")
                 Button("Save") { Task { await store.save() } }
+                    .help("Save the routine (⌘S)")
                     .keyboardShortcut("s")
                     .buttonStyle(.borderedProminent)
                     .disabled(!store.hasUnsavedChanges)
@@ -344,9 +366,11 @@ private struct BucketEditor: View {
                 Label(name.capitalized, systemImage: "circle.fill").tag(name)
             }
         }
+        .help("The label's colour in Gmail and OpenAGC")
         Picker("Review", selection: $bucket.cadence) {
             ForEach(RoutineDefinition.Bucket.cadences, id: \.self) { Text($0.capitalized).tag($0) }
         }
+        .help("How often you plan to look at this bucket; the agent uses it to judge urgency")
         VStack(alignment: .leading) {
             Text("What belongs here").font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $bucket.description).frame(minHeight: 60).font(.body)
@@ -356,6 +380,7 @@ private struct BucketEditor: View {
         TextField("When it's ambiguous", text: Binding(get: { bucket.priorityWhenAmbiguous ?? "" },
                                                        set: { bucket.priorityWhenAmbiguous = $0.isEmpty ? nil : $0 }))
         Toggle("List each thread in the report", isOn: $bucket.listIndividuallyInReport)
+            .help("Name every thread filed here in the report, not just the count")
     }
 }
 
@@ -473,13 +498,16 @@ private struct PromptEditor: View {
                     draft.advancedPrompt = nil
                     dismiss()
                 }
+                .help("Go back to the prompt built from the settings")
                 .disabled(draft.advancedPrompt == nil)
                 Spacer()
                 Button("Cancel") { dismiss() }
+                    .help("Close without changing the prompt")
                 Button("Use This Prompt") {
                     draft.advancedPrompt = text
                     dismiss()
                 }
+                .help("Use your edited prompt; the settings will no longer change it")
                 .buttonStyle(.borderedProminent)
             }
         }
@@ -535,11 +563,14 @@ private struct HandoffSheet: View {
             HStack {
                 Spacer()
                 Button("Close") { dismiss() }
+                    .help("Close; you can set it up later")
                 if !isChatGPT {
                     Button("Link Routine") { Task { await model.routines.attach(url: pasted) } }
+                        .help("Connect the routine you created at claude.ai so OpenAGC shows its runs")
                         .disabled(pasted.isEmpty)
                 }
                 Button("Copy Prompt and Open") { model.routines.copyAndOpen(handoff) }
+                    .help("Copy the routine's prompt and open the site to paste it")
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -567,6 +598,7 @@ private struct LaunchAtLoginToggle: View {
                 self.error = error.localizedDescription
             }
         }))
+        .help("Start OpenAGC when you log in, so routines on this Mac run on time")
         if let error {
             Text(error).font(.caption).foregroundStyle(.red)
         }

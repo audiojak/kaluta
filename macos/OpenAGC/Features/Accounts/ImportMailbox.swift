@@ -54,6 +54,7 @@ struct ImportMailboxSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.importDraft = nil }
+                    .help("Close without importing (Esc)")
                     .keyboardShortcut(.cancelAction)
                 Button("Import") {
                     model.importDraft = draft
@@ -61,6 +62,7 @@ struct ImportMailboxSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.scan == nil || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .help("Import these messages into a new mailbox on this Mac (Return)")
             }
         }
         .padding(Space.xxl)
@@ -91,9 +93,11 @@ struct ImportProgressSheet: View {
                 Spacer()
                 if status?.done == true {
                     Button("Close") { Task { await model.finishImport(show: false) } }
+                        .help("Close and stay where you are")
                     Button("Show Mail") { Task { await model.finishImport(show: true) } }
                         .keyboardShortcut(.defaultAction)
                         .disabled(status?.imported == 0)
+                        .help("Open the imported mailbox (Return)")
                 } else {
                     Button("Stop Import") { model.cancelRunningImport() }
                         .help("What has been imported so far is kept; Re-import in Settings continues.")

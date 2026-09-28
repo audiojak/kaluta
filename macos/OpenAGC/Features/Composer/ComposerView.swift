@@ -106,6 +106,7 @@ struct ComposerView: View {
                 RecipientField(addresses: $store.to, suggest: suggest, accessibilityLabel: "To")
                 if !store.showsCcBcc {
                     Button("Cc/Bcc") { store.showsCcBcc = true }
+                        .help("Add Cc and Bcc fields")
                         .buttonStyle(.link)
                         .font(.callout)
                 }
@@ -150,6 +151,7 @@ struct ComposerView: View {
                       systemImage: showsQuote ? "chevron.down" : "ellipsis")
                     .font(.callout)
             }
+            .help(showsQuote ? "Hide the message you are replying to" : "Show the message you are replying to")
             .buttonStyle(.borderless)
             .padding(.horizontal, Space.xl)
             .padding(.vertical, Space.s)
@@ -170,6 +172,7 @@ struct ComposerView: View {
                         Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
                             .foregroundStyle(.secondary)
                         Button("Remove", systemImage: "xmark.circle.fill") { store.removeAttachment(attachment) }
+                            .help("Remove \(attachment.filename) from the message")
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
                     }
