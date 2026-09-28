@@ -829,6 +829,28 @@ only.*
 Trade-off, accepted: text search over old mail waits on Gmail's server
 search, and an agent reading old mail pauses while it downloads.
 
+*Measured (2026-09-28, oagc-vaq):* `crates/mail-sync/tests/scale.rs`,
+release build, Apple M4 Pro. 100,000 messages in 33,334 threads over two
+years (1,539 threads in the Inbox), listed through the fake provider with
+a cheap-headers source standing in for IMAP, so the times are the engine's
+and the store's, not the network's:
+
+| Step | Time |
+| --- | --- |
+| List every id and queue it by tier | 1.75 s |
+| Inbox browsable (the headers pass does the Inbox first) | 1.80 s |
+| Every message listed (headers pass done) | 7.4 s |
+| Bodies for the Inbox and the last 30 days (6,668) | 0.5 s |
+
+Queue right after listing: 770 unread Inbox, 2,307 other Inbox and 3,591
+from the last 30 days for bodies; 20,000 (to six months), 24,667 (to a
+year) and 48,665 (older) for headers only. Peak memory rose about 100 MB
+over the fake mailbox's own 280 MB; the store took 98 MB. No body outside
+the window was fetched. A 5,000-message version of the same run is in the
+gate and checks the tiers, that only in-window bodies are fetched, and a
+generous time bound. Rerun:
+`cargo test --release -p mail-sync --test scale -- --ignored --nocapture`.
+
 ### 7.5 Sending and threading **(Verified)**
 
 Outgoing mail is built with `mail-builder`: `multipart/alternative` with
