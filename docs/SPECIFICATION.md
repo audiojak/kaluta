@@ -1748,14 +1748,23 @@ The reader's toolbar carries New Message, Reply / Reply All / Forward,
 Archive / Trash, a Label menu, Star and the agent toggle, beside search.
 *(Planned: New Message at the reader's leading edge, as in Mail.)*
 
-**Amendment (2026-09-28): Gmail categories.** Planned. When the account
-uses Gmail's categories, the Inbox shows Mail-style tabs above the list:
-Primary, Promotions, Social, Updates, Forums (only those with mail), each
-a narrowed Inbox listing like Important-only (`INBOX+CATEGORY_…`; Primary
-is `CATEGORY_PERSONAL` or Inbox mail with no category). Tabs show unread
-counts; the chosen tab is remembered per account; "Show Categories" in
-the list header turns them off. Moving a thread to another category is
-not in scope (Gmail's filters decide).
+**Amendment (2026-09-28): Gmail categories.** Implemented 2026-09-28.
+When the account uses Gmail's categories, the Inbox shows Mail-style tabs
+above the list: Primary, Promotions, Social, Updates, Forums (Primary
+always, the others only with mail; no tabs when only Primary has mail),
+each a narrowed Inbox listing like Important-only (`INBOX+CATEGORY_…`;
+as a narrowing, Primary means "in no other category", so Inbox mail Gmail
+never categorised is Primary). Tabs are capsules with the category's
+symbol and unread count, the chosen one also its name. The chosen tab is
+remembered per account and falls back to Primary while it has no mail;
+tabs combine with Important-only (`INBOX+IMPORTANT+CATEGORY_SOCIAL`) and
+search ignores them. With categories the Important-only switch moves into
+a View Options menu in the list header beside "Show Categories", which
+turns the tabs off (per account). Revealing a thread from a notification
+opens its tab. A thread in two categories lists in both but counts in the
+first. Categories come from the Gmail API; IMAP-only accounts have none.
+Moving a thread to another category is not in scope (Gmail's filters
+decide).
 
 **Amendment (2026-09-28): list filters.** Planned. A filter button in the
 list column's header, as in Mail, narrows the current mailbox or search:

@@ -53,9 +53,7 @@ final class AppModel {
             guard newValue != inboxImportantOnlyLoaded else { return }
             inboxImportantOnlyLoaded = newValue
             if let id = openAccountID { defaults.set(newValue, forKey: Self.importantOnlyKey(id)) }
-            selectedThreadID = nil
-            selectedThreadIDs = []
-            if case .open = accountState, let id = listMailboxID { Task { await threads.show(mailboxID: id) } }
+            relist()
         }
     }
 
@@ -63,11 +61,83 @@ final class AppModel {
 
     static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
 
-    /// What the thread list shows: the selected mailbox, narrowed to
-    /// Important in the Inbox when that switch is on.
+    /// Every Inbox category with its counts, narrowed like the list
+    /// (Important only); the tabs are `InboxCategories.visible` of these.
+    private(set) var inboxCategoryCounts: [InboxCategory] = []
+
+    /// The Inbox's category tabs are on (per account; on by default).
+    var showCategories: Bool {
+        get { showCategoriesLoaded }
+        set {
+            guard newValue != showCategoriesLoaded else { return }
+            showCategoriesLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.showCategoriesKey(id)) }
+            relist()
+        }
+    }
+
+    private var showCategoriesLoaded = true
+
+    /// The category tab the user chose (per account); the list shows it
+    /// while it has mail, otherwise Primary.
+    var inboxCategory: String {
+        get { inboxCategoryLoaded }
+        set {
+            guard newValue != inboxCategoryLoaded else { return }
+            inboxCategoryLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.inboxCategoryKey(id)) }
+            relist()
+        }
+    }
+
+    private var inboxCategoryLoaded = InboxCategories.primary
+
+    static func showCategoriesKey(_ accountID: String) -> String { "inboxShowCategories.\(accountID)" }
+    static func inboxCategoryKey(_ accountID: String) -> String { "inboxCategory.\(accountID)" }
+
+    /// The tabs above the Inbox list; empty when categories are off or
+    /// the account has none.
+    var inboxCategoryTabs: [InboxCategory] {
+        showCategories ? InboxCategories.visible(inboxCategoryCounts) : []
+    }
+
+    /// The tab the Inbox list is narrowed to, if any.
+    var activeInboxCategory: String? {
+        InboxCategories.active(chosen: inboxCategory, visible: inboxCategoryTabs)
+    }
+
+    /// What the thread list shows: the selected mailbox; in the Inbox,
+    /// narrowed to Important when that switch is on and to the category
+    /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID else { return nil }
-        return id == "INBOX" && inboxImportantOnly ? "INBOX+IMPORTANT" : id
+        guard id == "INBOX" else { return id }
+        var parts = ["INBOX"]
+        if inboxImportantOnly { parts.append("IMPORTANT") }
+        if let category = activeInboxCategory { parts.append(category) }
+        return parts.joined(separator: "+")
+    }
+
+    /// Show the list again after the Inbox's narrowing changed; the
+    /// selection goes, as when choosing another mailbox.
+    private func relist() {
+        selectedThreadID = nil
+        selectedThreadIDs = []
+        guard case .open = accountState else { return }
+        Task {
+            await reloadInboxCategories()
+            if let id = listMailboxID, id != threads.mailboxID || threads.searchQuery != nil { await threads.show(mailboxID: id) }
+        }
+    }
+
+    /// Re-count the Inbox's categories. Returns whether the list's
+    /// narrowing changed as a result (a tab emptied or appeared).
+    @discardableResult
+    func reloadInboxCategories() async -> Bool {
+        guard let core, case .open = accountState else { return false }
+        let before = listMailboxID
+        inboxCategoryCounts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        return listMailboxID != before
     }
 
     /// The open account's id, if any (demo included).
@@ -306,6 +376,9 @@ final class AppModel {
             await mailboxes.reload()
             await reloadAccounts()
             inboxImportantOnlyLoaded = defaults.bool(forKey: Self.importantOnlyKey(accountID))
+            showCategoriesLoaded = defaults.object(forKey: Self.showCategoriesKey(accountID)) as? Bool ?? true
+            inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
+            await reloadInboxCategories()
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -587,12 +660,22 @@ final class AppModel {
         reveal(threadID: threadID)
     }
 
-    /// Show a thread from a notification: switch to the Inbox and select it.
+    /// Show a thread from a notification: switch to the Inbox, and to its
+    /// category tab, and select it.
     func reveal(threadID: String) {
         if selectedMailboxID != "INBOX" { selectedMailboxID = "INBOX" }
         searchText = ""
         selectedThreadIDs = []
         selectedThreadID = threadID
+        guard !inboxCategoryTabs.isEmpty, let core else { return }
+        Task {
+            guard let labels = try? await core.thread(threadID)?.thread.labelIds else { return }
+            let tab = InboxCategories.category(of: labels, in: inboxCategoryCounts.map(\.id))
+            guard tab != activeInboxCategory else { return }
+            inboxCategory = tab
+            // Choosing a tab clears the selection; this one is the point.
+            selectedThreadID = threadID
+        }
     }
 
     // MARK: Compose
@@ -924,7 +1007,12 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
-            if mailboxID == threads.mailboxID || threads.searchQuery != nil {
+            // A category tab may have gained its first thread or lost its
+            // last: then the Inbox shows another narrowing.
+            if selectedMailboxID == "INBOX", mailboxID == "INBOX" || mailboxID.hasPrefix("CATEGORY_"),
+               await reloadInboxCategories(), threads.searchQuery == nil, let id = listMailboxID {
+                await threads.show(mailboxID: id)
+            } else if mailboxID == threads.mailboxID || threads.searchQuery != nil {
                 await threads.apply(hint)
             } else if let shown = threads.mailboxID, shown.split(separator: "+").contains(Substring(mailboxID)) {
                 // A narrowed view (INBOX+IMPORTANT): a change to either

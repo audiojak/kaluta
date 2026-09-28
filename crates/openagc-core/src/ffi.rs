@@ -67,6 +67,16 @@ impl From<MailboxKind> for d::MailboxKind {
     }
 }
 
+/// One of the Inbox's category tabs (spec §14.3 amendment, categories).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct InboxCategory {
+    /// `CATEGORY_PERSONAL` (Primary) or another `CATEGORY_…` label id:
+    /// what follows `INBOX+` in a `list_threads` mailbox.
+    pub id: String,
+    pub total_count: u32,
+    pub unread_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MailboxInfo {
     /// What `list_threads` takes: the label id, or `@archive`.

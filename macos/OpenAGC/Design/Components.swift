@@ -86,3 +86,49 @@ struct LabelChip: View {
             .background(Color(nsColor: Tone.chipFill(hex: colorHex)), in: .rect(cornerRadius: Radius.chip))
     }
 }
+
+/// A row of tabs as capsules, for a column header (the Inbox's category
+/// tabs). Each tab shows its symbol and count; the chosen one also its
+/// name, so the row fits a narrow column.
+struct CapsuleTabs: View {
+    struct Tab: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let symbol: String
+        /// Shown after the symbol when non-zero (unread threads).
+        var count: Int = 0
+    }
+
+    let tabs: [Tab]
+    @Binding var selection: String?
+    /// Read after the count by VoiceOver and in the help tag ("unread").
+    var countNoun = "unread"
+
+    var body: some View {
+        HStack(spacing: Space.xs) {
+            ForEach(tabs) { tab in
+                let chosen = tab.id == selection
+                Button { selection = tab.id } label: {
+                    HStack(spacing: Space.xs) {
+                        Image(systemName: tab.symbol)
+                        if chosen { Text(tab.title).fontWeight(.medium) }
+                        if tab.count > 0 {
+                            Text(tab.count.formatted()).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                    }
+                    .lineLimit(1)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, Space.xs)
+                    .background(chosen ? Tone.highlight : AnyShapeStyle(.clear), in: .capsule)
+                    .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .help(tab.count > 0 ? "\(tab.title), \(tab.count) \(countNoun)" : tab.title)
+                .accessibilityLabel(tab.title)
+                .accessibilityValue(tab.count > 0 ? "\(tab.count) \(countNoun)" : "")
+                .accessibilityAddTraits(chosen ? [.isSelected] : [])
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}

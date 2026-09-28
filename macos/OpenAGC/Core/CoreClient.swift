@@ -199,6 +199,11 @@ final class CoreClient: Sendable {
         try await call { try await core.createLabel(name: path, color: color) }
     }
 
+    /// The Inbox's category tabs with their counts, Primary first.
+    func inboxCategories(importantOnly: Bool) async throws(CoreClientError) -> [InboxCategory] {
+        try await call { try await core.inboxCategories(importantOnly: importantOnly) }
+    }
+
     func threads(in mailboxID: String, after cursor: String? = nil, limit: UInt32 = 100) async throws(CoreClientError) -> ThreadPage {
         try await call { try await core.listThreads(mailboxId: mailboxID, cursor: cursor, limit: limit) }
     }
@@ -720,6 +725,7 @@ typealias DraftAttachmentInfo = OpenAGCCore.DraftAttachmentInfo
 typealias DraftInfo = OpenAGCCore.DraftInfo
 typealias DraftStatus = OpenAGCCore.DraftStatus
 typealias LabelInfo = OpenAGCCore.LabelInfo
+typealias InboxCategory = OpenAGCCore.InboxCategory
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow

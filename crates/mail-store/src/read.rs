@@ -97,36 +97,51 @@ pub fn mailbox_label(mailbox: &Mailbox) -> &str {
     }
 }
 
+/// Gmail's categories other than Primary, in tab order (spec §14.3
+/// amendment 2026-09-28, categories).
+pub const CATEGORIES: &[&str] = &["CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL", "CATEGORY_UPDATES", "CATEGORY_FORUMS"];
+/// The Primary tab. As a narrowing it means "in none of `CATEGORIES`", so
+/// Inbox mail that Gmail never categorised is Primary too.
+pub const PRIMARY: &str = "CATEGORY_PERSONAL";
+
+/// At most this many narrowings after the mailbox (`INBOX+IMPORTANT+…`).
+const MAX_NARROWINGS: usize = 3;
+
 /// Threads in a mailbox, newest first, keyset-paged: cost is O(page)
-/// however deep the user scrolls (spec §4.2).
-/// Threads in a mailbox, newest first. `mailbox` is a label id, or two
-/// joined by `+` for threads carrying both (`INBOX+IMPORTANT`: the Inbox's
-/// "Important only" view), ordered by the first.
+/// however deep the user scrolls (spec §4.2). `mailbox` is a label id,
+/// optionally followed by `+`-joined labels the threads must also carry
+/// (`INBOX+IMPORTANT`: the Inbox's "Important only" view;
+/// `INBOX+CATEGORY_SOCIAL`: a category tab; `PRIMARY` narrows to threads
+/// in no other category). Ordered by the first label.
 pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limit: u32) -> StoreResult<ThreadPage> {
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     let (after_at, after_id) = match cursor {
         Some(c) => decode_cursor(c)?,
         None => (i64::MAX, i64::MAX),
     };
-    let (label, also) = match mailbox.split_once('+') {
-        Some((label, also)) => (label, Some(also)),
-        None => (mailbox, None),
-    };
-    let mut stmt = conn.prepare_cached(
+    let mut parts = mailbox.split('+');
+    let label = parts.next().unwrap_or_default();
+    let narrowings: Vec<&str> = parts.collect();
+    if narrowings.len() > MAX_NARROWINGS {
+        return Err(StoreError::Invalid(format!("mailbox {mailbox:?} narrows too many times")));
+    }
+    let mut sql = String::from(
         "SELECT t.id, t.gmail_id, t.subject, t.snippet, t.last_message_at, t.message_count, t.unread_count,
                 t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json, tl.last_message_at
          FROM thread_labels tl JOIN threads t ON t.id = tl.thread_id
          WHERE tl.label_id = (SELECT id FROM labels WHERE gmail_id = ?1)
-           AND (tl.last_message_at, tl.thread_id) < (?2, ?3)
-           AND (?5 IS NULL OR EXISTS (
-                 SELECT 1 FROM thread_labels t2
-                 WHERE t2.thread_id = tl.thread_id AND t2.label_id = (SELECT id FROM labels WHERE gmail_id = ?5)))
-         ORDER BY tl.last_message_at DESC, tl.thread_id DESC
-         LIMIT ?4",
-    )?;
+           AND (tl.last_message_at, tl.thread_id) < (?2, ?3)",
+    );
+    let mut values: Vec<rusqlite::types::Value> =
+        vec![label.to_owned().into(), after_at.into(), after_id.into(), i64::from(limit + 1).into()];
+    for narrowing in &narrowings {
+        sql.push_str(&narrowing_clause(narrowing, &mut values));
+    }
+    sql.push_str(" ORDER BY tl.last_message_at DESC, tl.thread_id DESC LIMIT ?4");
+    let mut stmt = conn.prepare_cached(&sql)?;
     let mut last_key = None;
     let rows = stmt
-        .query_map(params![label, after_at, after_id, limit + 1, also], |r| {
+        .query_map(rusqlite::params_from_iter(values), |r| {
             let key = (r.get::<_, i64>(11)?, r.get::<_, i64>(0)?);
             Ok((key, thread_summary(r, 1)?))
         })?
@@ -139,6 +154,72 @@ pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limi
     }
     let next_cursor = if has_more { last_key.map(|(at, id)| encode_cursor(at, id)) } else { None };
     Ok(ThreadPage { rows: out, next_cursor })
+}
+
+/// The SQL that narrows `tl.thread_id` to threads also carrying `label`
+/// (or, for `PRIMARY`, carrying no other category), binding its values.
+fn narrowing_clause(label: &str, values: &mut Vec<rusqlite::types::Value>) -> String {
+    if label == PRIMARY {
+        let first = values.len() + 1;
+        values.extend(CATEGORIES.iter().map(|c| rusqlite::types::Value::from((*c).to_owned())));
+        let placeholders = (first..first + CATEGORIES.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        format!(
+            " AND NOT EXISTS (SELECT 1 FROM thread_labels n JOIN labels nl ON nl.id = n.label_id
+                 WHERE n.thread_id = tl.thread_id AND nl.gmail_id IN ({placeholders}))"
+        )
+    } else {
+        values.push(label.to_owned().into());
+        format!(
+            " AND EXISTS (SELECT 1 FROM thread_labels n
+                 WHERE n.thread_id = tl.thread_id AND n.label_id = (SELECT id FROM labels WHERE gmail_id = ?{}))",
+            values.len()
+        )
+    }
+}
+
+/// Threads and unread threads in one Inbox category tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CategoryCount {
+    /// `PRIMARY` or one of `CATEGORIES`.
+    pub id: String,
+    pub total: u32,
+    pub unread: u32,
+}
+
+/// The Inbox's category tabs with their counts, Primary first, then
+/// `CATEGORIES` in order; `also` narrows as in `list_threads`
+/// (`IMPORTANT` for Important-only). Every tab is returned, empty ones
+/// with zero counts; a thread in two categories counts in the first.
+pub fn inbox_categories(conn: &Connection, also: Option<&str>) -> StoreResult<Vec<CategoryCount>> {
+    let mut values: Vec<rusqlite::types::Value> =
+        CATEGORIES.iter().map(|c| rusqlite::types::Value::from((*c).to_owned())).collect();
+    let placeholders = (1..=CATEGORIES.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+    let order =
+        CATEGORIES.iter().enumerate().map(|(i, _)| format!("WHEN ?{} THEN {i}", i + 1)).collect::<Vec<_>>().join(" ");
+    let narrowing = also.map(|label| narrowing_clause(label, &mut values)).unwrap_or_default();
+    let sql = format!(
+        "SELECT (SELECT cl.gmail_id FROM thread_labels c JOIN labels cl ON cl.id = c.label_id
+                 WHERE c.thread_id = tl.thread_id AND cl.gmail_id IN ({placeholders})
+                 ORDER BY CASE cl.gmail_id {order} END LIMIT 1) AS category,
+                COUNT(*), COALESCE(SUM(t.unread_count > 0), 0)
+         FROM thread_labels tl JOIN threads t ON t.id = tl.thread_id
+         WHERE tl.label_id = (SELECT id FROM labels WHERE gmail_id = 'INBOX'){narrowing}
+         GROUP BY category"
+    );
+    let mut stmt = conn.prepare_cached(&sql)?;
+    let counted = stmt
+        .query_map(rusqlite::params_from_iter(values), |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(std::iter::once(PRIMARY)
+        .chain(CATEGORIES.iter().copied())
+        .map(|id| {
+            let found = counted.iter().find(|(c, _, _)| c.as_deref().unwrap_or(PRIMARY) == id);
+            let (total, unread) = found.map(|(_, t, u)| (*t, *u)).unwrap_or((0, 0));
+            CategoryCount { id: id.to_owned(), total: total.max(0) as u32, unread: unread.max(0) as u32 }
+        })
+        .collect())
 }
 
 pub fn get_thread_summary(conn: &Connection, id: &ThreadId) -> StoreResult<Option<ThreadSummary>> {

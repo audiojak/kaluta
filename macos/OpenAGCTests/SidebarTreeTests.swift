@@ -73,6 +73,7 @@ struct ImportantOnlyTests {
         let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
         let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        defaults.set(false, forKey: AppModel.showCategoriesKey("demo")) // tabs have their own tests
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         await model.start(openDemo: true)
         let core = try #require(model.core)

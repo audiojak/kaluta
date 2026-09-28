@@ -385,3 +385,46 @@ fn a_mailbox_can_be_narrowed_to_threads_that_also_carry_another_label() {
     assert_eq!(rest.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["t1"]);
     assert_eq!(db.read_blocking(|c| read::list_threads(c, "INBOX", None, 10)).unwrap().rows.len(), 3);
 }
+
+#[test]
+fn the_inbox_splits_into_category_tabs_with_primary_as_everything_uncategorised() {
+    let db = open("categories");
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX", "CATEGORY_PERSONAL", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX"])).unwrap(); // never categorised: Primary
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "CATEGORY_SOCIAL", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m4", "t4", 4_000, &["INBOX", "CATEGORY_PROMOTIONS", "IMPORTANT"])).unwrap();
+        w.upsert_message(&msg("m5", "t5", 5_000, &["CATEGORY_SOCIAL"])).unwrap(); // archived
+        w.upsert_message(&msg("m6", "t6", 6_000, &["INBOX", "CATEGORY_PERSONAL", "IMPORTANT", "UNREAD"])).unwrap();
+    });
+    let ids = |mailbox: &'static str| {
+        db.read_blocking(move |c| read::list_threads(c, mailbox, None, 10))
+            .unwrap()
+            .rows
+            .iter()
+            .map(|t| t.id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids("INBOX+CATEGORY_PERSONAL"), ["t6", "t2", "t1"]);
+    assert_eq!(ids("INBOX+CATEGORY_SOCIAL"), ["t3"], "the archived Social thread is not in the Inbox");
+    assert_eq!(ids("INBOX+IMPORTANT+CATEGORY_PERSONAL"), ["t6"], "tabs combine with Important only");
+    assert_eq!(ids("INBOX+CATEGORY_PROMOTIONS+IMPORTANT"), ["t4"]);
+
+    let counts = db.read_blocking(|c| read::inbox_categories(c, None)).unwrap();
+    let summary: Vec<_> = counts.iter().map(|c| (c.id.as_str(), c.total, c.unread)).collect();
+    assert_eq!(
+        summary,
+        [
+            ("CATEGORY_PERSONAL", 3, 2),
+            ("CATEGORY_PROMOTIONS", 1, 0),
+            ("CATEGORY_SOCIAL", 1, 1),
+            ("CATEGORY_UPDATES", 0, 0),
+            ("CATEGORY_FORUMS", 0, 0),
+        ]
+    );
+    let important = db.read_blocking(|c| read::inbox_categories(c, Some("IMPORTANT"))).unwrap();
+    assert_eq!(important.iter().map(|c| c.total).collect::<Vec<_>>(), [1, 1, 0, 0, 0]);
+
+    let too_narrow = db.read_blocking(|c| read::list_threads(c, "INBOX+A+B+C+D", None, 10));
+    assert!(too_narrow.is_err());
+}

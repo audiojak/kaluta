@@ -19,8 +19,10 @@ struct AppModelTests {
         #expect(model.mailboxes.systemMailboxes.map(\.kind) == [.inbox, .starred, .important, .sent, .drafts, .archive, .spam, .trash])
         #expect(model.mailboxes.labels.map(\.name) == ["Customers", "Customers/Acme", "Customers/Globex", "Hiring", "Newsletters",
                                                   "Projects/Launch", "Projects/Launch/Press", "Receipts", "Travel"])
-        #expect(model.threads.mailboxID == "INBOX")
-        #expect(model.threads.rows.count == min(Int(ThreadListStore.pageSize), Int(inbox.totalCount)))
+        // The demo uses Gmail's categories, so the Inbox opens on Primary.
+        #expect(model.threads.mailboxID == "INBOX+CATEGORY_PERSONAL")
+        let primary = try #require(model.inboxCategoryTabs.first)
+        #expect(model.threads.rows.count == min(Int(ThreadListStore.pageSize), Int(primary.totalCount)))
     }
 
     @Test func switchingMailboxesReloadsTheListAndClearsSelection() async throws {

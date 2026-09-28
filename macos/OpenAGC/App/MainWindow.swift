@@ -92,7 +92,9 @@ struct MainWindow: View {
         if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
             parts.append("\(mailbox.unreadCount.formatted()) unread")
         }
-        if model.selectedMailboxID == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.inboxImportantOnly {
+            parts.append("Important only")
+        }
         if model.isArchive { parts.append("Imported mailbox · cannot send") }
         return parts.joined(separator: " · ")
     }
@@ -143,16 +145,43 @@ struct MainWindow: View {
         }
     }
 
-    /// The list column's header: the Inbox's Important-only switch.
+    /// The list column's header in the Inbox: the category tabs with a
+    /// View Options menu (Important Only, Show Categories) when the
+    /// account uses categories; otherwise the Important-only switch.
     @ViewBuilder private var listHeader: some View {
         if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
             @Bindable var model = model
-            ListHeaderBar {
-                Spacer()
-                Toggle("Important only", isOn: $model.inboxImportantOnly)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .help("Show only the Inbox threads Gmail marked Important")
+            if InboxCategories.inUse(model.inboxCategoryCounts) {
+                ListHeaderBar {
+                    if model.showCategories {
+                        CapsuleTabs(tabs: model.inboxCategoryTabs.map {
+                            CapsuleTabs.Tab(id: $0.id, title: InboxCategories.title($0.id),
+                                            symbol: InboxCategories.symbol($0.id), count: Int($0.unreadCount))
+                        }, selection: Binding(get: { model.activeInboxCategory },
+                                              set: { if let id = $0 { model.inboxCategory = id } }))
+                        .accessibilityLabel("Categories")
+                    }
+                    Spacer(minLength: 0)
+                    Menu {
+                        Toggle("Important Only", isOn: $model.inboxImportantOnly)
+                        Toggle("Show Categories", isOn: $model.showCategories)
+                    } label: {
+                        Label("View Options", systemImage: "ellipsis.circle")
+                    }
+                    .labelStyle(.iconOnly)
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("View Options")
+                }
+            } else {
+                ListHeaderBar {
+                    Spacer()
+                    Toggle("Important only", isOn: $model.inboxImportantOnly)
+                        .toggleStyle(.switch)
+                        .controlSize(.mini)
+                        .help("Show only the Inbox threads Gmail marked Important")
+                }
             }
         }
     }

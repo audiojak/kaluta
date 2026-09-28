@@ -102,8 +102,9 @@ struct ComposerTests {
 
     @Test func contactSuggestionsComeFromMail() async throws {
         let model = try await demo()
-        let message = try await latestMessage(model)
-        let sender = try #require(message.from)
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await model.core!.thread(row.id))
+        let sender = try #require(detail.messages.first { !$0.isSentByMe }?.from)
         let prefix = String(sender.email.prefix(3))
         let suggestions = model.core!.suggestContactsNow(prefix)
         #expect(suggestions.contains { $0.email == sender.email })

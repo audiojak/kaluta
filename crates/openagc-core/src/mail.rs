@@ -7,7 +7,7 @@ use std::sync::Arc;
 use mail_domain::{MessageId, ThreadId};
 use mail_store::{Db, StoreError, read};
 
-use crate::ffi::{LabelInfo, MailboxInfo, RenderedBody, ThreadDetail, ThreadPage};
+use crate::ffi::{InboxCategory, LabelInfo, MailboxInfo, RenderedBody, ThreadDetail, ThreadPage};
 use crate::{Core, CoreError, ErrorKind, runtime};
 
 impl From<StoreError> for CoreError {
@@ -83,7 +83,24 @@ impl Core {
         runtime::run(async move { Ok(db.read(read::list_labels).await?.into_iter().map(Into::into).collect()) }).await
     }
 
-    /// Threads in `mailbox_id` (a label id or `@archive`), newest first.
+    /// The Inbox's category tabs, Primary first, with thread and unread
+    /// counts (narrowed to Important when `important_only`). Every tab
+    /// comes back; the app shows those with mail.
+    pub async fn inbox_categories(&self, important_only: bool) -> Result<Vec<InboxCategory>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            let also = important_only.then_some("IMPORTANT");
+            let counts = db.read(move |c| read::inbox_categories(c, also)).await?;
+            Ok(counts
+                .into_iter()
+                .map(|c| InboxCategory { id: c.id, total_count: c.total, unread_count: c.unread })
+                .collect())
+        })
+        .await
+    }
+
+    /// Threads in `mailbox_id` (a label id or `@archive`, optionally
+    /// narrowed: `INBOX+IMPORTANT`, `INBOX+CATEGORY_SOCIAL`), newest first.
     /// Pass the previous page's `next_cursor` to continue.
     pub async fn list_threads(
         &self,
