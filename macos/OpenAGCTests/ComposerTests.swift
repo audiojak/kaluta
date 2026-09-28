@@ -197,3 +197,17 @@ struct ComposerTests {
         #expect(opened == [.reply(messageID: target, all: true), .forward(messageID: target)])
     }
 }
+
+@MainActor
+struct RecipientCompletionTests {
+    private let jordan = AddressInfo(name: "Jordan Kim", email: "jordan.kim@example.com")
+    private let dana = AddressInfo(name: "Dana Ruiz", email: "d.ruiz@example.org")
+
+    @Test func completionsStartWithWhatWasTyped() {
+        let offered = RecipientField.Coordinator.completions(for: "da", among: [jordan, dana]).map(\.0)
+        #expect(offered == ["Dana Ruiz <d.ruiz@example.org>"], "Jordan matched inside the name: not offered")
+        let byEmail = RecipientField.Coordinator.completions(for: "D.RU", among: [dana]).map(\.0)
+        #expect(byEmail == ["d.ruiz@example.org"], "an address that starts with it, bare")
+        #expect(RecipientField.Coordinator.completions(for: " ", among: [dana]).isEmpty)
+    }
+}

@@ -72,16 +72,16 @@ struct ComposerView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Attach", systemImage: "paperclip") { importing = true }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
-                    .hoverHelp("Attach Files")
+                    .help(ToolbarHelp.composer("Attach")) // toolbar
                 // Reviewing an agent's draft: the decision is the approval
                 // card's, so sending here would go around it.
                 if request.agentName == nil {
                     Button("Discard", systemImage: "trash") { Task { await store.discard() } }
-                        .hoverHelp("Delete Draft")
+                        .help(ToolbarHelp.composer("Discard")) // toolbar
                     Button("Send", systemImage: "paperplane.fill") { Task { await store.send() } }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                         .disabled(!store.canSend)
-                        .hoverHelp("Send (⇧⌘D)")
+                        .help(ToolbarHelp.composer("Send")) // toolbar
                 }
             }
         }
@@ -129,10 +129,15 @@ struct ComposerView: View {
 
     private func row(_ label: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            // Top, not first-baseline: asking the recipient token field for
+            // its baseline while the user typed made it re-tokenize and ask
+            // for layout again, forever (the app hung and ran out of memory
+            // forwarding a message, 2026-09-28).
+            HStack(alignment: .top, spacing: Space.m) {
                 Text(label)
                     .foregroundStyle(.secondary)
                     .frame(width: 64, alignment: .trailing)
+                    .padding(.top, Space.hair)
                 content()
             }
             .padding(.horizontal, Space.l)

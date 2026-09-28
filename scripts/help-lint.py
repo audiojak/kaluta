@@ -57,7 +57,7 @@ for path in sorted(ROOT.rglob("*.swift")):
     if rel in TOOLBAR:
         continue
     for i, line in enumerate(path.read_text().split("\n")):
-        if re.search(r'(?<![\w])\.help\(', line):
+        if re.search(r'(?<![\w])\.help\(', line) and "// toolbar" not in line:
             findings.append(f"{rel}:{i + 1}: use .hoverHelp, not .help: {line.strip()[:70]}")
 
 for f in findings:

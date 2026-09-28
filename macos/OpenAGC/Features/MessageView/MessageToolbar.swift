@@ -124,8 +124,19 @@ private struct LabelToolbarMenu: View {
 /// `ToolbarToolTips` also copies these onto the items; one source for both.
 @MainActor
 enum ToolbarHelp {
+    /// The composer window's toolbar (no model needed).
+    static func composer(_ label: String) -> String {
+        switch label {
+        case "Attach": "Attach files (⇧⌘A)"
+        case "Discard": "Delete this draft"
+        case "Send": "Send (⇧⌘D)"
+        default: label
+        }
+    }
+
     static func text(for label: String, model: AppModel) -> String? {
         switch label {
+        case "Attach", "Discard", "Send": composer(label)
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
         case "Reply": "Reply (⌘R)"
         case "Reply All": "Reply All (⇧⌘R)"
