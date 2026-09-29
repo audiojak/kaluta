@@ -103,6 +103,7 @@
 		DB3DC4EECF705D9820BC3B1E /* RichTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D24E3C75C954D3F4970670D2 /* RichTextEditor.swift */; };
 		DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9036B10AEDC12CF3CF3416BD /* MainWindow.swift */; };
 		DDDC17F9FCF6F1E7462D3B7D /* UndoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E8DBF47559E5EC82041284 /* UndoTests.swift */; };
+		DF53A7536F3E679277D3C187 /* BulkTaskSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD73699F481A160A310E527 /* BulkTaskSheet.swift */; };
 		E44E3F9A96EE57A2B8F018CF /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF9BB1ABE76E11F4305E525 /* KeyboardShortcuts.swift */; };
 		E65B21770ED2B172D35054C7 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5846BE9A95C68C7383B2B7C /* SyncStatusView.swift */; };
 		E6C0C4D4E44A1BE9838F0FB8 /* RoutinesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0226B235AA4B7F4515359C61 /* RoutinesStore.swift */; };
@@ -201,6 +202,7 @@
 		700730FD7CE20073EC4E05F4 /* KeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTests.swift; sourceTree = "<group>"; };
 		7491CD8B391923F8E19F565D /* MailReadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailReadTests.swift; sourceTree = "<group>"; };
 		7AFC64B77AEDD827390E1C08 /* AgentPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanel.swift; sourceTree = "<group>"; };
+		7CD73699F481A160A310E527 /* BulkTaskSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkTaskSheet.swift; sourceTree = "<group>"; };
 		7DFBC630572AC27DA6ED8285 /* AgentSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSettings.swift; sourceTree = "<group>"; };
 		813AFF04D4AA06CBAF57266A /* ArchiveAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveAccountTests.swift; sourceTree = "<group>"; };
 		83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelTests.swift; sourceTree = "<group>"; };
@@ -391,6 +393,7 @@
 			isa = PBXGroup;
 			children = (
 				BE0D26F833C2199E4C16795D /* AppModel+Tasks.swift */,
+				7CD73699F481A160A310E527 /* BulkTaskSheet.swift */,
 				12119B6B5E72875BDA8E5C10 /* TaskDialog.swift */,
 				30E76B5CB7759AE57FCB348E /* TaskListStore.swift */,
 				15F8DEBC281B735D98308AF6 /* TaskListView.swift */,
@@ -836,6 +839,7 @@
 				6ACB449680E2C76A02262484 /* AppModel+Tasks.swift in Sources */,
 				5983A19ACD9796ACFA5E19D5 /* AppModel.swift in Sources */,
 				A64492AC04FB122343BA17D2 /* AttachmentStrip.swift in Sources */,
+				DF53A7536F3E679277D3C187 /* BulkTaskSheet.swift in Sources */,
 				403EB3F17C39C0781B552172 /* Components.swift in Sources */,
 				16A834C86559A500A03CD574 /* ComposerAssistant.swift in Sources */,
 				19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */,

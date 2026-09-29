@@ -22,6 +22,9 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
             TaskDialog(draft: draft)
         }
+        .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in
+            BulkTaskSheet(draft: draft)
+        }
         .sheet(item: Binding(get: { model.importDraft }, set: { model.importDraft = $0 })) { draft in
             ImportMailboxSheet(draft: draft)
         }

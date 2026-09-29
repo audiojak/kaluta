@@ -243,3 +243,61 @@ struct TaskListTests {
         #expect(opened.last?.taskID == nil)
     }
 }
+
+@MainActor
+struct BulkTaskTests {
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { throw Timeout() }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+    private struct Timeout: Error {}
+
+    private func demo() async throws -> AppModel {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        return model
+    }
+
+    @Test func theLatestTwentyGetOneRequestAndThreadsWithTasksStartUnchecked() async throws {
+        let model = try await demo()
+        let first = try #require(model.threads.rows.first)
+        _ = try await model.core!.createTasks([
+            NewTask(threadId: first.id, messageId: nil, title: "Already", notes: "", category: "Reply", dueDay: nil,
+                    action: .reply, why: "", fromAi: false),
+        ])
+        await model.openBulkTasks()
+        let draft = try #require(model.bulkTasks)
+        #expect(draft.rows.count == min(20, model.threads.rows.count))
+        #expect(draft.rows.map(\.threadID) == model.threads.rows.prefix(20).map(\.id))
+        try await waitUntil { draft.suggester.state != .working }
+        #expect(draft.rows.allSatisfy { !$0.title.isEmpty }, "one answer filled every row")
+        #expect(draft.rows[0].hasTask && !draft.rows[0].included)
+        #expect(draft.ready.count == draft.rows.count - 1)
+
+        draft.rows[1].included = false
+        let expected = draft.ready.count
+        await model.acceptBulkTasks(draft)
+        #expect(model.bulkTasks == nil)
+        #expect(try await model.core!.listTasks().count == expected + 1)
+        #expect(model.undo.notice?.text == "Added \(expected) tasks")
+
+        let account = try #require(model.openAccountID)
+        model.undo.undo(in: account)
+        for _ in 0..<100 where try await model.core!.listTasks().count > 1 { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await model.core!.listTasks().map(\.title) == ["Already"], "one undo removes them all")
+    }
+
+    @Test func highlightedThreadsAreAskedAbout() async throws {
+        let model = try await demo()
+        let picked = Set(model.threads.rows.dropFirst(2).prefix(3).map(\.id))
+        model.selectedThreadIDs = picked
+        #expect(Set(model.bulkTaskTargets.map(\.id)) == picked)
+        model.selectedThreadIDs = []
+        #expect(model.bulkTaskTargets.count == min(20, model.threads.rows.count))
+    }
+}

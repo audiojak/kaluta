@@ -95,6 +95,54 @@ extension AppModel {
         }
     }
 
+    /// The threads `⇧T` asks about: the highlighted ones, else the latest
+    /// 20 in the open list.
+    var bulkTaskTargets: [ThreadRow] {
+        if selectedThreadIDs.count > 1 { return threads.rows.filter { selectedThreadIDs.contains($0.id) } }
+        return Array(threads.rows.prefix(BulkTaskDraft.defaultCount))
+    }
+
+    /// `⇧T` and Message › Create Tasks…: the bulk sheet, asking Claude
+    /// about all the threads in one request.
+    func openBulkTasks(now: Date = .now) async {
+        guard bulkTasks == nil, taskDraft == nil, !isTaskList, let core else { return }
+        let targets = bulkTaskTargets
+        guard !targets.isEmpty else { return }
+        let categories = (try? await core.taskCategories()) ?? []
+        let withTasks = Set((try? await core.threadsWithOpenTasks(targets.map(\.id))) ?? [])
+        let rows = targets.map { row in
+            BulkTaskDraft.Row(threadID: row.id, sender: ThreadRowView.senderLine(row),
+                              subject: row.subject.isEmpty ? "(no subject)" : row.subject,
+                              hasTask: withTasks.contains(row.id), category: categories.first ?? "Reply", now: now)
+        }
+        let draft = BulkTaskDraft(rows: rows, categories: categories)
+        bulkTasks = draft
+        if TaskSuggester.canAsk(self) {
+            await draft.suggester.run(threadIDs: rows.map(\.threadID), model: self, now: now)
+        }
+    }
+
+    func closeBulkTasks() {
+        bulkTasks?.suggester.cancel()
+        bulkTasks = nil
+    }
+
+    /// Add the checked rows' tasks in one go; one Undo removes them all.
+    func acceptBulkTasks(_ draft: BulkTaskDraft) async {
+        let ready = draft.ready
+        guard !ready.isEmpty, let core, let accountID = openAccountID else { return }
+        do {
+            let made = try await core.createTasks(ready.map(\.newTask))
+            draft.suggester.cancel()
+            if bulkTasks === draft { bulkTasks = nil }
+            recordTaskUndo(made, accountID: accountID)
+        } catch let error as CoreClientError {
+            draft.error = error.message
+        } catch {
+            draft.error = error.localizedDescription
+        }
+    }
+
     func closeTaskDialog() {
         taskDraft?.suggester.cancel()
         taskDraft = nil

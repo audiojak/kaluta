@@ -286,6 +286,8 @@ final class AppModel {
     var runningImport: String?
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
+    /// The bulk sheet (`⇧T`), while open.
+    var bulkTasks: BulkTaskDraft?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.

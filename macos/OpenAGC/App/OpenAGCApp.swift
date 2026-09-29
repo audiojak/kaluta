@@ -196,6 +196,8 @@ struct MailCommands: Commands {
             Divider() // menu
             Button("New Task from Email…") { Task { await model.openTaskDialog() } }
                 .disabled(!mailKey || model.taskTarget == nil)
+            Button("Create Tasks…") { Task { await model.openBulkTasks() } }
+                .disabled(!mailKey || model.isTaskList || model.threads.rows.isEmpty)
             Divider() // menu
             Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k")

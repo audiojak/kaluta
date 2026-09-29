@@ -2153,6 +2153,14 @@ need or made a decision.
   last open task); Undo Send takes back both, and once the message has
   gone, ⌘Z opens the task again. Searching while in Tasks shows mail
   results as anywhere else.
+- **Many emails: `⇧T`.** In a mail list, `⇧T` (also Message › Create
+  Tasks… and the context menu) opens the **bulk sheet** for the
+  highlighted threads, or else the latest 20 in the open list, and asks
+  Claude about all of them in one request. Each row shows the email and
+  Claude's title, category, due day and why, all editable, with a
+  checkbox; threads that already have an open task say so and start
+  unchecked. "Add N Tasks" (Return) adds the checked rows that have a
+  title; one Undo removes them all.
 
 ---
 
