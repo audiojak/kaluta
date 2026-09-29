@@ -3,7 +3,9 @@
 //! backfill client uses: CAPABILITY, AUTHENTICATE XOAUTH2, SELECT/EXAMINE,
 //! UID FETCH (UID, FLAGS, X-GM-MSGID, X-GM-THRID, X-GM-LABELS,
 //! RFC822.SIZE, BODY.PEEK[], BODY.PEEK[HEADER], BODY.PEEK[TEXT]<0.n>),
-//! NOOP and LOGOUT. Nothing here ever connects anywhere.
+//! UID SEARCH (ALL, or X-GM-RAW with `in:`, `label:`, `is:unread`,
+//! `is:starred`, `newer_than:Nd`), NOOP and LOGOUT. Nothing here ever
+//! connects anywhere.
 
 use std::sync::{Arc, Mutex};
 
@@ -37,6 +39,9 @@ struct State {
     header_fetches: usize,
     /// Refuse every AUTHENTICATE (an admin disabled IMAP).
     refuse_login: bool,
+    /// "Now" for `newer_than:` (ms); the real clock when unset.
+    now: Option<i64>,
+    searches: usize,
 }
 
 /// A running fake server. Dropping it stops accepting connections.
@@ -54,6 +59,16 @@ impl Drop for FakeImapServer {
 
 impl FakeImapServer {
     /// Start on an ephemeral port, accepting `token` as the OAuth bearer.
+    /// "Now" for `newer_than:` searches.
+    pub fn set_now(&self, now_ms: i64) {
+        self.state.lock().unwrap().now = Some(now_ms);
+    }
+
+    /// `UID SEARCH` commands answered.
+    pub fn searches(&self) -> usize {
+        self.state.lock().unwrap().searches
+    }
+
     pub async fn start(token: &str) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind the fake IMAP server");
         let addr = listener.local_addr().expect("fake IMAP address");
@@ -162,6 +177,21 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
             }
             "UID" if authenticated => {
                 let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
+                if sub.eq_ignore_ascii_case("SEARCH") {
+                    let found: Vec<String> = {
+                        let mut s = state.lock().unwrap();
+                        s.searches += 1;
+                        let now = s.now.unwrap_or_else(|| {
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |d| d.as_millis() as i64)
+                        });
+                        s.messages.iter().filter(|m| matches_search(rest, m, now)).map(|m| m.uid.to_string()).collect()
+                    };
+                    write.write_all(format!("* SEARCH {}\r\n", found.join(" ")).as_bytes()).await?;
+                    write.write_all(format!("{tag} OK SEARCH completed (Success)\r\n").as_bytes()).await?;
+                    continue;
+                }
                 if !sub.eq_ignore_ascii_case("FETCH") {
                     write.write_all(format!("{tag} BAD unsupported\r\n").as_bytes()).await?;
                     continue;
@@ -258,6 +288,33 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
                 _ => false,
             },
             None => bound(part) == Some(uid),
+        }
+    })
+}
+
+/// Whether `m` matches a `UID SEARCH` criteria string: `ALL`, or
+/// `X-GM-RAW "…"` with space-separated terms that must all hold.
+fn matches_search(criteria: &str, m: &FakeImapMessage, now: i64) -> bool {
+    let criteria = criteria.trim();
+    if criteria.eq_ignore_ascii_case("ALL") {
+        return true;
+    }
+    let Some(raw) = criteria.strip_prefix("X-GM-RAW ") else { return false };
+    let query = raw.trim().trim_matches('"').replace("\\\"", "\"");
+    let has_label = |name: &str| m.labels.iter().any(|l| l.trim_start_matches('\\').eq_ignore_ascii_case(name));
+    let date = mail_mime::parse(&m.raw).ok().and_then(|p| p.headers.date).unwrap_or(0);
+    query.split_whitespace().all(|term| {
+        let term = term.to_ascii_lowercase();
+        if let Some(name) = term.strip_prefix("in:").or_else(|| term.strip_prefix("label:")) {
+            has_label(name)
+        } else if term == "is:unread" {
+            !m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"))
+        } else if term == "is:starred" {
+            m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged"))
+        } else if let Some(days) = term.strip_prefix("newer_than:").and_then(|d| d.strip_suffix('d')) {
+            days.parse::<i64>().is_ok_and(|d| date > now - d * 86_400_000)
+        } else {
+            false
         }
     })
 }

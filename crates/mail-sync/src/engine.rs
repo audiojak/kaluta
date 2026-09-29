@@ -124,6 +124,16 @@ fn tiers_tag(headers_from: Option<u8>) -> String {
     headers_from.map_or_else(|| "flat".to_owned(), |cut| format!("headers-from-{cut}"))
 }
 
+/// A phase as a Gmail search, for listing over IMAP (`X-GM-RAW`):
+/// its labels as `in:` terms, then its query; `""` for everything.
+fn phase_search(phase: &Phase) -> String {
+    let mut terms: Vec<String> = phase.labels.iter().map(|l| format!("in:{}", l.to_ascii_lowercase())).collect();
+    if let Some(q) = &phase.query {
+        terms.push(q.clone());
+    }
+    terms.join(" ")
+}
+
 /// Phases listed before backfill starts, so the inbox fills first.
 pub const INBOX_PHASES: usize = 2;
 /// Phases every window shares; the rest depend on the window.
@@ -338,6 +348,23 @@ impl SyncEngine {
                 self.transport.record(timer.finish(Job::Headers, Via::Imap, Some(reason), 0, false));
                 Ok(None)
             }
+        }
+    }
+
+    /// Ids matching a Gmail search, over IMAP; why not, when it cannot.
+    async fn list_via_imap(&self, query: &str, job: crate::transport::Job) -> Result<Vec<MessageId>, String> {
+        use crate::transport::{Timer, Via};
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        self.imap_gate(source.as_ref())?;
+        let timer = Timer::start();
+        match source.list(query).await {
+            Ok(Some(ids)) => {
+                self.transport.imap_succeeded();
+                self.transport.record(timer.finish(job, Via::Imap, None, ids.len(), true));
+                Ok(ids)
+            }
+            Ok(None) => Err("this download source cannot list".into()),
+            Err(e) => Err(self.imap_error(&e)),
         }
     }
 
@@ -626,19 +653,18 @@ impl SyncEngine {
     /// window, spec §7.4 follow-up; header-only mail, tiered download).
     /// Interactive: the user is waiting. Returns how many were downloaded.
     pub async fn search_server(&self, query: &str, max: usize) -> SyncResult<usize> {
-        let filter = ListFilter { label_ids: vec![], query: Some(query.to_owned()), include_spam_trash: false };
-        let timer = crate::transport::Timer::start();
-        let found = self.provider.list_message_ids(&filter, None).await;
-        let count = found.as_ref().map_or(0, |p| p.ids.len());
-        self.record_api(
-            &timer,
-            crate::transport::Job::Search,
-            "searching over IMAP is not built yet",
-            count,
-            found.is_ok(),
-        );
-        let page = found?;
-        let ids: Vec<MessageId> = page.ids.into_iter().map(|(id, _)| id).take(max).collect();
+        // Over IMAP first (Gmail's search syntax, no quota), newest first.
+        let ids = match self.list_via_imap(query, crate::transport::Job::Search).await {
+            Ok(ids) => ids.into_iter().take(max).collect(),
+            Err(reason) => {
+                let filter = ListFilter { label_ids: vec![], query: Some(query.to_owned()), include_spam_trash: false };
+                let timer = crate::transport::Timer::start();
+                let found = self.provider.list_message_ids(&filter, None).await;
+                let count = found.as_ref().map_or(0, |p| p.ids.len());
+                self.record_api(&timer, crate::transport::Job::Search, &reason, count, found.is_ok());
+                found?.ids.into_iter().map(|(id, _)| id).take(max).collect::<Vec<MessageId>>()
+            }
+        };
         // Matches stored with headers only get their bodies too (tiered
         // download), the same way an opened message does.
         self.ensure_bodies(ids).await
@@ -965,19 +991,21 @@ impl SyncEngine {
             query: phase.query.clone(),
             include_spam_trash: false,
         };
+        // Over IMAP first: the same phase as a Gmail search, no quota.
+        let reason = match self.list_via_imap(&phase_search(phase), crate::transport::Job::List).await {
+            Ok(ids) => {
+                self.db.write(move |tx| queue::enqueue(tx, priority, &ids, refetch)).await?;
+                return Ok(());
+            }
+            Err(reason) => reason,
+        };
         let mut page: Option<PageToken> = None;
         loop {
             tracing::debug!(priority, has_page = page.is_some(), "listing phase page");
             let timer = crate::transport::Timer::start();
             let listed = self.provider.list_message_ids(&filter, page.take()).await;
             let count = listed.as_ref().map_or(0, |r| r.ids.len());
-            self.record_api(
-                &timer,
-                crate::transport::Job::List,
-                "listing over IMAP is not built yet",
-                count,
-                listed.is_ok(),
-            );
+            self.record_api(&timer, crate::transport::Job::List, &reason, count, listed.is_ok());
             let result = listed?;
             let ids: Vec<MessageId> = result.ids.into_iter().map(|(id, _)| id).collect();
             self.db.write(move |tx| queue::enqueue(tx, priority, &ids, refetch)).await?;

@@ -358,6 +358,33 @@ impl BackfillSource for ImapBackfill {
         Ok(Some(out))
     }
 
+    async fn list(&self, query: &str) -> ProviderResult<Option<Vec<MessageId>>> {
+        self.available().await?;
+        let mut state = self.state.lock().await;
+        let mut session = match state.session.take() {
+            Some(s) => s,
+            None => self.connect().await?,
+        };
+        // Gmail's own search syntax over IMAP; everything in All Mail for "".
+        let criteria = if query.trim().is_empty() {
+            "ALL".to_owned()
+        } else {
+            format!("X-GM-RAW \"{}\"", query.replace('\\', "\\\\").replace('"', "\\\""))
+        };
+        let uids = session.uid_search(&criteria).await.map_err(imap)?;
+        let mut by_uid: HashMap<u32, u64> = state.map.iter().map(|(m, l)| (l.uid, *m)).collect();
+        if uids.iter().any(|u| !by_uid.contains_key(u)) {
+            state.map =
+                self.load_map(&mut session).await.map_err(|e| ProviderError::Network(format!("IMAP id map: {e}")))?;
+            by_uid = state.map.iter().map(|(m, l)| (l.uid, *m)).collect();
+        }
+        state.session = Some(session);
+        let mut ids: Vec<MessageId> =
+            uids.into_iter().filter_map(|u| by_uid.get(&u)).map(|m| MessageId(format!("{m:x}"))).collect();
+        ids.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| b.0.cmp(&a.0)));
+        Ok(Some(ids))
+    }
+
     fn cheap_headers(&self) -> bool {
         !self.is_refused()
     }

@@ -118,6 +118,10 @@ impl provider_api::BackfillSource for LabelRefreshingImap {
         self.inner.fetch_headers(ids).await
     }
 
+    async fn list(&self, query: &str) -> provider_api::ProviderResult<Option<Vec<mail_domain::MessageId>>> {
+        self.inner.list(query).await
+    }
+
     fn cheap_headers(&self) -> bool {
         self.inner.cheap_headers()
     }
@@ -1071,8 +1075,9 @@ mod tests {
             let bodies = diag.latest_by_job.iter().find(|op| op.job == "bodies").expect("bodies recorded");
             assert_eq!((bodies.via.as_str(), bodies.ok), ("imap", true));
             let list = diag.latest_by_job.iter().find(|op| op.job == "list").expect("listing recorded");
-            assert_eq!(list.via, "api");
-            assert!(list.reason.is_some(), "the API's use says why");
+            assert_eq!((list.via.as_str(), list.reason.as_deref()), ("imap", None), "listed over IMAP");
+            let changes = diag.latest_by_job.iter().find(|op| op.job == "changes");
+            assert!(changes.is_none_or(|c| c.via == "api" && c.reason.is_some()), "changes: the API, and why");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
 

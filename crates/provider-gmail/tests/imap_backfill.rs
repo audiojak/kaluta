@@ -263,3 +263,28 @@ async fn a_message_that_left_all_mail_since_the_map_loaded_comes_over_the_api() 
     assert_eq!(fetched.len(), 1, "never silently dropped");
     assert_eq!(fetched[0].subject, "B from REST");
 }
+
+#[tokio::test]
+async fn gmail_searches_list_ids_over_imap_without_the_api() {
+    let (server, rest, source) = setup("good-token").await;
+    let ids = |q: &'static str| {
+        let source = &source;
+        async move {
+            let mut out: Vec<String> =
+                source.list(q).await.unwrap().expect("IMAP can list").into_iter().map(|m| m.0).collect();
+            out.sort();
+            out
+        }
+    };
+    assert_eq!(ids("in:inbox").await, [hex(MSG_A).0], "the Inbox");
+    assert_eq!(ids("in:inbox is:unread").await, [hex(MSG_A).0], "unread in the Inbox");
+    assert_eq!(ids("is:starred").await, [hex(MSG_B).0]);
+    let mut all = vec![hex(MSG_A).0, hex(MSG_B).0, hex(MSG_BIG).0];
+    all.sort();
+    assert_eq!(ids("").await, all, "everything in All Mail");
+    assert_eq!(server.searches(), 4);
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no API calls");
+
+    let (_s2, _r2, refused) = setup("wrong-token").await;
+    assert!(refused.list("in:inbox").await.is_err(), "refused: the engine lists over the API");
+}

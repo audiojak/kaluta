@@ -137,6 +137,12 @@ pub trait BackfillSource: Send + Sync {
     async fn fetch_headers(&self, _ids: &[MessageId]) -> ProviderResult<Option<Vec<FetchedMessage>>> {
         Ok(None)
     }
+    /// Ids of the messages matching a Gmail search (`query` in Gmail's
+    /// syntax, `""` for everything), if this source can list without the
+    /// API's quota; `None` when it cannot (docs/plans/imap-first-sync.md).
+    async fn list(&self, _query: &str) -> ProviderResult<Option<Vec<MessageId>>> {
+        Ok(None)
+    }
     /// Whether [`BackfillSource::fetch_headers`] is cheap here at all (it
     /// may still answer `None` for a while, e.g. over its daily budget).
     /// Decides tiered download (spec §7.4 amendment 2026-09-27).
