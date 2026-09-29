@@ -1,15 +1,16 @@
-//! Bulk backfill over Gmail IMAP (spec §7.4, IMAP amendment). Only message
-//! bodies for backfill come through here; listing, history, writes and new
-//! mail stay on the REST API, whose ids are the source of truth.
+//! Gmail over IMAP (docs/plans/imap-first-sync.md): listing, headers and
+//! bodies; history, writes and drafts ids stay on the REST API, whose ids
+//! are the source of truth.
 //!
 //! How it maps onto the API: Gmail's `X-GM-MSGID` and `X-GM-THRID` are the
 //! API's message and thread ids (decimal here, hex there). One cheap
 //! `UID FETCH 1:* (UID X-GM-MSGID RFC822.SIZE)` over
-//! `[Gmail]/All Mail` maps ids to UIDs; bodies then come in batched
-//! `UID FETCH … BODY.PEEK[]`. Anything IMAP cannot or should not serve goes
-//! to REST: ids not in All Mail (spam, trash), messages over the size cap
-//! (REST never downloads attachment bytes), and everything once the daily
-//! byte budget is spent or if Google refuses the IMAP login.
+//! `[Gmail]/All Mail`, then Drafts, Spam and Trash (found by their
+//! special-use attributes; All Mail has no spam or trash), maps ids to
+//! folder and UID; bodies then come in batched `UID FETCH … BODY.PEEK[]`.
+//! Messages over the size cap go to REST (which never downloads attachment
+//! bytes); refused logins and a spent budget are errors the sync engine
+//! falls back on.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -18,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
-use async_imap::imap_proto::{AttributeValue, MessageSection, Response, SectionPath, Status};
+use async_imap::imap_proto::{AttributeValue, MessageSection, NameAttribute, Response, SectionPath, Status};
 use async_trait::async_trait;
 use mail_domain::{LabelId, MessageId, Millis, ThreadId, system_labels};
 use provider_api::{
@@ -30,7 +31,6 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 pub const GMAIL_IMAP_HOST: &str = "imap.gmail.com";
-const ALL_MAIL: &str = "[Gmail]/All Mail";
 const SNIPPET_CHARS: usize = 160;
 /// Bytes of the message text fetched with headers, for a list snippet
 /// without the body (spec §7.4 tiered download, 4).
@@ -73,8 +73,75 @@ impl ImapConfig {
 /// keeps it in step with the stored label list.
 pub type LabelNames = Arc<RwLock<HashMap<String, LabelId>>>;
 
+/// The folders synced. All Mail holds everything but spam and trash;
+/// Drafts is read too, in case a draft is missing from All Mail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Folder {
+    AllMail,
+    Drafts,
+    Spam,
+    Trash,
+}
+
+impl Folder {
+    const ALL: [Folder; 4] = [Folder::AllMail, Folder::Drafts, Folder::Spam, Folder::Trash];
+
+    /// The English name, used when the server lists no special-use folders.
+    fn default_name(self) -> &'static str {
+        match self {
+            Folder::AllMail => "[Gmail]/All Mail",
+            Folder::Drafts => "[Gmail]/Drafts",
+            Folder::Spam => "[Gmail]/Spam",
+            Folder::Trash => "[Gmail]/Trash",
+        }
+    }
+
+    fn special_use(attr: &NameAttribute<'_>) -> Option<Folder> {
+        match attr {
+            NameAttribute::All => Some(Folder::AllMail),
+            NameAttribute::Drafts => Some(Folder::Drafts),
+            NameAttribute::Junk => Some(Folder::Spam),
+            NameAttribute::Trash => Some(Folder::Trash),
+            _ => None,
+        }
+    }
+
+    /// The label a message has for being in this folder; `X-GM-LABELS`
+    /// omits it.
+    fn label(self) -> Option<&'static str> {
+        match self {
+            Folder::AllMail => None,
+            Folder::Drafts => Some(system_labels::DRAFT),
+            Folder::Spam => Some(system_labels::SPAM),
+            Folder::Trash => Some(system_labels::TRASH),
+        }
+    }
+
+    /// A search's folder from its `in:` term, and the query without it.
+    fn for_query(query: &str) -> (Folder, String) {
+        let mut folder = Folder::AllMail;
+        let rest: Vec<&str> = query
+            .split_whitespace()
+            .filter(|term| {
+                let found = match term.to_ascii_lowercase().as_str() {
+                    "in:spam" | "label:spam" => Some(Folder::Spam),
+                    "in:trash" | "label:trash" => Some(Folder::Trash),
+                    "in:drafts" | "in:draft" | "label:draft" | "is:draft" => Some(Folder::Drafts),
+                    _ => None,
+                };
+                if let Some(f) = found {
+                    folder = f;
+                }
+                found.is_none()
+            })
+            .collect();
+        (folder, rest.join(" "))
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Located {
+    folder: Folder,
     uid: u32,
     size: u32,
 }
@@ -82,8 +149,109 @@ struct Located {
 #[derive(Default)]
 struct State {
     session: Option<Session>,
-    /// X-GM-MSGID → where it is in All Mail.
+    /// The folder the session has open.
+    selected: Option<Folder>,
+    /// Folder names as the server lists them.
+    names: HashMap<Folder, String>,
+    /// X-GM-MSGID → where it is.
     map: HashMap<u64, Located>,
+}
+
+impl State {
+    /// Take the session, connecting (and finding the folders) if needed.
+    async fn session(&mut self, source: &ImapBackfill) -> ProviderResult<Session> {
+        if let Some(s) = self.session.take() {
+            return Ok(s);
+        }
+        let mut session = source.connect().await?;
+        self.selected = None;
+        self.names = folder_names(&mut session).await;
+        Ok(session)
+    }
+
+    /// Open `folder` read-only unless it is open already. `Ok(false)` when
+    /// the account has no such folder.
+    async fn open(&mut self, session: &mut Session, folder: Folder) -> ProviderResult<bool> {
+        if self.selected == Some(folder) {
+            return Ok(true);
+        }
+        let name = self.names.get(&folder).cloned().unwrap_or_else(|| folder.default_name().to_owned());
+        match tokio::time::timeout(IO_TIMEOUT, session.examine(&name)).await {
+            Ok(Ok(_)) => {
+                self.selected = Some(folder);
+                Ok(true)
+            }
+            Ok(Err(async_imap::error::Error::No(_))) if folder != Folder::AllMail => {
+                self.selected = None;
+                Ok(false)
+            }
+            Ok(Err(e)) => Err(imap(e)),
+            Err(_) => Err(ProviderError::Network("IMAP EXAMINE timed out".into())),
+        }
+    }
+
+    /// Refresh the id map from every folder: All Mail first, so a message
+    /// in both keeps its All Mail place and its full labels.
+    async fn load_map(&mut self, session: &mut Session) -> ProviderResult<()> {
+        let mut map = HashMap::new();
+        for folder in Folder::ALL {
+            if !self.open(session, folder).await? {
+                continue;
+            }
+            for_each_fetch(session, "UID FETCH 1:* (UID X-GM-MSGID RFC822.SIZE)", |attrs| {
+                let (mut uid, mut msgid, mut size) = (None, None, 0);
+                for a in attrs {
+                    match a {
+                        AttributeValue::Uid(u) => uid = Some(*u),
+                        AttributeValue::GmailMsgId(m) => msgid = Some(*m),
+                        AttributeValue::Rfc822Size(s) => size = *s,
+                        _ => {}
+                    }
+                }
+                if let (Some(uid), Some(msgid)) = (uid, msgid) {
+                    map.entry(msgid).or_insert(Located { folder, uid, size });
+                }
+            })
+            .await
+            .map_err(|e| ProviderError::Network(format!("IMAP id map: {e}")))?;
+        }
+        tracing::debug!(messages = map.len(), "IMAP id map loaded");
+        self.map = map;
+        Ok(())
+    }
+}
+
+/// Group located messages by folder, keeping their order within each.
+fn by_folder(wanted: &[(u64, Located)]) -> Vec<(Folder, Vec<u32>)> {
+    Folder::ALL
+        .iter()
+        .map(|f| (*f, wanted.iter().filter(|(_, l)| l.folder == *f).map(|(_, l)| l.uid).collect::<Vec<_>>()))
+        .filter(|(_, uids)| !uids.is_empty())
+        .collect()
+}
+
+/// The special-use folders the server lists; empty when LIST fails or
+/// shows none (the default names are used then).
+async fn folder_names(session: &mut Session) -> HashMap<Folder, String> {
+    use futures::TryStreamExt;
+    let mut names = HashMap::new();
+    let listed: Vec<async_imap::types::Name> =
+        match tokio::time::timeout(IO_TIMEOUT, async { session.list(Some(""), Some("*")).await?.try_collect().await })
+            .await
+        {
+            Ok(Ok(listed)) => listed,
+            Ok(Err(e)) => {
+                tracing::debug!(error = %e, "IMAP LIST failed; using the default folder names");
+                return names;
+            }
+            Err(_) => return names,
+        };
+    for name in &listed {
+        if let Some(folder) = name.attributes().iter().find_map(Folder::special_use) {
+            names.insert(folder, name.name().to_owned());
+        }
+    }
+    names
 }
 
 /// Longest wait for a connection, a login, or any single response line.
@@ -172,7 +340,7 @@ impl ImapBackfill {
         client.read_response().await.map_err(net)?.ok_or_else(|| ProviderError::Network("no IMAP greeting".into()))?;
         let token = self.tokens.access_token().await?;
         let auth = XOAuth2(format!("user={}\u{1}auth=Bearer {}\u{1}\u{1}", self.config.email, token.expose()));
-        let mut session = match client.authenticate("XOAUTH2", auth).await {
+        let session = match client.authenticate("XOAUTH2", auth).await {
             Ok(session) => session,
             Err((e, _)) => {
                 self.refused.store(true, Ordering::Relaxed);
@@ -180,53 +348,36 @@ impl ImapBackfill {
                 return Err(ProviderError::Forbidden("IMAP login refused".into()));
             }
         };
-        session.examine(ALL_MAIL).await.map_err(imap)?;
         Ok(session)
     }
 
-    /// Refresh the id → UID map for All Mail.
-    async fn load_map(&self, session: &mut Session) -> ProviderResult<HashMap<u64, Located>> {
-        let mut map = HashMap::new();
-        for_each_fetch(session, "UID FETCH 1:* (UID X-GM-MSGID RFC822.SIZE)", |attrs| {
-            let (mut uid, mut msgid, mut size) = (None, None, 0);
-            for a in attrs {
-                match a {
-                    AttributeValue::Uid(u) => uid = Some(*u),
-                    AttributeValue::GmailMsgId(m) => msgid = Some(*m),
-                    AttributeValue::Rfc822Size(s) => size = *s,
-                    _ => {}
-                }
-            }
-            if let (Some(uid), Some(msgid)) = (uid, msgid) {
-                map.insert(msgid, Located { uid, size });
-            }
-        })
-        .await?;
-        tracing::debug!(messages = map.len(), "IMAP id map loaded");
-        Ok(map)
-    }
-
     async fn fetch_imap(&self, wanted: &[(u64, Located)]) -> ProviderResult<Vec<FetchedMessage>> {
+        if wanted.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut state = self.state.lock().await;
-        let mut session = match state.session.take() {
-            Some(s) => s,
-            None => self.connect().await?,
-        };
+        let mut session = state.session(self).await?;
         let labels = self.labels.read().unwrap_or_else(|e| e.into_inner()).clone();
         let mut out = Vec::with_capacity(wanted.len());
         let mut bytes = 0u64;
         let result: ProviderResult<()> = async {
-            for chunk in wanted.chunks(self.config.batch.max(1)) {
-                let set = chunk.iter().map(|(_, l)| l.uid.to_string()).collect::<Vec<_>>().join(",");
-                let command =
-                    format!("UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE BODY.PEEK[])");
-                for_each_fetch(&mut session, &command, |attrs| {
-                    if let Some(m) = to_fetched(attrs, &labels) {
-                        bytes += m.size_estimate;
-                        out.push(m);
-                    }
-                })
-                .await?;
+            for (folder, uids) in by_folder(wanted) {
+                if !state.open(&mut session, folder).await? {
+                    continue;
+                }
+                for chunk in uids.chunks(self.config.batch.max(1)) {
+                    let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+                    let command = format!(
+                        "UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE BODY.PEEK[])"
+                    );
+                    for_each_fetch(&mut session, &command, |attrs| {
+                        if let Some(m) = to_fetched(attrs, &labels, folder) {
+                            bytes += m.size_estimate;
+                            out.push(m);
+                        }
+                    })
+                    .await?;
+                }
             }
             Ok(())
         }
@@ -256,17 +407,9 @@ impl BackfillSource for ImapBackfill {
         };
         if needs_map {
             let mut state = self.state.lock().await;
-            let mut session = match state.session.take() {
-                Some(s) => s,
-                None => self.connect().await?,
-            };
-            match self.load_map(&mut session).await {
-                Ok(map) => {
-                    state.map = map;
-                    state.session = Some(session);
-                }
-                Err(e) => return Err(ProviderError::Network(format!("IMAP id map: {e}"))),
-            }
+            let mut session = state.session(self).await?;
+            state.load_map(&mut session).await?;
+            state.session = Some(session);
         }
         let (via_imap, via_rest) = {
             let state = self.state.lock().await;
@@ -282,7 +425,7 @@ impl BackfillSource for ImapBackfill {
         };
         let mut out =
             self.fetch_imap(&via_imap).await.map_err(|e| ProviderError::Network(format!("IMAP fetch: {e}")))?;
-        // Anything IMAP did not return (moved to Spam or Trash since the
+        // Anything IMAP did not return (moved between folders since the
         // map loaded, or unparseable) goes over the API too; backfill
         // drops every requested id from its queue, so none may be skipped.
         let returned: std::collections::HashSet<&str> = out.iter().map(|m| m.id.as_str()).collect();
@@ -311,48 +454,48 @@ impl BackfillSource for ImapBackfill {
         self.available().await?;
         let wanted: Vec<u64> = ids.iter().filter_map(|id| u64::from_str_radix(id.as_str(), 16).ok()).collect();
         let mut state = self.state.lock().await;
-        let mut session = match state.session.take() {
-            Some(s) => s,
-            None => self.connect().await?,
-        };
+        let mut session = state.session(self).await?;
         if wanted.iter().any(|m| !state.map.contains_key(m)) {
-            state.map =
-                self.load_map(&mut session).await.map_err(|e| ProviderError::Network(format!("IMAP id map: {e}")))?;
+            state.load_map(&mut session).await?;
         }
-        let uids: Vec<u32> = wanted.iter().filter_map(|m| state.map.get(m).map(|l| l.uid)).collect();
+        let located: Vec<(u64, Located)> = wanted.iter().filter_map(|m| state.map.get(m).map(|l| (*m, *l))).collect();
         let labels = self.labels.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let mut out = Vec::with_capacity(uids.len());
+        let mut out = Vec::with_capacity(located.len());
         let mut bytes = 0u64;
-        let mut failed = false;
-        for chunk in uids.chunks(1000) {
-            let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-            let command = format!(
-                "UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE RFC822.SIZE \
-                 BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.{SNIPPET_TEXT_BYTES}>)"
-            );
-            let result = for_each_fetch(&mut session, &command, |attrs| {
-                bytes += attrs
-                    .iter()
-                    .map(|a| match a {
-                        AttributeValue::BodySection { data: Some(d), .. } => d.len() as u64,
-                        _ => 0,
-                    })
-                    .sum::<u64>();
-                if let Some(mut m) = to_fetched(attrs, &labels) {
-                    // Headers (and a snippet) only: no body yet.
-                    m.body = None;
-                    out.push(m);
+        let result: ProviderResult<()> = async {
+            for (folder, uids) in by_folder(&located) {
+                if !state.open(&mut session, folder).await? {
+                    continue;
                 }
-            })
-            .await;
-            if result.is_err() {
-                failed = true;
-                break;
+                for chunk in uids.chunks(1000) {
+                    let set = chunk.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+                    let command = format!(
+                        "UID FETCH {set} (UID X-GM-MSGID X-GM-THRID X-GM-LABELS FLAGS INTERNALDATE RFC822.SIZE \
+                         BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.{SNIPPET_TEXT_BYTES}>)"
+                    );
+                    for_each_fetch(&mut session, &command, |attrs| {
+                        bytes += attrs
+                            .iter()
+                            .map(|a| match a {
+                                AttributeValue::BodySection { data: Some(d), .. } => d.len() as u64,
+                                _ => 0,
+                            })
+                            .sum::<u64>();
+                        if let Some(mut m) = to_fetched(attrs, &labels, folder) {
+                            // Headers (and a snippet) only: no body yet.
+                            m.body = None;
+                            out.push(m);
+                        }
+                    })
+                    .await?;
+                }
             }
+            Ok(())
         }
+        .await;
         self.count_bytes(bytes);
-        if failed {
-            return Err(ProviderError::Network("IMAP header fetch failed".into()));
+        if let Err(e) = result {
+            return Err(ProviderError::Network(format!("IMAP header fetch: {e}")));
         }
         state.session = Some(session);
         Ok(Some(out))
@@ -361,22 +504,27 @@ impl BackfillSource for ImapBackfill {
     async fn list(&self, query: &str) -> ProviderResult<Option<Vec<MessageId>>> {
         self.available().await?;
         let mut state = self.state.lock().await;
-        let mut session = match state.session.take() {
-            Some(s) => s,
-            None => self.connect().await?,
-        };
-        // Gmail's own search syntax over IMAP; everything in All Mail for "".
+        let mut session = state.session(self).await?;
+        // Spam, Trash and Drafts are folders of their own; the rest of the
+        // query is Gmail's own search syntax, or everything for "".
+        let (folder, query) = Folder::for_query(query);
+        if !state.open(&mut session, folder).await? {
+            state.session = Some(session);
+            return Ok(Some(Vec::new()));
+        }
         let criteria = if query.trim().is_empty() {
             "ALL".to_owned()
         } else {
             format!("X-GM-RAW \"{}\"", query.replace('\\', "\\\\").replace('"', "\\\""))
         };
         let uids = session.uid_search(&criteria).await.map_err(imap)?;
-        let mut by_uid: HashMap<u32, u64> = state.map.iter().map(|(m, l)| (l.uid, *m)).collect();
+        let in_folder = |state: &State| -> HashMap<u32, u64> {
+            state.map.iter().filter(|(_, l)| l.folder == folder).map(|(m, l)| (l.uid, *m)).collect()
+        };
+        let mut by_uid = in_folder(&state);
         if uids.iter().any(|u| !by_uid.contains_key(u)) {
-            state.map =
-                self.load_map(&mut session).await.map_err(|e| ProviderError::Network(format!("IMAP id map: {e}")))?;
-            by_uid = state.map.iter().map(|(m, l)| (l.uid, *m)).collect();
+            state.load_map(&mut session).await?;
+            by_uid = in_folder(&state);
         }
         state.session = Some(session);
         let mut ids: Vec<MessageId> =
@@ -450,7 +598,11 @@ async fn for_each_fetch(
 /// paths (headers, text, HTML, attachments with their bytes). A headers
 /// fetch may carry the first bytes of the text too (`BODY[TEXT]<0>`): they
 /// are parsed with the header for the snippet only.
-fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -> Option<FetchedMessage> {
+fn to_fetched(
+    attrs: &[AttributeValue<'_>],
+    labels: &HashMap<String, LabelId>,
+    folder: Folder,
+) -> Option<FetchedMessage> {
     let (mut msgid, mut thrid, mut raw, mut internal, mut size) = (None, None, None, None, None);
     let mut partial_text: Option<Vec<u8>> = None;
     let mut label_ids: Vec<LabelId> = Vec::new();
@@ -496,6 +648,9 @@ fn to_fetched(attrs: &[AttributeValue<'_>], labels: &HashMap<String, LabelId>) -
     }
     if flagged {
         label_ids.push(LabelId::new(system_labels::STARRED));
+    }
+    if let Some(label) = folder.label() {
+        label_ids.push(LabelId::new(label));
     }
     label_ids.sort();
     label_ids.dedup();

@@ -71,7 +71,6 @@ fn seed_mailbox(fake: &FakeProvider) {
     fake.seed(message("recent", "t3", 10, &["Label_1"]));
     fake.seed(message("this-year", "t4", 100, &[]));
     fake.seed(message("ancient", "t5", 900, &[]));
-    fake.seed(message("spam", "t6", 1, &["SPAM"]));
 }
 
 fn assert_consistent(db: &Db) {
@@ -84,6 +83,8 @@ async fn bootstrap_queues_by_priority_and_backfill_fills_the_store() {
     let (fake, db, recorder, engine) = setup("bootstrap");
     engine.set_window(SyncWindow::Everything).await.unwrap();
     seed_mailbox(&fake);
+    fake.seed(message("spam", "t6", 1, &["SPAM"]));
+    fake.seed(message("binned", "t7", 3, &["TRASH"]));
     assert!(engine.needs_bootstrap().await.unwrap());
 
     engine.bootstrap_prepare().await.unwrap();
@@ -96,12 +97,12 @@ async fn bootstrap_queues_by_priority_and_backfill_fills_the_store() {
     let queued = db.read(|c| queue::peek(c, 10)).await.unwrap();
     assert_eq!(
         queued.iter().map(|m| m.as_str()).collect::<Vec<_>>(),
-        vec!["inbox-unread", "inbox-read", "recent", "this-year", "ancient"],
-        "priority order; spam is never listed"
+        vec!["inbox-unread", "inbox-read", "recent", "spam", "binned", "this-year", "ancient"],
+        "priority order; Spam and Trash with the last month, whatever their age"
     );
 
     let fetched = engine.backfill_all().await.unwrap();
-    assert_eq!(fetched, 5);
+    assert_eq!(fetched, 7);
     assert_eq!(db.read(queue::len).await.unwrap(), 0);
     let inbox = db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap();
     assert_eq!(inbox.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t1", "t2"]);

@@ -1015,7 +1015,7 @@ mod tests {
     #[test]
     fn with_imap_granted_backfill_bodies_come_over_imap_and_the_rest_stays_on_the_api() {
         use provider_gmail::imap::{ImapConfig, ImapEndpoint};
-        use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+        use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer, SPAM};
 
         let dir = std::env::temp_dir().join(format!("openagc-core-imap-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1049,6 +1049,19 @@ mod tests {
                     raw: raw.into_bytes(),
                 });
             }
+            // Spam lives outside All Mail, in a folder of its own (with
+            // UIDs of its own); the API does not know it at all.
+            server.add_to(
+                SPAM,
+                FakeImapMessage {
+                    uid: 1,
+                    msgid: 0x1a0000000000009,
+                    thrid: 0x1a0000000000009,
+                    labels: vec![],
+                    flags: vec![],
+                    raw: b"From: Spammer <x@example.com>\r\nTo: me@example.com\r\nSubject: IMAP spam\r\nMessage-ID: <spam@example.com>\r\nDate: Mon, 01 Sep 2025 10:00:00 +0000\r\n\r\nBuy now\r\n".to_vec(),
+                },
+            );
             let config = ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), ..ImapConfig::gmail("me@example.com") };
             let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
             assert!(imap.is_some());
@@ -1056,7 +1069,7 @@ mod tests {
             for _ in 0..200 {
                 let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
                 // Subjects arrive with the headers pass; wait for the bodies too.
-                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) && server.body_fetches() == 2 {
+                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) && server.body_fetches() == 3 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1065,8 +1078,10 @@ mod tests {
             let mut subjects: Vec<String> = rows.iter().map(|r| r.subject.clone()).collect();
             subjects.sort();
             assert_eq!(subjects, ["IMAP 1", "IMAP 2"], "bodies came over IMAP");
-            assert_eq!(server.body_fetches(), 2);
-            assert_eq!(server.header_fetches(), 2, "headers first");
+            assert_eq!(server.body_fetches(), 3);
+            let spam = core.list_threads("SPAM".into(), None, 10).await.unwrap().rows;
+            assert_eq!(spam.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(), ["IMAP spam"], "Spam synced over IMAP");
+            assert!(server.header_fetches() >= 2, "headers first");
             assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no REST body fetches");
             let status = core.backfill_status("acct".into()).await;
             assert_eq!(status.transport, "imap");

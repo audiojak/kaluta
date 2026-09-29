@@ -10,7 +10,7 @@ use provider_api::fake::FakeProvider;
 use provider_api::token::StaticToken;
 use provider_api::{BackfillSource, FetchedMessage, ProviderError};
 use provider_gmail::imap::{ImapBackfill, ImapConfig, ImapEndpoint};
-use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+use provider_gmail::imap_fake::{DRAFTS, FakeImapMessage, FakeImapServer, SPAM, TRASH};
 
 const MSG_A: u64 = 0x18a1_0000_0000_0001;
 const MSG_B: u64 = 0x18a1_0000_0000_0002;
@@ -287,4 +287,45 @@ async fn gmail_searches_list_ids_over_imap_without_the_api() {
 
     let (_s2, _r2, refused) = setup("wrong-token").await;
     assert!(refused.list("in:inbox").await.is_err(), "refused: the engine lists over the API");
+}
+
+#[tokio::test]
+async fn spam_trash_and_drafts_come_from_their_folders_with_their_labels() {
+    let (server, rest, source) = setup("good-token").await;
+    const SPAMMY: u64 = 0x18a1_0000_0000_0010;
+    const BINNED: u64 = 0x18a1_0000_0000_0011;
+    const DRAFTED: u64 = 0x18a1_0000_0000_0012;
+    // UIDs are per folder: the same UIDs as All Mail's, on purpose.
+    for (folder, uid, msgid, n) in [(SPAM, 10, SPAMMY, 4), (TRASH, 11, BINNED, 5), (DRAFTS, 10, DRAFTED, 6)] {
+        server.add_to(
+            folder,
+            FakeImapMessage {
+                uid,
+                msgid,
+                thrid: msgid,
+                labels: if folder == DRAFTS { vec!["\\Draft".into()] } else { vec![] },
+                flags: vec!["\\Seen".into()],
+                raw: FixtureMessage::simple(n).to_rfc822(),
+            },
+        );
+    }
+
+    let labels_of = |m: &FetchedMessage| m.label_ids.iter().map(|l| l.as_str().to_owned()).collect::<Vec<_>>();
+    let mut fetched = source.fetch(&[hex(MSG_A), hex(SPAMMY), hex(BINNED), hex(DRAFTED)]).await.unwrap();
+    fetched.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    let subjects: Vec<&str> = fetched.iter().map(|m| m.subject.as_str()).collect();
+    assert_eq!(subjects, ["Subject 1", "Subject 4", "Subject 5", "Subject 6"], "each from its own folder, not by UID");
+    assert_eq!(labels_of(&fetched[1]), ["SPAM"]);
+    assert_eq!(labels_of(&fetched[2]), ["TRASH"]);
+    assert_eq!(labels_of(&fetched[3]), ["DRAFT"]);
+
+    let headers = source.fetch_headers(&[hex(SPAMMY), hex(MSG_B)]).await.unwrap().unwrap();
+    assert_eq!(headers.len(), 2);
+    assert!(headers.iter().all(|m| m.body.is_none()));
+
+    assert_eq!(source.list("in:spam").await.unwrap().unwrap(), [hex(SPAMMY)]);
+    assert_eq!(source.list("in:trash newer_than:10000d").await.unwrap().unwrap(), [hex(BINNED)]);
+    assert_eq!(source.list("in:drafts").await.unwrap().unwrap(), [hex(DRAFTED)]);
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no API calls");
+    assert_eq!(server.logins(), 1, "one session, switching folders");
 }

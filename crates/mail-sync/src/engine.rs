@@ -92,12 +92,15 @@ pub struct Phase {
 /// Backfill phases for a window, most urgent first (spec §7.4). Each lists
 /// message ids into the queue at its priority. Every age tier has its own
 /// priority (3 = six months, 4 = a year, 5 = older) so the body window can
-/// cut between them.
+/// cut between them. Spam and Trash are listed whole with the last month:
+/// Gmail empties them after 30 days, and All Mail leaves them out.
 pub fn phases_for(window: SyncWindow) -> Vec<Phase> {
     let mut phases = vec![
         Phase { priority: 0, labels: &["INBOX"], query: Some("is:unread".into()) },
         Phase { priority: 1, labels: &["INBOX"], query: None },
         Phase { priority: 2, labels: &[], query: Some("newer_than:30d".into()) },
+        Phase { priority: 2, labels: &["SPAM"], query: None },
+        Phase { priority: 2, labels: &["TRASH"], query: None },
     ];
     let half = Phase { priority: 3, labels: &[], query: Some("newer_than:180d".into()) };
     let year = Phase { priority: 4, labels: &[], query: Some("newer_than:365d".into()) };
@@ -137,7 +140,9 @@ fn phase_search(phase: &Phase) -> String {
 /// Phases listed before backfill starts, so the inbox fills first.
 pub const INBOX_PHASES: usize = 2;
 /// Phases every window shares; the rest depend on the window.
-const FIXED_PHASES: usize = 3;
+const FIXED_PHASES: usize = 5;
+/// The first priority of the window's own phases.
+const WINDOW_PRIORITY: u8 = 3;
 pub const BACKFILL_BATCH: usize = 50;
 
 const KEY_CURSOR: &str = "history_cursor";
@@ -528,7 +533,7 @@ impl SyncEngine {
         let bootstrapped = self
             .db
             .write(move |tx| {
-                queue::clear_from_priority(tx, FIXED_PHASES as u8)?;
+                queue::clear_from_priority(tx, WINDOW_PRIORITY)?;
                 read::sync_state(tx, KEY_BOOTSTRAPPED)
             })
             .await?
@@ -758,11 +763,9 @@ impl SyncEngine {
                 }
             })
             .await?;
-        let fetched = if missing.is_empty() {
-            vec![]
-        } else {
-            self.provider.fetch_messages(&missing, Priority::Background).await?
-        };
+        // Draft messages over IMAP like any other (All Mail or Drafts).
+        let fetched =
+            if missing.is_empty() { vec![] } else { self.fetch_bodies(&missing, Priority::Background).await? };
         let downloaded = fetched.len();
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let pairs: Vec<(String, String)> = listed.into_iter().map(|(d, m)| (d, m.0)).collect();
@@ -989,7 +992,7 @@ impl SyncEngine {
         let filter = ListFilter {
             label_ids: phase.labels.iter().map(|l| LabelId::new(*l)).collect(),
             query: phase.query.clone(),
-            include_spam_trash: false,
+            include_spam_trash: phase.labels.iter().any(|l| matches!(*l, "SPAM" | "TRASH")),
         };
         // Over IMAP first: the same phase as a Gmail search, no quota.
         let reason = match self.list_via_imap(&phase_search(phase), crate::transport::Job::List).await {
