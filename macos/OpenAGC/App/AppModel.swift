@@ -144,7 +144,7 @@ final class AppModel {
     /// narrowed to Important when that switch is on and to the category
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
-        guard let id = selectedMailboxID else { return nil }
+        guard let id = selectedMailboxID, id != Self.tasksMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -291,6 +291,8 @@ final class AppModel {
     /// Where each account's window was (mailbox, thread), restored on switch.
     @ObservationIgnored private var placeByAccount: [String: (mailbox: String?, thread: String?)] = [:]
     let routines: RoutinesStore
+    /// The task list (spec §14.8).
+    let tasks: TaskListStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -319,6 +321,7 @@ final class AppModel {
         notifier = NewMailNotifier(defaults: defaults)
         fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
+        tasks = TaskListStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -467,6 +470,7 @@ final class AppModel {
             ownAddresses = await core.ownAddresses()
             reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
+            await tasks.load()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -805,14 +809,16 @@ final class AppModel {
         openComposer?(request)
     }
 
+    /// In the task list, the reply answers the selected task: sending it
+    /// completes the task (spec §14.8).
     func reply(all: Bool) {
         guard let id = replyTargetMessageID else { return }
-        compose(.reply(messageID: id, all: all))
+        compose(.reply(messageID: id, all: all, task: answeringTaskID))
     }
 
     func forward() {
         guard let id = replyTargetMessageID else { return }
-        compose(.forward(messageID: id))
+        compose(.forward(messageID: id, task: answeringTaskID))
     }
 
     // MARK: Actions on the selection
@@ -942,11 +948,28 @@ final class AppModel {
         return store
     }
 
-    func sendHeld(draftID: Int64, accountID: String) {
+    /// A message was sent (or is held for Undo Send). A reply a task
+    /// called for completes the task (spec §14.8): Undo Send takes back
+    /// both; once the message has gone, undo reopens the task.
+    func messageSent(heldDraftID: Int64?, taskID: Int64?, accountID: String) async {
+        var completed: TaskItem?
+        if let taskID, let core { completed = try? await core.setTaskDone(taskID, true) }
+        if let heldDraftID {
+            sendHeld(draftID: heldDraftID, accountID: accountID, reopen: completed)
+        } else if let completed, let core {
+            undo.record(accountID: accountID, actionName: "Complete Task",
+                        noticeText: "Sent. Task done: “\(completed.title)”",
+                        undo: { _ = try? await core.setTaskDone(completed.id, false) },
+                        redo: { _ = try? await core.setTaskDone(completed.id, true) })
+        }
+    }
+
+    func sendHeld(draftID: Int64, accountID: String, reopen task: TaskItem? = nil) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
             guard let self else { return }
             if await core.cancelSend(draftID, in: accountID) {
+                if let task { _ = try? await core.setTaskDone(task.id, false) }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
                 self.compose(.draft(id: draftID))
             } else {
@@ -1111,6 +1134,7 @@ final class AppModel {
         selectedThreadIDs = []
         searchText = ""
 
+        if isTaskList { Task { await tasks.load() } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1212,6 +1236,7 @@ final class AppModel {
             routinesRevision += 1
         case .tasksChanged:
             tasksRevision += 1
+            await tasks.load()
         case let .importProgress(status):
             imports[tagged.accountID ?? ""] = status
             if status.done {

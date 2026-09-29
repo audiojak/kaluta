@@ -8,8 +8,9 @@ import UniformTypeIdentifiers
 /// composer windows across launches.
 enum ComposeRequest: Codable, Hashable, Sendable {
     case new(to: String?)
-    case reply(messageID: String, all: Bool)
-    case forward(messageID: String)
+    /// `task`: the task this answers (spec §14.8); sending completes it.
+    case reply(messageID: String, all: Bool, task: Int64? = nil)
+    case forward(messageID: String, task: Int64? = nil)
     case draft(id: Int64)
     /// A draft an agent wrote, opened for the user to check before
     /// approving the send.
@@ -18,6 +19,14 @@ enum ComposeRequest: Codable, Hashable, Sendable {
     /// Who wrote the draft, for the composer's banner.
     var agentName: String? {
         if case let .review(_, agent) = self { agent } else { nil }
+    }
+
+    /// The task sending this completes.
+    var taskID: Int64? {
+        switch self {
+        case let .reply(_, _, task), let .forward(_, task): task
+        default: nil
+        }
     }
 }
 
@@ -47,6 +56,10 @@ final class ComposerStore {
     private(set) var lastSaved: Date?
     /// The draft just sent, if it is held for Undo Send (spec §14.6a).
     private(set) var heldSend: Int64?
+    /// Sent (rather than discarded), for what follows a send.
+    private(set) var didSend = false
+    /// The task this message answers (spec §14.8).
+    private(set) var taskID: Int64?
     /// The account the composer sends as.
     var accountID: String? { core?.accountID }
 
@@ -87,6 +100,7 @@ final class ComposerStore {
     // MARK: Loading
 
     func load(_ request: ComposeRequest) async {
+        taskID = request.taskID
         guard let core else {
             phase = .failed("The core is not running.")
             return
@@ -96,9 +110,9 @@ final class ComposerStore {
             let draft: DraftInfo? = switch request {
             case let .new(to):
                 to.map { DraftInfo.empty(to: [AddressInfo(name: nil, email: $0)]) } ?? .empty()
-            case let .reply(messageID, all):
+            case let .reply(messageID, all, _):
                 try await core.replyDraft(to: messageID, all: all)
-            case let .forward(messageID):
+            case let .forward(messageID, _):
                 try await core.forwardDraft(of: messageID)
             case let .draft(id), let .review(id, _):
                 try await core.draft(id)
@@ -226,6 +240,7 @@ final class ComposerStore {
         phase = .sending
         do {
             if try await core.sendDraft(draftID) { heldSend = draftID }
+            didSend = true
             phase = .sent
         } catch {
             phase = .editing

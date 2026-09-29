@@ -13,7 +13,8 @@ pub const DEFAULT_CATEGORIES: &[&str] = &["Reply", "Decide", "Gather Info", "Sch
 /// `task_meta` key for the id of the account's `Task` label.
 pub const LABEL_KEY: &str = "label_id";
 
-/// A task as stored, with the email it is about when that is still here.
+/// A task as stored, with the email it is about when that is still here:
+/// its sender is the task's message's, else the latest from someone else.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TaskRow {
     pub id: i64,
@@ -56,7 +57,8 @@ const SELECT: &str = "SELECT t.id, t.thread_id, t.message_id, t.title, t.notes, 
   LEFT JOIN threads th ON th.gmail_id = t.thread_id
   LEFT JOIN messages m ON m.id = COALESCE(
     (SELECT id FROM messages WHERE gmail_id = t.message_id),
-    (SELECT id FROM messages WHERE thread_id = th.id AND is_draft = 0 ORDER BY internal_date DESC LIMIT 1))";
+    (SELECT id FROM messages WHERE thread_id = th.id AND is_draft = 0
+      ORDER BY is_sent_by_me, internal_date DESC LIMIT 1))";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<TaskRow> {
     Ok(TaskRow {

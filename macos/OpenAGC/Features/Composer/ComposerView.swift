@@ -41,8 +41,8 @@ struct ComposerView: View {
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
-            if let store, let draftID = store.heldSend, let account = store.accountID ?? model.openAccountID {
-                model.sendHeld(draftID: draftID, accountID: account)
+            if let store, store.didSend, let account = store.accountID ?? model.openAccountID {
+                Task { await model.messageSent(heldDraftID: store.heldSend, taskID: store.taskID, accountID: account) }
             }
             dismiss()
         }

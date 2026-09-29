@@ -131,3 +131,115 @@ struct TaskDialogTests {
         #expect(!TaskDraft(threadID: "t", subject: "", sender: "", categories: []).canAdd)
     }
 }
+
+@MainActor
+struct TaskListTests {
+    private func demoWithTasks() async throws -> AppModel {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        await model.seedDemoTasks()
+        model.selectedMailboxID = AppModel.tasksMailboxID
+        await model.tasks.load()
+        return model
+    }
+
+    private func settle(_ model: AppModel) async throws {
+        try await Task.sleep(for: .milliseconds(150))
+        await model.tasks.load()
+    }
+
+    @Test func tasksGroupByWhenTheyAreDueAndShowTheirEmail() async throws {
+        let model = try await demoWithTasks()
+        #expect(model.isTaskList)
+        #expect(model.listMailboxID == nil, "no mailbox is listed behind the tasks")
+        let sections = model.tasks.sections()
+        #expect(sections.map(\.group) == [.overdue, .today, .thisWeek, .later])
+        #expect(sections.map { $0.tasks.count } == [1, 2, 1, 1])
+        #expect(model.tasks.dueCount == 3, "the sidebar badge: overdue and today")
+        #expect(model.tasks.openCount == 5)
+
+        let first = try #require(sections.first?.tasks.first)
+        model.selectTask(first.id)
+        #expect(model.selectedThreadID == first.threadId, "the reader shows the task's email")
+
+        model.tasks.showsDone = true
+        try await settle(model)
+        #expect(model.tasks.tasks.map(\.title) == ["Forward the invoice to accounts"])
+    }
+
+    @Test func doneDeleteAndCategoryAreUndoable() async throws {
+        let model = try await demoWithTasks()
+        let account = try #require(model.openAccountID)
+        let first = try #require(model.tasks.sections().first?.tasks.first)
+        model.selectTask(first.id)
+
+        await model.toggleSelectedTaskDone()
+        #expect(!model.tasks.tasks.contains { $0.id == first.id })
+        #expect(model.tasks.selectedID != nil && model.tasks.selectedID != first.id, "the next task is selected")
+        #expect(model.undo.undoTitle(in: account) == "Undo Complete Task")
+        model.undo.undo(in: account)
+        try await settle(model)
+        #expect(model.tasks.tasks.contains { $0.id == first.id })
+
+        model.selectTask(first.id)
+        await model.setSelectedTaskCategory("Admin")
+        #expect(model.tasks.selected?.category == "Admin")
+        model.undo.undo(in: account)
+        try await settle(model)
+        #expect(model.tasks.tasks.first { $0.id == first.id }?.category == "Reply")
+
+        model.selectTask(first.id)
+        await model.deleteSelectedTask()
+        #expect(!model.tasks.tasks.contains { $0.id == first.id })
+        model.undo.undo(in: account)
+        try await settle(model)
+        #expect(model.tasks.tasks.first { $0.id == first.id }?.title == first.title)
+    }
+
+    @Test func editingChangesTheTaskAndUndoPutsItBack() async throws {
+        let model = try await demoWithTasks()
+        let account = try #require(model.openAccountID)
+        let task = try #require(model.tasks.sections().first?.tasks.first)
+        model.selectTask(task.id)
+        await model.editSelectedTask()
+        let draft = try #require(model.taskDraft)
+        #expect(draft.editing?.id == task.id && draft.title == task.title && draft.hasDue)
+        draft.title = "Send the plan tomorrow"
+        draft.hasDue = false
+        await model.acceptTask(draft)
+        #expect(model.taskDraft == nil)
+        let changed = try #require(model.tasks.tasks.first { $0.id == task.id })
+        #expect(changed.title == "Send the plan tomorrow" && changed.dueDay == nil)
+        model.undo.undo(in: account)
+        try await settle(model)
+        #expect(model.tasks.tasks.first { $0.id == task.id }?.title == task.title)
+    }
+
+    @Test func aReplyFromTheListCompletesItsTaskWhenSent() async throws {
+        let model = try await demoWithTasks()
+        let account = try #require(model.openAccountID)
+        var opened: [ComposeRequest] = []
+        model.openComposer = { opened.append($0) }
+        let task = try #require(model.tasks.sections().first?.tasks.first)
+        model.selectTask(task.id)
+        await model.reader.show(threadID: task.threadId)
+        model.reply(all: false)
+        #expect(opened.first?.taskID == task.id, "the reply carries its task")
+
+        await model.messageSent(heldDraftID: nil, taskID: task.id, accountID: account)
+        try await settle(model)
+        #expect(!model.tasks.tasks.contains { $0.id == task.id }, "sending finished it")
+        #expect(model.undo.notice?.text.hasPrefix("Sent. Task done") == true)
+        model.undo.undo(in: account)
+        try await settle(model)
+        #expect(model.tasks.tasks.contains { $0.id == task.id }, "undo opens it again")
+
+        // Outside the task list, a reply answers no task.
+        model.selectedMailboxID = "INBOX"
+        model.selectedThreadID = task.threadId
+        await model.reader.show(threadID: task.threadId)
+        model.reply(all: false)
+        #expect(opened.last?.taskID == nil)
+    }
+}

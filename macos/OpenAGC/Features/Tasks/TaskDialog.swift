@@ -25,11 +25,15 @@ final class TaskDraft: Identifiable {
     /// Why adding it failed, shown in the dialog.
     var error: String?
 
+    /// The task being changed (`↩` in the task list), or nil for a new one.
+    let editing: TaskItem?
+
     let suggester = TaskSuggester()
     @ObservationIgnored private var applying = false
     @ObservationIgnored private var editedTitle = false
 
     init(threadID: String, subject: String, sender: String, categories: [String], now: Date = .now) {
+        editing = nil
         self.threadID = threadID
         self.subject = subject
         self.sender = sender
@@ -39,6 +43,30 @@ final class TaskDraft: Identifiable {
         suggester.onDone = { [weak self] found in
             if let first = found.first { self?.apply(first) }
         }
+    }
+
+    /// The dialog for changing a task: its fields, no request to Claude.
+    init(editing task: TaskItem, categories: [String]) {
+        editing = task
+        threadID = task.threadId
+        subject = task.subject.isEmpty ? "(no subject)" : task.subject
+        sender = task.senderName ?? task.senderEmail ?? ""
+        self.categories = categories.contains(task.category) ? categories : categories + [task.category]
+        category = task.category
+        due = DueDay.date(task.dueDay) ?? Calendar.current.startOfDay(for: .now)
+        hasDue = task.dueDay != nil
+        action = task.action
+        notes = task.notes
+        why = task.why
+        fromAI = task.fromAi
+        applying = true
+        title = task.title
+        applying = false
+    }
+
+    var edit: TaskEdit {
+        TaskEdit(title: title, notes: notes, category: category, dueDay: hasDue ? DueDay.string(due) : nil,
+                 action: action)
     }
 
     /// Fill the fields from Claude's suggestion; a title the user typed stays.
@@ -82,7 +110,8 @@ struct TaskDialog: View {
     @FocusState private var titleFocused: Bool
 
     var body: some View {
-        Dialog(title: "New Task", message: "\(draft.sender) · \(draft.subject)") {
+        Dialog(title: draft.editing == nil ? "New Task" : "Edit Task",
+               message: draft.sender.isEmpty ? draft.subject : "\(draft.sender) · \(draft.subject)") {
             status
             TextField("What to do", text: $draft.title)
                 .textFieldStyle(.roundedBorder)
@@ -123,10 +152,11 @@ struct TaskDialog: View {
                 .hoverHelp("Ask \(model.agent.providerName) for another suggestion")
         } buttons: {
             CancelButton(help: "Close without adding a task (Esc)") { model.closeTaskDialog() }
-            Button("Add Task") { Task { await model.acceptTask(draft) } }
+            Button(draft.editing == nil ? "Add Task" : "Save") { Task { await model.acceptTask(draft) } }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!draft.canAdd)
-                .hoverHelp("Add it to your tasks and label the email Task (Return)")
+                .hoverHelp(draft.editing == nil ? "Add it to your tasks and label the email Task (Return)"
+                                                : "Save your changes to the task (Return)")
         }
         .onAppear { titleFocused = true }
     }

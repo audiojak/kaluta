@@ -7,10 +7,27 @@ struct ListToolbar: ToolbarContent {
     @Environment(AppModel.self) private var model
 
     var body: some ToolbarContent {
-        // Filter and View Options beside the title, as in Mail.
-        ToolbarItem { ListFilterMenu() }
-        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
-            ToolbarItem { ListViewOptionsMenu() }
+        if model.isTaskList {
+            // The selected task's own actions (spec §14.8).
+            ToolbarItemGroup {
+                Button(model.tasks.selected?.done == true ? "Mark as Not Done" : "Mark as Done",
+                       systemImage: "checkmark.circle") { Task { await model.toggleSelectedTaskDone() } }
+                    .help(ToolbarHelp.text(for: "Mark as Done", model: model) ?? "")
+                    .disabled(model.tasks.selected == nil)
+                Menu("Category", systemImage: "square.grid.2x2") {
+                    ForEach(model.tasks.categories, id: \.self) { name in
+                        Button(name) { Task { await model.setSelectedTaskCategory(name) } } // no-help: menu
+                    }
+                }
+                .help(ToolbarHelp.text(for: "Category", model: model) ?? "")
+                .disabled(model.tasks.selected == nil)
+            }
+        } else {
+            // Filter and View Options beside the title, as in Mail.
+            ToolbarItem { ListFilterMenu() }
+            if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+                ToolbarItem { ListViewOptionsMenu() }
+            }
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {
@@ -161,6 +178,9 @@ enum ToolbarHelp {
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
         case "New Routine": "Create a routine that sorts important mail on a schedule"
+        case "Mark as Done": model.tasks.selected?.done == true ? "Open the task again (e)" : "Mark the task done (e)"
+        case "Mark as Not Done": "Open the task again (e)"
+        case "Category": "Move the task to another category (c)"
         case "Filter":
             model.listFilters.isEmpty ? "Filter: show only unread, starred or with attachments"
                 : "Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ")

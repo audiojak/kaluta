@@ -90,6 +90,7 @@ struct MainWindow: View {
     /// The list column's title, as Mail shows it: the mailbox's name.
     private var listTitle: String {
         if model.threads.searchQuery != nil { return "Search Results" }
+        if model.isTaskList { return "Tasks" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
     }
 
@@ -97,6 +98,12 @@ struct MainWindow: View {
     /// the sidebar's footer.
     private var listSubtitle: String {
         var parts: [String] = []
+        if model.isTaskList {
+            if model.tasks.showsDone { return "Done" }
+            if model.tasks.openCount > 0 { parts.append("\(model.tasks.openCount.formatted()) open") }
+            if model.tasks.dueCount > 0 { parts.append("\(model.tasks.dueCount.formatted()) due") }
+            return parts.joined(separator: " · ")
+        }
         if model.threads.searchQuery == nil, model.selectedMailboxID == "INBOX", let tab = model.activeInboxCategory,
            let counts = model.inboxCategoryTabs.first(where: { $0.id == tab }) {
             // As Mail puts it: "Primary · 667 unread".
@@ -143,7 +150,9 @@ struct MainWindow: View {
                     .foregroundStyle(.secondary)
                     .padding(Space.m)
                 }
-                if model.threads.rows.isEmpty {
+                if model.isTaskList {
+                    TaskListView()
+                } else if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
                         ContentUnavailableView.search(text: model.searchText)
                     } else {
@@ -170,6 +179,7 @@ struct MainWindow: View {
     @ViewBuilder private var listHeader: some View {
         VStack(spacing: 0) {
             categoryTabs
+            taskTabs
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,
@@ -177,6 +187,20 @@ struct MainWindow: View {
                         onDismiss: { model.finishTip(tip, accept: false) })
                     .padding(.horizontal, Space.l)
                     .padding(.bottom, Space.m)
+            }
+        }
+    }
+
+    /// The task list's Open and Done, as the Inbox's category tabs.
+    @ViewBuilder private var taskTabs: some View {
+        if model.isTaskList {
+            ListHeaderBar {
+                CapsuleTabs(tabs: [
+                    CapsuleTabs.Tab(id: "open", title: "Open", symbol: "circle", count: model.tasks.openCount),
+                    CapsuleTabs.Tab(id: "done", title: "Done", symbol: "checkmark.circle"),
+                ], selection: Binding(get: { model.tasks.showsDone ? "done" : "open" },
+                                      set: { model.tasks.showsDone = $0 == "done" }), countNoun: "open")
+                .accessibilityLabel("Show")
             }
         }
     }

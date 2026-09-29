@@ -26,6 +26,8 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
+///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
 ///                                       thread (use -OpenAGCFakeAgents YES)
 ///                                       and capture the sheet
@@ -110,6 +112,13 @@ enum Snapshot {
                 model.openSyncDebugger?()
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
+            }
+            if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
+                await model.seedDemoTasks()
+                model.selectedMailboxID = AppModel.tasksMailboxID
+                try? await Task.sleep(for: .milliseconds(500))
+                model.selectTask(model.tasks.sections().first?.tasks.first?.id)
+                try? await Task.sleep(for: .milliseconds(800))
             }
             if defaults.bool(forKey: "OpenAGCSnapshotTask"), let model = delegate.model {
                 await model.agent.loadProviders()

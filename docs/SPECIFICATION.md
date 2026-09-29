@@ -2137,6 +2137,22 @@ need or made a decision.
   cancels, Ask Again asks once more. Adding closes the dialog and shows
   "Added a task: “…”" in the undo notice; ⌘Z removes it (and the label, if
   it was the thread's only open task), ⇧⌘Z puts it back.
+- **The task list.** A **Tasks** entry under Favorites (its badge: open
+  tasks due today or overdue) swaps the list column for the tasks; the
+  reader shows the chosen task's email. Open and Done tabs sit in the
+  column header. Open tasks group under Overdue, Today, This Week, Later
+  and No Date; each row shows the title and due day, then the category
+  chip and the email's sender and subject; overdue days are orange, today
+  in the accent colour. Keys: `↩` edit (the task dialog, Save), `r` `a` `f`
+  reply, reply all, forward, `e` done (or open again among Done), `c`
+  category (a chooser with number keys), `⌫` delete, `j` `k` move; the
+  same in the context menu, and Mark as Done and Category in the list
+  column's toolbar. Every change goes on the undo stack with a notice.
+  A reply or forward started from the task list answers the task: when it
+  is sent, the task is done (and the thread's `Task` label goes with its
+  last open task); Undo Send takes back both, and once the message has
+  gone, ⌘Z opens the task again. Searching while in Tasks shows mail
+  results as anywhere else.
 
 ---
 
