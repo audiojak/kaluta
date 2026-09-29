@@ -2,14 +2,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// A composer window's content (spec §14.5): header fields, the rich-text
-/// body, the quoted original, attachments, and Send.
+/// body, the message being answered (shown by default, in a pane that can
+/// be resized or hidden), writing help from the agent, attachments, and
+/// Send.
 struct ComposerView: View {
     let request: ComposeRequest
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var store: ComposerStore?
-    @State private var showsQuote = false
+    @State private var showsQuote = true
     @State private var importing = false
+    @State private var assistant = ComposerAssistant()
+    @FocusState private var assistantFocused: Bool
 
     var body: some View {
         Group {
@@ -33,6 +37,7 @@ struct ComposerView: View {
             let store = ComposerStore(core: model.core, account: model.openAccountID)
             self.store = store
             await store.load(request)
+            if model.agent.providers.isEmpty { await model.agent.loadProviders() }
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
@@ -58,11 +63,23 @@ struct ComposerView: View {
             if let error = store.saveError {
                 Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
-            RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
-                .frame(maxHeight: .infinity)
-            if !store.quotedHTML.isEmpty {
-                quote(store)
+            if !store.quotedHTML.isEmpty, showsQuote {
+                // The editor and the original, the divider between them
+                // draggable.
+                VSplitView {
+                    RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
+                        .frame(minHeight: 120, maxHeight: .infinity)
+                    quote(store)
+                        .frame(minHeight: 90, idealHeight: 260, maxHeight: .infinity)
+                }
+            } else {
+                RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
+                    .frame(maxHeight: .infinity)
+                if !store.quotedHTML.isEmpty {
+                    quoteToggle
+                }
             }
+            assistantBar(store)
             if !store.attachments.isEmpty {
                 attachmentStrip(store)
             }
@@ -146,25 +163,91 @@ struct ComposerView: View {
         }
     }
 
+    /// The original, under the editor.
     private func quote(_ store: ComposerStore) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            InsetRule()
+            quoteToggle
+            MessageWebView(html: Self.quoteDocument(store.quotedHTML), allowRemoteImages: false)
+        }
+    }
+
+    private var quoteToggle: some View {
+        HStack {
             Button {
                 showsQuote.toggle()
             } label: {
-                Label(showsQuote ? "Hide Quoted Text" : "Show Quoted Text",
-                      systemImage: showsQuote ? "chevron.down" : "ellipsis")
+                Label(showsQuote ? "Hide Original" : "Show Original",
+                      systemImage: showsQuote ? "chevron.down" : "chevron.up")
                     .font(.callout)
             }
-            .hoverHelp(showsQuote ? "Hide the message you are replying to" : "Show the message you are replying to")
+            .hoverHelp(showsQuote ? "Hide the message you are answering" : "Show the message you are answering")
             .buttonStyle(.borderless)
-            .padding(.horizontal, Space.xl)
-            .padding(.vertical, Space.s)
-            if showsQuote {
-                MessageWebView(html: Self.quoteDocument(store.quotedHTML), allowRemoteImages: false)
-                    .frame(height: 220)
+            Spacer()
+        }
+        .padding(.horizontal, Space.xl)
+        .padding(.vertical, Space.s)
+        .overlay(alignment: .top) { InsetRule() }
+    }
+
+    /// Writing help: ask the agent to write or change the message.
+    private func assistantBar(_ store: ComposerStore) -> some View {
+        @Bindable var assistant = assistant
+        let ready = model.agent.isProviderReady
+        let name = model.agent.providerName
+        let run = { Task { await assistant.run(store: store, model: model, original: ComposerAssistant.plainText(fromHTML: store.quotedHTML)) } }
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.m) {
+                Image(systemName: "sparkles").foregroundStyle(.tint)
+                TextField(ready ? "Ask \(name) to write or change this message…" : "\(name) is not set up (Settings › Agents)",
+                          text: $assistant.instruction)
+                    .textFieldStyle(.plain)
+                    .focused($assistantFocused)
+                    .onSubmit { run() }
+                    .disabled(!ready || assistant.state == .working)
+                    .accessibilityLabel("Writing help")
+                Menu {
+                    ForEach(ComposerAssistant.suggestions(replying: !store.quotedHTML.isEmpty), id: \.self) { suggestion in
+                        Button(suggestion) {
+                            assistant.instruction = suggestion
+                            assistantFocused = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "text.bubble")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(!ready)
+                .hoverHelp("Ideas to ask for; choosing one puts it in the box")
+                if assistant.state == .working {
+                    ProgressView().controlSize(.small)
+                    Button("Stop") { assistant.cancel() }
+                        .hoverHelp("Stop the agent writing")
+                } else {
+                    Button("Write") { run() }
+                        .disabled(!ready || assistant.instruction.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .hoverHelp("Have \(name) write this into the message (Return)")
+                }
+            }
+            switch assistant.state {
+            case .done:
+                HStack(spacing: Space.m) {
+                    Text("Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    Button("Undo") { assistant.undo() }
+                        .buttonStyle(.link)
+                        .hoverHelp("Put back the message as it was before")
+                }
+                .font(TypeRole.caption)
+            case let .failed(message):
+                Text(message).font(TypeRole.caption).foregroundStyle(.red)
+            default:
+                EmptyView()
             }
         }
+        .controlSize(.small)
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.s)
+        .overlay(alignment: .top) { InsetRule() }
     }
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {

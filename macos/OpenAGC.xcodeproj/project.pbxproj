@@ -14,6 +14,7 @@
 		0C3A1E2BB1395CFE3826E5C0 /* SchemeHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B84FAD449704789E8707C7 /* SchemeHandlers.swift */; };
 		116A2EC55EB66E0F8E5ACCF0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4C676A513B753ECEBB6FF97 /* SettingsView.swift */; };
 		169E901DDE62D2B0DE7DEF3F /* ComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0853C589261B9BC5E99D0106 /* ComposerTests.swift */; };
+		16A834C86559A500A03CD574 /* ComposerAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 045C8138124940FF93D5F90B /* ComposerAssistant.swift */; };
 		16F271E116BA5AD078A38B81 /* DraftClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C8234BE90C43AB48FCA078 /* DraftClient.swift */; };
 		1970C5710634017B9B3E926B /* CoreClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA889A74036D5319EED2E94 /* CoreClientTests.swift */; };
 		19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */; };
@@ -61,6 +62,7 @@
 		751F75594BDFE0DB89944569 /* OpenAGCApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FDA6A53B22BE15E4B5B603 /* OpenAGCApp.swift */; };
 		77B3B3168E8CB3B3135A1612 /* ListFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A5BA2DB76BB7475F5832B8 /* ListFilterTests.swift */; };
 		79D089313B823566456CDFBD /* LabelTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCCFF907D89AAA9F8298A38B /* LabelTree.swift */; };
+		7ADB97840B40A1C13F3A9D87 /* ComposerAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118671237C043C8CFF6F33F0 /* ComposerAssistantTests.swift */; };
 		7E970B4006C6E0C0A357D7F9 /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */; };
 		8AE4FC81B09805EFF46AE738 /* ActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA440AC1C73AD0A9E18E993 /* ActionTests.swift */; };
 		8BCA879DA87A93071503AFD8 /* OpenAGCCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24AC691869E94971A95182AF /* OpenAGCCore.framework */; };
@@ -140,6 +142,7 @@
 		00C8234BE90C43AB48FCA078 /* DraftClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftClient.swift; sourceTree = "<group>"; };
 		0226B235AA4B7F4515359C61 /* RoutinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesStore.swift; sourceTree = "<group>"; };
 		033CF7C15494E30BC67D425A /* AttachmentStrip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentStrip.swift; sourceTree = "<group>"; };
+		045C8138124940FF93D5F90B /* ComposerAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAssistant.swift; sourceTree = "<group>"; };
 		04D52F53D78AD39AD9664700 /* MailUndo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailUndo.swift; sourceTree = "<group>"; };
 		04F1A33FDE9F24E15210C90A /* AccountSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSwitchTests.swift; sourceTree = "<group>"; };
 		053AED4EA96D02AB9F26511F /* ListFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListFilter.swift; sourceTree = "<group>"; };
@@ -147,6 +150,7 @@
 		0C8A5AC940824CF40F0B058F /* LabelTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelTreeTests.swift; sourceTree = "<group>"; };
 		0ECC21C8EFCB7A1F70BD6BF9 /* AccountMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenu.swift; sourceTree = "<group>"; };
 		0F2806227B342184B9664E7D /* LinkSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkSafety.swift; sourceTree = "<group>"; };
+		118671237C043C8CFF6F33F0 /* ComposerAssistantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerAssistantTests.swift; sourceTree = "<group>"; };
 		11B84FAD449704789E8707C7 /* SchemeHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemeHandlers.swift; sourceTree = "<group>"; };
 		17B53574C86CCC4F40FC00A1 /* AgentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStore.swift; sourceTree = "<group>"; };
 		190E7BE352B8FB1A5BC8078E /* RoutinesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesWindow.swift; sourceTree = "<group>"; };
@@ -411,6 +415,7 @@
 				813AFF04D4AA06CBAF57266A /* ArchiveAccountTests.swift */,
 				99F36E7595DF6E9B290AE189 /* AttachmentTests.swift */,
 				3099D543330783FF161C148F /* CategoryTabTests.swift */,
+				118671237C043C8CFF6F33F0 /* ComposerAssistantTests.swift */,
 				0853C589261B9BC5E99D0106 /* ComposerTests.swift */,
 				6EA889A74036D5319EED2E94 /* CoreClientTests.swift */,
 				FE0EEA46B16CBE10362B13CC /* CoreEventTests.swift */,
@@ -525,6 +530,7 @@
 		CE7481F262DA91540E01D859 /* Composer */ = {
 			isa = PBXGroup;
 			children = (
+				045C8138124940FF93D5F90B /* ComposerAssistant.swift */,
 				AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */,
 				C05AE95A75189A1675986338 /* ComposerStore.swift */,
 				2A5694ECC8EA36F2A4119F98 /* ComposerView.swift */,
@@ -759,6 +765,7 @@
 				9EA6082C5120AB0A63AA34E5 /* ArchiveAccountTests.swift in Sources */,
 				4BBB2B43CEEF1AFA6C20B2D3 /* AttachmentTests.swift in Sources */,
 				41F36E445C76099104FF1BD8 /* CategoryTabTests.swift in Sources */,
+				7ADB97840B40A1C13F3A9D87 /* ComposerAssistantTests.swift in Sources */,
 				169E901DDE62D2B0DE7DEF3F /* ComposerTests.swift in Sources */,
 				1970C5710634017B9B3E926B /* CoreClientTests.swift in Sources */,
 				F55DCE790C44258F12C510F2 /* CoreEventTests.swift in Sources */,
@@ -799,6 +806,7 @@
 				5983A19ACD9796ACFA5E19D5 /* AppModel.swift in Sources */,
 				A64492AC04FB122343BA17D2 /* AttachmentStrip.swift in Sources */,
 				403EB3F17C39C0781B552172 /* Components.swift in Sources */,
+				16A834C86559A500A03CD574 /* ComposerAssistant.swift in Sources */,
 				19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */,
 				A183D5AC94021A65ABDCCBDD /* ComposerStore.swift in Sources */,
 				69662C039B9C1E122F754EDE /* ComposerView.swift in Sources */,

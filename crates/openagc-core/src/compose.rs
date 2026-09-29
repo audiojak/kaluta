@@ -140,16 +140,25 @@ impl Core {
         self.refuse_if_archive()?;
         let me = self.own_addresses().await?;
         let db = self.db()?;
-        runtime::run(
-            async move { Ok(mail_sync::reply_draft(&db, &MessageId(message_id), reply_all, &me).await?.into()) },
-        )
+        let service = self.sync_service();
+        runtime::run(async move {
+            let id = MessageId(message_id);
+            download_for_quote(service.as_deref(), &id).await;
+            Ok(mail_sync::reply_draft(&db, &id, reply_all, &me).await?.into())
+        })
         .await
     }
 
     pub async fn forward_draft(&self, message_id: String) -> Result<DraftInfo, CoreError> {
         self.refuse_if_archive()?;
         let db = self.db()?;
-        runtime::run(async move { Ok(mail_sync::forward_draft(&db, &MessageId(message_id)).await?.into()) }).await
+        let service = self.sync_service();
+        runtime::run(async move {
+            let id = MessageId(message_id);
+            download_for_quote(service.as_deref(), &id).await;
+            Ok(mail_sync::forward_draft(&db, &id).await?.into())
+        })
+        .await
     }
 
     /// Open a draft from the Drafts mailbox for editing (spec §14.5
@@ -460,6 +469,17 @@ impl Core {
     /// Compose operations for `account_id` (see `AccountComposer`).
     pub fn composer_for(self: std::sync::Arc<Self>, account_id: String) -> std::sync::Arc<AccountComposer> {
         std::sync::Arc::new(AccountComposer { core: self, account: account_id })
+    }
+}
+
+/// A message stored with headers only has no text to quote and no
+/// attachments to forward: download it first. Best effort: offline, the
+/// reply opens with what is stored.
+async fn download_for_quote(service: Option<&crate::sync::SyncService>, id: &MessageId) {
+    if let Some(service) = service
+        && let Err(e) = service.engine().ensure_bodies(vec![id.clone()]).await
+    {
+        tracing::warn!(error = %e, "could not download the message to quote; replying with what is stored");
     }
 }
 

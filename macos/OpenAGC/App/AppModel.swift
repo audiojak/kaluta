@@ -576,6 +576,13 @@ final class AppModel {
 
     /// A suggestion was chosen: send it, or put it in the field when it
     /// needs the user's words.
+    /// Put an example in the prompt for the user to send or change (the
+    /// agent column's examples).
+    func fillPrompt(_ suggestion: AgentSuggestion) {
+        agentPromptDraft = suggestion.fillText
+        focusAgentPrompt()
+    }
+
     func choose(_ suggestion: AgentSuggestion) {
         if suggestion.fillsOnly {
             agentPromptDraft = suggestion.fillText
@@ -1121,7 +1128,15 @@ final class AppModel {
         return account == openAccountID
     }
 
+    /// Agent sessions that report somewhere other than the agent panel (a
+    /// composer's writing help), by session id.
+    @ObservationIgnored var agentSinks: [String: @MainActor ([AgentEventInfo]) async -> Void] = [:]
+
     private func handle(_ tagged: CoreClientEvent.Tagged) async {
+        if case let .agent(sessionID, events) = tagged.event, let sink = agentSinks[sessionID] {
+            await sink(events)
+            return
+        }
         // An agent session reports to its own account's panel, shown or not.
         if case let .agent(sessionID, events) = tagged.event, let account = tagged.accountID,
            let store = agentStores[account] {

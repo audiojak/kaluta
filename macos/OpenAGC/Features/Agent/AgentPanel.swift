@@ -155,8 +155,8 @@ struct SuggestionChips: View {
 }
 
 /// The agent column before a conversation: what the agent can do, as
-/// example prompts in groups (spec §14.6b). Choosing one sends it, or
-/// fills the field when it needs the user's words.
+/// example prompts in groups (spec §14.6b). Choosing one puts it in the
+/// prompt, to send as it is or change first.
 struct AgentCapabilitiesView: View {
     @Environment(AppModel.self) private var model
 
@@ -175,18 +175,17 @@ struct AgentCapabilitiesView: View {
                             .font(TypeRole.groupLabel)
                             .foregroundStyle(.secondary)
                         ForEach(group.examples) { example in
-                            Button { model.choose(example) } label: {
+                            Button { model.fillPrompt(example) } label: {
                                 Text("“\(example.text)”")
                                     .multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.tint)
-                            .disabled(!model.agent.isProviderReady)
-                            .hoverHelp(example.fillsOnly ? "Put this in the prompt for you to finish" : "Ask the agent this")
+                            .hoverHelp(example.fillsOnly ? "Put this in the prompt for you to finish"
+                                                         : "Put this in the prompt; press Return to ask")
                             .accessibilityLabel(example.text)
-                            .accessibilityHint(example.fillsOnly ? "Puts this in the prompt for you to finish"
-                                                                 : "Asks the agent")
+                            .accessibilityHint("Puts this in the prompt")
                         }
                     }
                     .accessibilityElement(children: .contain)

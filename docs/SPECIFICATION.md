@@ -1911,6 +1911,16 @@ keeping the Gmail draft id so saving replaces that draft rather than
 adding a second one. Drafts show their paperclip in the list like any
 thread.
 
+*(Amended 2026-09-28.)* A reply or forward shows the message being
+answered under the editor by default, in a pane whose divider can be
+dragged, with Hide Original / Show Original; the message is downloaded
+first if only its headers were stored. A writing-help bar at the bottom
+asks the agent to write or change the message ("Write a reply", "Make it
+shorter", …, or the user's own words). It runs in a session of its own
+that can see only the thread being answered; its answer replaces the
+body, with Undo, and anything it proposes that would change mail is
+refused. Sending stays the user's.
+
 ### 14.6 Agent panel
 
 Not a chat window. The prompt bar sits under the thread list; a session
