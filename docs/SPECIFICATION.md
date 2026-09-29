@@ -2161,6 +2161,14 @@ need or made a decision.
   checkbox; threads that already have an open task say so and start
   unchecked. "Add N Tasks" (Return) adds the checked rows that have a
   title; one Undo removes them all.
+- **Hiding emails with tasks.** View Options in the Inbox has **Hide
+  Emails with Tasks**, remembered per account like Important Only (§14.3):
+  the Inbox then leaves out threads carrying the account's `Task` label,
+  so it shows only what still needs sorting. It combines with Important
+  Only, the category tabs (whose counts follow) and the filters, and the
+  list's subtitle says "Tasks hidden"; search ignores it, as it ignores
+  the tabs. The store's lists take exclusion narrowings for it
+  (`INBOX+!Label_7`, "and not labelled", next to `INBOX+IMPORTANT`).
 
 ---
 

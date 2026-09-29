@@ -118,6 +118,9 @@ struct MainWindow: View {
         if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.inboxImportantOnly {
             parts.append("Important only")
         }
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.hiddenTaskLabel != nil {
+            parts.append("Tasks hidden")
+        }
         if !model.listFilters.isEmpty {
             parts.append("Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))
         }

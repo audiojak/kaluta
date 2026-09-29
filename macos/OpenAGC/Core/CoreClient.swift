@@ -224,8 +224,8 @@ final class CoreClient: Sendable {
     }
 
     /// The Inbox's category tabs with their counts, Primary first.
-    func inboxCategories(importantOnly: Bool) async throws(CoreClientError) -> [InboxCategory] {
-        try await call { try await core.inboxCategories(importantOnly: importantOnly) }
+    func inboxCategories(importantOnly: Bool, hiddenLabel: String? = nil) async throws(CoreClientError) -> [InboxCategory] {
+        try await call { try await core.inboxCategories(importantOnly: importantOnly, hiddenLabel: hiddenLabel) }
     }
 
     func threads(in mailboxID: String, after cursor: String? = nil, limit: UInt32 = 100) async throws(CoreClientError) -> ThreadPage {

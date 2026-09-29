@@ -73,6 +73,7 @@ struct ListViewOptionsMenu: View {
         @Bindable var model = model
         Menu {
             Toggle("Important Only", isOn: $model.inboxImportantOnly)
+            Toggle("Hide Emails with Tasks", isOn: $model.inboxHidesTasks)
             if InboxCategories.inUse(model.inboxCategoryCounts) {
                 Toggle("Show Categories", isOn: $model.showCategories)
             }

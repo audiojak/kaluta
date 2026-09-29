@@ -61,6 +61,27 @@ final class AppModel {
 
     static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
 
+    /// The Inbox leaves out threads with an open task (they carry the
+    /// account's `Task` label; spec §14.8, §14.3), remembered per account.
+    var inboxHidesTasks: Bool {
+        get { inboxHidesTasksLoaded }
+        set {
+            guard newValue != inboxHidesTasksLoaded else { return }
+            inboxHidesTasksLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.hideTasksKey(id)) }
+            relist()
+        }
+    }
+
+    private var inboxHidesTasksLoaded = false
+    /// The open account's `Task` label, once it has one.
+    var taskLabelID: String?
+
+    static func hideTasksKey(_ accountID: String) -> String { "inboxHideTasks.\(accountID)" }
+
+    /// The narrowing that hides emails with tasks, when on and possible.
+    var hiddenTaskLabel: String? { inboxHidesTasks ? taskLabelID : nil }
+
     /// The open account's addresses, aliases included: rows show other
     /// people, and "Me" only when it is just you.
     private(set) var ownAddresses: Set<String> = []
@@ -148,6 +169,7 @@ final class AppModel {
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
+            if let hidden = hiddenTaskLabel { parts.append("!" + hidden) }
             if let category = activeInboxCategory { parts.append(category) }
         }
         parts += ListFilter.ordered(listFilters).map(\.rawValue)
@@ -206,7 +228,7 @@ final class AppModel {
         categoryGeneration += 1
         let generation = categoryGeneration
         let before = listMailboxID
-        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly, hiddenLabel: hiddenTaskLabel)) ?? []
         // A newer reload (the switch toggled again) wins.
         guard generation == categoryGeneration else { return false }
         inboxCategoryCounts = counts
@@ -466,6 +488,8 @@ final class AppModel {
             await mailboxes.reload()
             await reloadAccounts()
             inboxImportantOnlyLoaded = defaults.bool(forKey: Self.importantOnlyKey(accountID))
+            inboxHidesTasksLoaded = defaults.bool(forKey: Self.hideTasksKey(accountID))
+            taskLabelID = try? await core.taskLabelID()
             showCategoriesLoaded = defaults.object(forKey: Self.showCategoriesKey(accountID)) as? Bool ?? true
             inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
             await reloadInboxCategories()
@@ -1239,6 +1263,12 @@ final class AppModel {
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()
+            // The first task made the label: the Inbox can now hide by it.
+            let label = try? await core?.taskLabelID()
+            if label != taskLabelID {
+                taskLabelID = label
+                if inboxHidesTasks { relist() }
+            }
         case let .importProgress(status):
             imports[tagged.accountID ?? ""] = status
             if status.done {

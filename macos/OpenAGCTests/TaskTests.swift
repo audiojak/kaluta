@@ -301,3 +301,41 @@ struct BulkTaskTests {
         #expect(model.bulkTaskTargets.count == min(20, model.threads.rows.count))
     }
 }
+
+@MainActor
+struct HideTasksTests {
+    @Test func theInboxCanHideEmailsWithTasksPerAccount() async throws {
+        let defaults = CoreClient.appDefaults()
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()), defaults: defaults)
+        await model.start(openDemo: true)
+        model.showCategories = false
+        let row = try #require(model.threads.rows.first)
+        _ = try await model.core!.createTasks([
+            NewTask(threadId: row.id, messageId: nil, title: "Do it", notes: "", category: "Reply", dueDay: nil,
+                    action: .reply, why: "", fromAi: false),
+        ])
+        for _ in 0..<100 where model.taskLabelID == nil { try await Task.sleep(for: .milliseconds(20)) }
+        let label = try #require(model.taskLabelID)
+        #expect(model.listMailboxID?.contains("!") == false, "off by default")
+
+        model.inboxHidesTasks = true
+        #expect(model.listMailboxID?.hasSuffix("!" + label) == true)
+        for _ in 0..<100 where model.threads.rows.contains(where: { $0.id == row.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!model.threads.rows.contains { $0.id == row.id }, "the thread with a task left the Inbox")
+        let account = try #require(model.openAccountID)
+        #expect(defaults.bool(forKey: AppModel.hideTasksKey(account)), "remembered per account")
+
+        // Search ignores it, as it ignores the tabs.
+        model.searchText = "a"
+        #expect(model.filteredSearch.contains("!") == false)
+        model.searchText = ""
+
+        model.inboxHidesTasks = false
+        for _ in 0..<100 where !model.threads.rows.contains(where: { $0.id == row.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.threads.rows.contains { $0.id == row.id })
+    }
+}

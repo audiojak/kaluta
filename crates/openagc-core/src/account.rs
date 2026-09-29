@@ -1162,7 +1162,7 @@ mod tests {
             // themselves carry none.
             let mut promotions = 0;
             for _ in 0..200 {
-                let counts = core.inbox_categories(false).await.unwrap_or_default();
+                let counts = core.inbox_categories(false, None).await.unwrap_or_default();
                 promotions = counts.iter().find(|c| c.id == "CATEGORY_PROMOTIONS").map_or(0, |c| c.total_count);
                 if promotions == 1 {
                     break;

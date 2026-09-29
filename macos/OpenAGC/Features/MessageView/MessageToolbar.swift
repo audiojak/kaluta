@@ -185,8 +185,9 @@ enum ToolbarHelp {
             model.listFilters.isEmpty ? "Filter: show only unread, starred or with attachments"
                 : "Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ")
         case "View Options":
-            InboxCategories.inUse(model.inboxCategoryCounts) ? "View options: Important Only, Show Categories"
-                : "View options: Important Only"
+            InboxCategories.inUse(model.inboxCategoryCounts)
+                ? "View options: Important Only, Hide Emails with Tasks, Show Categories"
+                : "View options: Important Only, Hide Emails with Tasks"
         default: nil
         }
     }
