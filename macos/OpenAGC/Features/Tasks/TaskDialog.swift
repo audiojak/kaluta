@@ -13,10 +13,10 @@ final class TaskDraft: Identifiable {
     let categories: [String]
 
     var title = "" { didSet { if !applying { editedTitle = true } } }
-    var category: String
-    var hasDue = false
-    var due: Date
-    var action: TaskAction = .reply
+    var category: String { didSet { if !applying { editedOther = true } } }
+    var hasDue = false { didSet { if !applying { editedOther = true } } }
+    var due: Date { didSet { if !applying { editedOther = true } } }
+    var action: TaskAction = .reply { didSet { if !applying { editedOther = true } } }
     var notes = ""
     /// Claude's line on why, shown under the fields.
     private(set) var why = ""
@@ -31,6 +31,9 @@ final class TaskDraft: Identifiable {
     let suggester = TaskSuggester()
     @ObservationIgnored private var applying = false
     @ObservationIgnored private var editedTitle = false
+    /// Category, due day or action changed by the user: a later
+    /// suggestion leaves them as they are.
+    @ObservationIgnored private var editedOther = false
 
     init(threadID: String, subject: String, sender: String, categories: [String], now: Date = .now) {
         editing = nil
@@ -77,14 +80,16 @@ final class TaskDraft: Identifiable {
             title = s.title
             fromAI = true
         }
-        category = s.category
-        if let day = s.dueDay, let date = DueDay.date(day) {
-            hasDue = true
-            due = date
-        } else {
-            hasDue = false
+        if !editedOther {
+            category = s.category
+            if let day = s.dueDay, let date = DueDay.date(day) {
+                hasDue = true
+                due = date
+            } else {
+                hasDue = false
+            }
+            action = s.action
         }
-        action = s.action
         why = s.why
     }
 

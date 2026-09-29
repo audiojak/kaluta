@@ -495,6 +495,12 @@ final class CoreClient: Sendable {
         try await call { try await core.startAgentSession(provider: provider, selection: selection, resume: resume) }
     }
 
+    /// A session whose tools may only read: writing help and task
+    /// suggestions, which must not change mail whatever the agent is told.
+    func startReadOnlyAgentSession(provider: String, selection: [String]) async throws(CoreClientError) -> String {
+        try await call { try await core.startReadOnlyAgentSession(provider: provider, selection: selection) }
+    }
+
     func sendAgentPrompt(_ sessionID: String, _ prompt: String,
                          context: PromptContextInfo = PromptContextInfo(mailboxId: nil, selectedThreadIds: [],
                                                                          searchQuery: nil)) async throws(CoreClientError) {

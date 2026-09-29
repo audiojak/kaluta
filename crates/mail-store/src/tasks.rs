@@ -171,7 +171,10 @@ pub fn list(conn: &Connection, include_done: bool) -> StoreResult<Vec<TaskRow>> 
     let filter = if include_done { "" } else { "WHERE t.status = 'open'" };
     let sql = format!(
         "{SELECT} {filter}
-         ORDER BY t.status = 'done', t.due_day IS NULL, t.due_day, t.completed_at DESC, t.created_at, t.id"
+         ORDER BY t.status = 'done',
+           CASE WHEN t.status = 'open' THEN t.due_day IS NULL END,
+           CASE WHEN t.status = 'open' THEN t.due_day END,
+           t.completed_at DESC, t.created_at, t.id"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map([], row)?.collect::<Result<Vec<_>, _>>()?;
@@ -265,12 +268,16 @@ mod tests {
             let done = insert(tx, "t3", None, &fields("finished", Some("2026-09-01")), "ai", "", 3)?;
             insert(tx, "t4", None, &fields("soon", Some("2026-09-30")), "ai", "why", 4)?;
             set_done(tx, done, true, 10)?;
+            let later = insert(tx, "t5", None, &fields("finished later", Some("2026-12-01")), "ai", "", 5)?;
+            set_done(tx, later, true, 20)?;
             Ok(())
         })
         .unwrap();
         let open: Vec<String> = s.1.read_blocking(|c| list(c, false)).unwrap().into_iter().map(|t| t.title).collect();
         assert_eq!(open, ["soon", "later", "undated"]);
         let all = s.1.read_blocking(|c| list(c, true)).unwrap();
+        let done: Vec<&str> = all.iter().filter(|t| t.status == "done").map(|t| t.title.as_str()).collect();
+        assert_eq!(done, ["finished later", "finished"], "latest finished first, whatever the due day");
         assert_eq!(all.last().unwrap().title, "finished");
         assert_eq!(all.last().unwrap().completed_at, Some(10));
         let with = s.1.read_blocking(|c| threads_with_open_tasks(c, &["t1".into(), "t3".into()])).unwrap();

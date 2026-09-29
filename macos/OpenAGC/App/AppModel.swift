@@ -997,7 +997,12 @@ final class AppModel {
             if await core.cancelSend(draftID, in: accountID) {
                 if let task { _ = try? await core.setTaskDone(task.id, false) }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
-                self.compose(.draft(id: draftID))
+                // Sending it again still completes the task.
+                self.compose(.draft(id: draftID, task: task?.id))
+            } else if let task {
+                // The message has gone; the task comes back (spec §14.8).
+                _ = try? await core.setTaskDone(task.id, false)
+                self.undo.show("Already sent. Task open again: “\(task.title)”", accountID: accountID)
             } else {
                 self.undo.show("Already sent", accountID: accountID)
             }

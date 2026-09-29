@@ -1929,8 +1929,9 @@ first if only its headers were stored. A writing-help bar at the bottom
 asks the agent to write or change the message ("Write a reply", "Make it
 shorter", …, or the user's own words). It runs in a session of its own
 that can see only the thread being answered; its answer replaces the
-body, with Undo, and anything it proposes that would change mail is
-refused. Sending stays the user's.
+body, with Undo. The session is read-only: the core refuses every tool
+that would change mail (2026-09-29; it had only refused proposals, which
+left tools that need no approval open). Sending stays the user's.
 
 ### 14.6 Agent panel
 
@@ -2123,9 +2124,11 @@ need or made a decision.
   object, `{"tasks": […]}`) but keeps only threads it asked about, the
   first suggestion for each; an unknown category becomes the first, a day
   that is not a date or an unknown action becomes none. The app asks in a
-  one-turn agent session of its own that sees only those threads and
-  refuses any proposal that would change mail; it does not appear in the
-  agent column. With no agent ready, the dialog opens empty.
+  one-turn **read-only** agent session of its own that sees only those
+  threads: the core refuses every tool that would change mail, whatever an
+  email tells the agent (the composer's writing help uses the same kind of
+  session). Inside the email blocks every `<` becomes `‹`, so no text can
+  close or fake a block. It does not appear in the agent column. With no agent ready, the dialog opens empty.
 - **One email: `t`.** In a mail list, `t` (also Message › New Task from
   Email… and the list's context menu) opens the **task dialog** for the
   thread being read and asks Claude at once: the email's sender and

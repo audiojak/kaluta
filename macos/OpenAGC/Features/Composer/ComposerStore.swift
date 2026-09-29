@@ -11,7 +11,7 @@ enum ComposeRequest: Codable, Hashable, Sendable {
     /// `task`: the task this answers (spec §14.8); sending completes it.
     case reply(messageID: String, all: Bool, task: Int64? = nil)
     case forward(messageID: String, task: Int64? = nil)
-    case draft(id: Int64)
+    case draft(id: Int64, task: Int64? = nil)
     /// A draft an agent wrote, opened for the user to check before
     /// approving the send.
     case review(draftID: Int64, agent: String)
@@ -24,7 +24,7 @@ enum ComposeRequest: Codable, Hashable, Sendable {
     /// The task sending this completes.
     var taskID: Int64? {
         switch self {
-        case let .reply(_, _, task), let .forward(_, task): task
+        case let .reply(_, _, task), let .forward(_, task), let .draft(_, task): task
         default: nil
         }
     }
@@ -114,7 +114,7 @@ final class ComposerStore {
                 try await core.replyDraft(to: messageID, all: all)
             case let .forward(messageID, _):
                 try await core.forwardDraft(of: messageID)
-            case let .draft(id), let .review(id, _):
+            case let .draft(id, _), let .review(id, _):
                 try await core.draft(id)
             }
             guard let draft else {

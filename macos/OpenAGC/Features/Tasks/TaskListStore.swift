@@ -29,6 +29,10 @@ final class TaskListStore {
     private(set) var error: String?
 
     @ObservationIgnored private let core: CoreClient?
+    /// Loads are numbered; one finishing after a newer one was applied is
+    /// dropped, so older data never replaces newer.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var applied = 0
 
     init(core: CoreClient?) {
         self.core = core
@@ -36,13 +40,19 @@ final class TaskListStore {
 
     func load() async {
         guard let core else { return }
+        generation += 1
+        let mine = generation
+        let done = showsDone
         do {
-            let all = try await core.listTasks(includeDone: showsDone)
+            let all = try await core.listTasks(includeDone: done)
+            let found = try await core.taskCategories()
+            guard mine > applied, done == showsDone else { return }
+            applied = mine
             let open = all.filter { !$0.done }
-            let shown = showsDone ? all.filter(\.done) : open
+            let shown = done ? all.filter(\.done) : open
             if shown != tasks { tasks = shown }
             dueCount = Self.dueCount(open)
-            categories = try await core.taskCategories()
+            categories = found
             openCount = open.count
             error = nil
         } catch let error as CoreClientError {

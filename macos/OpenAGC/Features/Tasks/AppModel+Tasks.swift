@@ -3,6 +3,9 @@ import Foundation
 /// Tasks from email (spec §14.8): the dialog, the task list and what each
 /// action does. Every change to a task can be undone.
 extension AppModel {
+    /// The core's cap on threads in one request for suggestions.
+    static let bulkTaskLimit = 50
+
     /// The sidebar's Tasks entry, in place of a mailbox id.
     static let tasksMailboxID = "@tasks"
 
@@ -57,15 +60,23 @@ extension AppModel {
         await update(task, to: edit, actionName: "Change Category", notice: "Moved “\(task.title)” to \(name)")
     }
 
-    /// Change a task, undoably.
-    func update(_ task: TaskItem, to edit: TaskEdit, actionName: String, notice: String) async {
-        guard let core, let accountID = openAccountID else { return }
-        guard (try? await core.updateTask(task.id, edit)) != nil else { return }
+    /// Change a task, undoably. Returns why it failed, if it did.
+    @discardableResult
+    func update(_ task: TaskItem, to edit: TaskEdit, actionName: String, notice: String) async -> String? {
+        guard let core, let accountID = openAccountID else { return "No account is open" }
+        do {
+            _ = try await core.updateTask(task.id, edit)
+        } catch let error as CoreClientError {
+            return error.message
+        } catch {
+            return error.localizedDescription
+        }
         await tasks.load()
         let before = task.edit
         undo.record(accountID: accountID, actionName: actionName, noticeText: notice,
                     undo: { _ = try? await core.updateTask(task.id, before) },
                     redo: { _ = try? await core.updateTask(task.id, edit) })
+        return nil
     }
 
     /// `↩` in the task list: the task dialog, to change it.
@@ -97,8 +108,11 @@ extension AppModel {
 
     /// The threads `⇧T` asks about: the highlighted ones, else the latest
     /// 20 in the open list.
+    /// Claude is asked about at most `bulkTaskLimit` at once.
     var bulkTaskTargets: [ThreadRow] {
-        if selectedThreadIDs.count > 1 { return threads.rows.filter { selectedThreadIDs.contains($0.id) } }
+        if selectedThreadIDs.count > 1 {
+            return Array(threads.rows.filter { selectedThreadIDs.contains($0.id) }.prefix(Self.bulkTaskLimit))
+        }
         return Array(threads.rows.prefix(BulkTaskDraft.defaultCount))
     }
 
@@ -153,9 +167,14 @@ extension AppModel {
     func acceptTask(_ draft: TaskDraft) async {
         guard draft.canAdd, let core, let accountID = openAccountID else { return }
         if let task = draft.editing {
+            // The dialog stays open, with the error, if the change fails.
+            if let error = await update(task, to: draft.edit, actionName: "Edit Task",
+                                        notice: "Changed “\(draft.edit.title)”") {
+                draft.error = error
+                return
+            }
             draft.suggester.cancel()
             if taskDraft === draft { taskDraft = nil }
-            await update(task, to: draft.edit, actionName: "Edit Task", notice: "Changed “\(draft.edit.title)”")
             return
         }
         do {

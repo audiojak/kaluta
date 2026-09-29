@@ -18,6 +18,9 @@ final class TaskSuggester {
     @ObservationIgnored var onDone: (([TaskSuggestion]) -> Void)?
 
     @ObservationIgnored private var sessionID: String?
+    /// Bumped by each run and by cancel: a run that finds it changed after
+    /// an await stops, and closes any session it had started.
+    @ObservationIgnored private var generation = 0
     @ObservationIgnored private var threadIDs: [String] = []
     @ObservationIgnored private var reply = ""
     @ObservationIgnored private weak var model: AppModel?
@@ -37,23 +40,32 @@ final class TaskSuggester {
         guard !threadIDs.isEmpty, state != .working, let core = model.core else { return }
         self.model = model
         self.threadIDs = threadIDs
+        generation += 1
+        let mine = generation
         state = .working
         reply = ""
         do {
             let prompt = try await core.taskPrompt(threadIDs, today: DueDay.string(now))
-            let session = try await core.startAgentSession(provider: model.agent.providerID, selection: threadIDs)
+            guard mine == generation else { return }
+            let session = try await core.startReadOnlyAgentSession(provider: model.agent.providerID,
+                                                                   selection: threadIDs)
+            guard mine == generation else {
+                try? await core.closeAgentSession(session)
+                return
+            }
             sessionID = session
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
             try await core.sendAgentPrompt(session, prompt)
         } catch let error as CoreClientError {
-            fail(error.message)
+            if mine == generation { fail(error.message) }
         } catch {
-            fail(error.localizedDescription)
+            if mine == generation { fail(error.localizedDescription) }
         }
     }
 
     func cancel() {
         guard state == .working else { return }
+        generation += 1
         if let core = model?.core, let sessionID { Task { try? await core.cancelAgentTurn(sessionID) } }
         finish()
         state = .idle

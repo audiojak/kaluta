@@ -340,6 +340,21 @@ impl Core {
         self.start_session_with_id(provider, id, selection, resume).await
     }
 
+    /// A session whose tools may only read (spec §14.5, §14.8): the
+    /// composer's writing help and task suggestions. Anything that would
+    /// change mail is refused by the core, whatever the agent is told.
+    pub async fn start_read_only_agent_session(
+        self: Arc<Self>,
+        provider: String,
+        selection: Vec<String>,
+    ) -> Result<String, CoreError> {
+        let provider = provider_id(&provider)?;
+        let id = self.agent_runtime().manager.new_session_id();
+        let session = self.clone().start_session_with_id(provider, id, Some(selection), None).await?;
+        self.agents.with_session(&session, |s| s.read_only = true);
+        Ok(session)
+    }
+
     /// Continue a stored conversation (spec §9.3, §9.4): the agent CLI
     /// resumes its own session and the transcript keeps growing.
     pub async fn resume_agent_session(self: Arc<Self>, session_id: String) -> Result<String, CoreError> {

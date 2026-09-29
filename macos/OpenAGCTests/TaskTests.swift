@@ -41,6 +41,25 @@ struct TaskSuggesterTests {
         #expect(try await model.core!.listTasks().isEmpty, "nothing is a task until accepted")
     }
 
+    @Test func cancellingWhileStartingLeavesNoSessionBehind() async throws {
+        let model = try await demo()
+        let ids = Array(model.threads.rows.prefix(2).map(\.id))
+        let suggester = TaskSuggester()
+        let running = Task { await suggester.run(threadIDs: ids, model: model) }
+        await Task.yield()
+        suggester.cancel()
+        await running.value
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(suggester.state == .idle)
+        #expect(model.agentSinks.isEmpty)
+    }
+
+    @Test func aBulkRequestAsksAboutAtMostFiftyThreads() async throws {
+        let model = try await demo()
+        model.selectedThreadIDs = Set(model.threads.rows.map(\.id))
+        #expect(model.bulkTaskTargets.count == min(AppModel.bulkTaskLimit, model.threads.rows.count))
+    }
+
     @Test func acceptedTasksAreStoredLabelledAndAnnounced() async throws {
         let model = try await demo()
         let core = try #require(model.core)
