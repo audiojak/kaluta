@@ -74,6 +74,8 @@ if [[ "$ACTION" == test ]]; then
       echo "isolation: warning: the real preferences changed, but OpenAGC was running and may have written them"
     else
       echo "isolation: the test run wrote the real preferences ($REAL_PREFS)"
+      # Name what was written, so the leak can be found.
+      plutil -p "$REAL_PREFS" 2>/dev/null | sed 's/^/isolation:   /' | head -40
       [[ $status -eq 0 ]] && status=1
     fi
   fi
