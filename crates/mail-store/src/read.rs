@@ -141,12 +141,12 @@ pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limi
     if narrowings.len() > MAX_NARROWINGS {
         return Err(StoreError::Invalid(format!("mailbox {mailbox:?} narrows too many times")));
     }
-    let mut sql = String::from(
+    let mut sql = format!(
         "SELECT t.id, t.gmail_id, t.subject, t.snippet, t.last_message_at, t.message_count, t.unread_count,
-                t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json, tl.last_message_at
+                t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json, {REPLIED}, tl.last_message_at
          FROM thread_labels tl JOIN threads t ON t.id = tl.thread_id
          WHERE tl.label_id = (SELECT id FROM labels WHERE gmail_id = ?1)
-           AND (tl.last_message_at, tl.thread_id) < (?2, ?3)",
+           AND (tl.last_message_at, tl.thread_id) < (?2, ?3)"
     );
     let mut values: Vec<rusqlite::types::Value> =
         vec![label.to_owned().into(), after_at.into(), after_id.into(), i64::from(limit + 1).into()];
@@ -158,7 +158,7 @@ pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limi
     let mut last_key = None;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(values), |r| {
-            let key = (r.get::<_, i64>(11)?, r.get::<_, i64>(0)?);
+            let key = (r.get::<_, i64>(12)?, r.get::<_, i64>(0)?);
             Ok((key, thread_summary(r, 1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -264,11 +264,11 @@ pub fn inbox_messages_missing(conn: &Connection, ids: &[MessageId], label: &Labe
 }
 
 pub fn get_thread_summary(conn: &Connection, id: &ThreadId) -> StoreResult<Option<ThreadSummary>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT id, gmail_id, subject, snippet, last_message_at, message_count, unread_count, has_attachments,
-                is_starred, participants_json, label_ids_json
-         FROM threads WHERE gmail_id = ?1",
-    )?;
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT t.id, t.gmail_id, t.subject, t.snippet, t.last_message_at, t.message_count, t.unread_count,
+                    t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json, {REPLIED}
+             FROM threads t WHERE t.gmail_id = ?1"
+    ))?;
     match stmt.query_row([id.as_str()], |r| thread_summary(r, 1)).optional()? {
         Some(summary) => Ok(Some(summary?)),
         None => Ok(None),
@@ -438,7 +438,12 @@ struct ParticipantJson {
     email: String,
 }
 
-/// A summary from a row shaped `id, gmail_id, subject, … label_ids_json`.
+/// Whether you replied in thread `t`: a message you sent after its first.
+pub(crate) const REPLIED: &str = "EXISTS(SELECT 1 FROM messages rm WHERE rm.thread_id = t.id AND rm.is_sent_by_me
+       AND rm.internal_date > (SELECT MIN(fm.internal_date) FROM messages fm WHERE fm.thread_id = t.id))";
+
+/// A summary from a row shaped `id, gmail_id, subject, … label_ids_json,
+/// replied`.
 pub(crate) fn thread_summary_row(r: &Row<'_>) -> rusqlite::Result<StoreResult<ThreadSummary>> {
     thread_summary(r, 1)
 }
@@ -461,6 +466,7 @@ fn thread_summary(r: &Row<'_>, offset: usize) -> rusqlite::Result<StoreResult<Th
             is_starred: r.get(offset + 7)?,
             participants: participants.into_iter().map(|p| EmailAddress { name: p.name, email: p.email }).collect(),
             label_ids: labels.into_iter().map(LabelId).collect(),
+            replied: r.get(offset + 10)?,
         })
     };
     Ok(parse())

@@ -134,6 +134,10 @@ pub struct ThreadSummary {
     /// Distinct senders, oldest first, for the "Alice, Bob (3)" line.
     pub participants: Vec<EmailAddress>,
     pub label_ids: Vec<LabelId>,
+    /// You replied: a message you sent follows the thread's first one
+    /// (the row's replied arrow, as in Mail).
+    #[serde(default)]
+    pub replied: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

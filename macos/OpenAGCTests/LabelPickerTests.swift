@@ -11,7 +11,7 @@ struct LabelPickerTests {
 
     private func row(_ id: String, labels: [String]) -> ThreadRow {
         ThreadRow(id: id, subject: "", snippet: "snippet", lastMessageAt: 0, messageCount: 1, unreadCount: 0,
-                  hasAttachments: false, isStarred: false, participants: [], labelIds: labels)
+                  hasAttachments: false, isStarred: false, participants: [], labelIds: labels, replied: false)
     }
 
     private let labels = ["Work", "Work/Hiring", "Work/Hiring/Onsite", "Clients/Acme", "Receipts"]

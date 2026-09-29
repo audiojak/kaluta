@@ -780,3 +780,23 @@ async fn inbox_categories_missing_from_downloaded_mail_are_applied_and_the_inbox
     assert_eq!(op.via, mail_sync::transport::Via::Api, "no IMAP here: the API lists them");
     assert_consistent(&db);
 }
+
+#[tokio::test]
+async fn a_thread_you_replied_in_is_marked_replied() {
+    let (fake, db, _recorder, engine) = setup("replied");
+    fake.seed(message("asked", "t1", 3, &["INBOX"]));
+    fake.seed(message("answered", "t1", 2, &["SENT"]));
+    fake.seed(message("started", "t2", 3, &["SENT"]));
+    fake.seed(message("their-answer", "t2", 2, &["INBOX"]));
+    fake.seed(message("alone", "t3", 1, &["INBOX"]));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+    let page = db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap();
+    let replied = |id: &str| page.rows.iter().find(|r| r.id.as_str() == id).unwrap().replied;
+    assert!(replied("t1"), "you answered them");
+    assert!(!replied("t2"), "you started it; they answered");
+    assert!(!replied("t3"));
+    let summary = db.read(|c| read::get_thread_summary(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
+    assert!(summary.replied);
+}

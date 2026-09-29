@@ -72,6 +72,13 @@ The AppKit thread row uses `TypeRole.rowSender(unread:)` (13 pt, semibold
 when unread), `rowSubject(unread:)` (12 pt, medium when unread),
 `rowSecondary` (12 pt) and `chip` (11 pt medium).
 
+The thread row is calm, as in Mail: sender and date, the subject, two
+lines of preview, and a hairline (`separatorColor`) inset to the text
+column between rows, hidden under the selection. The thread's message
+count sits beside the date in the accent colour, not as "(3)" after the
+names; a replied arrow sits under the unread dot when you answered; the
+Important marker is left out where every row is Important.
+
 ### Colour (`Tone`)
 
 Always system colours underneath, so light and dark, Increase Contrast and

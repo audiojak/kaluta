@@ -22,19 +22,24 @@ struct SenderLineTests {
     private func row(_ people: [(String?, String)], messages: UInt32 = 1) -> ThreadRow {
         ThreadRow(id: "t", subject: "s", snippet: "", lastMessageAt: 0, messageCount: messages, unreadCount: 0,
                   hasAttachments: false, isStarred: false,
-                  participants: people.map { AddressInfo(name: $0.0, email: $0.1) }, labelIds: [])
+                  participants: people.map { AddressInfo(name: $0.0, email: $0.1) }, labelIds: [], replied: false)
     }
 
     private let me: Set<String> = ["john@actual.ai", "john.kennedy@alias.example"]
 
     @Test func youAreLeftOutAndOthersNamedLikeMail() {
         #expect(ThreadRowView.senderLine(row([("John Kennedy", "John@Actual.ai"), ("Matthew Watts", "mw@x.com")], messages: 3),
-                                         me: me) == "Matthew Watts (3)")
+                                         me: me) == "Matthew Watts")
         #expect(ThreadRowView.senderLine(row([("Jeffrey Priebe", "j@x.com"), ("Andre Corr", "a@x.com"),
                                               ("John Kennedy", "john.kennedy@alias.example")]), me: me) == "Jeffrey & Andre")
         #expect(ThreadRowView.senderLine(row([("Himanshi Verma", "h@x"), ("Le, Minh", "m@x"), (nil, "austin@x.com"),
-                                              ("D P", "d@x")], messages: 21), me: me) == "Himanshi, Minh, austin … (21)")
-        #expect(ThreadRowView.senderLine(row([("John Kennedy", "john@actual.ai")], messages: 2), me: me) == "Me (2)")
+                                              ("D P", "d@x")], messages: 21), me: me) == "Himanshi, Minh, austin …")
+        #expect(ThreadRowView.senderLine(row([("John Kennedy", "john@actual.ai")], messages: 2), me: me) == "Me")
         #expect(ThreadRowView.senderLine(row([]), me: me) == "(unknown sender)")
+    }
+
+    @Test func theCountStandsApartAndOnlyForThreads() {
+        #expect(ThreadRowView.countText(row([("A", "a@x")], messages: 3)) == "3")
+        #expect(ThreadRowView.countText(row([("A", "a@x")])) == nil)
     }
 }
