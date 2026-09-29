@@ -625,6 +625,11 @@ turns into eight 60-second stalls.
   combination (`readonly`+`compose`+`send`) is equally *restricted* in
   Google's classification, so splitting scopes buys nothing and complicates
   consent. `mail.google.com` (full access) is never requested.
+  *(Amended 2026-09-28, IMAP-first sync, §7.4: sign-in asks for
+  `https://mail.google.com/` plus `gmail.modify`, `openid` and `profile`.
+  `gmail.modify` is already restricted, so verification and CASA are
+  unchanged; the consent wording is broader. An account signed in without
+  the full scope keeps working over the API until its next sign-in.)*
 - **Client ID policy (decided):** OpenAGC ships a project OAuth client ID
   and, because installed apps cannot keep secrets (Google's own statement),
   the client secret is in the repo and treated as public. Settings ›
@@ -705,7 +710,9 @@ Conflict rule: server wins for labels/read state on the next history sync;
 the outbox is drained *before* history is applied so local intent is not
 overwritten while in flight.
 
-**Amendment (2026-09-26): bulk backfill over IMAP.** Planned; the REST
+**Amendment (2026-09-26): bulk backfill over IMAP.** *Superseded by the
+2026-09-28 amendment, IMAP-first sync, at the end of this section; kept for
+the history of the decision.* Planned; the REST
 backfill stays as the fallback and the only path for incremental sync.
 
 *Why.* The REST API charges 20 units per `messages.get` whatever the format,
@@ -828,6 +835,63 @@ only.*
 
 Trade-off, accepted: text search over old mail waits on Gmail's server
 search, and an agent reading old mail pauses while it downloads.
+
+*Measured (2026-09-28, oagc-vaq):* `crates/mail-sync/tests/scale.rs`,
+release build, Apple M4 Pro. 100,000 messages in 33,334 threads over two
+years (1,539 threads in the Inbox), listed through the fake provider with
+a cheap-headers source standing in for IMAP, so the times are the engine's
+and the store's, not the network's:
+
+| Step | Time |
+| --- | --- |
+| List every id and queue it by tier | 1.75 s |
+| Inbox browsable (the headers pass does the Inbox first) | 1.80 s |
+| Every message listed (headers pass done) | 7.4 s |
+| Bodies for the Inbox and the last 30 days (6,668) | 0.5 s |
+
+Queue right after listing: 770 unread Inbox, 2,307 other Inbox and 3,591
+from the last 30 days for bodies; 20,000 (to six months), 24,667 (to a
+year) and 48,665 (older) for headers only. Peak memory rose about 100 MB
+over the fake mailbox's own 280 MB; the store took 98 MB. No body outside
+the window was fetched. A 5,000-message version of the same run is in the
+gate and checks the tiers, that only in-window bodies are fetched, and a
+generous time bound. Rerun:
+`cargo test --release -p mail-sync --test scale -- --ignored --nocapture`.
+
+**Amendment (2026-09-28): IMAP-first sync.** Implemented
+(docs/plans/imap-first-sync.md; supersedes the 2026-09-26 "hybrid"
+design). IMAP is the default transport for Gmail accounts, not an option.
+The API serves a job only when it is faster, when there is no other way to
+get the data, or when IMAP fails.
+
+| Job | Transport |
+| --- | --- |
+| Listing the window's phases | IMAP `UID SEARCH X-GM-RAW "…"` (the phase as a Gmail search) |
+| Headers and bodies | IMAP; messages over 2 MB through the API |
+| Spam, Trash, Drafts | IMAP folders found by `LIST` special-use (`\Junk`, `\Trash`, `\Drafts`, `\All`; English names as fallback), labelled `SPAM`/`TRASH`/`DRAFT` from the folder. Spam and Trash are listed whole with the last month (Gmail empties them after 30 days) |
+| New mail | IMAP `IDLE` on All Mail, its own connection, re-issued every 25 min; any change runs an incremental round at once. The 30 s / 5 min poll stays as the backstop |
+| Changes made elsewhere | API `history.list`: Gmail IMAP keeps no change log |
+| Inbox categories | IMAP `X-GM-RAW "in:inbox category:…"` per category, API as fallback: IMAP leaves categories out of a message's labels, so they are applied to stored Inbox mail at start, when the download queue empties, and every 10 minutes (only added; moves to Primary arrive through history). With categories in use, the Inbox's unread count is Primary's, as in Gmail |
+| Draft ids, label colours | API: no other way |
+| Writes (outbox), send, drafts | API: one call per change with exact undo (§14.6a), threading, draft ids |
+| Server search | IMAP `X-GM-RAW`, the API as fallback |
+
+*Fallback.* Each operation falls back to the API on its own. Three IMAP
+failures in a row open a breaker for 15 minutes (then one try); a refresh
+closes it. A refused login or the day's bandwidth budget (2,000 MB) makes
+IMAP unavailable without counting as failures. IDLE failures back off and
+never open the breaker. When the API is serving for one of these reasons,
+the sidebar's sync footer says so in a quiet note ("Using the Gmail API ·
+IMAP was refused for this account").
+
+*Record.* Every operation is recorded (job, transport, why the API, time,
+items, success; the last 200 per account) and shown in the Sync Debugger
+(§14.7a).
+
+*Testing.* Fakes only: the in-process IMAP server speaks `LIST` with
+special-use attributes, per-folder `SELECT`/`EXAMINE`, `UID SEARCH` with
+`X-GM-RAW`, `IDLE`, and refused logins; a failing source exercises the
+fallback and the breaker. Nothing connects to Gmail.
 
 ### 7.5 Sending and threading **(Verified)**
 
@@ -1737,7 +1801,62 @@ Every target in §1.3 traces to one of these rules.
   reader column, inset like the macOS 26 sidebar, rather than a bar pinned
   under the thread list. The list column has a header: the Inbox's
   Important-only switch, then a rule separating the title area from the
-  messages.)*
+  messages.)* *(Amended 2026-09-28: the capsule sits in a strip of its own
+  under the reader, with a margin above it, so a thread ends above it
+  rather than scrolling beneath it.)*
+
+**Amendment (2026-09-28): Mail-like layout.** Implemented 2026-09-28. The
+sidebar reads Favorites (Inbox, Starred, Sent), then the account's other
+mailboxes with its labels under the account's name, then Routines; sync
+status is its footer (a thin progress bar, "Downloading Messages", what is
+left). The list column is titled with the mailbox and its unread count.
+New Message sits at the list column's trailing edge, where it meets the
+reader, as in Mail (implemented 2026-09-28: the list column's own
+toolbar; SwiftUI right-aligns a detail column's items, and `.navigation`
+put it beside the title). The reader's toolbar starts at its leading edge
+with Reply / Reply All / Forward, Archive / Trash / Mark as Junk, a Label
+menu, Star and the agent toggle, with search at the trailing edge.
+
+**Amendment (2026-09-28): Gmail categories.** Implemented 2026-09-28.
+When the account uses Gmail's categories, the Inbox shows Mail-style tabs
+above the list: Primary, Promotions, Social, Updates, Forums (Primary
+always, the others only with mail; no tabs when only Primary has mail),
+each a narrowed Inbox listing like Important-only (`INBOX+CATEGORY_…`;
+as a narrowing, Primary means "in no other category", so Inbox mail Gmail
+never categorised is Primary). Tabs are capsules with the category's
+symbol and unread count, the chosen one also its name. The chosen tab is
+remembered per account and falls back to Primary while it has no mail;
+tabs combine with Important-only (`INBOX+IMPORTANT+CATEGORY_SOCIAL`) and
+search ignores them. With categories the Important-only switch moves into
+a View Options menu in the list header beside "Show Categories", which
+turns the tabs off (per account). Revealing a thread from a notification
+opens its tab. A thread in two categories lists in both but counts in the
+first. Categories come from the Gmail API; IMAP-only accounts have none.
+Moving a thread to another category is not in scope (Gmail's filters
+decide).
+
+**Amendment (2026-09-28): list filters.** Implemented 2026-09-28. A
+filter button in the list column's header (every mailbox and search), as
+in Mail, narrows the current mailbox or search: Unread, Starred, With
+Attachments (combinable, with Clear Filters). An active filter fills the
+button and shows in the subtitle ("Filtered: Unread, Starred"). Filters
+apply locally: a listing gets them as narrowings on the thread's own
+columns (`INBOX+@unread+@attachments`, combining with Important-only and
+category tabs), a search as operators (`is:unread`, `is:starred`,
+`has:attachment`) after the typed query, which is grouped in
+parentheses so an `OR` is filtered as a whole. Clearing the search shows
+the listing as it is then. They are per window, kept when
+changing mailboxes, cleared when a notification reveals a thread, and not
+remembered between launches.
+
+**Amendment (2026-09-28): junk.** Implemented 2026-09-28. *Mark as Junk*
+(toolbar, Message menu ⇧⌘J, context menu, `!` in the thread list as in
+Gmail, VoiceOver's Actions) moves threads to Spam (adds `SPAM`, removes
+`INBOX`); in Spam the same command reads *Not Junk* and moves them to the
+Inbox; it is not offered in Sent or Drafts. Both are undoable (§14.6a:
+"Moved 2 conversations to Spam") and go
+through the outbox as label changes. Agents and `modify_labels` still may
+not set `SPAM`: only these two user actions (`mark_junk`, `not_junk`) do.
 
 ### 14.4 Message rendering **(Verified)**
 
@@ -1778,6 +1897,31 @@ generated in Rust from the HTML. Reply quoting inserts the sanitized parent
 HTML inside `<blockquote>` with a "On <date>, <name> wrote:" line.
 Autosave to `drafts` every 2 s of idleness; Gmail draft sync through the
 outbox every 30 s or on close.
+
+**Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
+through Gmail's drafts list (`drafts.list`) on every incremental round,
+since Gmail's change history leaves drafts out and the sync window
+(one month by default) would miss older ones: every draft's message is
+stored in full whatever the window, draft messages whose draft is gone
+(sent or discarded elsewhere) are removed, and `server_drafts` records
+which Gmail draft holds which message. A draft in the Drafts mailbox opens
+in a composer from *Edit Draft* in the reader, a double-click or Return:
+the local draft already mirroring it is reused; a draft written elsewhere
+becomes a local draft on first open (recipients, subject, body, and its
+attachments fetched and copied beside the other draft attachments),
+keeping the Gmail draft id so saving replaces that draft rather than
+adding a second one. Drafts show their paperclip in the list like any
+thread.
+
+*(Amended 2026-09-28.)* A reply or forward shows the message being
+answered under the editor by default, in a pane whose divider can be
+dragged, with Hide Original / Show Original; the message is downloaded
+first if only its headers were stored. A writing-help bar at the bottom
+asks the agent to write or change the message ("Write a reply", "Make it
+shorter", …, or the user's own words). It runs in a session of its own
+that can see only the thread being answered; its answer replaces the
+body, with Undo, and anything it proposes that would change mail is
+refused. Sending stays the user's.
 
 ### 14.6 Agent panel
 
@@ -1847,9 +1991,16 @@ when you mean undo": all these actions are reversible).
   back, and its notice does not pause, since the hold does not.
 - The outbox runs strictly in order: an op waiting to retry holds back
   the ones after it (an undo must never reach Gmail before the action it
-  reverses); held sends alone step aside until their time. The demo mailbox sends locally at once, so it offers
-  no Undo Send. Agent sends are held for the same delay but have no notice
-  of their own yet.
+  reverses); held sends alone step aside until their time.
+- The demo mailbox sends locally at once, so it offers no Undo Send.
+  Agent sends are held for the same delay. *(Amended 2026-09-28,
+  implemented:)* an approved agent send or forward that the core holds
+  shows "Sending… Undo" on its approval card for the hold
+  (`send_held_until`); Undo cancels it (`cancel_send`), the card reads
+  "Not sent. The draft is open for you." and the draft opens in the review
+  composer, switching accounts if need be. It is not on ⌘Z's stack and
+  has no notice; the agent's transcript still says it sent, and the
+  activity log keeps the approval.
 
 ### 14.6b Agent suggestions **(Amendment 2026-09-27)**
 
@@ -1907,6 +2058,25 @@ Standard menu bar with all commands and shortcuts; `NSUserNotification` via
 `UNUserNotificationCenter` for new mail in Inbox (opt-in per sender
 category later); Dock badge for unread; full VoiceOver labeling on custom
 AppKit rows; Services and Spotlight are deferred.
+
+*(Amended 2026-09-28.)* Settings › Accounts no longer offers "Download
+faster over IMAP": it shows how the account downloads ("Over IMAP", or
+"Over the Gmail API" and why), with "Sign In Again for IMAP…" only for an
+account whose sign-in lacks the full scope.
+
+### 14.7a Sync Debugger **(Amendment 2026-09-28)**
+
+A permanent window (Window › Sync Debugger) for diagnosing sync, per Gmail
+account: the transport downloading mail, the IMAP breaker, the last IMAP
+error, IMAP bytes today against the budget, the server's IMAP
+capabilities, the messages stored, the latest operation for each job and
+the recent operations (time, job, IMAP or API, duration, items, and why
+the API served it). *Run Comparison* times each job both ways (up to
+10,000 ids listed, 500 headers, 500 messages, and the changes: API history
+since the last sync against re-reading labels and flags over IMAP for the
+last 30 days) and shows which was faster per item. It downloads a sample
+but stores nothing, changes no mail, and leaves the breaker and the
+operation record alone.
 
 ---
 

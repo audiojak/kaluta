@@ -123,20 +123,69 @@ impl Core {
         self.own_address().await
     }
 
+    /// Every address that is the user: the account's and the ones their
+    /// sent mail came from (aliases), lowercased. Thread rows say "Me" for
+    /// these rather than the user's own name.
+    pub async fn own_addresses(&self) -> Result<Vec<String>, CoreError> {
+        let account = self.own_address().await?.to_lowercase();
+        let db = self.db()?;
+        let mut sent = runtime::run(async move { Ok(db.read(read::sent_from_addresses).await?) }).await?;
+        if !sent.contains(&account) {
+            sent.insert(0, account);
+        }
+        Ok(sent)
+    }
+
     pub async fn reply_draft(&self, message_id: String, reply_all: bool) -> Result<DraftInfo, CoreError> {
         self.refuse_if_archive()?;
-        let me = vec![self.own_address().await?];
+        let me = self.own_addresses().await?;
         let db = self.db()?;
-        runtime::run(
-            async move { Ok(mail_sync::reply_draft(&db, &MessageId(message_id), reply_all, &me).await?.into()) },
-        )
+        let service = self.sync_service();
+        runtime::run(async move {
+            let id = MessageId(message_id);
+            download_for_quote(service.as_deref(), &id).await;
+            Ok(mail_sync::reply_draft(&db, &id, reply_all, &me).await?.into())
+        })
         .await
     }
 
     pub async fn forward_draft(&self, message_id: String) -> Result<DraftInfo, CoreError> {
         self.refuse_if_archive()?;
         let db = self.db()?;
-        runtime::run(async move { Ok(mail_sync::forward_draft(&db, &MessageId(message_id)).await?.into()) }).await
+        let service = self.sync_service();
+        runtime::run(async move {
+            let id = MessageId(message_id);
+            download_for_quote(service.as_deref(), &id).await;
+            Ok(mail_sync::forward_draft(&db, &id).await?.into())
+        })
+        .await
+    }
+
+    /// Open a draft from the Drafts mailbox for editing (spec §14.5
+    /// amendment 2026-09-28): `message_id` is the draft's message there.
+    /// Downloads it in full if it came with headers only, then returns the
+    /// local draft that edits it (made on first open, with its attachments;
+    /// saving replaces the same draft on Gmail).
+    pub async fn open_draft(&self, message_id: String) -> Result<DraftInfo, CoreError> {
+        self.refuse_if_archive()?;
+        let db = self.db()?;
+        let service = self.sync_service();
+        let cache = self.attachment_cache_dir()?;
+        let drafts_dir = self.data_path().join("DraftAttachments");
+        runtime::run(async move {
+            let id = mail_domain::MessageId(message_id);
+            let provider = service.as_ref().map(|s| s.engine().provider());
+            if let Some(service) = &service {
+                service.engine().ensure_bodies(vec![id.clone()]).await?;
+            }
+            let draft_id = mail_sync::draft_for_editing(&db, provider, &cache, &drafts_dir, &id).await?;
+            let draft = db
+                .read(move |c| drafts::get(c, draft_id))
+                .await?
+                .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "that draft no longer exists"))?;
+            Ok(draft.into())
+        })
+        .await
     }
 
     /// Save (autosave) a draft; returns its id.
@@ -202,6 +251,17 @@ impl Core {
                 service.outbox_changed();
             }
             Ok(true)
+        })
+        .await
+    }
+
+    /// When the draft's send stops being held (Unix ms), if it is held:
+    /// an agent's approved send can be taken back until then.
+    pub async fn send_held_until(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            let now = mail_sync::now_millis();
+            Ok(db.read(move |c| mail_store::outbox::send_held_until(c, draft_id, now)).await?)
         })
         .await
     }
@@ -355,6 +415,10 @@ impl AccountComposer {
         self.scoped(self.core.account_address()).await
     }
 
+    pub async fn own_addresses(&self) -> Result<Vec<String>, CoreError> {
+        self.scoped(self.core.own_addresses()).await
+    }
+
     pub async fn reply_draft(&self, message_id: String, reply_all: bool) -> Result<DraftInfo, CoreError> {
         self.scoped(self.core.reply_draft(message_id, reply_all)).await
     }
@@ -365,6 +429,10 @@ impl AccountComposer {
 
     pub async fn save_draft(&self, draft: DraftInfo) -> Result<i64, CoreError> {
         self.scoped(self.core.save_draft(draft)).await
+    }
+
+    pub async fn open_draft(&self, message_id: String) -> Result<DraftInfo, CoreError> {
+        self.scoped(self.core.open_draft(message_id)).await
     }
 
     pub async fn get_draft(&self, id: i64) -> Result<Option<DraftInfo>, CoreError> {
@@ -383,6 +451,10 @@ impl AccountComposer {
         self.scoped(self.core.cancel_send(draft_id)).await
     }
 
+    pub async fn send_held_until(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
+        self.scoped(self.core.send_held_until(draft_id)).await
+    }
+
     pub fn flush_drafts(&self) {
         crate::registry::SCOPED_ACCOUNT.sync_scope(self.account.clone(), || self.core.flush_drafts());
     }
@@ -397,6 +469,17 @@ impl Core {
     /// Compose operations for `account_id` (see `AccountComposer`).
     pub fn composer_for(self: std::sync::Arc<Self>, account_id: String) -> std::sync::Arc<AccountComposer> {
         std::sync::Arc::new(AccountComposer { core: self, account: account_id })
+    }
+}
+
+/// A message stored with headers only has no text to quote and no
+/// attachments to forward: download it first. Best effort: offline, the
+/// reply opens with what is stored.
+async fn download_for_quote(service: Option<&crate::sync::SyncService>, id: &MessageId) {
+    if let Some(service) = service
+        && let Err(e) = service.engine().ensure_bodies(vec![id.clone()]).await
+    {
+        tracing::warn!(error = %e, "could not download the message to quote; replying with what is stored");
     }
 }
 
@@ -540,7 +623,11 @@ mod tests {
         // Sent, held, then taken back: nothing reaches Gmail, the draft is
         // editable again and the Sent copy is gone.
         let id = block_on(core.save_draft(draft_to("Held"))).unwrap();
+        let before = mail_sync::now_millis();
         assert!(block_on(core.send_draft(id)).unwrap(), "held");
+        let until = block_on(core.send_held_until(id)).unwrap().expect("held until");
+        assert!((before + 29_000..=mail_sync::now_millis() + 30_000).contains(&until), "about 30 s from now");
+        assert_eq!(block_on(core.send_held_until(id + 1)).unwrap(), None, "another draft is not held");
         assert_eq!(block_on(core.held_send_count()), 1);
         assert_eq!(core.held_send_count_now(), 1);
         assert!(block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held"));
@@ -553,6 +640,7 @@ mod tests {
             !block_on(core.list_threads("SENT".into(), None, 10)).unwrap().rows.iter().any(|t| t.subject == "Held")
         );
         assert!(!block_on(core.cancel_send(id)).unwrap(), "nothing left to take back");
+        assert_eq!(block_on(core.send_held_until(id)).unwrap(), None);
 
         // A send already tried (it timed out after Gmail may have taken
         // it) cannot be taken back: that could mean sending it twice.
@@ -575,6 +663,75 @@ mod tests {
         assert!(!block_on(core.send_draft(id)).unwrap(), "not held");
         assert_eq!(block_on(core.held_send_count()), 0);
         assert!(wait_until(|| fake.message(&MessageId::new("sent2")).is_some()));
+        core.stop_sync();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_draft_written_elsewhere_opens_for_editing_with_its_attachment_and_saves_in_place() {
+        use mail_domain::{EmailAddress, LabelId, MessageId, ThreadId};
+        use provider_api::{FetchedAttachment, FetchedBody, FetchedMessage};
+        let dir = std::env::temp_dir().join(format!("openagc-core-opendraft-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            Arc::new(Noop),
+        )
+        .unwrap();
+        block_on(core.clone().open_account("acct".into())).unwrap();
+        let fake = Arc::new(provider_api::fake::FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        fake.seed_draft(
+            "r-web1",
+            FetchedMessage {
+                id: MessageId::new("webdraft1"),
+                thread_id: ThreadId::new("twebdraft"),
+                label_ids: vec![LabelId::new("DRAFT")],
+                internal_date: 1_760_000_000_000, // long before the sync window
+                from: Some(EmailAddress::new(None, "me@example.com")),
+                to: vec![EmailAddress::new(Some("Sam"), "sam@example.com")],
+                subject: "Budget".into(),
+                body: Some(FetchedBody {
+                    text: None,
+                    html: Some("<p>Numbers attached.</p>".into()),
+                    attachments: vec![FetchedAttachment {
+                        attachment_id: Some("att1".into()),
+                        filename: "budget.pdf".into(),
+                        mime_type: "application/pdf".into(),
+                        size: 25,
+                        ..Default::default()
+                    }],
+                }),
+                ..Default::default()
+            },
+        );
+        core.start_sync_with(fake.clone()).unwrap();
+        let drafts = || block_on(core.list_threads("DRAFT".into(), None, 10)).unwrap().rows;
+        assert!(wait_until(|| drafts().len() == 1), "the draft synced though it is outside the window");
+        assert!(drafts()[0].has_attachments, "the list shows its attachment");
+
+        let draft = block_on(core.open_draft("webdraft1".into())).unwrap();
+        assert!(draft.id > 0);
+        assert_eq!(draft.subject, "Budget");
+        assert_eq!(draft.to.iter().map(|a| a.email.as_str()).collect::<Vec<_>>(), ["sam@example.com"]);
+        assert!(draft.body_html.contains("Numbers attached."));
+        assert_eq!(draft.attachments.len(), 1);
+        assert_eq!(std::fs::read(&draft.attachments[0].path).unwrap(), b"fake bytes of budget.pdf");
+        assert_eq!(block_on(core.open_draft("webdraft1".into())).unwrap().id, draft.id, "opened again: the same draft");
+        core.flush_drafts();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(fake.drafts()["r-web1"].0.is_empty(), "opening alone uploads nothing");
+
+        // Saving mirrors to the same server draft, not a second one.
+        let mut edited = draft.clone();
+        edited.subject = "Budget v2".into();
+        block_on(core.save_draft(edited)).unwrap();
+        core.flush_drafts();
+        assert!(wait_until(|| fake
+            .drafts()
+            .get("r-web1")
+            .is_some_and(|(raw, _)| { String::from_utf8_lossy(raw).contains("Budget v2") })));
+        assert_eq!(fake.drafts().len(), 1, "replaced in place");
         core.stop_sync();
         let _ = std::fs::remove_dir_all(&dir);
     }

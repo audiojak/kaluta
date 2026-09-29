@@ -1,9 +1,13 @@
 //! An in-process fake of Gmail's IMAP endpoint for tests (spec §7.4 IMAP
 //! amendment, Testing). Plain TCP on 127.0.0.1; speaks only what the
-//! backfill client uses: CAPABILITY, AUTHENTICATE XOAUTH2, SELECT/EXAMINE,
+//! backfill client uses: CAPABILITY, AUTHENTICATE XOAUTH2, LIST (with
+//! special-use attributes), SELECT/EXAMINE of the special folders,
 //! UID FETCH (UID, FLAGS, X-GM-MSGID, X-GM-THRID, X-GM-LABELS,
 //! RFC822.SIZE, BODY.PEEK[], BODY.PEEK[HEADER], BODY.PEEK[TEXT]<0.n>),
-//! NOOP and LOGOUT. Nothing here ever connects anywhere.
+//! UID SEARCH (ALL, or X-GM-RAW with `in:`, `label:`, `is:unread`,
+//! `is:starred`, `newer_than:Nd`), IDLE (an `EXISTS` when a message is
+//! added), NOOP and LOGOUT. Nothing here ever
+//! connects anywhere.
 
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +16,12 @@ use base64::engine::general_purpose::STANDARD;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
+/// Gmail's folder names (English), for [`FakeImapServer::add_to`].
+pub const ALL_MAIL: &str = "[Gmail]/All Mail";
+pub const SPAM: &str = "[Gmail]/Spam";
+pub const TRASH: &str = "[Gmail]/Trash";
+pub const DRAFTS: &str = "[Gmail]/Drafts";
+
 /// One message in the fake All Mail.
 #[derive(Debug, Clone)]
 pub struct FakeImapMessage {
@@ -19,7 +29,9 @@ pub struct FakeImapMessage {
     /// Gmail's message id (decimal here; the API writes it in hex).
     pub msgid: u64,
     pub thrid: u64,
-    /// `X-GM-LABELS`: system labels as `\Inbox`, `\Sent`…; user labels by name.
+    /// `X-GM-LABELS`: system labels as `\Inbox`, `\Sent`…; user labels by
+    /// name. `category:promotions` (and the like) puts it in that Inbox
+    /// category for `X-GM-RAW` searches only, since Gmail sends none.
     pub labels: Vec<String>,
     /// `\Seen`, `\Flagged`.
     pub flags: Vec<String>,
@@ -28,7 +40,9 @@ pub struct FakeImapMessage {
 
 #[derive(Default)]
 struct State {
-    messages: Vec<FakeImapMessage>,
+    /// Every message with the folder it is in (`[Gmail]/All Mail`,
+    /// `[Gmail]/Spam`, `[Gmail]/Trash`, `[Gmail]/Drafts`).
+    messages: Vec<(String, FakeImapMessage)>,
     /// Bearer token the server accepts.
     token: String,
     /// Counters for assertions.
@@ -37,12 +51,18 @@ struct State {
     header_fetches: usize,
     /// Refuse every AUTHENTICATE (an admin disabled IMAP).
     refuse_login: bool,
+    /// "Now" for `newer_than:` (ms); the real clock when unset.
+    now: Option<i64>,
+    searches: usize,
+    idles: usize,
 }
 
 /// A running fake server. Dropping it stops accepting connections.
 pub struct FakeImapServer {
     pub addr: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
+    /// Rung when a message is added, for sessions in IDLE.
+    bell: Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -53,30 +73,54 @@ impl Drop for FakeImapServer {
 }
 
 impl FakeImapServer {
+    /// "Now" for `newer_than:` searches.
+    pub fn set_now(&self, now_ms: i64) {
+        self.state.lock().unwrap().now = Some(now_ms);
+    }
+
+    /// `IDLE` commands started.
+    pub fn idles(&self) -> usize {
+        self.state.lock().unwrap().idles
+    }
+
+    /// `UID SEARCH` commands answered.
+    pub fn searches(&self) -> usize {
+        self.state.lock().unwrap().searches
+    }
+
     /// Start on an ephemeral port, accepting `token` as the OAuth bearer.
     pub async fn start(token: &str) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind the fake IMAP server");
         let addr = listener.local_addr().expect("fake IMAP address");
         let state = Arc::new(Mutex::new(State { token: token.to_owned(), ..Default::default() }));
-        let accept_state = state.clone();
+        let bell = Arc::new(tokio::sync::Notify::new());
+        let (accept_state, accept_bell) = (state.clone(), bell.clone());
         let task = tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
-                let state = accept_state.clone();
+                let (state, bell) = (accept_state.clone(), accept_bell.clone());
                 tokio::spawn(async move {
-                    let _ = serve(stream, state).await;
+                    let _ = serve(stream, state, bell).await;
                 });
             }
         });
-        Self { addr, state, task }
+        Self { addr, state, bell, task }
     }
 
+    /// Add a message to All Mail.
     pub fn add(&self, message: FakeImapMessage) {
-        self.state.lock().unwrap().messages.push(message);
+        self.add_to(ALL_MAIL, message);
+    }
+
+    /// Add a message to another folder (`SPAM`, `TRASH`, `DRAFTS`); UIDs
+    /// are per folder, as in Gmail.
+    pub fn add_to(&self, folder: &str, message: FakeImapMessage) {
+        self.state.lock().unwrap().messages.push((folder.to_owned(), message));
+        self.bell.notify_waiters();
     }
 
     /// Take a message out of All Mail (moved to Spam or Trash).
     pub fn remove(&self, uid: u32) {
-        self.state.lock().unwrap().messages.retain(|m| m.uid != uid);
+        self.state.lock().unwrap().messages.retain(|(f, m)| !(f == ALL_MAIL && m.uid == uid));
     }
 
     pub fn refuse_logins(&self) {
@@ -98,11 +142,12 @@ impl FakeImapServer {
     }
 }
 
-async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<()> {
+async fn serve(stream: TcpStream, state: Arc<Mutex<State>>, bell: Arc<tokio::sync::Notify>) -> std::io::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read);
     write.write_all(b"* OK Gimap ready (fake)\r\n").await?;
     let mut authenticated = false;
+    let mut selected = ALL_MAIL.to_owned();
     let mut line = String::new();
     loop {
         line.clear();
@@ -114,7 +159,7 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
         let (command, args) = rest.split_once(' ').unwrap_or((rest, ""));
         match command.to_ascii_uppercase().as_str() {
             "CAPABILITY" => {
-                write.write_all(b"* CAPABILITY IMAP4rev1 UIDPLUS X-GM-EXT-1 AUTH=XOAUTH2 AUTH=PLAIN\r\n").await?;
+                write.write_all(b"* CAPABILITY IMAP4rev1 UIDPLUS IDLE X-GM-EXT-1 AUTH=XOAUTH2 AUTH=PLAIN\r\n").await?;
                 write.write_all(format!("{tag} OK Thats all she wrote!\r\n").as_bytes()).await?;
             }
             "AUTHENTICATE" => {
@@ -150,18 +195,49 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                         .await?;
                 }
             }
+            "LIST" if authenticated => {
+                // Gmail's special-use folders (RFC 6154), as it lists them.
+                for (attr, name) in [
+                    ("\\HasNoChildren", "INBOX"),
+                    ("\\All \\HasNoChildren", ALL_MAIL),
+                    ("\\Junk \\HasNoChildren", SPAM),
+                    ("\\Trash \\HasNoChildren", TRASH),
+                    ("\\Drafts \\HasNoChildren", DRAFTS),
+                ] {
+                    write.write_all(format!("* LIST ({attr}) \"/\" \"{name}\"\r\n").as_bytes()).await?;
+                }
+                write.write_all(format!("{tag} OK Success\r\n").as_bytes()).await?;
+            }
             "SELECT" | "EXAMINE" if authenticated => {
-                let count = state.lock().unwrap().messages.len();
+                selected = args.trim().trim_matches('"').to_owned();
+                let count = state.lock().unwrap().messages.iter().filter(|(f, _)| *f == selected).count();
                 write.write_all(b"* FLAGS (\\Answered \\Flagged \\Draft \\Deleted \\Seen)\r\n").await?;
                 write.write_all(format!("* {count} EXISTS\r\n* 0 RECENT\r\n").as_bytes()).await?;
                 write.write_all(b"* OK [UIDVALIDITY 7] UIDs valid.\r\n").await?;
                 let mode = if command.eq_ignore_ascii_case("EXAMINE") { "READ-ONLY" } else { "READ-WRITE" };
-                write
-                    .write_all(format!("{tag} OK [{mode}] [Gmail]/All Mail selected. (Success)\r\n").as_bytes())
-                    .await?;
+                write.write_all(format!("{tag} OK [{mode}] {selected} selected. (Success)\r\n").as_bytes()).await?;
             }
             "UID" if authenticated => {
                 let (sub, rest) = args.split_once(' ').unwrap_or((args, ""));
+                if sub.eq_ignore_ascii_case("SEARCH") {
+                    let found: Vec<String> = {
+                        let mut s = state.lock().unwrap();
+                        s.searches += 1;
+                        let now = s.now.unwrap_or_else(|| {
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |d| d.as_millis() as i64)
+                        });
+                        s.messages
+                            .iter()
+                            .filter(|(f, m)| *f == selected && matches_search(rest, m, now))
+                            .map(|(_, m)| m.uid.to_string())
+                            .collect()
+                    };
+                    write.write_all(format!("* SEARCH {}\r\n", found.join(" ")).as_bytes()).await?;
+                    write.write_all(format!("{tag} OK SEARCH completed (Success)\r\n").as_bytes()).await?;
+                    continue;
+                }
                 if !sub.eq_ignore_ascii_case("FETCH") {
                     write.write_all(format!("{tag} BAD unsupported\r\n").as_bytes()).await?;
                     continue;
@@ -170,8 +246,9 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                 let items = items.to_ascii_uppercase();
                 let messages: Vec<FakeImapMessage> = {
                     let s = state.lock().unwrap();
-                    let max = s.messages.iter().map(|m| m.uid).max().unwrap_or(0);
-                    s.messages.iter().filter(|m| in_set(set, m.uid, max)).cloned().collect()
+                    let here = s.messages.iter().filter(|(f, _)| *f == selected).map(|(_, m)| m);
+                    let max = here.clone().map(|m| m.uid).max().unwrap_or(0);
+                    here.filter(|m| in_set(set, m.uid, max)).cloned().collect()
                 };
                 let with_body = items.contains("BODY.PEEK[]") || items.contains("BODY[]");
                 let with_header = items.contains("BODY.PEEK[HEADER]");
@@ -237,6 +314,34 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                 }
                 write.write_all(format!("{tag} OK Success\r\n").as_bytes()).await?;
             }
+            "IDLE" if authenticated => {
+                state.lock().unwrap().idles += 1;
+                // Listen before answering, so a message added meanwhile rings.
+                let mut rung = std::pin::pin!(bell.notified());
+                rung.as_mut().enable();
+                write.write_all(b"+ idling\r\n").await?;
+                loop {
+                    let mut done = String::new();
+                    tokio::select! {
+                        read = lines.read_line(&mut done) => {
+                            if read? == 0 {
+                                return Ok(());
+                            }
+                            if done.trim().eq_ignore_ascii_case("DONE") {
+                                write.write_all(format!("{tag} OK IDLE terminated (Success)\r\n").as_bytes()).await?;
+                                break;
+                            }
+                        }
+                        () = rung.as_mut() => {
+                            let count =
+                                state.lock().unwrap().messages.iter().filter(|(f, _)| *f == selected).count();
+                            write.write_all(format!("* {count} EXISTS\r\n").as_bytes()).await?;
+                            rung.set(bell.notified());
+                            rung.as_mut().enable();
+                        }
+                    }
+                }
+            }
             "NOOP" => write.write_all(format!("{tag} OK Success\r\n").as_bytes()).await?,
             "LOGOUT" => {
                 write.write_all(b"* BYE LOGOUT Requested\r\n").await?;
@@ -258,6 +363,37 @@ fn in_set(set: &str, uid: u32, max: u32) -> bool {
                 _ => false,
             },
             None => bound(part) == Some(uid),
+        }
+    })
+}
+
+/// Whether `m` matches a `UID SEARCH` criteria string: `ALL`, or
+/// `X-GM-RAW "…"` with space-separated terms that must all hold.
+fn matches_search(criteria: &str, m: &FakeImapMessage, now: i64) -> bool {
+    let criteria = criteria.trim();
+    if criteria.eq_ignore_ascii_case("ALL") {
+        return true;
+    }
+    let Some(raw) = criteria.strip_prefix("X-GM-RAW ") else { return false };
+    let query = raw.trim().trim_matches('"').replace("\\\"", "\"");
+    let has_label = |name: &str| m.labels.iter().any(|l| l.trim_start_matches('\\').eq_ignore_ascii_case(name));
+    let date = mail_mime::parse(&m.raw).ok().and_then(|p| p.headers.date).unwrap_or(0);
+    query.split_whitespace().all(|term| {
+        let term = term.to_ascii_lowercase();
+        if let Some(name) = term.strip_prefix("in:").or_else(|| term.strip_prefix("label:")) {
+            has_label(name)
+        } else if term.starts_with("category:") {
+            // Gmail lists no categories in X-GM-LABELS; a fake message
+            // joins one with a label spelled like the search term.
+            has_label(&term)
+        } else if term == "is:unread" {
+            !m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"))
+        } else if term == "is:starred" {
+            m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Flagged"))
+        } else if let Some(days) = term.strip_prefix("newer_than:").and_then(|d| d.strip_suffix('d')) {
+            days.parse::<i64>().is_ok_and(|d| date > now - d * 86_400_000)
+        } else {
+            false
         }
     })
 }

@@ -26,6 +26,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "⌃⌘A", action: "Archive", inThreadList: false),
             .init(keys: "⌃⌘I", action: "Move to Inbox", inThreadList: false),
             .init(keys: "⌘⌫", action: "Move to Trash", inThreadList: false),
+            .init(keys: "⇧⌘J", action: "Mark as junk (Not junk in Spam)", inThreadList: false),
             .init(keys: "⇧⌘U", action: "Mark as read or unread", inThreadList: false),
             .init(keys: "⇧⌘L", action: "Star or unstar", inThreadList: false),
             .init(keys: "⇧⌘I", action: "Load remote images", inThreadList: false),
@@ -39,6 +40,8 @@ enum KeyboardShortcutGuide {
             .init(keys: "↑ ↓  or  j k", action: "Previous or next thread", inThreadList: true),
             .init(keys: "e", action: "Archive", inThreadList: true),
             .init(keys: "#  or  ⌫", action: "Move to Trash", inThreadList: true),
+            .init(keys: "!", action: "Mark as junk or not junk", inThreadList: true),
+            .init(keys: "↩", action: "Edit the draft (in Drafts)", inThreadList: true),
             .init(keys: "u", action: "Mark as read or unread", inThreadList: true),
             .init(keys: "s", action: "Star or unstar", inThreadList: true),
             .init(keys: "l", action: "Label…", inThreadList: true),
@@ -65,9 +68,9 @@ enum KeyboardShortcutGuide {
 struct KeyboardShortcutsView: View {
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: Space.xxl) {
                 ForEach(KeyboardShortcutGuide.groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: Space.s) {
                         Text(group.title).font(.headline)
                         Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 4) {
                             ForEach(group.shortcuts, id: \.self) { s in
@@ -83,7 +86,7 @@ struct KeyboardShortcutsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            .padding(20)
+            .padding(Space.xxl)
         }
         .frame(minWidth: 460, minHeight: 520)
     }

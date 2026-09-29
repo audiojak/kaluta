@@ -31,34 +31,34 @@ struct ThreadReaderView: View {
     private func header(_ detail: ThreadDetail) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
-                .font(.title3.weight(.semibold))
+                .font(TypeRole.title)
                 .textSelection(.enabled)
                 .lineLimit(2)
             Spacer()
+            if detail.messages.contains(where: \.isDraft) {
+                Button("Edit Draft", systemImage: "pencil") { model.editDraft(threadID: detail.thread.id) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .hoverHelp("Open this draft to edit and send it (Return in Drafts)")
+            }
             if detail.messages.count > 1 {
                 Text("\(detail.messages.count) messages")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 14)
-        .padding(.bottom, 6)
+        .padding(.horizontal, Space.xxl)
+        .padding(.top, Space.xl)
+        .padding(.bottom, Space.s)
     }
 
     private var remoteImagesBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "photo.badge.exclamationmark")
-                .foregroundStyle(.secondary)
-            Text("Remote images are hidden to protect your privacy.")
-                .font(.callout)
-            Spacer()
+        Banner("Remote images are hidden to protect your privacy.", systemImage: "photo.badge.exclamationmark",
+               intent: .neutral, inset: Space.xxl) {
             Button("Load Images") { model.reader.loadRemoteImagesForThread() }
+                .hoverHelp("Show remote images in this conversation only (⇧⌘I)")
             Button("Always from Sender") { model.reader.alwaysLoadRemoteImagesFromSenders() }
+                .hoverHelp("Always show remote images from these senders (change in Settings › Privacy)")
         }
-        .controlSize(.small)
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.quaternary.opacity(0.5))
     }
 }

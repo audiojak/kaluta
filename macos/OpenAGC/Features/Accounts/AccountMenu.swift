@@ -12,25 +12,37 @@ struct AccountMenuButton: View {
         Menu {
             AccountMenuItems(openSettings: { openSettings() })
         } label: {
-            // Toolbar menus draw their label as a template (one colour), which
-            // turns a photo into a blank shape: give it a full-colour image.
-            if let current {
-                Image(nsImage: AccountAvatar.toolbarImage(current))
-                    .renderingMode(.original)
-            } else {
-                Image(systemName: "person.crop.circle")
+            // "Accounts" names the toolbar item, so ToolbarToolTips finds it.
+            Label {
+                Text("Accounts")
+            } icon: {
+                // Toolbar menus draw their label as a template (one colour),
+                // which turns a photo into a blank shape: a full-colour image.
+                if let current {
+                    Image(nsImage: AccountAvatar.toolbarImage(current))
+                        .renderingMode(.original)
+                } else {
+                    Image(systemName: "person.crop.circle")
+                }
             }
+            .labelStyle(.iconOnly)
         }
         .menuIndicator(.hidden)
         .fixedSize()
-        .help(current.map { "\($0.displayName ?? $0.email) — \($0.email)\nSwitch account" }
-            ?? (model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts"))
+        .help(Self.helpText(model))
         .accessibilityLabel("Account: \(current?.email ?? "none"). Switch account")
         .task { await model.reloadAccounts() }
     }
 
     private var current: AccountSummary? {
         model.accounts.first { $0.id == model.openAccountID }
+    }
+
+    static func helpText(_ model: AppModel) -> String {
+        if let current = model.accounts.first(where: { $0.id == model.openAccountID }) {
+            return "\(current.displayName ?? current.email) — \(current.email)\nSwitch account"
+        }
+        return model.openAccountID == AppModel.demoAccountID ? "Demo mailbox" : "Accounts"
     }
 }
 
@@ -42,7 +54,7 @@ struct AccountMenuItems: View {
 
     var body: some View {
         ForEach(Array(model.accounts.enumerated()), id: \.element.id) { index, account in
-            Button {
+            Button { // no-help: menu item
                 Task { await model.switchAccount(to: account.id) }
             } label: {
                 Image(nsImage: AccountAvatar.menuImage(account, current: account.id == model.openAccountID))
@@ -50,10 +62,10 @@ struct AccountMenuItems: View {
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }
-        if !model.accounts.isEmpty { Divider() }
-        Button("Add Account…") { Task { await model.addAccount() } }
+        if !model.accounts.isEmpty { Divider() } // menu
+        Button("Add Account…") { Task { await model.addAccount() } } // no-help: menu item
             .disabled(!GoogleClientConfiguration.effective().isUsable)
-        Button("Accounts Settings…", action: openSettings)
+        Button("Accounts Settings…", action: openSettings) // no-help: menu item
     }
 
     /// "Work Me — work@example.com (12)".
@@ -80,7 +92,7 @@ extension AccountAvatar {
     static func menuImage(_ account: AccountSummary, current: Bool) -> NSImage {
         let view = AccountAvatar(account: account, size: 18)
             .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: current ? 2 : 0))
-            .padding(1)
+            .padding(Space.hair)
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
         let image = renderer.nsImage ?? NSImage()

@@ -165,6 +165,27 @@ pub struct Draft {
     pub id: String,
 }
 
+/// `drafts.list`: each draft with the message it holds now.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftList {
+    #[serde(default)]
+    pub drafts: Vec<DraftRef>,
+    #[serde(default)]
+    pub next_page_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DraftRef {
+    pub id: String,
+    pub message: DraftMessageRef,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DraftMessageRef {
+    pub id: String,
+}
+
 /// Gmail uses URL-safe base64, sometimes padded, sometimes not.
 pub fn decode_base64url(data: &str) -> Option<Vec<u8>> {
     let trimmed = data.trim();

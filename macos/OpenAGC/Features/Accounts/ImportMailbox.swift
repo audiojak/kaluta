@@ -33,7 +33,7 @@ struct ImportMailboxSheet: View {
     @State var draft: ImportDraft
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             Text("Import Mailbox").font(.title2.weight(.semibold))
             Text("The mail becomes its own account: searchable and ready for the agent, but it cannot send, and nothing is uploaded.")
                 .foregroundStyle(.secondary)
@@ -54,6 +54,7 @@ struct ImportMailboxSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.importDraft = nil }
+                    .hoverHelp("Close without importing (Esc)")
                     .keyboardShortcut(.cancelAction)
                 Button("Import") {
                     model.importDraft = draft
@@ -61,9 +62,10 @@ struct ImportMailboxSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.scan == nil || draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+                .hoverHelp("Import these messages into a new mailbox on this Mac (Return)")
             }
         }
-        .padding(20)
+        .padding(Space.xxl)
         .frame(width: 460)
     }
 }
@@ -75,7 +77,7 @@ struct ImportProgressSheet: View {
 
     var body: some View {
         let status = model.imports[accountID]
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Space.xl) {
             Text(status?.done == true ? "Import finished" : "Importing mail…").font(.title3.weight(.semibold))
             if let status {
                 if status.done {
@@ -91,16 +93,18 @@ struct ImportProgressSheet: View {
                 Spacer()
                 if status?.done == true {
                     Button("Close") { Task { await model.finishImport(show: false) } }
+                        .hoverHelp("Close and stay where you are")
                     Button("Show Mail") { Task { await model.finishImport(show: true) } }
                         .keyboardShortcut(.defaultAction)
                         .disabled(status?.imported == 0)
+                        .hoverHelp("Open the imported mailbox (Return)")
                 } else {
                     Button("Stop Import") { model.cancelRunningImport() }
-                        .help("What has been imported so far is kept; Re-import in Settings continues.")
+                        .hoverHelp("What has been imported so far is kept; Re-import in Settings continues.")
                 }
             }
         }
-        .padding(20)
+        .padding(Space.xxl)
         .frame(width: 420)
     }
 

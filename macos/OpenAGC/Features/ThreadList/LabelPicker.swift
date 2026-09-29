@@ -65,7 +65,7 @@ struct LabelPickerView: View {
 
     var body: some View {
         let picker = picker
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Space.s) {
             TextField("Filter or new label (nest with /)", text: $filter)
                 .textFieldStyle(.roundedBorder)
                 .focused($focused)
@@ -83,11 +83,12 @@ struct LabelPickerView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .contentShape(Rectangle())
                         }
+                        .hoverHelp("Create the label \(path) and apply it")
                         .buttonStyle(.plain)
-                        .padding(.vertical, 3)
+                        .padding(.vertical, Space.xs)
                     }
                     if picker.rows.isEmpty && picker.createPath == nil {
-                        Text("No labels").foregroundStyle(.secondary).padding(.vertical, 3)
+                        Text("No labels").foregroundStyle(.secondary).padding(.vertical, Space.xs)
                     }
                 }
             }
@@ -96,13 +97,13 @@ struct LabelPickerView: View {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
         }
-        .padding(10)
+        .padding(Space.m)
         .frame(width: 280)
         .onAppear { focused = true }
     }
 
     @ViewBuilder private func rowView(_ row: LabelPickerModel.Row) -> some View {
-        let content = HStack(spacing: 6) {
+        let content = HStack(spacing: Space.s) {
             Image(systemName: row.state == .on ? "checkmark.square.fill" : row.state == .mixed ? "minus.square" : "square")
                 .foregroundStyle(row.node.isGroup ? .clear : .secondary)
             Text(row.node.name)
@@ -110,10 +111,11 @@ struct LabelPickerView: View {
             Spacer(minLength: 0)
         }
         .padding(.leading, CGFloat(row.depth) * 14)
-        .padding(.vertical, 3)
+        .padding(.vertical, Space.xs)
         .contentShape(Rectangle())
         if let id = row.node.mailbox?.labelId {
             Button { toggle(id, row.state) } label: { content }
+                .hoverHelp("\(row.state == .on ? "Remove" : "Apply") the label \(row.node.path)")
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(row.node.path), \(row.state == .on ? "applied" : "not applied")")
         } else {

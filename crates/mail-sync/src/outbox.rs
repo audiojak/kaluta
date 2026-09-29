@@ -40,6 +40,23 @@ impl LocalChange {
     pub fn move_to_inbox(thread_ids: Vec<ThreadId>) -> Self {
         Self::Labels { thread_ids, add: vec![LabelId::new(system_labels::INBOX)], remove: vec![] }
     }
+    /// Mark as Junk: to Spam and out of the Inbox. Only this and
+    /// `not_junk` set or clear `SPAM` (spec §14.3 amendment, junk).
+    pub fn mark_junk(thread_ids: Vec<ThreadId>) -> Self {
+        Self::Labels {
+            thread_ids,
+            add: vec![LabelId::new(system_labels::SPAM)],
+            remove: vec![LabelId::new(system_labels::INBOX)],
+        }
+    }
+    /// Not Junk: out of Spam and into the Inbox.
+    pub fn not_junk(thread_ids: Vec<ThreadId>) -> Self {
+        Self::Labels {
+            thread_ids,
+            add: vec![LabelId::new(system_labels::INBOX)],
+            remove: vec![LabelId::new(system_labels::SPAM)],
+        }
+    }
     pub fn set_read(thread_ids: Vec<ThreadId>, read: bool) -> Self {
         let unread = vec![LabelId::new(system_labels::UNREAD)];
         if read {
@@ -225,6 +242,7 @@ impl SyncEngine {
             if !self.db().write(move |tx| outbox::claim(tx, claimed_id)).await? {
                 continue;
             }
+            let timer = crate::transport::Timer::start();
             let result = match &queued.op {
                 OutboxOp::ModifyLabels { message_ids, add, remove } => {
                     // Before the call: history may report it before we return.
@@ -270,6 +288,13 @@ impl SyncEngine {
                 OutboxOp::SyncDraft { draft_id, from } => self.mirror_draft(*draft_id, from).await?,
                 OutboxOp::DeleteDraft { gmail_draft_id } => self.provider().delete_draft(gmail_draft_id).await,
             };
+            self.record_api(
+                &timer,
+                crate::transport::Job::Write,
+                "one API call per change, with exact undo",
+                1,
+                result.is_ok(),
+            );
             let id = queued.id;
             match result {
                 Ok(()) => {

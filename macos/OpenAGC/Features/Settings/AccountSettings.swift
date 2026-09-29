@@ -15,6 +15,7 @@ struct AccountSettings: View {
                 case .open(let id) where id == AppModel.demoAccountID:
                     LabeledContent("Account") { Text("Demo mailbox (nothing leaves this Mac)") }
                     Button("Connect Gmail Instead…") { Task { await model.signIn(with: .effective()) } }
+                        .hoverHelp("Sign in with Google to use your Gmail instead of the demo")
                         .disabled(!GoogleClientConfiguration.effective().isUsable)
                 case .open:
                     ForEach(model.accounts, id: \.id) { account in
@@ -27,6 +28,7 @@ struct AccountSettings: View {
                         Label(reauthenticationHint, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                     }
                     Button("Add Account…") { Task { await model.addAccount() } }
+                        .hoverHelp("Sign in to another Gmail account")
                         .disabled(!GoogleClientConfiguration.effective().isUsable)
                 case .signingIn:
                     HStack {
@@ -36,6 +38,7 @@ struct AccountSettings: View {
                 default:
                     Text("No account is connected.").foregroundStyle(.secondary)
                     Button("Connect Gmail…") { Task { await model.signIn(with: .effective()) } }
+                        .hoverHelp("Sign in with Google to add your Gmail")
                         .disabled(!GoogleClientConfiguration.effective().isUsable)
                 }
             }
@@ -51,7 +54,7 @@ struct AccountSettings: View {
             Section("Data on this Mac") {
                 ForEach(orphans, id: \.id) { orphan in
                     HStack {
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: Space.hair) {
                             Text("Leftover mail from \(orphan.email ?? "an old sign-in")")
                             Text(ByteCountFormatter.string(fromByteCount: Int64(orphan.bytes), countStyle: .file))
                                 .font(.caption).foregroundStyle(.secondary)
@@ -64,13 +67,15 @@ struct AccountSettings: View {
                             }
                         }
                     }
-                    .help("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected.")
+                    .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected.")
                 }
                 HStack {
                     Button("Show Mail Data") {
                         if let dir = try? CoreClient.defaultDataDirectory() { NSWorkspace.shared.activateFileViewerSelecting([dir]) }
                     }
+                    .hoverHelp("Show the folder where OpenAGC keeps downloaded mail, in Finder")
                     Button("Show Logs") { NSWorkspace.shared.activateFileViewerSelecting([CoreClient.defaultLogDirectory()]) }
+                        .hoverHelp("Show OpenAGC's log files in Finder")
                 }
             }
         }
@@ -78,7 +83,7 @@ struct AccountSettings: View {
         .task(id: model.accounts.map(\.id)) { orphans = (try? await model.core?.orphanedStores()) ?? [] }
         .confirmationDialog("Remove \(removing?.email ?? "this account") from OpenAGC?",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
-            Button("Remove", role: .destructive) {
+            Button("Remove", role: .destructive) { // no-help: confirmation dialog button
                 if let account = removing { Task { await model.removeAccount(account.id) } }
                 removing = nil
             }
@@ -121,15 +126,22 @@ struct AccountRow: View {
     ]
 
     /// Whether to suggest IMAP: a large mailbox still on the API.
-    static func suggestsIMAP(imapEnabled: Bool, storedMessages: UInt64?) -> Bool {
-        !imapEnabled && (storedMessages ?? 0) > suggestIMAPAbove
+    /// The Downloads row: which transport and, if not IMAP, why.
+    static func transportText(imapEnabled: Bool, transport: String?) -> String {
+        guard imapEnabled else { return "Over the Gmail API (this sign-in does not allow IMAP)" }
+        switch transport {
+        case "imap": return "Over IMAP"
+        case "imap-refused": return "Over the Gmail API (IMAP was refused)"
+        case nil, "none": return "Over IMAP when syncing"
+        default: return "Over the Gmail API"
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.m) {
                 AccountAvatar(account: account, size: 32)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: Space.hair) {
                     Text(account.displayName ?? account.email).font(.body.weight(.medium))
                     if account.displayName != nil { Text(account.email).font(.caption).foregroundStyle(.secondary) }
                     Text(status).font(.caption).foregroundStyle(signedIn == false ? .orange : .secondary)
@@ -137,13 +149,15 @@ struct AccountRow: View {
                 Spacer()
                 if account.id != model.openAccountID {
                     Button("Show") { Task { await model.switchAccount(to: account.id) } }
+                        .hoverHelp("Switch the window to this account")
                 }
                 if account.kind == .gmail, signedIn == true {
                     Button("Refresh from Gmail") { Task { _ = try? await model.core?.refreshFromServer(account.id) } }
-                        .help("Download this account's mail again so labels and messages match Gmail. Nothing is sent or changed on the server.")
+                        .hoverHelp("Download this account's mail again so labels and messages match Gmail. Nothing is sent or changed on the server.")
                 }
                 if account.kind == .archive {
                     Button("Re-import…") { Task { _ = try? await model.core?.reimportArchive(account.id) } }
+                        .hoverHelp("Import the mailbox file again, adding anything missing")
                         .disabled(model.imports[account.id].map { !$0.done } ?? false)
                 }
                 if signedIn == false {
@@ -153,8 +167,10 @@ struct AccountRow: View {
                             await model.signIn(with: .effective())
                         }
                     }
+                    .hoverHelp("Sign in to Google again for this account")
                 }
                 Button("Remove…", role: .destructive, action: onRemove)
+                    .hoverHelp("Remove this account from OpenAGC; Gmail itself is not changed")
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(
@@ -168,13 +184,17 @@ struct AccountRow: View {
                         Text(choice.1).tag(choice.0)
                     }
                 }
+                .hoverHelp("How far back OpenAGC keeps a copy of this account's mail")
                 .disabled(window == nil)
-                Toggle(isOn: Binding(get: { account.imapEnabled },
-                                     set: { on in Task { await model.setFasterDownload(on, for: account.id) } })) {
-                    Text("Download faster over IMAP")
-                    Text("Asks Google for full mail access, which IMAP needs. OpenAGC still never deletes mail permanently.")
+                LabeledContent("Downloads") {
+                    Text(Self.transportText(imapEnabled: account.imapEnabled, transport: backfill?.transport))
+                        .foregroundStyle(.secondary)
                 }
-                .disabled(signedIn != true)
+                .hoverHelp("IMAP is used for downloading; the Gmail API for categories, drafts, changes made elsewhere and sending, and whenever IMAP fails")
+                if !account.imapEnabled, signedIn == true {
+                    Button("Sign In Again for IMAP…") { Task { await model.signInAgainForIMAP(account.id) } }
+                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. OpenAGC still never deletes mail permanently.")
+                }
                 if account.imapEnabled {
                     // Tiered download (spec §7.4): older mail in the range
                     // comes down as headers; bodies when needed.
@@ -190,15 +210,11 @@ struct AccountRow: View {
                         }
                     }
                     .disabled(bodyWindow == nil)
-                    .help("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full.")
-                } else if signedIn == true, Self.suggestsIMAP(imapEnabled: false, storedMessages: backfill?.storedMessages) {
-                    Label("A mailbox this large downloads much faster over IMAP.", systemImage: "bolt")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    .hoverHelp("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full.")
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, Space.hair)
         .task(id: account.id) {
             window = try? await model.core?.syncWindow(for: account.id)
             bodyWindow = account.kind == .gmail ? try? await model.core?.bodyWindow(for: account.id) : nil
@@ -253,6 +269,7 @@ struct SyncWindowSection: View {
                     Text(choice.1).tag(choice.0)
                 }
             }
+            .hoverHelp("How far back OpenAGC keeps a copy of your mail")
             .disabled(window == nil)
         } header: {
             Text("Mail on this Mac")
@@ -270,7 +287,7 @@ struct SyncWindowSection: View {
 
 /// The bring-your-own-client fields, shared with onboarding.
 struct GoogleClientFields: View {
-    @State private var customID = UserDefaults.standard.string(forKey: GoogleClientConfiguration.customClientIDKey) ?? ""
+    @State private var customID = CoreClient.appDefaults().string(forKey: GoogleClientConfiguration.customClientIDKey) ?? ""
     @State private var customSecret = ""
     @State private var status: String?
 
@@ -290,6 +307,7 @@ struct GoogleClientFields: View {
                     status = String(describing: error)
                 }
             }
+            .hoverHelp("Use this Google client for sign-in")
             Link("How to create one", destination: URL(string: "https://github.com/audiojak/openagc/blob/main/docs/google-oauth-client.md")!)
             if let status { Text(status).foregroundStyle(.secondary).font(.callout) }
         }
@@ -298,7 +316,7 @@ struct GoogleClientFields: View {
 
 /// Settings › Privacy: what leaves the Mac, and remote images.
 struct PrivacySettings: View {
-    @State private var allowed: [String] = UserDefaults.standard.stringArray(forKey: ReaderStore.allowedSendersKey) ?? []
+    @State private var allowed: [String] = CoreClient.appDefaults().stringArray(forKey: ReaderStore.allowedSendersKey) ?? []
 
     var body: some View {
         Form {
@@ -317,10 +335,12 @@ struct PrivacySettings: View {
                         Text(sender)
                         Spacer()
                         Button("Remove") { save(allowed.filter { $0 != sender }) }.controlSize(.small)
+                            .hoverHelp("Stop loading remote images from this sender automatically")
                     }
                 }
                 if !allowed.isEmpty {
                     Button("Remove All", role: .destructive) { save([]) }
+                        .hoverHelp("Stop loading remote images automatically from any sender")
                 }
             } header: {
                 Text("Remote images always loaded from")
@@ -334,7 +354,7 @@ struct PrivacySettings: View {
 
     private func save(_ list: [String]) {
         allowed = list
-        UserDefaults.standard.set(list, forKey: ReaderStore.allowedSendersKey)
+        CoreClient.appDefaults().set(list, forKey: ReaderStore.allowedSendersKey)
     }
 }
 
@@ -355,6 +375,7 @@ struct RoutineSettings: View {
                     }
                 }
                 Button("Open Routines…") { openWindow(id: "routines") }
+                    .hoverHelp("Open the Routines window")
             } footer: {
                 Text("A routine files automated mail into labels on a schedule, on Claude's cloud or here on this Mac.")
                     .foregroundStyle(.secondary)

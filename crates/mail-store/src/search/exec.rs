@@ -162,12 +162,13 @@ pub fn search(
     let lim = sql.bind(i64::from(limit) + 1);
     let query = format!(
         "SELECT t.id, t.gmail_id, t.subject, t.snippet, t.last_message_at, t.message_count, t.unread_count,
-                t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json
+                t.has_attachments, t.is_starred, t.participants_json, t.label_ids_json, {replied}
          FROM threads t
          WHERE t.id IN (SELECT m.thread_id FROM messages m WHERE {predicate})
            AND (t.last_message_at, t.id) < ({at}, {id})
          ORDER BY t.last_message_at DESC, t.id DESC
-         LIMIT {lim}"
+         LIMIT {lim}",
+        replied = crate::read::REPLIED
     );
     let mut stmt = conn.prepare(&query).map_err(|e| StoreError::Invalid(format!("search: {e}")))?;
     let rows = stmt

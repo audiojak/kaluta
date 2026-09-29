@@ -28,10 +28,21 @@ struct RecipientField: NSViewRepresentable {
         return field
     }
 
+    /// As wide as offered and as tall as its tokens wrap to.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView field: NSTokenField, context: Context) -> CGSize? {
+        let width = proposal.width ?? 240
+        let height = field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10_000)).height ?? 22
+        return CGSize(width: width, height: max(22, ceil(height)))
+    }
+
     func updateNSView(_ field: NSTokenField, context: Context) {
         context.coordinator.parent = self
-        let current = (field.objectValue as? [Any] ?? []).compactMap { ($0 as? Token)?.address }
-        if current != addresses {
+        // Compare the way `publish` reads the field, half-typed text
+        // included. Counting tokens only made every keystroke look like a
+        // change from outside: the field was reset mid-typing, which
+        // published again, without end (the app hung and ran out of memory
+        // forwarding a message, 2026-09-28).
+        if Coordinator.addresses(in: field) != addresses {
             field.objectValue = addresses.map(Token.init)
         }
     }
@@ -55,15 +66,30 @@ struct RecipientField: NSViewRepresentable {
 
         func tokenField(_ tokenField: NSTokenField, completionsForSubstring substring: String,
                         indexOfToken tokenIndex: Int, indexOfSelectedItem selectedIndex: UnsafeMutablePointer<Int>?) -> [Any]? {
-            let matches = parent.suggest(substring)
             offered = [:]
-            let strings = matches.map { address in
-                let s = Self.editingString(address)
-                offered[s] = address
-                return s
-            }
+            let strings = Self.completions(for: substring, among: parent.suggest(substring))
+            for (string, address) in strings { offered[string] = address }
             selectedIndex?.pointee = strings.isEmpty ? -1 : 0
-            return strings
+            return strings.map(\.0)
+        }
+
+        /// What to offer for typed text. The token field completes inline
+        /// with the first one, replacing what was typed, so each must start
+        /// with the typed text: "Name <email>" when the name does, the bare
+        /// address when the address does. Contacts that matched elsewhere
+        /// (typing "dan" found "Jordan") are left out; before, "drew"
+        /// became "Wrew".
+        static func completions(for typed: String, among matches: [AddressInfo]) -> [(String, AddressInfo)] {
+            let prefix = typed.trimmingCharacters(in: .whitespaces)
+            guard !prefix.isEmpty else { return [] }
+            var seen = Set<String>()
+            return matches.compactMap { address in
+                let full = editingString(address)
+                let string = full.lowercased().hasPrefix(prefix.lowercased()) ? full
+                    : address.email.lowercased().hasPrefix(prefix.lowercased()) ? address.email : nil
+                guard let string, seen.insert(string).inserted else { return nil }
+                return (string, address)
+            }
         }
 
         func tokenField(_ tokenField: NSTokenField, representedObjectForEditing editingString: String) -> Any? {
@@ -88,14 +114,20 @@ struct RecipientField: NSViewRepresentable {
 
         private func publish(_ notification: Notification) {
             guard let field = notification.object as? NSTokenField else { return }
-            let addresses = (field.objectValue as? [Any] ?? []).compactMap { item -> AddressInfo? in
+            let addresses = Self.addresses(in: field)
+            if addresses != parent.addresses { parent.addresses = addresses }
+        }
+
+        /// The field's addresses: its tokens, and any text not yet made a
+        /// token read as an address.
+        static func addresses(in field: NSTokenField) -> [AddressInfo] {
+            (field.objectValue as? [Any] ?? []).compactMap { item -> AddressInfo? in
                 if let token = item as? Token { return token.address }
                 if let string = item as? String, !string.trimmingCharacters(in: .whitespaces).isEmpty {
-                    return Self.parse(string)
+                    return parse(string)
                 }
                 return nil
             }
-            if addresses != parent.addresses { parent.addresses = addresses }
         }
 
         static func editingString(_ address: AddressInfo) -> String {

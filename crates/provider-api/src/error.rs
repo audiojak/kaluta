@@ -27,6 +27,11 @@ pub enum ProviderError {
     Invalid(String),
     #[error("permission denied: {0}")]
     Forbidden(String),
+    /// This transport cannot serve the request now, by design rather than
+    /// by failure (IMAP refused for the account, its daily budget used):
+    /// the caller uses another transport without counting a failure.
+    #[error("unavailable: {0}")]
+    Unavailable(String),
 }
 
 impl ProviderError {

@@ -4,7 +4,7 @@ import Testing
 
 struct EmailDocumentTests {
     private func message(_ id: String, read: Bool = true, html: String? = "<p>x</p>", from: String = "Ann") -> EmailDocument.Message {
-        EmailDocument.Message(id: id, fromName: from, fromEmail: "ann@example.com", recipients: "Me",
+        EmailDocument.Message(id: id, fromName: from, fromEmail: "ann@example.com", recipients: ["Me"],
                               date: Date(timeIntervalSince1970: 0), snippet: "snip", isRead: read, html: html)
     }
 
@@ -28,6 +28,23 @@ struct EmailDocumentTests {
         #expect(EmailDocument.thread([styled], isDark: true).contains(#"class="body paper""#))
         #expect(!EmailDocument.thread([styled], isDark: false).contains("paper\""))
         #expect(!EmailDocument.thread([message("u")], isDark: true).contains(#"class="body paper""#))
+    }
+
+    @Test func cardsCarryInitialsAColourPerSenderAndAShortToLine() {
+        #expect(EmailDocument.initials(name: "Darshan Patel", email: "d@x") == "DP")
+        #expect(EmailDocument.initials(name: "Le, Minh", email: "m@x") == "ML")
+        #expect(EmailDocument.initials(name: "Cher", email: "c@x") == "C")
+        #expect(EmailDocument.initials(name: "billing@zoom.us", email: "billing@zoom.us") == "B")
+        #expect(EmailDocument.avatarColor("A@x.com") == EmailDocument.avatarColor("a@x.com"), "stable per sender")
+        #expect(EmailDocument.shortRecipients(["Me"]) == "Me")
+        #expect(EmailDocument.shortRecipients(["Me", "Sam"]) == "Me & Sam")
+        #expect(EmailDocument.shortRecipients(["Me", "Sam", "Ann", "Bo"]) == "Me, Sam + 2")
+        let many = EmailDocument.Message(id: "1", fromName: "Ann", fromEmail: "ann@x.com",
+                                         recipients: ["Me", "Sam", "Ann", "Bo"], date: Date(timeIntervalSince1970: 0),
+                                         snippet: "", isRead: true, html: "<p>x</p>")
+        let html = EmailDocument.thread([many], isDark: false)
+        #expect(html.contains(#"title="Me, Sam, Ann, Bo">To: Me, Sam + 2</div>"#), "the full list on hover")
+        #expect(html.contains(#"class="avatar""#))
     }
 
     @Test func missingBodyShowsAPlaceholder() {

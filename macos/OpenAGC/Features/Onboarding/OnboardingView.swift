@@ -10,14 +10,14 @@ struct OnboardingView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Space.xxl) {
+                VStack(alignment: .leading, spacing: Space.s) {
                     Text("Welcome to OpenAGC").font(.title.weight(.semibold))
                     Text("A Mac email client that works with the AI agents you already use.")
                         .foregroundStyle(.secondary)
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Space.m) {
                     Label("Your mail syncs straight from Google to this Mac. OpenAGC has no servers.", systemImage: "lock.shield")
                     Label("Agents see mail only when you ask them to, through tools you control.", systemImage: "sparkles")
                     Label("Sending and deleting always wait for your approval.", systemImage: "hand.raised")
@@ -25,11 +25,12 @@ struct OnboardingView: View {
                 .font(.callout)
 
                 if model.accountState == .signingIn {
-                    HStack(spacing: 10) {
+                    HStack(spacing: Space.m) {
                         ProgressView().controlSize(.small)
                         Text("Finish signing in with Google in your browser…")
                         Spacer()
                         Button("Cancel") { model.cancelSignIn() }
+                            .hoverHelp("Stop waiting for the sign-in in your browser")
                     }
                 } else {
                     HStack {
@@ -41,7 +42,9 @@ struct OnboardingView: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                         .disabled(!client.isUsable)
+                        .hoverHelp("Sign in with Google in your browser to add your Gmail")
                         Button("Explore a Demo Mailbox") { Task { await model.openDemoMailbox() } }
+                            .hoverHelp("Try OpenAGC with made-up mail; nothing leaves this Mac")
                             .controlSize(.large)
                     }
                     if !client.isUsable {
@@ -57,7 +60,7 @@ struct OnboardingView: View {
                 OnboardingAgents()
 
                 DisclosureGroup("Advanced: use your own Google OAuth client", isExpanded: $showAdvanced) {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: Space.m) {
                         Text("Create a “Desktop app” OAuth client in Google Cloud with the Gmail API enabled, then paste its ID and secret. Your own client avoids Google's unverified-app warning.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
@@ -66,10 +69,10 @@ struct OnboardingView: View {
                         GoogleClientFields()
                     }
                     .textFieldStyle(.roundedBorder)
-                    .padding(.top, 6)
+                    .padding(.top, Space.s)
                 }
             }
-            .padding(28)
+            .padding(Space.page)
             .frame(maxWidth: 560, alignment: .leading)
         }
     }
@@ -81,13 +84,13 @@ private struct OnboardingAgents: View {
 
     var body: some View {
         let agent = model.agent
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Space.m) {
             Text("Agents").font(.headline)
             Text("OpenAGC works with the Claude Code or Codex command-line tools you already have, signed in with your own account. You can add one later.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             if agent.providers.isEmpty {
-                HStack(spacing: 8) {
+                HStack(spacing: Space.m) {
                     ProgressView().controlSize(.small)
                     Text("Looking for Claude Code and Codex…").foregroundStyle(.secondary)
                 }
@@ -95,7 +98,7 @@ private struct OnboardingAgents: View {
             ForEach(agent.providers, id: \.id) { provider in
                 let status = AgentStatusText(provider)
                 Label {
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: Space.hair) {
                         Text(provider.name)
                         Text(status.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
@@ -108,9 +111,11 @@ private struct OnboardingAgents: View {
                 Picker("Ask by default", selection: Bindable(agent).providerID) {
                     ForEach(ready, id: \.id) { Text($0.name).tag($0.id) }
                 }
+                .hoverHelp("Which agent the prompt asks unless you choose another")
                 .fixedSize()
             }
             Button("Check Again") { Task { await agent.loadProviders(refresh: true) } }
+                .hoverHelp("Look again for the Claude Code and Codex command-line tools")
                 .controlSize(.small)
         }
         .task { await agent.loadProviders() }

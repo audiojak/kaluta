@@ -67,6 +67,16 @@ impl From<MailboxKind> for d::MailboxKind {
     }
 }
 
+/// One of the Inbox's category tabs (spec §14.3 amendment, categories).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct InboxCategory {
+    /// `CATEGORY_PERSONAL` (Primary) or another `CATEGORY_…` label id:
+    /// what follows `INBOX+` in a `list_threads` mailbox.
+    pub id: String,
+    pub total_count: u32,
+    pub unread_count: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MailboxInfo {
     /// What `list_threads` takes: the label id, or `@archive`.
@@ -132,6 +142,8 @@ pub struct ThreadRow {
     pub is_starred: bool,
     pub participants: Vec<AddressInfo>,
     pub label_ids: Vec<String>,
+    /// You replied in the thread (the replied arrow).
+    pub replied: bool,
 }
 
 impl From<d::ThreadSummary> for ThreadRow {
@@ -147,6 +159,7 @@ impl From<d::ThreadSummary> for ThreadRow {
             is_starred: t.is_starred,
             participants: t.participants.into_iter().map(Into::into).collect(),
             label_ids: t.label_ids.into_iter().map(|l| l.0).collect(),
+            replied: t.replied,
         }
     }
 }
@@ -261,8 +274,10 @@ mod tests {
             is_starred: false,
             participants: vec![d::EmailAddress::new(Some("Ann"), "ann@example.com")],
             label_ids: vec!["INBOX".into()],
+            replied: true,
         }
         .into();
+        assert!(row.replied);
         assert_eq!(row.id, "t1");
         assert_eq!(row.participants, vec![AddressInfo { name: Some("Ann".into()), email: "ann@example.com".into() }]);
         assert_eq!(row.label_ids, vec!["INBOX".to_owned()]);

@@ -9,6 +9,21 @@ ACTION="${1:-test}"
 shift || true
 
 "$ROOT/scripts/clean-test-scratch.sh"
+# Design-system rules that a grep can check (docs/design-system.md).
+"$ROOT/scripts/design-lint.sh" --strict
+# Every button, menu button, toggle and picker has a hover description.
+"$ROOT/scripts/help-lint.py" --strict
+# Test isolation: settings go through CoreClient.appDefaults() (a scratch
+# suite under tests and snapshots); .standard is only for reading launch
+# arguments, in the files listed here.
+leaks=$(grep -rnE 'UserDefaults\.standard' --include='*.swift' "$ROOT/macos/OpenAGC" \
+  | grep -vE '/(Core/CoreClient|App/OpenAGCApp|App/Snapshot)\.swift:' || true)
+appstorage=$(grep -rn '@AppStorage(' --include='*.swift' "$ROOT/macos/OpenAGC" | grep -v 'store:' || true)
+if [[ -n "$leaks$appstorage" ]]; then
+  printf '%s\n%s\n' "$leaks" "$appstorage" | sed '/^$/d; s/^/isolation: /'
+  echo "isolation: use CoreClient.appDefaults() instead of the real preferences"
+  exit 1
+fi
 mkdir -p "$ROOT/build"
 cd "$ROOT/macos"
 # Optional per-developer signing overrides (scripts/dev-signing.sh).
@@ -33,6 +48,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The real preferences must come through a test run untouched. The
+# maintainer's own OpenAGC may be running and write them itself; then the
+# check can only warn.
+REAL_PREFS="$HOME/Library/Preferences/ai.actual.openagc.plist"
+prefs_before=$(stat -f %m "$REAL_PREFS" 2>/dev/null || echo none)
+app_running=$(pgrep -f 'OpenAGC.app/Contents/MacOS/OpenAGC' >/dev/null && echo yes || echo no)
+
 set +e
 xcodebuild -project OpenAGC.xcodeproj -scheme OpenAGC \
   -destination 'platform=macOS,arch=arm64' \
@@ -44,4 +66,18 @@ set -e
 grep -E "error:|$ROOT/macos/.*warning:|\*\* (BUILD|TEST) |✔ Test |✘" "$ROOT/build/xcodebuild.log" \
   | grep -v -e 'appintentsmetadataprocessor' -e 'com.apple.linkd' || true
 [[ $status -eq 0 ]] || echo "xcodebuild failed ($status); full log: build/xcodebuild.log"
+if [[ "$ACTION" == test ]]; then
+  sleep 2 # cfprefsd writes just after the host exits
+  prefs_after=$(stat -f %m "$REAL_PREFS" 2>/dev/null || echo none)
+  if [[ "$prefs_before" != "$prefs_after" ]]; then
+    if [[ $app_running == yes ]]; then
+      echo "isolation: warning: the real preferences changed, but OpenAGC was running and may have written them"
+    else
+      echo "isolation: the test run wrote the real preferences ($REAL_PREFS)"
+      # Name what was written, so the leak can be found.
+      plutil -p "$REAL_PREFS" 2>/dev/null | sed 's/^/isolation:   /' | head -40
+      [[ $status -eq 0 ]] && status=1
+    fi
+  fi
+fi
 exit $status

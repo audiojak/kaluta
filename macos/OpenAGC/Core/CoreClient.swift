@@ -43,11 +43,17 @@ final class CoreClient: Sendable {
         }
     }
 
-    /// The app's Keychain items, or a separate service under tests so a
-    /// test can never read the user's sign-ins.
+    /// The app's Keychain items, or a separate service when hosting tests
+    /// or on a scratch data directory, so neither can read the user's
+    /// sign-ins. Everything that touches the Keychain defaults to this.
     static func defaultSecrets() -> KeychainSecretStore {
-        KeychainSecretStore(service: isRunningTests ? "ai.actual.openagc.tests" : "ai.actual.openagc")
+        if isRunningTests { return KeychainSecretStore(service: testSecretsService) }
+        return KeychainSecretStore(service: isScratchRun ? "ai.actual.openagc.scratch" : "ai.actual.openagc")
     }
+
+    /// The test host's Keychain service; emptied when the host starts and
+    /// quits (`AppDelegate`).
+    static let testSecretsService = "ai.actual.openagc.tests"
 
     /// Where the app's tests put scratch data: one directory per test-host
     /// process, which scripts/test-macos.sh removes after the run (and the
@@ -64,10 +70,20 @@ final class CoreClient: Sendable {
     /// tests or running on a scratch data directory (snapshots,
     /// automation): those must never write the real app's preferences
     /// (the test host and snapshots share its bundle id).
-    static func appDefaults() -> UserDefaults {
-        let scratch = isRunningTests || !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
-        guard scratch else { return .standard }
+    /// One suite per process, shared by everything that remembers a
+    /// setting, so a test run or snapshot is consistent with itself.
+    /// Launch arguments (`-OpenAGC…`) are still read from `.standard`:
+    /// reading the argument domain writes nothing.
+    static func appDefaults() -> UserDefaults { sharedDefaults }
+
+    nonisolated(unsafe) private static let sharedDefaults: UserDefaults = {
+        guard isRunningTests || isScratchRun else { return .standard }
         return UserDefaults(suiteName: "openagc-scratch-\(UUID().uuidString)") ?? .standard
+    }()
+
+    /// Pointed at a throwaway data directory (snapshots, automation).
+    static var isScratchRun: Bool {
+        !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
     }
 
     static var isRunningTests: Bool {
@@ -157,8 +173,16 @@ final class CoreClient: Sendable {
         await core.backfillStatus(accountId: accountID)
     }
 
-    func disableIMAP(_ accountID: String) async throws(CoreClientError) {
-        try await call { try await core.disableImap(accountId: accountID) }
+    /// Which transport serves each sync job and why, the breaker, recent
+    /// operations (the Sync Debugger, the sync footer).
+    func syncDiagnostics(_ accountID: String) async -> SyncDiagnostics {
+        await core.syncDiagnostics(accountId: accountID)
+    }
+
+    /// Time each sync job over IMAP and over the API (the Sync Debugger).
+    /// Reads only; changes no mail.
+    func compareTransports(_ accountID: String) async throws(CoreClientError) -> [TransportComparison] {
+        try await call { try await core.compareTransports(accountId: accountID) }
     }
 
     func isArchive(_ accountID: String) -> Bool { core.accountIsArchive(accountId: accountID) }
@@ -197,6 +221,11 @@ final class CoreClient: Sendable {
     /// Create a label; a `/` path creates missing parents.
     func createLabel(_ path: String, color: String? = nil) async throws(CoreClientError) -> LabelInfo {
         try await call { try await core.createLabel(name: path, color: color) }
+    }
+
+    /// The Inbox's category tabs with their counts, Primary first.
+    func inboxCategories(importantOnly: Bool) async throws(CoreClientError) -> [InboxCategory] {
+        try await call { try await core.inboxCategories(importantOnly: importantOnly) }
     }
 
     func threads(in mailboxID: String, after cursor: String? = nil, limit: UInt32 = 100) async throws(CoreClientError) -> ThreadPage {
@@ -247,6 +276,16 @@ final class CoreClient: Sendable {
     @discardableResult
     func trash(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
         try await call { try await core.trash(threadIds: threadIDs) }
+    }
+
+    /// Mark as Junk: to Spam, out of the Inbox (spec §14.3 amendment, junk).
+    func markJunk(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
+        try await call { try await core.markJunk(threadIds: threadIDs) }
+    }
+
+    /// Not Junk: out of Spam, into the Inbox.
+    func notJunk(_ threadIDs: [String]) async throws(CoreClientError) -> UndoToken? {
+        try await call { try await core.notJunk(threadIds: threadIDs) }
     }
 
     /// Reverse a recorded action exactly, in its own account.
@@ -307,6 +346,11 @@ final class CoreClient: Sendable {
         try await call { try await core.accountAddress() }
     }
 
+    /// The open account's own addresses (aliases too), lowercased.
+    func ownAddresses() async -> Set<String> {
+        Set((try? await call { try await core.ownAddresses() }) ?? [])
+    }
+
     func replyDraft(to messageID: String, all: Bool) async throws(CoreClientError) -> DraftInfo {
         try await call { try await core.replyDraft(messageId: messageID, replyAll: all) }
     }
@@ -342,6 +386,20 @@ final class CoreClient: Sendable {
     func cancelSend(_ draftID: Int64, in accountID: String) async -> Bool {
         let composer = composer(for: accountID)
         return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
+    }
+
+    /// The local draft that edits a draft from the Drafts mailbox (made on
+    /// first open, with its attachments).
+    func openDraft(_ messageID: String, in accountID: String) async throws(CoreClientError) -> DraftInfo {
+        let composer = composer(for: accountID)
+        return try await CoreClient.bridge { try await composer.openDraft(messageId: messageID) }
+    }
+
+    /// When the draft's send stops being held, if it is still held.
+    func sendHeldUntil(_ draftID: Int64, in accountID: String) async -> Date? {
+        let composer = composer(for: accountID)
+        let until = try? await CoreClient.bridge { try await composer.sendHeldUntil(draftId: draftID) }
+        return until.flatMap { $0 }.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
     }
 
     /// How long sends wait so they can be undone (0 = off).
@@ -720,6 +778,10 @@ typealias DraftAttachmentInfo = OpenAGCCore.DraftAttachmentInfo
 typealias DraftInfo = OpenAGCCore.DraftInfo
 typealias DraftStatus = OpenAGCCore.DraftStatus
 typealias LabelInfo = OpenAGCCore.LabelInfo
+typealias InboxCategory = OpenAGCCore.InboxCategory
+typealias SyncDiagnostics = OpenAGCCore.SyncDiagnostics
+typealias TransportOp = OpenAGCCore.TransportOp
+typealias TransportComparison = OpenAGCCore.TransportComparison
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow

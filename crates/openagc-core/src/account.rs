@@ -52,7 +52,54 @@ struct StoredClient {
 }
 
 /// An account's backfill transport (spec §7.4 IMAP amendment).
+/// One sync operation, for the Sync Debugger.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportOp {
+    /// "list", "headers", "bodies", "changes", "drafts", "search", "write".
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    /// Why the API served it, if it did.
+    pub reason: Option<String>,
+    pub at: i64,
+    pub millis: u64,
+    pub items: u32,
+    pub ok: bool,
+}
+
+/// How an account is syncing, by transport (docs/plans/imap-first-sync.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SyncDiagnostics {
+    pub syncing: bool,
+    pub backfill: BackfillStatus,
+    /// When IMAP is tried again, if paused after failures.
+    pub breaker_open_until: Option<i64>,
+    pub consecutive_imap_failures: u32,
+    pub last_imap_error: Option<String>,
+    /// The latest operation for each job.
+    pub latest_by_job: Vec<TransportOp>,
+    /// Newest first, up to 200.
+    pub recent: Vec<TransportOp>,
+    /// What Gmail's IMAP server supports, from the last login.
+    pub imap_capabilities: Vec<String>,
+    /// IMAP bytes per day before the API takes over.
+    pub imap_budget_bytes: u64,
+}
+
+/// One job measured one way (the Sync Debugger's comparison).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportComparison {
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    pub note: Option<String>,
+    pub millis: u64,
+    pub items: u32,
+    /// Why it was not measured, or how it failed.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct BackfillStatus {
     /// "rest", "imap", "imap-refused", or "none" when not syncing.
     pub transport: String,
@@ -86,6 +133,14 @@ impl provider_api::BackfillSource for LabelRefreshingImap {
     ) -> provider_api::ProviderResult<Option<Vec<provider_api::FetchedMessage>>> {
         self.refresh_labels().await;
         self.inner.fetch_headers(ids).await
+    }
+
+    async fn list(&self, query: &str) -> provider_api::ProviderResult<Option<Vec<mail_domain::MessageId>>> {
+        self.inner.list(query).await
+    }
+
+    async fn watch(&self, max: std::time::Duration) -> provider_api::ProviderResult<Option<bool>> {
+        self.inner.watch(max).await
     }
 
     fn cheap_headers(&self) -> bool {
@@ -323,7 +378,10 @@ impl From<ProviderError> for CoreError {
             ProviderError::Forbidden(_) => ErrorKind::PermissionDenied,
             ProviderError::NotFound(_) => ErrorKind::NotFound,
             ProviderError::RateLimited { .. } => ErrorKind::RateLimited,
-            ProviderError::Network(_) | ProviderError::Server { .. } | ProviderError::Decode(_) => ErrorKind::Network,
+            ProviderError::Network(_)
+            | ProviderError::Server { .. }
+            | ProviderError::Decode(_)
+            | ProviderError::Unavailable(_) => ErrorKind::Network,
             ProviderError::CursorExpired | ProviderError::Invalid(_) => ErrorKind::Internal,
         };
         CoreError::new(kind, e.to_string())
@@ -443,8 +501,8 @@ impl Core {
 #[uniffi::export]
 impl Core {
     /// Begin Gmail sign-in: returns the URL Swift opens in the browser.
-    /// `full_access` also asks for `https://mail.google.com/`, which faster
-    /// download over IMAP needs (spec §7.4 IMAP amendment); off by default.
+    /// `full_access` also asks for `https://mail.google.com/`, which IMAP
+    /// needs; the app always asks for it (docs/plans/imap-first-sync.md).
     pub async fn begin_gmail_sign_in(
         &self,
         client: OAuthClientConfig,
@@ -635,6 +693,71 @@ impl Core {
         .await
     }
 
+    /// Which transport serves each sync job for an account, why, the
+    /// breaker, and recent operations (docs/plans/imap-first-sync.md): for
+    /// the Sync Debugger and the sync footer. Empty when not syncing.
+    pub async fn sync_diagnostics(&self, account_id: String) -> SyncDiagnostics {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let imap = self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let (imap_capabilities, imap_budget_bytes) =
+            imap.map_or_else(|| (Vec::new(), 0), |i| (i.capabilities(), i.daily_budget_bytes()));
+        let status = self.backfill_status(account_id).await;
+        let Some(service) = service else {
+            return SyncDiagnostics {
+                syncing: false,
+                backfill: status,
+                imap_capabilities,
+                imap_budget_bytes,
+                ..Default::default()
+            };
+        };
+        let snap = service.engine().transport_snapshot();
+        let op = |r: &mail_sync::transport::OpRecord| TransportOp {
+            job: r.job.name().to_owned(),
+            via: r.via.name().to_owned(),
+            reason: r.reason.clone(),
+            at: r.at,
+            millis: r.millis,
+            items: r.items as u32,
+            ok: r.ok,
+        };
+        SyncDiagnostics {
+            syncing: true,
+            backfill: status,
+            breaker_open_until: snap.breaker_open_until,
+            consecutive_imap_failures: snap.consecutive_failures,
+            last_imap_error: snap.last_imap_error.clone(),
+            latest_by_job: snap.latest_by_job().iter().map(op).collect(),
+            recent: snap.recent.iter().map(op).collect(),
+            imap_capabilities,
+            imap_budget_bytes,
+        }
+    }
+
+    /// Time each sync job over IMAP and over the API for an account (the
+    /// Sync Debugger's comparison). Reads only; changes no mail.
+    pub async fn compare_transports(&self, account_id: String) -> Result<Vec<TransportComparison>, CoreError> {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let Some(service) = service else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "that account is not syncing"));
+        };
+        let rows = runtime::run(async move {
+            service.engine().compare_transports(Default::default()).await.map_err(CoreError::from)
+        })
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| TransportComparison {
+                job: r.job.name().to_owned(),
+                via: r.via.name().to_owned(),
+                note: r.note,
+                millis: r.millis,
+                items: r.items.min(u32::MAX as usize) as u32,
+                error: r.error,
+            })
+            .collect())
+    }
+
     /// How an account's backfill is fetching bodies (Settings shows it).
     pub async fn backfill_status(&self, account_id: String) -> BackfillStatus {
         let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
@@ -805,9 +928,11 @@ impl Core {
         .await
     }
 
-    /// Sync now (foreground, wake from sleep, network regained, ⌘R).
+    /// Sync now (foreground, wake from sleep, network regained, ⌘R). IMAP
+    /// is tried again at once even if it failed lately.
     pub fn sync_now(&self) {
         for service in self.accounts.all() {
+            service.engine().reset_transport();
             service.sync_now();
         }
     }
@@ -946,7 +1071,7 @@ mod tests {
     #[test]
     fn with_imap_granted_backfill_bodies_come_over_imap_and_the_rest_stays_on_the_api() {
         use provider_gmail::imap::{ImapConfig, ImapEndpoint};
-        use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+        use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer, SPAM};
 
         let dir = std::env::temp_dir().join(format!("openagc-core-imap-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -975,18 +1100,38 @@ mod tests {
                     uid: n,
                     msgid,
                     thrid: msgid,
-                    labels: vec!["\\Inbox".into()],
+                    // Message 2 is a promotion: Gmail's IMAP says so only
+                    // through a search.
+                    labels: if n == 2 {
+                        vec!["\\Inbox".into(), "category:promotions".into()]
+                    } else {
+                        vec!["\\Inbox".into()]
+                    },
                     flags: vec![],
                     raw: raw.into_bytes(),
                 });
             }
+            // Spam lives outside All Mail, in a folder of its own (with
+            // UIDs of its own); the API does not know it at all.
+            server.add_to(
+                SPAM,
+                FakeImapMessage {
+                    uid: 1,
+                    msgid: 0x1a0000000000009,
+                    thrid: 0x1a0000000000009,
+                    labels: vec![],
+                    flags: vec![],
+                    raw: b"From: Spammer <x@example.com>\r\nTo: me@example.com\r\nSubject: IMAP spam\r\nMessage-ID: <spam@example.com>\r\nDate: Mon, 01 Sep 2025 10:00:00 +0000\r\n\r\nBuy now\r\n".to_vec(),
+                },
+            );
             let config = ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), ..ImapConfig::gmail("me@example.com") };
             let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
             assert!(imap.is_some());
             core.start_sync_with_backfill(rest.clone(), imap).unwrap();
             for _ in 0..200 {
                 let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
-                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) {
+                // Subjects arrive with the headers pass; wait for the bodies too.
+                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) && server.body_fetches() == 3 {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(25)).await;
@@ -995,13 +1140,86 @@ mod tests {
             let mut subjects: Vec<String> = rows.iter().map(|r| r.subject.clone()).collect();
             subjects.sort();
             assert_eq!(subjects, ["IMAP 1", "IMAP 2"], "bodies came over IMAP");
-            assert_eq!(server.body_fetches(), 2);
-            assert_eq!(server.header_fetches(), 2, "headers first");
+            assert_eq!(server.body_fetches(), 3);
+            let spam = core.list_threads("SPAM".into(), None, 10).await.unwrap().rows;
+            assert_eq!(spam.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(), ["IMAP spam"], "Spam synced over IMAP");
+            assert!(server.header_fetches() >= 2, "headers first");
             assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no REST body fetches");
             let status = core.backfill_status("acct".into()).await;
             assert_eq!(status.transport, "imap");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.syncing && diag.breaker_open_until.is_none());
+            let bodies = diag.latest_by_job.iter().find(|op| op.job == "bodies").expect("bodies recorded");
+            assert_eq!((bodies.via.as_str(), bodies.ok), ("imap", true));
+            let list = diag.latest_by_job.iter().find(|op| op.job == "list").expect("listing recorded");
+            assert_eq!((list.via.as_str(), list.reason.as_deref()), ("imap", None), "listed over IMAP");
+            let changes = diag.latest_by_job.iter().find(|op| op.job == "changes");
+            assert!(changes.is_none_or(|c| c.via == "api" && c.reason.is_some()), "changes: the API, and why");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
+
+            // Inbox categories come from IMAP searches, as the messages
+            // themselves carry none.
+            let mut promotions = 0;
+            for _ in 0..200 {
+                let counts = core.inbox_categories(false).await.unwrap_or_default();
+                promotions = counts.iter().find(|c| c.id == "CATEGORY_PROMOTIONS").map_or(0, |c| c.total_count);
+                if promotions == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(promotions, 1, "the promotion was found by an IMAP search");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let op = diag.latest_by_job.iter().find(|op| op.job == "categories").expect("categories recorded");
+            assert_eq!(op.via, "imap");
+
+            // New mail arrives at once over IDLE, without waiting for the
+            // 30 s poll or a sync_now.
+            let mut fresh = message("1a0000000000003", &["INBOX", "UNREAD"]);
+            fresh.subject = "pushed".into();
+            rest.deliver(fresh);
+            server.add(FakeImapMessage {
+                uid: 3,
+                msgid: 0x1a0000000000003,
+                thrid: 0x1a0000000000003,
+                labels: vec!["\\Inbox".into()],
+                flags: vec![],
+                raw: b"From: s@example.com\r\nSubject: pushed\r\n\r\nNew\r\n".to_vec(),
+            });
+            let pushed = std::time::Instant::now();
+            while pushed.elapsed() < Duration::from_secs(10) {
+                let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
+                if rows.len() == 3 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(core.list_threads("INBOX".into(), None, 10).await.unwrap().rows.len(), 3, "pushed over IDLE");
+            assert!(server.idles() >= 1);
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let push = diag.latest_by_job.iter().find(|op| op.job == "push").expect("push recorded");
+            assert_eq!(push.via, "imap");
+
+            // The Sync Debugger: capabilities from the login, and each job
+            // timed both ways without storing anything.
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.imap_capabilities.iter().any(|c| c == "X-GM-EXT-1"), "{:?}", diag.imap_capabilities);
+            assert!(diag.imap_budget_bytes > 0);
+            let stored = core.backfill_status("acct".into()).await.stored_messages;
+            let rows = core.compare_transports("acct".into()).await.unwrap();
+            let find = |job: &str, via: &str| {
+                rows.iter().find(|r| r.job == job && r.via == via).unwrap_or_else(|| panic!("{job} {via}: {rows:?}"))
+            };
+            assert_eq!((find("list", "imap").items, find("list", "imap").error.as_deref()), (3, None));
+            assert_eq!(find("list", "api").items, 3);
+            assert_eq!(find("headers", "imap").items, 3);
+            assert!(find("headers", "api").error.is_some(), "the API has no cheaper headers");
+            assert_eq!((find("bodies", "imap").items, find("bodies", "api").items), (3, 3));
+            assert!(find("changes", "api").error.is_none());
+            assert!(find("changes", "imap").note.as_deref().is_some_and(|n| n.contains("no change log")));
+            assert_eq!(core.backfill_status("acct".into()).await.stored_messages, stored, "nothing stored");
+            assert!(core.compare_transports("other".into()).await.is_err());
 
             // Tiered download: the body window is per account.
             assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::Month, "default");

@@ -14,29 +14,29 @@ struct AttachmentStrip: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Space.xs) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: Space.m) {
                     ForEach(attachments, id: \.id) { attachment in
                         chip(attachment)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 2)
+                .padding(.horizontal, Space.xxl)
+                .padding(.vertical, Space.hair)
             }
             if let error {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
-                    .padding(.horizontal, 20)
+                    .padding(.horizontal, Space.xxl)
             }
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, Space.s)
         .quickLookPreview($previewURL)
     }
 
     private func chip(_ attachment: AttachmentInfo) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: Space.s) {
             if loading.contains(attachment.id) {
                 ProgressView().controlSize(.mini)
             } else {
@@ -52,9 +52,9 @@ struct AttachmentStrip: View {
                 .foregroundStyle(.secondary)
         }
         .font(.callout)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 6))
+        .padding(.horizontal, Space.m)
+        .padding(.vertical, Space.s)
+        .background(Tone.controlFill, in: .rect(cornerRadius: Radius.control))
         .contentShape(.rect)
         .onTapGesture(count: 2) { perform(attachment) { NSWorkspace.shared.open($0) } }
         .onTapGesture { perform(attachment) { previewURL = $0 } }
@@ -65,7 +65,7 @@ struct AttachmentStrip: View {
             Button("Save As…") { perform(attachment) { save($0) } }
             Button("Show in Finder") { perform(attachment) { NSWorkspace.shared.activateFileViewerSelecting([$0]) } }
         }
-        .help("\(attachment.filename) — click to preview, double-click to open")
+        .hoverHelp("\(attachment.filename) — click to preview, double-click to open")
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(named: "Open") { perform(attachment) { NSWorkspace.shared.open($0) } }

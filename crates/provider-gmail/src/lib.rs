@@ -39,6 +39,7 @@ pub mod cost {
     pub const SEND: u32 = 100;
     pub const ATTACHMENT_GET: u32 = 20;
     pub const DRAFTS_WRITE: u32 = 10;
+    pub const DRAFTS_LIST: u32 = 5;
     pub const LABELS_CREATE: u32 = 5;
 }
 
@@ -297,5 +298,24 @@ impl MailProvider for GmailProvider {
     async fn delete_draft(&self, draft_id: &str) -> ProviderResult<()> {
         let url = self.url(&format!("drafts/{draft_id}"));
         self.http.empty(cost::DRAFTS_WRITE, Priority::Interactive, |c| c.delete(&url)).await
+    }
+
+    async fn list_drafts(&self) -> ProviderResult<Option<Vec<(String, MessageId)>>> {
+        let url = self.url("drafts");
+        let mut out = Vec::new();
+        let mut page: Option<String> = None;
+        loop {
+            let mut query: Vec<(&str, String)> = vec![("maxResults", "500".into())];
+            if let Some(p) = &page {
+                query.push(("pageToken", p.clone()));
+            }
+            let list: wire::DraftList =
+                self.http.json(cost::DRAFTS_LIST, Priority::Background, |c| c.get(&url).query(&query)).await?;
+            out.extend(list.drafts.into_iter().map(|d| (d.id, MessageId(d.message.id))));
+            match list.next_page_token {
+                Some(next) => page = Some(next),
+                None => return Ok(Some(out)),
+            }
+        }
     }
 }

@@ -53,9 +53,7 @@ final class AppModel {
             guard newValue != inboxImportantOnlyLoaded else { return }
             inboxImportantOnlyLoaded = newValue
             if let id = openAccountID { defaults.set(newValue, forKey: Self.importantOnlyKey(id)) }
-            selectedThreadID = nil
-            selectedThreadIDs = []
-            if case .open = accountState, let id = listMailboxID { Task { await threads.show(mailboxID: id) } }
+            relist()
         }
     }
 
@@ -63,11 +61,156 @@ final class AppModel {
 
     static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
 
-    /// What the thread list shows: the selected mailbox, narrowed to
-    /// Important in the Inbox when that switch is on.
+    /// The open account's addresses, aliases included: rows show other
+    /// people, and "Me" only when it is just you.
+    private(set) var ownAddresses: Set<String> = []
+
+    /// Every Inbox category with its counts, narrowed like the list
+    /// (Important only); the tabs are `InboxCategories.visible` of these.
+    private(set) var inboxCategoryCounts: [InboxCategory] = []
+
+    /// The Inbox's category tabs are on (per account; on by default).
+    var showCategories: Bool {
+        get { showCategoriesLoaded }
+        set {
+            guard newValue != showCategoriesLoaded else { return }
+            showCategoriesLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.showCategoriesKey(id)) }
+            relist()
+        }
+    }
+
+    private var showCategoriesLoaded = true
+
+    /// The category tab the user chose (per account); the list shows it
+    /// while it has mail, otherwise Primary.
+    var inboxCategory: String {
+        get { inboxCategoryLoaded }
+        set {
+            guard newValue != inboxCategoryLoaded else { return }
+            inboxCategoryLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.inboxCategoryKey(id)) }
+            relist()
+        }
+    }
+
+    private var inboxCategoryLoaded = InboxCategories.primary
+    @ObservationIgnored private var categoryGeneration = 0
+
+    static func showCategoriesKey(_ accountID: String) -> String { "inboxShowCategories.\(accountID)" }
+    static let dismissedTipsKey = "dismissedTips"
+
+    /// Tips the user acted on or put away; they never come back.
+    private(set) var dismissedTips: Set<String> = []
+
+    /// The tip over the Inbox now, if any.
+    var currentTip: Tip? {
+        Tip.next(dismissed: dismissedTips, context: Tip.Context(
+            inInbox: selectedMailboxID == "INBOX",
+            searching: threads.searchQuery != nil,
+            categoriesAvailable: inboxCategoryCounts.contains { $0.id != InboxCategories.primary && $0.totalCount > 0 },
+            categoriesShown: showCategories,
+            importantOnly: inboxImportantOnly,
+            agentShown: agent.isPresented))
+    }
+
+    /// Act on a tip (`accept`) or put it away; either way it is done.
+    func finishTip(_ tip: Tip, accept: Bool) {
+        switch (tip, accept) {
+        case (.categories, false): showCategories = false
+        case (.importantOnly, true): inboxImportantOnly = true
+        case (.agent, true):
+            agent.isPresented = true
+            focusAgentPrompt()
+        default: break
+        }
+        dismissedTips.insert(tip.rawValue)
+        defaults.set(Array(dismissedTips).sorted(), forKey: Self.dismissedTipsKey)
+    }
+    static func inboxCategoryKey(_ accountID: String) -> String { "inboxCategory.\(accountID)" }
+
+    /// The tabs above the Inbox list; empty when categories are off or
+    /// the account has none.
+    var inboxCategoryTabs: [InboxCategory] {
+        showCategories ? InboxCategories.visible(inboxCategoryCounts) : []
+    }
+
+    /// The tab the Inbox list is narrowed to, if any.
+    var activeInboxCategory: String? {
+        InboxCategories.active(chosen: inboxCategory, visible: inboxCategoryTabs)
+    }
+
+    /// What the thread list shows: the selected mailbox; in the Inbox,
+    /// narrowed to Important when that switch is on and to the category
+    /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID else { return nil }
-        return id == "INBOX" && inboxImportantOnly ? "INBOX+IMPORTANT" : id
+        var parts = [id]
+        if id == "INBOX" {
+            if inboxImportantOnly { parts.append("IMPORTANT") }
+            if let category = activeInboxCategory { parts.append(category) }
+        }
+        parts += ListFilter.ordered(listFilters).map(\.rawValue)
+        return parts.joined(separator: "+")
+    }
+
+    /// The list filters (spec §14.3 amendment, filters): per window, kept
+    /// across mailboxes, not remembered between launches.
+    var listFilters: Set<ListFilter> = [] {
+        didSet { if listFilters != oldValue { relist() } }
+    }
+
+    /// Run the search, or with nothing typed go back to the listing as it
+    /// is now: filters or tabs may have changed during the search.
+    private func searchChanged() {
+        let query = filteredSearch
+        guard query.isEmpty else { threads.search(query); return }
+        threads.search("")
+        if case .open = accountState, let id = listMailboxID, threads.searchQuery != nil || id != threads.mailboxID {
+            Task { await threads.show(mailboxID: id) }
+        }
+    }
+
+    /// The search as the store runs it: the typed query plus the filters'
+    /// operators. Empty when nothing is typed (the filters then narrow the
+    /// mailbox instead).
+    var filteredSearch: String {
+        let typed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return "" }
+        let filters = ListFilter.ordered(listFilters).map(\.searchOperator)
+        // Grouped, so `a OR b` is filtered as a whole (AND binds tighter).
+        return filters.isEmpty ? typed : (["(\(typed))"] + filters).joined(separator: " ")
+    }
+
+    /// Show the list again after the Inbox's narrowing changed; the
+    /// selection goes, as when choosing another mailbox.
+    private func relist() {
+        selectedThreadID = nil
+        selectedThreadIDs = []
+        guard case .open = accountState else { return }
+        Task {
+            await reloadInboxCategories()
+            if !filteredSearch.isEmpty {
+                threads.search(filteredSearch)
+            } else if let id = listMailboxID, id != threads.mailboxID || threads.searchQuery != nil {
+                await threads.show(mailboxID: id)
+            }
+        }
+    }
+
+    /// Re-count the Inbox's categories. Returns whether the list's
+    /// narrowing changed as a result (a tab emptied or appeared).
+    @discardableResult
+    func reloadInboxCategories() async -> Bool {
+        guard let core, case .open = accountState else { return false }
+        categoryGeneration += 1
+        let generation = categoryGeneration
+        let before = listMailboxID
+        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        // A newer reload (the switch toggled again) wins.
+        guard generation == categoryGeneration else { return false }
+        inboxCategoryCounts = counts
+        return listMailboxID != before
     }
 
     /// The open account's id, if any (demo included).
@@ -86,6 +229,17 @@ final class AppModel {
     /// How the open account's backfill downloads bodies ("imap", "rest",
     /// "imap-refused"), for the sidebar's sync line.
     private(set) var backfillTransport: String?
+    /// Why the account is on the Gmail API when it should be on IMAP (it
+    /// failed, or was refused); nil otherwise. A quiet line in the sync
+    /// footer (maintainer decision 3, docs/plans/imap-first-sync.md).
+    private(set) var transportNote: String?
+
+    static func transportNote(_ d: SyncDiagnostics) -> String? {
+        guard d.syncing else { return nil }
+        if d.backfill.transport == "imap-refused" { return "IMAP was refused for this account" }
+        if d.breakerOpenUntil != nil { return "IMAP paused after errors" }
+        return nil
+    }
     @ObservationIgnored private var transportCheckedAt: Date = .distantPast
     /// Set when Google rejected the stored credentials; shows a banner.
     private(set) var needsReauthentication = false
@@ -101,7 +255,7 @@ final class AppModel {
     var selectedThreadID: String?
     /// The toolbar search field's text.
     var searchText = "" {
-        didSet { if searchText != oldValue { threads.search(searchText) } }
+        didSet { if searchText != oldValue { searchChanged() } }
     }
     /// Every selected thread; actions apply to all of them.
     var selectedThreadIDs: Set<String> = []
@@ -113,8 +267,9 @@ final class AppModel {
     @ObservationIgnored var openComposer: ((ComposeRequest) -> Void)?
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
+    @ObservationIgnored var openSyncDebugger: (() -> Void)?
 
-    let notifier = NewMailNotifier()
+    let notifier: NewMailNotifier
     let mailboxes: MailboxStore
     let threads: ThreadListStore
     let reader: ReaderStore
@@ -154,11 +309,13 @@ final class AppModel {
         self.core = core
         self.defaults = defaults
         accountEmail = defaults.string(forKey: "accountEmail")
+        dismissedTips = Set(defaults.stringArray(forKey: Self.dismissedTipsKey) ?? [])
         undoSendSeconds = (defaults.object(forKey: Self.undoSendKey) as? Int).map { UInt32(clamping: $0) } ?? 10
         mailboxes = MailboxStore(core: core)
         threads = ThreadListStore(core: core)
-        reader = ReaderStore(core: core)
-        fallbackAgent = AgentStore(core: core)
+        reader = ReaderStore(core: core, defaults: defaults)
+        notifier = NewMailNotifier(defaults: defaults)
+        fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
@@ -214,7 +371,9 @@ final class AppModel {
     /// Sign in to Gmail: again as the open account, or (`adding`) as a new
     /// one, in which case Google shows its account chooser and a cancelled
     /// sign-in returns to the account that was open (spec §7.7).
-    func signIn(with client: GoogleClientConfiguration, adding: Bool = false, fullAccess: Bool = false) async {
+    /// Full mail access is asked for by default: IMAP is the default
+    /// transport (docs/plans/imap-first-sync.md).
+    func signIn(with client: GoogleClientConfiguration, adding: Bool = false, fullAccess: Bool = true) async {
         guard let core, client.isUsable else { return }
         let previous = openAccountID
         accountBeforeSignIn = previous
@@ -257,17 +416,11 @@ final class AppModel {
         }
     }
 
-    /// Faster download over IMAP for an account (spec §7.4): on means
-    /// signing in again with full mail access; off stops using it.
-    func setFasterDownload(_ on: Bool, for accountID: String) async {
-        guard let core else { return }
-        if on {
-            await switchAccount(to: accountID)
-            await signIn(with: .effective(), fullAccess: true)
-        } else {
-            try? await core.disableIMAP(accountID)
-            await reloadAccounts()
-        }
+    /// Sign an account in again, which grants the full mail access IMAP
+    /// needs (an account signed in before IMAP became the default).
+    func signInAgainForIMAP(_ accountID: String) async {
+        await switchAccount(to: accountID)
+        await signIn(with: .effective())
     }
 
     /// Add another Gmail account (the avatar menu's Add Account…).
@@ -301,11 +454,16 @@ final class AppModel {
         guard let core else { return }
         do {
             try await core.openAccount(accountID)
-            if agentStores[accountID] == nil { agentStores[accountID] = AgentStore(core: core) }
+            if agentStores[accountID] == nil { agentStores[accountID] = makeAgentStore(core: core, accountID: accountID) }
             accountState = .open(accountID: accountID)
             await mailboxes.reload()
             await reloadAccounts()
             inboxImportantOnlyLoaded = defaults.bool(forKey: Self.importantOnlyKey(accountID))
+            showCategoriesLoaded = defaults.object(forKey: Self.showCategoriesKey(accountID)) as? Bool ?? true
+            inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
+            await reloadInboxCategories()
+            ownAddresses = await core.ownAddresses()
+            reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -418,6 +576,13 @@ final class AppModel {
 
     /// A suggestion was chosen: send it, or put it in the field when it
     /// needs the user's words.
+    /// Put an example in the prompt for the user to send or change (the
+    /// agent column's examples).
+    func fillPrompt(_ suggestion: AgentSuggestion) {
+        agentPromptDraft = suggestion.fillText
+        focusAgentPrompt()
+    }
+
     func choose(_ suggestion: AgentSuggestion) {
         if suggestion.fillsOnly {
             agentPromptDraft = suggestion.fillText
@@ -530,8 +695,11 @@ final class AppModel {
         guard let core, let id = openAccountID, force || Date().timeIntervalSince(transportCheckedAt) > 5 else { return }
         transportCheckedAt = Date()
         Task {
-            let status = await core.backfillStatus(id)
-            if openAccountID == id, backfillTransport != status.transport { backfillTransport = status.transport }
+            let diagnostics = await core.syncDiagnostics(id)
+            guard openAccountID == id else { return }
+            if backfillTransport != diagnostics.backfill.transport { backfillTransport = diagnostics.backfill.transport }
+            let note = Self.transportNote(diagnostics)
+            if transportNote != note { transportNote = note }
         }
     }
 
@@ -587,13 +755,28 @@ final class AppModel {
         reveal(threadID: threadID)
     }
 
-    /// Show a thread from a notification: switch to the Inbox and select it.
+    /// Show a thread from a notification: switch to the Inbox, and to its
+    /// category tab, and select it.
     func reveal(threadID: String) {
         if selectedMailboxID != "INBOX" { selectedMailboxID = "INBOX" }
+        listFilters = []
         searchText = ""
         selectedThreadIDs = []
         selectedThreadID = threadID
+        guard let core else { return }
+        Task {
+            guard let labels = try? await core.thread(threadID)?.thread.labelIds else { return }
+            // Hidden by Important only: show the whole Inbox.
+            if inboxImportantOnly, !labels.contains("IMPORTANT") { inboxImportantOnly = false }
+            // New mail may be the first in its tab: count before choosing.
+            await reloadInboxCategories()
+            let tab = InboxCategories.category(of: labels, in: inboxCategoryCounts.map(\.id))
+            if !inboxCategoryTabs.isEmpty, tab != activeInboxCategory { inboxCategory = tab }
+            // Changing the narrowing clears the selection; this one is the point.
+            selectedThreadID = threadID
+        }
     }
+
 
     // MARK: Compose
 
@@ -644,6 +827,22 @@ final class AppModel {
 
     func trashSelection() {
         removeFromList(.trash) { core, ids in try await core.trash(ids) }
+    }
+
+    /// The Spam mailbox is on screen: the junk action is Not Junk there.
+    var isSpamMailbox: Bool { selectedMailboxID == "SPAM" && threads.searchQuery == nil }
+
+    /// Junk is for received mail: not offered in Sent or Drafts.
+    var canJunk: Bool { !["SENT", "DRAFT"].contains(selectedMailboxID ?? "") }
+
+    /// Mark as Junk, or Not Junk in Spam (spec §14.3 amendment, junk).
+    func toggleJunkSelection() {
+        guard canJunk else { return }
+        if isSpamMailbox {
+            removeFromList(.notJunk) { core, ids in try await core.notJunk(ids) }
+        } else {
+            removeFromList(.junk) { core, ids in try await core.markJunk(ids) }
+        }
     }
 
     func moveSelectionToInbox() {
@@ -705,6 +904,40 @@ final class AppModel {
     }
 
     /// A composer sent a message that is held: offer to take it back.
+    /// Open a thread's draft in a composer (the Drafts mailbox: Edit
+    /// Draft, a double-click or Return). A draft written elsewhere becomes
+    /// a local draft the first time, attachments included; saving it
+    /// updates the same draft on Gmail.
+    func editDraft(threadID: String? = nil) {
+        guard let core, let threadID = threadID ?? selectedThreadID, let account = openAccountID else { return }
+        Task {
+            guard let detail = try? await core.thread(threadID),
+                  let message = detail.messages.last(where: \.isDraft) else { return }
+            do {
+                let draft = try await core.openDraft(message.id, in: account)
+                compose(.draft(id: draft.id))
+            } catch let error as CoreClientError {
+                logger.error("open draft failed: \(error.message, privacy: .private)")
+                undo.show("Couldn't open the draft: \(error.message)", accountID: account)
+            } catch {}
+        }
+    }
+
+    /// An account's agent panel; an approved send it holds can be taken
+    /// back from its card (spec §14.6a), reopening the draft for review.
+    private func makeAgentStore(core: CoreClient, accountID: String) -> AgentStore {
+        let store = AgentStore(core: core, defaults: defaults)
+        store.heldUntil = { draftID in await core.sendHeldUntil(draftID, in: accountID) }
+        store.takeBack = { [weak self, weak store] draftID in
+            guard await core.cancelSend(draftID, in: accountID) else { return false }
+            guard let self else { return true }
+            if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
+            self.compose(.review(draftID: draftID, agent: store?.providerName ?? "Agent"))
+            return true
+        }
+        return store
+    }
+
     func sendHeld(draftID: Int64, accountID: String) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
@@ -895,7 +1128,15 @@ final class AppModel {
         return account == openAccountID
     }
 
+    /// Agent sessions that report somewhere other than the agent panel (a
+    /// composer's writing help), by session id.
+    @ObservationIgnored var agentSinks: [String: @MainActor ([AgentEventInfo]) async -> Void] = [:]
+
     private func handle(_ tagged: CoreClientEvent.Tagged) async {
+        if case let .agent(sessionID, events) = tagged.event, let sink = agentSinks[sessionID] {
+            await sink(events)
+            return
+        }
         // An agent session reports to its own account's panel, shown or not.
         if case let .agent(sessionID, events) = tagged.event, let account = tagged.accountID,
            let store = agentStores[account] {
@@ -924,7 +1165,12 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
-            if mailboxID == threads.mailboxID || threads.searchQuery != nil {
+            // A category tab may have gained its first thread or lost its
+            // last: then the Inbox shows another narrowing.
+            if selectedMailboxID == "INBOX", mailboxID == "INBOX" || mailboxID.hasPrefix("CATEGORY_"),
+               await reloadInboxCategories(), threads.searchQuery == nil, let id = listMailboxID {
+                await threads.show(mailboxID: id)
+            } else if mailboxID == threads.mailboxID || threads.searchQuery != nil {
                 await threads.apply(hint)
             } else if let shown = threads.mailboxID, shown.split(separator: "+").contains(Substring(mailboxID)) {
                 // A narrowed view (INBOX+IMPORTANT): a change to either

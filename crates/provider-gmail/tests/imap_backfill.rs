@@ -8,9 +8,9 @@ use mail_domain::{LabelId, MessageId, ThreadId};
 use mail_mime::mbox::fixture::FixtureMessage;
 use provider_api::fake::FakeProvider;
 use provider_api::token::StaticToken;
-use provider_api::{BackfillSource, FetchedMessage};
+use provider_api::{BackfillSource, FetchedMessage, ProviderError};
 use provider_gmail::imap::{ImapBackfill, ImapConfig, ImapEndpoint};
-use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+use provider_gmail::imap_fake::{DRAFTS, FakeImapMessage, FakeImapServer, SPAM, TRASH};
 
 const MSG_A: u64 = 0x18a1_0000_0000_0001;
 const MSG_B: u64 = 0x18a1_0000_0000_0002;
@@ -116,14 +116,16 @@ async fn big_and_unknown_messages_go_over_the_api() {
 
 #[tokio::test]
 async fn a_refused_login_means_the_api_from_then_on() {
+    // The source says so; the engine's transport serves the batch over the
+    // API (docs/plans/imap-first-sync.md) and records why.
     let (server, rest, source) = setup("wrong-token").await;
-    let fetched = source.fetch(&[hex(MSG_BIG)]).await.unwrap();
-    assert_eq!(fetched.len(), 1);
+    assert!(source.fetch(&[hex(MSG_BIG)]).await.is_err());
     assert!(source.is_refused());
     assert_eq!(source.name(), "imap-refused");
-    source.fetch(&[hex(MSG_BIG)]).await.unwrap();
+    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap_err();
+    assert!(matches!(again, ProviderError::Unavailable(_)), "refused is unavailable, not a failure: {again}");
     assert_eq!(server.logins(), 0);
-    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 2, "no second login attempt");
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no second login attempt, no API");
 }
 
 #[tokio::test]
@@ -143,8 +145,8 @@ async fn the_daily_budget_hands_over_to_the_api() {
     };
     source.fetch(&[hex(MSG_A)]).await.unwrap();
     assert_eq!(server.body_fetches(), 1);
-    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap();
-    assert_eq!(again[0].subject, "from REST");
+    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap_err();
+    assert!(matches!(again, ProviderError::Unavailable(_)), "over budget: the API's turn");
     assert_eq!(server.body_fetches(), 1, "over budget: no more IMAP today");
 }
 
@@ -162,7 +164,7 @@ async fn headers_come_without_bodies_for_a_browsable_list() {
     assert_eq!(server.body_fetches(), 0);
 
     let (_s2, _r2, refused) = setup("wrong-token").await;
-    assert!(refused.fetch_headers(&[hex(MSG_A)]).await.unwrap().is_none(), "no cheap headers without IMAP");
+    assert!(refused.fetch_headers(&[hex(MSG_A)]).await.is_err(), "no cheap headers without IMAP");
 }
 
 fn crlf(s: &str) -> Vec<u8> {
@@ -260,4 +262,100 @@ async fn a_message_that_left_all_mail_since_the_map_loaded_comes_over_the_api() 
     let fetched = source.fetch(&[hex(MSG_B)]).await.unwrap();
     assert_eq!(fetched.len(), 1, "never silently dropped");
     assert_eq!(fetched[0].subject, "B from REST");
+}
+
+#[tokio::test]
+async fn gmail_searches_list_ids_over_imap_without_the_api() {
+    let (server, rest, source) = setup("good-token").await;
+    let ids = |q: &'static str| {
+        let source = &source;
+        async move {
+            let mut out: Vec<String> =
+                source.list(q).await.unwrap().expect("IMAP can list").into_iter().map(|m| m.0).collect();
+            out.sort();
+            out
+        }
+    };
+    assert_eq!(ids("in:inbox").await, [hex(MSG_A).0], "the Inbox");
+    assert_eq!(ids("in:inbox is:unread").await, [hex(MSG_A).0], "unread in the Inbox");
+    assert_eq!(ids("is:starred").await, [hex(MSG_B).0]);
+    let mut all = vec![hex(MSG_A).0, hex(MSG_B).0, hex(MSG_BIG).0];
+    all.sort();
+    assert_eq!(ids("").await, all, "everything in All Mail");
+    assert_eq!(server.searches(), 4);
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no API calls");
+
+    let (_s2, _r2, refused) = setup("wrong-token").await;
+    assert!(refused.list("in:inbox").await.is_err(), "refused: the engine lists over the API");
+}
+
+#[tokio::test]
+async fn spam_trash_and_drafts_come_from_their_folders_with_their_labels() {
+    let (server, rest, source) = setup("good-token").await;
+    const SPAMMY: u64 = 0x18a1_0000_0000_0010;
+    const BINNED: u64 = 0x18a1_0000_0000_0011;
+    const DRAFTED: u64 = 0x18a1_0000_0000_0012;
+    // UIDs are per folder: the same UIDs as All Mail's, on purpose.
+    for (folder, uid, msgid, n) in [(SPAM, 10, SPAMMY, 4), (TRASH, 11, BINNED, 5), (DRAFTS, 10, DRAFTED, 6)] {
+        server.add_to(
+            folder,
+            FakeImapMessage {
+                uid,
+                msgid,
+                thrid: msgid,
+                labels: if folder == DRAFTS { vec!["\\Draft".into()] } else { vec![] },
+                flags: vec!["\\Seen".into()],
+                raw: FixtureMessage::simple(n).to_rfc822(),
+            },
+        );
+    }
+
+    let labels_of = |m: &FetchedMessage| m.label_ids.iter().map(|l| l.as_str().to_owned()).collect::<Vec<_>>();
+    let mut fetched = source.fetch(&[hex(MSG_A), hex(SPAMMY), hex(BINNED), hex(DRAFTED)]).await.unwrap();
+    fetched.sort_by(|a, b| a.id.0.cmp(&b.id.0));
+    let subjects: Vec<&str> = fetched.iter().map(|m| m.subject.as_str()).collect();
+    assert_eq!(subjects, ["Subject 1", "Subject 4", "Subject 5", "Subject 6"], "each from its own folder, not by UID");
+    assert_eq!(labels_of(&fetched[1]), ["SPAM"]);
+    assert_eq!(labels_of(&fetched[2]), ["TRASH"]);
+    assert_eq!(labels_of(&fetched[3]), ["DRAFT"]);
+
+    let headers = source.fetch_headers(&[hex(SPAMMY), hex(MSG_B)]).await.unwrap().unwrap();
+    assert_eq!(headers.len(), 2);
+    assert!(headers.iter().all(|m| m.body.is_none()));
+
+    assert_eq!(source.list("in:spam").await.unwrap().unwrap(), [hex(SPAMMY)]);
+    assert_eq!(source.list("in:trash newer_than:10000d").await.unwrap().unwrap(), [hex(BINNED)]);
+    assert_eq!(source.list("in:drafts").await.unwrap().unwrap(), [hex(DRAFTED)]);
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no API calls");
+    assert_eq!(server.logins(), 1, "one session, switching folders");
+}
+
+#[tokio::test]
+async fn idle_reports_new_mail_at_once_and_times_out_quietly() {
+    use std::time::Duration;
+    let (server, _rest, source) = setup("good-token").await;
+    assert_eq!(source.watch(Duration::from_millis(100)).await.unwrap(), Some(false), "nothing new: the wait runs out");
+
+    let server = Arc::new(server);
+    let adder = server.clone();
+    let add = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        adder.add(FakeImapMessage {
+            uid: 13,
+            msgid: 0x18a1_0000_0000_0020,
+            thrid: THREAD,
+            labels: vec!["\\Inbox".into()],
+            flags: vec![],
+            raw: FixtureMessage::simple(9).to_rfc822(),
+        });
+    });
+    let started = std::time::Instant::now();
+    assert_eq!(source.watch(Duration::from_secs(20)).await.unwrap(), Some(true), "new mail wakes the wait");
+    assert!(started.elapsed() < Duration::from_secs(5), "at once, not at the timeout");
+    add.await.unwrap();
+    assert_eq!(server.idles(), 2);
+    assert_eq!(server.logins(), 1, "one IDLE connection, kept between waits");
+
+    let (_s2, _r2, refused) = setup("wrong-token").await;
+    assert!(refused.watch(Duration::from_millis(50)).await.is_err());
 }

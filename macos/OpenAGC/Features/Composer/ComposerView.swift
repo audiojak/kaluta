@@ -2,14 +2,18 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// A composer window's content (spec §14.5): header fields, the rich-text
-/// body, the quoted original, attachments, and Send.
+/// body, the message being answered (shown by default, in a pane that can
+/// be resized or hidden), writing help from the agent, attachments, and
+/// Send.
 struct ComposerView: View {
     let request: ComposeRequest
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var store: ComposerStore?
-    @State private var showsQuote = false
+    @State private var showsQuote = true
     @State private var importing = false
+    @State private var assistant = ComposerAssistant()
+    @FocusState private var assistantFocused: Bool
 
     var body: some View {
         Group {
@@ -33,6 +37,7 @@ struct ComposerView: View {
             let store = ComposerStore(core: model.core, account: model.openAccountID)
             self.store = store
             await store.load(request)
+            if model.agent.providers.isEmpty { await model.agent.loadProviders() }
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
@@ -51,29 +56,30 @@ struct ComposerView: View {
         @Bindable var store = store
         return VStack(spacing: 0) {
             if let agent = request.agentName {
-                Label("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
-                      systemImage: "sparkles")
-                    .font(.callout)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.tint.opacity(0.1))
+                Banner("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
+                       systemImage: "sparkles", intent: .info)
             }
             header(store)
             if let error = store.saveError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(.orange.opacity(0.1))
+                Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
-            RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
-                .frame(maxHeight: .infinity)
-            if !store.quotedHTML.isEmpty {
-                quote(store)
+            if !store.quotedHTML.isEmpty, showsQuote {
+                // The editor and the original, the divider between them
+                // draggable.
+                VSplitView {
+                    RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
+                        .frame(minHeight: 120, maxHeight: .infinity)
+                    quote(store)
+                        .frame(minHeight: 90, idealHeight: 260, maxHeight: .infinity)
+                }
+            } else {
+                RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty)
+                    .frame(maxHeight: .infinity)
+                if !store.quotedHTML.isEmpty {
+                    quoteToggle
+                }
             }
+            assistantBar(store)
             if !store.attachments.isEmpty {
                 attachmentStrip(store)
             }
@@ -83,16 +89,16 @@ struct ComposerView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Attach", systemImage: "paperclip") { importing = true }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
-                    .help("Attach Files")
+                    .help(ToolbarHelp.composer("Attach")) // toolbar
                 // Reviewing an agent's draft: the decision is the approval
                 // card's, so sending here would go around it.
                 if request.agentName == nil {
                     Button("Discard", systemImage: "trash") { Task { await store.discard() } }
-                        .help("Delete Draft")
+                        .help(ToolbarHelp.composer("Discard")) // toolbar
                     Button("Send", systemImage: "paperplane.fill") { Task { await store.send() } }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                         .disabled(!store.canSend)
-                        .help("Send (⇧⌘D)")
+                        .help(ToolbarHelp.composer("Send")) // toolbar
                 }
             }
         }
@@ -117,6 +123,7 @@ struct ComposerView: View {
                 RecipientField(addresses: $store.to, suggest: suggest, accessibilityLabel: "To")
                 if !store.showsCcBcc {
                     Button("Cc/Bcc") { store.showsCcBcc = true }
+                        .hoverHelp("Add Cc and Bcc fields")
                         .buttonStyle(.link)
                         .font(.callout)
                 }
@@ -139,61 +146,134 @@ struct ComposerView: View {
 
     private func row(_ label: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // Top, not first-baseline: asking the recipient token field for
+            // its baseline while the user typed made it re-tokenize and ask
+            // for layout again, forever (the app hung and ran out of memory
+            // forwarding a message, 2026-09-28).
+            HStack(alignment: .top, spacing: Space.m) {
                 Text(label)
                     .foregroundStyle(.secondary)
                     .frame(width: 64, alignment: .trailing)
+                    .padding(.top, Space.hair)
                 content()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            Divider()
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.s)
+            InsetRule()
         }
     }
 
+    /// The original, under the editor.
     private func quote(_ store: ComposerStore) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Divider()
+            quoteToggle
+            MessageWebView(html: Self.quoteDocument(store.quotedHTML), allowRemoteImages: false)
+        }
+    }
+
+    private var quoteToggle: some View {
+        HStack {
             Button {
                 showsQuote.toggle()
             } label: {
-                Label(showsQuote ? "Hide Quoted Text" : "Show Quoted Text",
-                      systemImage: showsQuote ? "chevron.down" : "ellipsis")
+                Label(showsQuote ? "Hide Original" : "Show Original",
+                      systemImage: showsQuote ? "chevron.down" : "chevron.up")
                     .font(.callout)
             }
+            .hoverHelp(showsQuote ? "Hide the message you are answering" : "Show the message you are answering")
             .buttonStyle(.borderless)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            if showsQuote {
-                MessageWebView(html: Self.quoteDocument(store.quotedHTML), allowRemoteImages: false)
-                    .frame(height: 220)
+            Spacer()
+        }
+        .padding(.horizontal, Space.xl)
+        .padding(.vertical, Space.s)
+        .overlay(alignment: .top) { InsetRule() }
+    }
+
+    /// Writing help: ask the agent to write or change the message.
+    private func assistantBar(_ store: ComposerStore) -> some View {
+        @Bindable var assistant = assistant
+        let ready = model.agent.isProviderReady
+        let name = model.agent.providerName
+        let run = { Task { await assistant.run(store: store, model: model, original: ComposerAssistant.plainText(fromHTML: store.quotedHTML)) } }
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.m) {
+                Image(systemName: "sparkles").foregroundStyle(.tint)
+                TextField(ready ? "Ask \(name) to write or change this message…" : "\(name) is not set up (Settings › Agents)",
+                          text: $assistant.instruction)
+                    .textFieldStyle(.plain)
+                    .focused($assistantFocused)
+                    .onSubmit { run() }
+                    .disabled(!ready || assistant.state == .working)
+                    .accessibilityLabel("Writing help")
+                Menu {
+                    ForEach(ComposerAssistant.suggestions(replying: !store.quotedHTML.isEmpty), id: \.self) { suggestion in
+                        Button(suggestion) {
+                            assistant.instruction = suggestion
+                            assistantFocused = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "text.bubble")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(!ready)
+                .hoverHelp("Ideas to ask for; choosing one puts it in the box")
+                if assistant.state == .working {
+                    ProgressView().controlSize(.small)
+                    Button("Stop") { assistant.cancel() }
+                        .hoverHelp("Stop the agent writing")
+                } else {
+                    Button("Write") { run() }
+                        .disabled(!ready || assistant.instruction.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .hoverHelp("Have \(name) write this into the message (Return)")
+                }
+            }
+            switch assistant.state {
+            case .done:
+                HStack(spacing: Space.m) {
+                    Text("Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    Button("Undo") { assistant.undo() }
+                        .buttonStyle(.link)
+                        .hoverHelp("Put back the message as it was before")
+                }
+                .font(TypeRole.caption)
+            case let .failed(message):
+                Text(message).font(TypeRole.caption).foregroundStyle(.red)
+            default:
+                EmptyView()
             }
         }
+        .controlSize(.small)
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.s)
+        .overlay(alignment: .top) { InsetRule() }
     }
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: Space.m) {
                 ForEach(store.attachments, id: \.path) { attachment in
-                    HStack(spacing: 6) {
+                    HStack(spacing: Space.s) {
                         Image(systemName: "doc")
                         Text(attachment.filename).lineLimit(1)
                         Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
                             .foregroundStyle(.secondary)
                         Button("Remove", systemImage: "xmark.circle.fill") { store.removeAttachment(attachment) }
+                            .hoverHelp("Remove \(attachment.filename) from the message")
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
                     }
                     .font(.callout)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, Space.xs)
                     .background(.quaternary, in: .capsule)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
         }
-        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .top) { InsetRule() }
     }
 
     /// The quote was sanitized by the core; show it under the reader's CSP.

@@ -102,8 +102,9 @@ struct ComposerTests {
 
     @Test func contactSuggestionsComeFromMail() async throws {
         let model = try await demo()
-        let message = try await latestMessage(model)
-        let sender = try #require(message.from)
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await model.core!.thread(row.id))
+        let sender = try #require(detail.messages.first { !$0.isSentByMe }?.from)
         let prefix = String(sender.email.prefix(3))
         let suggestions = model.core!.suggestContactsNow(prefix)
         #expect(suggestions.contains { $0.email == sender.email })
@@ -194,5 +195,19 @@ struct ComposerTests {
         model.reply(all: true)
         model.forward()
         #expect(opened == [.reply(messageID: target, all: true), .forward(messageID: target)])
+    }
+}
+
+@MainActor
+struct RecipientCompletionTests {
+    private let jordan = AddressInfo(name: "Jordan Kim", email: "jordan.kim@example.com")
+    private let dana = AddressInfo(name: "Dana Ruiz", email: "d.ruiz@example.org")
+
+    @Test func completionsStartWithWhatWasTyped() {
+        let offered = RecipientField.Coordinator.completions(for: "da", among: [jordan, dana]).map(\.0)
+        #expect(offered == ["Dana Ruiz <d.ruiz@example.org>"], "Jordan matched inside the name: not offered")
+        let byEmail = RecipientField.Coordinator.completions(for: "D.RU", among: [dana]).map(\.0)
+        #expect(byEmail == ["d.ruiz@example.org"], "an address that starts with it, bare")
+        #expect(RecipientField.Coordinator.completions(for: " ", among: [dana]).isEmpty)
     }
 }

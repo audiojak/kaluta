@@ -76,6 +76,24 @@ final class KeychainSecretStore: @unchecked Sendable {
         }
     }
 
+    /// Delete every item under this service (the test host's, between
+    /// runs). Never used on the app's own service.
+    func deleteAll() throws(KeychainError) {
+        precondition(service != "ai.actual.openagc", "never empty the user's own Keychain items")
+        // Both keychains: items may sit in the login keychain from runs
+        // that fell back to it, while the data-protection one answers
+        // "not found". The login keychain deletes one item per call.
+        for dataProtection in [true, false] {
+            for _ in 0..<1_000 {
+                var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service]
+                if dataProtection { q[kSecUseDataProtectionKeychain as String] = true }
+                let status = SecItemDelete(q as CFDictionary)
+                if status == errSecItemNotFound || (dataProtection && status == errSecMissingEntitlement) { break }
+                guard status == errSecSuccess else { throw KeychainError(status: status, operation: "delete") }
+            }
+        }
+    }
+
     private func baseQuery(_ key: String) -> [String: Any] {
         var q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

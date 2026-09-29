@@ -177,6 +177,18 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
         // Every seventh thread also gets a nested label, without touching rng.
         let nested_label = (t % 7 == 3).then(|| NESTED_LABELS[(t / 7) as usize % NESTED_LABELS.len()].0);
         let message_count = if automated { 1 } else { 1 + rng.below(5) as u32 };
+        // Gmail's categories on received mail, without touching rng: people
+        // are Primary; services spread over the other tabs.
+        let category = if automated {
+            match t % 9 {
+                0..=2 => "CATEGORY_UPDATES",
+                3..=5 => "CATEGORY_PROMOTIONS",
+                6 | 7 => "CATEGORY_SOCIAL",
+                _ => "CATEGORY_FORUMS",
+            }
+        } else {
+            "CATEGORY_PERSONAL"
+        };
 
         for i in 0..message_count {
             let from_me = !automated && i % 2 == 1;
@@ -187,6 +199,9 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
             }
             if in_inbox && !from_me {
                 labels.push(LabelId::new("INBOX"));
+            }
+            if !from_me {
+                labels.push(LabelId::new(category));
             }
             if unread && i + 1 == message_count && !from_me {
                 labels.push(LabelId::new("UNREAD"));

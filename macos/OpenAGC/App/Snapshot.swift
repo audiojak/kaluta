@@ -25,6 +25,7 @@ import os
 ///   -OpenAGCSnapshotRoutine <runner>    open the Routines window (creating
 ///                                       a routine if there is none) and
 ///                                       capture it
+///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
 ///   -OpenAGCSnapshotMode pdf            draw through AppKit's PDF (print) path
 ///   -OpenAGCSnapshotMode layer          render the CALayer tree instead
 ///                                       (catches layer-only SwiftUI content)
@@ -50,6 +51,8 @@ enum Snapshot {
                let main = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
                 var frame = main.frame
                 frame.size.width = width
+                // Never saved into the user's preferences.
+                AppDelegate.forgetWindowState(main)
                 main.setFrame(frame, display: true)
             }
             try? await Task.sleep(for: .seconds(delay / 2))
@@ -100,6 +103,11 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(800))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("routines") ?? false) }
             }
+            if defaults.bool(forKey: "OpenAGCSnapshotSyncDebugger"), let model = delegate.model {
+                model.openSyncDebugger?()
+                try? await Task.sleep(for: .milliseconds(1500))
+                window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
+            }
             if let compose = defaults.string(forKey: "OpenAGCSnapshotCompose"), let model = delegate.model {
                 try? await Task.sleep(for: .milliseconds(500))
                 switch compose {
@@ -121,6 +129,10 @@ enum Snapshot {
             }
             if defaults.bool(forKey: "OpenAGCSnapshotDumpViews"), let root = (window ?? NSApp.windows.first)?.contentView?.superview {
                 dump(root, depth: 0)
+                for item in (window ?? NSApp.windows.first)?.toolbar?.items ?? [] {
+                    let line = "toolbar item \(item.itemIdentifier.rawValue) label=\"\(item.label)\" toolTip=\(item.toolTip.map { "\"\($0)\"" } ?? "nil")\n"
+                    FileHandle.standardError.write(Data(line.utf8))
+                }
             }
             capture(window, to: URL(filePath: path))
             NSApp.terminate(nil)
@@ -137,6 +149,7 @@ enum Snapshot {
             detail += " expandedRows=\(expanded)"
         }
         if let text = view as? NSTextField, !text.stringValue.isEmpty { detail = " \"\(text.stringValue)\"" }
+        if let tip = view.toolTip { detail += " toolTip=\"\(tip)\"" }
         let line = String(repeating: "  ", count: depth) + "\(type(of: view)) \(view.frame.integral) hidden=\(view.isHidden)\(detail)\n"
         FileHandle.standardError.write(Data(line.utf8))
         for sub in view.subviews { dump(sub, depth: depth + 1) }

@@ -17,7 +17,7 @@ pub struct AttachmentFileInfo {
 }
 
 impl Core {
-    fn attachment_cache_dir(&self) -> Result<PathBuf, CoreError> {
+    pub(crate) fn attachment_cache_dir(&self) -> Result<PathBuf, CoreError> {
         let id =
             self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
         Ok(PathBuf::from(&self.config.data_dir).join("accounts").join(id).join("Attachments"))

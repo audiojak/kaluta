@@ -28,6 +28,8 @@ struct ThreadListView: NSViewRepresentable {
         table.addTableColumn(column)
         table.dataSource = context.coordinator
         table.delegate = context.coordinator
+        table.target = context.coordinator
+        table.doubleAction = #selector(Coordinator.openClicked(_:))
         table.setAccessibilityLabel("Threads")
 
         let scroll = NSScrollView()
@@ -85,6 +87,13 @@ struct ThreadListView: NSViewRepresentable {
             applyingSelection = false
         }
 
+        /// A double-click on a draft opens it in a composer.
+        @objc func openClicked(_ sender: NSTableView) {
+            let row = sender.clickedRow
+            guard rows.indices.contains(row), rows[row].labelIds.contains("DRAFT") else { return }
+            model.editDraft(threadID: rows[row].id)
+        }
+
         func numberOfRows(in tableView: NSTableView) -> Int {
             rows.count
         }
@@ -99,7 +108,9 @@ struct ThreadListView: NSViewRepresentable {
             let view = tableView.makeView(withIdentifier: ThreadRowView.identifier, owner: nil) as? ThreadRowView
                 ?? ThreadRowView()
             view.configure(with: rows[row], chips: ThreadRowView.chips(for: rows[row], labels: model.chipLabels,
-                                                                     excluding: model.threads.mailboxID))
+                                                                     excluding: model.threads.mailboxID),
+                           me: model.ownAddresses,
+                           markImportant: !(model.threads.mailboxID ?? "").split(separator: "+").contains("IMPORTANT"))
             view.setAccessibilityCustomActions(accessibilityActions(for: rows[row]))
             model.threads.rowWillAppear(at: row)
             return view
@@ -122,7 +133,8 @@ struct ThreadListView: NSViewRepresentable {
                 act("Move to Trash") { $0.trashSelection() },
                 act(row.unreadCount > 0 ? "Mark as Read" : "Mark as Unread") { $0.toggleReadSelection() },
                 act(row.isStarred ? "Unstar" : "Star") { $0.toggleStarSelection() },
-            ] + (model.isArchive ? [] : [act("Reply") { $0.reply(all: false) }])
+            ] + (model.canJunk ? [act(model.isSpamMailbox ? "Not Junk" : "Mark as Junk") { $0.toggleJunkSelection() }] : [])
+              + (model.isArchive ? [] : [act("Reply") { $0.reply(all: false) }])
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -202,6 +214,7 @@ final class ThreadTableView: NSTableView {
         case "s": model.toggleStarSelection()
         case "l": showLabelMenu()
         case "#": model.trashSelection()
+        case "!": model.toggleJunkSelection()
         case "r": model.reply(all: false)
         case "a": model.reply(all: true)
         case "f": model.forward()
@@ -210,7 +223,9 @@ final class ThreadTableView: NSTableView {
         case "k": moveSelection(by: -1)
         case "/": model.focusSearch()
         default:
-            if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
+            if event.keyCode == 36 || event.keyCode == 76, model.selectedMailboxID == "DRAFT" { // return, enter
+                model.editDraft()
+            } else if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
                 model.trashSelection()
             } else {
                 super.keyDown(with: event)
@@ -236,6 +251,9 @@ final class ThreadTableView: NSTableView {
         labels.submenu = labelMenu()
         menu.addItem(labels)
         menu.addItem(.separator())
+        if model.canJunk {
+            menu.addItem(ActionItem(model.isSpamMailbox ? "Not Junk" : "Mark as Junk", key: "!") { model.toggleJunkSelection() })
+        }
         menu.addItem(ActionItem("Move to Trash", key: "\u{8}") { model.trashSelection() })
         return menu
     }

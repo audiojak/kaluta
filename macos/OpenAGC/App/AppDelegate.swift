@@ -8,7 +8,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The test host starts with an empty Keychain service (a killed
+        // run may have left items) and empties it again on quit.
+        if CoreClient.isRunningTests { Self.emptyTestKeychain() }
+        if CoreClient.isRunningTests || CoreClient.isScratchRun { Self.keepWindowStateOutOfThePreferences() }
         Snapshot.scheduleIfRequested(delegate: self)
+    }
+
+    /// Test hosts and snapshots share the app's bundle id, so AppKit would
+    /// autosave their window and split-view frames into the user's real
+    /// preferences (a snapshot's `-OpenAGCSnapshotWidth` once resized the
+    /// user's saved window). Such runs forget every autosave name as
+    /// windows appear and become key; Snapshot does it again before it
+    /// resizes anything.
+    private static func keepWindowStateOutOfThePreferences() {
+        NSApp.windows.forEach(forgetWindowState)
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
+                                               queue: .main) { note in
+            guard let window = note.object as? NSWindow else { return }
+            MainActor.assumeIsolated { forgetWindowState(window) }
+        }
+        // Cheap: only a window that has an autosave name gets the walk.
+        NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil,
+                                               queue: .main) { note in
+            guard let window = note.object as? NSWindow else { return }
+            MainActor.assumeIsolated {
+                if !window.frameAutosaveName.isEmpty { forgetWindowState(window) }
+            }
+        }
+    }
+
+    /// Clear a window's frame autosave name and its split views'.
+    static func forgetWindowState(_ window: NSWindow) {
+        window.setFrameAutosaveName("")
+        var views: [NSView] = window.contentView.map { [$0] } ?? []
+        while let view = views.popLast() {
+            (view as? NSSplitView)?.autosaveName = nil
+            views.append(contentsOf: view.subviews)
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if CoreClient.isRunningTests { Self.emptyTestKeychain() }
+    }
+
+    private static func emptyTestKeychain() {
+        try? KeychainSecretStore(service: CoreClient.testSecretsService).deleteAll()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

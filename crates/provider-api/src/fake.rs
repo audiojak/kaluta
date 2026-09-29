@@ -36,8 +36,8 @@ struct State {
     next_history: u64,
     oldest_history: u64,
     sent_counter: u64,
-    /// Server drafts: id → (raw, thread).
-    drafts: BTreeMap<String, (Vec<u8>, Option<ThreadId>)>,
+    /// Server drafts: id → (raw, thread, the message holding it).
+    drafts: BTreeMap<String, (Vec<u8>, Option<ThreadId>, MessageId)>,
     draft_counter: u64,
 }
 
@@ -77,7 +77,19 @@ impl FakeProvider {
 
     /// The server's drafts, by id: raw bytes and thread.
     pub fn drafts(&self) -> BTreeMap<String, (Vec<u8>, Option<ThreadId>)> {
-        self.state().drafts.clone()
+        self.state().drafts.iter().map(|(id, (raw, thread, _))| (id.clone(), (raw.clone(), thread.clone()))).collect()
+    }
+
+    /// A draft made elsewhere (Gmail on the web): `message` is stored with
+    /// the DRAFT label and held by draft `draft_id`.
+    pub fn seed_draft(&self, draft_id: &str, mut message: FetchedMessage) {
+        let mut s = self.state();
+        if !message.label_ids.iter().any(|l| l.as_str() == "DRAFT") {
+            message.label_ids.push(LabelId::new("DRAFT"));
+        }
+        let id = message.id.clone();
+        s.drafts.insert(draft_id.to_owned(), (Vec::new(), Some(message.thread_id.clone()), id.clone()));
+        s.messages.insert(id.0.clone(), message);
     }
 
     pub fn set_labels(&self, labels: Vec<Label>) {
@@ -325,15 +337,45 @@ impl MailProvider for FakeProvider {
                 format!("r-draft{}", s.draft_counter)
             }
         };
-        s.drafts.insert(id.clone(), (raw.to_vec(), thread.cloned()));
+        // Like Gmail, every save puts the draft in a new message.
+        s.draft_counter += 1;
+        let message_id = MessageId::new(format!("draftmsg{}", s.draft_counter));
+        let thread_id = thread.cloned().unwrap_or_else(|| ThreadId::new(format!("t-{message_id}")));
+        let subject = String::from_utf8_lossy(raw)
+            .lines()
+            .find_map(|l| l.strip_prefix("Subject: ").map(str::to_owned))
+            .unwrap_or_default();
+        if let Some((_, _, old)) = s.drafts.get(&id).cloned() {
+            s.messages.remove(old.as_str());
+        }
+        s.messages.insert(
+            message_id.0.clone(),
+            FetchedMessage {
+                id: message_id.clone(),
+                thread_id,
+                label_ids: vec![LabelId::new("DRAFT")],
+                subject,
+                internal_date: self.now,
+                ..Default::default()
+            },
+        );
+        s.drafts.insert(id.clone(), (raw.to_vec(), thread.cloned(), message_id));
         Ok(id)
     }
 
     async fn delete_draft(&self, draft_id: &str) -> ProviderResult<()> {
         self.injected_failure()?;
-        match self.state().drafts.remove(draft_id) {
-            Some(_) => Ok(()),
+        let mut s = self.state();
+        match s.drafts.remove(draft_id) {
+            Some((_, _, message)) => {
+                s.messages.remove(message.as_str());
+                Ok(())
+            }
             None => Err(ProviderError::NotFound(format!("draft {draft_id}"))),
         }
+    }
+
+    async fn list_drafts(&self) -> ProviderResult<Option<Vec<(String, MessageId)>>> {
+        Ok(Some(self.state().drafts.iter().map(|(id, (_, _, m))| (id.clone(), m.clone())).collect()))
     }
 }

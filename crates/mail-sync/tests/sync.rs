@@ -71,7 +71,6 @@ fn seed_mailbox(fake: &FakeProvider) {
     fake.seed(message("recent", "t3", 10, &["Label_1"]));
     fake.seed(message("this-year", "t4", 100, &[]));
     fake.seed(message("ancient", "t5", 900, &[]));
-    fake.seed(message("spam", "t6", 1, &["SPAM"]));
 }
 
 fn assert_consistent(db: &Db) {
@@ -84,6 +83,8 @@ async fn bootstrap_queues_by_priority_and_backfill_fills_the_store() {
     let (fake, db, recorder, engine) = setup("bootstrap");
     engine.set_window(SyncWindow::Everything).await.unwrap();
     seed_mailbox(&fake);
+    fake.seed(message("spam", "t6", 1, &["SPAM"]));
+    fake.seed(message("binned", "t7", 3, &["TRASH"]));
     assert!(engine.needs_bootstrap().await.unwrap());
 
     engine.bootstrap_prepare().await.unwrap();
@@ -96,12 +97,12 @@ async fn bootstrap_queues_by_priority_and_backfill_fills_the_store() {
     let queued = db.read(|c| queue::peek(c, 10)).await.unwrap();
     assert_eq!(
         queued.iter().map(|m| m.as_str()).collect::<Vec<_>>(),
-        vec!["inbox-unread", "inbox-read", "recent", "this-year", "ancient"],
-        "priority order; spam is never listed"
+        vec!["inbox-unread", "inbox-read", "recent", "spam", "binned", "this-year", "ancient"],
+        "priority order; Spam and Trash with the last month, whatever their age"
     );
 
     let fetched = engine.backfill_all().await.unwrap();
-    assert_eq!(fetched, 5);
+    assert_eq!(fetched, 7);
     assert_eq!(db.read(queue::len).await.unwrap(), 0);
     let inbox = db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap();
     assert_eq!(inbox.rows.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), vec!["t1", "t2"]);
@@ -653,4 +654,149 @@ async fn label_changes_made_elsewhere_are_reported_and_our_own_are_not() {
     assert_eq!(change.thread.as_str(), "t1");
     assert_eq!(change.added, vec![LabelId::new("Label_7")]);
     assert_eq!(change.removed, vec![LabelId::new("INBOX")]);
+}
+
+#[tokio::test]
+async fn drafts_sync_through_the_drafts_list_whatever_the_window() {
+    let (fake, db, _recorder, engine) = setup("drafts");
+    engine.set_window(SyncWindow::Month).await.unwrap();
+    seed_mailbox(&fake);
+    // Written on the web a year ago: outside the window, and Gmail's
+    // history never mentions drafts.
+    let mut old = message("draft-old", "t-draft", 400, &[]);
+    old.subject = "Plan for next year".into();
+    fake.seed_draft("r-web1", old);
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+
+    assert_eq!(engine.sync_drafts().await.unwrap(), 1, "the draft's message came down");
+    let drafts = db.read(|c| read::list_threads(c, "DRAFT", None, 10)).await.unwrap();
+    assert_eq!(drafts.rows.iter().map(|t| t.subject.as_str()).collect::<Vec<_>>(), ["Plan for next year"]);
+    assert_eq!(
+        db.read(|c| mail_store::drafts::server_draft_for_message(c, "draft-old")).await.unwrap().as_deref(),
+        Some("r-web1"),
+        "which draft holds it, for editing"
+    );
+    assert_eq!(engine.sync_drafts().await.unwrap(), 0, "nothing new the second time");
+
+    // Sent or discarded elsewhere: the draft's message goes.
+    use provider_api::MailProvider;
+    fake.delete_draft("r-web1").await.unwrap();
+    engine.sync_drafts().await.unwrap();
+    assert!(db.read(|c| read::list_threads(c, "DRAFT", None, 10)).await.unwrap().rows.is_empty());
+    assert_consistent(&db);
+}
+
+/// An IMAP source whose connection keeps failing.
+struct BrokenImap(std::sync::atomic::AtomicUsize);
+
+#[async_trait::async_trait]
+impl provider_api::BackfillSource for BrokenImap {
+    async fn fetch(&self, _ids: &[MessageId]) -> provider_api::ProviderResult<Vec<FetchedMessage>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(provider_api::ProviderError::Network("IMAP connection timed out".into()))
+    }
+    fn cheap_headers(&self) -> bool {
+        true
+    }
+    fn name(&self) -> &'static str {
+        "imap"
+    }
+}
+
+#[tokio::test]
+async fn a_failing_imap_falls_back_to_the_api_per_batch_and_trips_the_breaker() {
+    use mail_sync::transport::{BREAKER_FAILURES, Job, Via};
+    let (fake, db, _recorder, engine) = setup("imap-breaker");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    fake.seed(message("recent-too", "t7", 5, &[])); // a fourth body, after the breaker opens
+    let broken = Arc::new(BrokenImap(Default::default()));
+    engine.set_backfill_source(broken.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    // One message per batch, so every batch asks IMAP first.
+    while engine.backfill_batch(1).await.unwrap() > 0 {}
+    assert_eq!(db.read(queue::counts).await.unwrap().0, 0, "every body came down over the API");
+    assert_eq!(
+        broken.0.load(std::sync::atomic::Ordering::SeqCst),
+        BREAKER_FAILURES as usize,
+        "after three failures IMAP is not asked again for a while"
+    );
+
+    let snap = engine.transport_snapshot();
+    assert!(snap.breaker_open_until.is_some());
+    assert!(snap.last_imap_error.as_deref().is_some_and(|e| e.contains("timed out")));
+    let bodies: Vec<_> = snap.recent.iter().filter(|r| r.job == Job::Bodies).collect();
+    assert!(bodies.iter().all(|r| r.via == Via::Api && r.ok));
+    assert!(bodies.last().unwrap().reason.as_deref().unwrap().starts_with("IMAP failed"));
+    assert!(bodies[0].reason.as_deref().unwrap().starts_with("IMAP paused"), "then the breaker's reason");
+    assert!(snap.recent.iter().any(|r| r.job == Job::List && r.via == Via::Api), "listing is recorded too");
+
+    engine.reset_transport();
+    assert!(engine.transport_snapshot().breaker_open_until.is_none(), "a refresh tries IMAP again");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
+async fn inbox_categories_missing_from_downloaded_mail_are_applied_and_the_inbox_counts_primary() {
+    let (fake, db, _recorder, engine) = setup("categories");
+    fake.seed(message("promo", "t1", 1, &["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"]));
+    fake.seed(message("social", "t2", 1, &["INBOX", "UNREAD", "CATEGORY_SOCIAL"]));
+    fake.seed(message("friend", "t3", 1, &["INBOX", "UNREAD"]));
+    fake.seed(message("old-promo", "t4", 1, &["CATEGORY_PROMOTIONS"]));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+    // As if downloaded over IMAP, which carries no categories.
+    db.write(|tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        for id in ["promo", "social"] {
+            w.modify_message_labels(
+                &MessageId::new(id),
+                &[],
+                &[LabelId::new("CATEGORY_PROMOTIONS"), LabelId::new("CATEGORY_SOCIAL")],
+            )?;
+        }
+        w.finish()
+    })
+    .await
+    .unwrap();
+    let inbox_unread = |db: Db| async move {
+        let boxes = db.read(read::list_mailboxes).await.unwrap();
+        boxes.iter().find(|m| read::mailbox_label(m) == "INBOX").unwrap().unread_count
+    };
+    assert_eq!(inbox_unread(db.clone()).await, 3, "no categories known: everything is Primary");
+
+    assert_eq!(engine.sync_categories().await.unwrap(), 2, "promo and social; the archived one is left alone");
+    let counts = db.read(|c| read::inbox_categories(c, None)).await.unwrap();
+    let unread = |id: &str| counts.iter().find(|c| c.id == id).unwrap().unread;
+    assert_eq!((unread("CATEGORY_PERSONAL"), unread("CATEGORY_PROMOTIONS"), unread("CATEGORY_SOCIAL")), (1, 1, 1));
+    assert_eq!(inbox_unread(db.clone()).await, 1, "with categories, the Inbox counts Primary, as Gmail does");
+    assert_eq!(engine.sync_categories().await.unwrap(), 0, "nothing left to change");
+    let snap = engine.transport_snapshot();
+    let op = snap.latest_by_job().into_iter().find(|r| r.job == mail_sync::transport::Job::Categories).unwrap();
+    assert_eq!(op.via, mail_sync::transport::Via::Api, "no IMAP here: the API lists them");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
+async fn a_thread_you_replied_in_is_marked_replied() {
+    let (fake, db, _recorder, engine) = setup("replied");
+    fake.seed(message("asked", "t1", 3, &["INBOX"]));
+    fake.seed(message("answered", "t1", 2, &["SENT"]));
+    fake.seed(message("started", "t2", 3, &["SENT"]));
+    fake.seed(message("their-answer", "t2", 2, &["INBOX"]));
+    fake.seed(message("alone", "t3", 1, &["INBOX"]));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+    let page = db.read(|c| read::list_threads(c, "INBOX", None, 10)).await.unwrap();
+    let replied = |id: &str| page.rows.iter().find(|r| r.id.as_str() == id).unwrap().replied;
+    assert!(replied("t1"), "you answered them");
+    assert!(!replied("t2"), "you started it; they answered");
+    assert!(!replied("t3"));
+    let summary = db.read(|c| read::get_thread_summary(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
+    assert!(summary.replied);
 }

@@ -15,6 +15,9 @@ struct UndoWordingTests {
         #expect(UndoableAction(kind: .unstar, count: 2).noticeText == "Unstarred 2 conversations")
         #expect(UndoableAction(kind: .label("Receipts"), count: 2).noticeText == "Labeled 2 conversations “Receipts”")
         #expect(UndoableAction(kind: .unlabel("Receipts"), count: 1).noticeText == "Removed “Receipts” from 1 conversation")
+        #expect(UndoableAction(kind: .junk, count: 2).noticeText == "Moved 2 conversations to Spam")
+        #expect(UndoableAction(kind: .notJunk, count: 1).noticeText == "Moved 1 conversation out of Spam to the Inbox")
+        #expect(UndoableAction(kind: .junk, count: 1).actionName == "Mark as Junk")
         #expect(UndoableAction(kind: .archive, count: 1).actionName == "Archive")
         #expect(UndoableAction(kind: .read, count: 1).actionName == "Mark as Read")
         #expect(UndoableAction(kind: .unlabel("x"), count: 1).actionName == "Remove Label")
@@ -149,6 +152,31 @@ struct UndoModelTests {
         // Dropping threads on a sidebar label.
         model.addLabel(label.labelId!, toThreads: [row.id])
         try await waitUntil("drop recorded") { model.undo.notice?.text.hasPrefix("Labeled 1 conversation") == true }
+    }
+
+    @Test func junkMovesToSpamAndNotJunkBringsItBack() async throws {
+        let model = try await demo()
+        let id = model.threads.rows[0].id
+        model.selectedThreadID = id
+        #expect(!model.isSpamMailbox)
+        model.toggleJunkSelection()
+        #expect(!model.threads.rows.contains { $0.id == id }, "gone from the list at once")
+        try await waitUntil("junk recorded") { model.undo.notice?.text == "Moved 1 conversation to Spam" }
+        #expect(try await model.core!.threads(in: "SPAM", limit: 50).rows.map(\.id) == [id])
+        #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Mark as Junk")
+
+        model.selectedMailboxID = "SPAM"
+        try await waitUntil("Spam listed") { model.threads.mailboxID == "SPAM" && model.threads.rows.contains { $0.id == id } }
+        #expect(model.isSpamMailbox)
+        model.selectedThreadID = id
+        model.toggleJunkSelection()
+        try await waitUntil("not junk recorded") { model.undo.notice?.text == "Moved 1 conversation out of Spam to the Inbox" }
+        try await waitUntil("back in the Inbox") { try await inbox(model).contains(id) }
+
+        model.undoMailAction()
+        try await waitUntil("in Spam again") {
+            try await model.core!.threads(in: "SPAM", limit: 50).rows.contains { $0.id == id }
+        }
     }
 
     @Test func nothingChangedMeansNothingToUndo() async throws {

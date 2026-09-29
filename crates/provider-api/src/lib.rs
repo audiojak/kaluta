@@ -137,6 +137,18 @@ pub trait BackfillSource: Send + Sync {
     async fn fetch_headers(&self, _ids: &[MessageId]) -> ProviderResult<Option<Vec<FetchedMessage>>> {
         Ok(None)
     }
+    /// Ids of the messages matching a Gmail search (`query` in Gmail's
+    /// syntax, `""` for everything), if this source can list without the
+    /// API's quota; `None` when it cannot (docs/plans/imap-first-sync.md).
+    async fn list(&self, _query: &str) -> ProviderResult<Option<Vec<MessageId>>> {
+        Ok(None)
+    }
+    /// Wait up to `max` for the mailbox to change (IMAP IDLE): `Some(true)`
+    /// when something arrived or changed, `Some(false)` when the wait ran
+    /// out; `None` when this source cannot push.
+    async fn watch(&self, _max: std::time::Duration) -> ProviderResult<Option<bool>> {
+        Ok(None)
+    }
     /// Whether [`BackfillSource::fetch_headers`] is cheap here at all (it
     /// may still answer `None` for a while, e.g. over its daily budget).
     /// Decides tiered download (spec §7.4 amendment 2026-09-27).
@@ -184,6 +196,13 @@ pub trait MailProvider: Send + Sync {
     async fn save_draft(&self, existing: Option<&str>, raw: &[u8], thread: Option<&ThreadId>)
     -> ProviderResult<String>;
     async fn delete_draft(&self, draft_id: &str) -> ProviderResult<()>;
+    /// The account's drafts: (draft id, the message it holds now). Gmail's
+    /// change history leaves drafts out, so they are synced through this
+    /// (spec §14.5 amendment 2026-09-28). `None`: the provider has no
+    /// drafts API, so stored drafts are left as they are.
+    async fn list_drafts(&self) -> ProviderResult<Option<Vec<(String, MessageId)>>> {
+        Ok(None)
+    }
     /// Create a user label. `color` is a `(background, text)` pair from the
     /// provider's palette.
     async fn create_label(&self, name: &str, color: Option<(&str, &str)>) -> ProviderResult<Label>;

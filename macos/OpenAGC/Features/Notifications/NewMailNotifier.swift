@@ -26,7 +26,7 @@ final class NewMailNotifier: NSObject {
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "notifications")
     private var askedForPermission = false
 
-    init(defaults: UserDefaults = .standard, post: ((UNNotificationRequest) -> Void)? = nil) {
+    init(defaults: UserDefaults = CoreClient.appDefaults(), post: ((UNNotificationRequest) -> Void)? = nil) {
         self.defaults = defaults
         defaults.register(defaults: [Self.notifyKey: true, Self.badgeKey: true])
         self.post = post ?? { _ in }

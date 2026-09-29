@@ -106,6 +106,18 @@ impl Core {
         self.mutate(LocalChange::move_to_inbox(threads(thread_ids)?), "move_to_inbox").await
     }
 
+    /// Mark as Junk (spec §14.3 amendment, junk): the threads go to Spam
+    /// and leave the Inbox; Gmail learns from it. A user action only:
+    /// `modify_labels` and agent tools may not set `SPAM`.
+    pub async fn mark_junk(&self, thread_ids: Vec<String>) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::mark_junk(threads(thread_ids)?), "junk").await
+    }
+
+    /// Not Junk: out of Spam, back in the Inbox.
+    pub async fn not_junk(&self, thread_ids: Vec<String>) -> Result<Option<UndoToken>, CoreError> {
+        self.mutate(LocalChange::not_junk(threads(thread_ids)?), "not_junk").await
+    }
+
     pub async fn set_read(&self, thread_ids: Vec<String>, read: bool) -> Result<Option<UndoToken>, CoreError> {
         self.mutate(LocalChange::set_read(threads(thread_ids)?, read), if read { "read" } else { "unread" }).await
     }
@@ -312,8 +324,46 @@ mod tests {
         assert_eq!(block_on(core.outbox_status()).unwrap().pending, 0);
         block_on(core.move_to_inbox(vec![first.clone()])).unwrap();
         assert!(inbox_ids(&core).contains(&first));
-        let err = block_on(core.modify_labels(vec![first], vec!["TRASH".into()], vec![])).unwrap_err();
+        let err = block_on(core.modify_labels(vec![first.clone()], vec!["TRASH".into()], vec![])).unwrap_err();
         assert_eq!(err.kind(), crate::ErrorKind::InvalidInput);
+        let err = block_on(core.modify_labels(vec![first], vec!["SPAM".into()], vec![])).unwrap_err();
+        assert_eq!(err.kind(), crate::ErrorKind::InvalidInput, "only Mark as Junk sets SPAM");
+    }
+
+    #[test]
+    fn junk_goes_to_spam_on_the_server_and_back_with_undo_or_not_junk() {
+        let core = core("junk");
+        block_on(core.clone().open_account("acct".into())).unwrap();
+        let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        fake.seed(seeded("m1", "t1", &["INBOX", "UNREAD"]));
+        fake.seed(seeded("m2", "t2", &["INBOX"]));
+        core.start_sync_with(fake.clone()).unwrap();
+        wait_until("both synced", || inbox_ids(&core).len() == 2);
+        let spam_ids = |core: &Core| -> Vec<String> {
+            block_on(core.list_threads("SPAM".into(), None, 50)).unwrap().rows.into_iter().map(|r| r.id).collect()
+        };
+
+        let token = block_on(core.mark_junk(vec!["t1".into()])).unwrap().expect("t1 changed");
+        assert_eq!(inbox_ids(&core), ["t2"], "local at once");
+        assert_eq!(spam_ids(&core), ["t1"]);
+        wait_until("server marked it spam", || {
+            let labels = labels_of(&fake, "m1");
+            labels.contains(&"SPAM".to_owned()) && !labels.contains(&"INBOX".to_owned())
+        });
+
+        block_on(core.undo_action(token)).unwrap();
+        assert!(inbox_ids(&core).contains(&"t1".to_owned()) && spam_ids(&core).is_empty());
+        wait_until("server undid it", || {
+            let labels = labels_of(&fake, "m1");
+            !labels.contains(&"SPAM".to_owned()) && labels.contains(&"INBOX".to_owned())
+        });
+
+        block_on(core.mark_junk(vec!["t2".into()])).unwrap();
+        block_on(core.not_junk(vec!["t2".into()])).unwrap().expect("t2 changed");
+        assert!(spam_ids(&core).is_empty());
+        wait_until("server has it back in the Inbox", || labels_of(&fake, "m2") == ["INBOX"]);
+        assert!(block_on(core.not_junk(vec!["t2".into()])).unwrap().is_none(), "not junk already: nothing to undo");
+        core.stop_sync();
     }
 
     #[test]

@@ -30,6 +30,8 @@ struct MainWindow: View {
         .onAppear {
             model.openComposer = { openWindow(id: "compose", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
+            model.openSyncDebugger = { openWindow(id: "sync-debugger") }
+            ToolbarToolTips.install(model: model)
         }
     }
 
@@ -40,22 +42,25 @@ struct MainWindow: View {
         } content: {
             content
                 .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 560)
+                .toolbar { ListToolbar() }
         } detail: {
             // The agent column sits beside the reader. (SwiftUI's
             // `.inspector` left its split item collapsed at zero width here.)
             HStack(spacing: 0) {
-                detail
-                    .frame(maxWidth: .infinity)
-                    // The agent prompt floats over the reader as an inset
-                    // glass capsule (macOS 26), not a bar pinned to a column.
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        AgentPromptBar()
-                            .frame(maxWidth: 680)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 12)
-                    }
+                // The agent prompt sits in a strip of its own under the
+                // reader, so a thread ends above it instead of scrolling
+                // beneath it (the reader's web view does not take a safe-area
+                // inset, so a floating capsule covered the messages).
+                VStack(spacing: 0) {
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    AgentPromptBar()
+                        .frame(maxWidth: 680)
+                        .padding(.horizontal, Space.xl)
+                        .padding(.vertical, Space.l)
+                }
                 if model.agent.isPresented {
-                    Divider()
+                    PaneDivider()
                     AgentInspector()
                         .frame(width: 340)
                         .transition(.move(edge: .trailing))
@@ -89,10 +94,20 @@ struct MainWindow: View {
     /// the sidebar's footer.
     private var listSubtitle: String {
         var parts: [String] = []
-        if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
+        if model.threads.searchQuery == nil, model.selectedMailboxID == "INBOX", let tab = model.activeInboxCategory,
+           let counts = model.inboxCategoryTabs.first(where: { $0.id == tab }) {
+            // As Mail puts it: "Primary · 667 unread".
+            parts.append(InboxCategories.title(tab))
+            if counts.unreadCount > 0 { parts.append("\(counts.unreadCount.formatted()) unread") }
+        } else if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
             parts.append("\(mailbox.unreadCount.formatted()) unread")
         }
-        if model.selectedMailboxID == "INBOX", model.inboxImportantOnly { parts.append("Important only") }
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.inboxImportantOnly {
+            parts.append("Important only")
+        }
+        if !model.listFilters.isEmpty {
+            parts.append("Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))
+        }
         if model.isArchive { parts.append("Imported mailbox · cannot send") }
         return parts.joined(separator: " · ")
     }
@@ -107,7 +122,6 @@ struct MainWindow: View {
             ContentUnavailableView("Something Went Wrong", systemImage: "exclamationmark.triangle", description: Text(message))
         case .open:
             VStack(spacing: 0) {
-                listHeader
                 if model.needsReauthentication {
                     ReauthenticationBanner()
                 }
@@ -115,16 +129,16 @@ struct MainWindow: View {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                        .padding(8)
+                        .padding(Space.m)
                 }
                 if model.threads.isSearchingServer {
-                    HStack(spacing: 6) {
+                    HStack(spacing: Space.s) {
                         ProgressView().controlSize(.small)
                         Text("Also searching Gmail for older mail…")
                     }
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                    .padding(8)
+                    .padding(Space.m)
                 }
                 if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
@@ -136,27 +150,45 @@ struct MainWindow: View {
                     ThreadListView()
                 }
             }
+            // Fill the column, so the header stays at the top when the list
+            // is empty (it floated to the middle with a short VStack).
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .bottom) { UndoNoticeView() }
+            // No drawn rule under the header: the column runs beneath the
+            // floating sidebar, and a full-width rule showed through its
+            // glass (oagc-0cw). The bar sits in the column's safe area.
+            .columnHeader { listHeader }
         }
     }
 
-    /// The list column's header: the Inbox's Important-only switch, and a
-    /// rule that separates the title area from the messages.
+    /// The row under the title: the Inbox's category tabs, as Mail shows
+    /// them, and a tip when there is one; nothing elsewhere. Filter and
+    /// View Options are in the title bar (`ListToolbar`).
     @ViewBuilder private var listHeader: some View {
-        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
-            @Bindable var model = model
-            HStack {
-                Spacer()
-                Toggle("Important only", isOn: $model.inboxImportantOnly)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .font(.callout)
-                    .help("Show only the Inbox threads Gmail marked Important")
+        VStack(spacing: 0) {
+            categoryTabs
+            if let tip = model.currentTip {
+                TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
+                        actionHelp: tip.actionHelp, dismiss: tip.dismiss,
+                        onAction: { model.finishTip(tip, accept: true) },
+                        onDismiss: { model.finishTip(tip, accept: false) })
+                    .padding(.horizontal, Space.l)
+                    .padding(.bottom, Space.m)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
         }
-        Divider()
+    }
+
+    @ViewBuilder private var categoryTabs: some View {
+        if !model.inboxCategoryTabs.isEmpty, model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+            ListHeaderBar {
+                CapsuleTabs(tabs: model.inboxCategoryTabs.map {
+                    CapsuleTabs.Tab(id: $0.id, title: InboxCategories.title($0.id),
+                                    symbol: InboxCategories.symbol($0.id), count: Int($0.unreadCount))
+                }, selection: Binding(get: { model.activeInboxCategory },
+                                      set: { if let id = $0 { model.inboxCategory = id } }))
+                .accessibilityLabel("Categories")
+            }
+        }
     }
 
     @ViewBuilder private var detail: some View {
@@ -173,16 +205,11 @@ private struct ReauthenticationBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
-            Text("Gmail needs you to sign in again.").font(.callout)
-            Spacer()
+        Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
+               intent: .attention) {
             Button("Sign In") { Task { await model.signIn(with: .effective()) } }
-                .controlSize(.small)
+                .hoverHelp("Sign in to Google again to keep syncing this account")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.yellow.opacity(0.15))
     }
 }
 

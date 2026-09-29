@@ -7,9 +7,10 @@ mod engine;
 mod error;
 pub mod import;
 mod outbox;
+pub mod transport;
 
 pub use attachments::{AttachmentFile, attachment_file, safe_filename};
-pub use compose::{forward_draft, reply_draft, schedule_draft_sync, send_draft};
+pub use compose::{draft_for_editing, forward_draft, reply_draft, schedule_draft_sync, send_draft};
 pub use convert::to_incoming;
 pub use engine::{
     BACKFILL_BATCH, BodyWindow, ExternalLabelChange, INBOX_PHASES, IncrementalReport, KEY_BODY_WINDOW, KEY_WINDOW,

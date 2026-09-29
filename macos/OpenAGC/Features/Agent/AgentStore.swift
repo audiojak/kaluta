@@ -22,7 +22,16 @@ final class AgentStore {
             case proposal(actionID: Int64, tool: String, summary: String, draftID: Int64?, state: ProposalState)
         }
 
-        enum ProposalState: Equatable { case pending, approved, rejected }
+        enum ProposalState: Equatable {
+            case pending, approved, rejected
+            /// An approved send held for Undo Send (spec §14.6a): it can be
+            /// taken back until then.
+            case sending(until: Date)
+            /// Taking the send back.
+            case undoing
+            /// The user took the send back; the draft is open to review.
+            case takenBack
+        }
 
         enum ToolState: Equatable { case running, succeeded, failed }
 
@@ -31,8 +40,8 @@ final class AgentStore {
     }
 
     private(set) var providers: [AgentProviderInfo] = []
-    var providerID: String = UserDefaults.standard.string(forKey: providerKey) ?? "claude-code" {
-        didSet { UserDefaults.standard.set(providerID, forKey: Self.providerKey) }
+    var providerID: String {
+        didSet { defaults.set(providerID, forKey: Self.providerKey) }
     }
     private(set) var sessionID: String?
     /// A stored conversation being shown; resumed on the next prompt.
@@ -45,12 +54,24 @@ final class AgentStore {
     private(set) var lastUsage: String?
 
     @ObservationIgnored private let core: CoreClient?
+    /// When a draft's send stops being held, if it is (set by the model
+    /// for this store's account).
+    @ObservationIgnored var heldUntil: (@MainActor (Int64) async -> Date?)?
+    /// Take a held send back and reopen its draft; false if it already went.
+    @ObservationIgnored var takeBack: (@MainActor (Int64) async -> Bool)?
+    /// How long to look for an approved send's hold: the core sends it
+    /// just after the approval.
+    @ObservationIgnored var holdLookup: Duration = .seconds(3)
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var toolEntries: [String: Int] = [:]
     @ObservationIgnored private let logger = Logger(subsystem: "ai.actual.openagc", category: "agent")
 
-    init(core: CoreClient?) {
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
         self.core = core
+        self.defaults = defaults
+        providerID = defaults.string(forKey: Self.providerKey) ?? "claude-code"
     }
 
     var provider: AgentProviderInfo? { providers.first { $0.id == providerID } }
@@ -124,7 +145,7 @@ final class AgentStore {
         guard let core else { return }
         do {
             try core.resolveAgentAction(actionID, approve: approve)
-            setProposal(actionID, approve ? .approved : .rejected)
+            decide(actionID, approved: approve)
         } catch {
             // Already decided (timed out, or the session ended).
             setProposal(actionID, .rejected)
@@ -133,6 +154,51 @@ final class AgentStore {
 
     func approveAll() {
         for id in pendingProposals { resolve(id, approve: true) }
+    }
+
+    /// A pending proposal was decided (here or by the core's event, which
+    /// may come second). An approved send or forward that the core holds
+    /// for Undo Send shows "Sending… Undo" until it goes.
+    private func decide(_ actionID: Int64, approved: Bool) {
+        guard let (tool, draftID, state) = proposal(actionID), state == .pending else { return }
+        setProposal(actionID, approved ? .approved : .rejected)
+        if approved, tool == "mail_send" || tool == "mail_forward", let draftID { watchHold(actionID, draftID: draftID) }
+    }
+
+    private func watchHold(_ actionID: Int64, draftID: Int64) {
+        guard let heldUntil else { return }
+        let lookup = holdLookup
+        Task {
+            let deadline = ContinuousClock.now + lookup
+            var until = await heldUntil(draftID)
+            while until == nil, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+                until = await heldUntil(draftID)
+            }
+            // Not held (no delay, or the demo, which sends at once).
+            guard let until, proposal(actionID)?.state == .approved else { return }
+            setProposal(actionID, .sending(until: until))
+            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow)))
+            if case .sending = proposal(actionID)?.state { setProposal(actionID, .approved) } // not while undoing
+        }
+    }
+
+    /// Take back an approved send while it is held: the draft returns to
+    /// editing and opens in the review composer.
+    func undoSend(_ actionID: Int64) {
+        guard let (_, draftID, state) = proposal(actionID), case .sending = state, let draftID, let takeBack else { return }
+        setProposal(actionID, .undoing) // a second click does nothing
+        Task {
+            let tookBack = await takeBack(draftID)
+            if proposal(actionID)?.state == .undoing { setProposal(actionID, tookBack ? .takenBack : .approved) }
+        }
+    }
+
+    private func proposal(_ actionID: Int64) -> (tool: String, draftID: Int64?, state: Entry.ProposalState)? {
+        for entry in entries {
+            if case let .proposal(id, tool, _, draft, state) = entry.kind, id == actionID { return (tool, draft, state) }
+        }
+        return nil
     }
 
     private func setProposal(_ actionID: Int64, _ state: Entry.ProposalState) {
@@ -194,7 +260,7 @@ final class AgentStore {
                 append(.proposal(actionID: actionID, tool: tool, summary: summary, draftID: draftID, state: .pending))
                 isPresented = true
             case let .actionResolved(actionID, approved):
-                setProposal(actionID, approved ? .approved : .rejected)
+                decide(actionID, approved: approved)
             case let .resultsAvailable(threadIDs):
                 let rows = await rows(for: threadIDs)
                 if !rows.isEmpty { append(.results(rows)) }

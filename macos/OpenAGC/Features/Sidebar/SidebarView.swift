@@ -5,6 +5,8 @@ struct SidebarView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var expansion = LabelExpansion()
+    /// Lines a routine's activity up under its name, past the icon.
+    private static let activityIndent: CGFloat = 26
 
     var body: some View {
         @Bindable var model = model
@@ -32,14 +34,15 @@ struct SidebarView: View {
                         model.routines.selectedID = routine.id
                         openWindow(id: "routines")
                     } label: {
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: Space.hair) {
                             Label(routine.name, systemImage: routine.enabled ? "clock.arrow.2.circlepath" : "pause.circle")
                             Text(RoutinesStore.activity(model.routines.latestRuns[routine.id]))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .padding(.leading, 26)
+                                .padding(.leading, Self.activityIndent)
                         }
                     }
+                    .hoverHelp("Open \(routine.name) in the Routines window")
                     .buttonStyle(.plain)
                 }
                 Button {
@@ -48,6 +51,7 @@ struct SidebarView: View {
                     Label(model.routines.routines.isEmpty ? "Set Up a Routine…" : "Manage Routines…", systemImage: "plus.circle")
                         .foregroundStyle(.secondary)
                 }
+                .hoverHelp("Open the Routines window")
                 .buttonStyle(.plain)
             }
         }
@@ -72,7 +76,7 @@ final class LabelExpansion {
     private var key: String?
     @ObservationIgnored private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = CoreClient.appDefaults()) {
         self.defaults = defaults
     }
 
