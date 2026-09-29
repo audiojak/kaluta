@@ -67,6 +67,9 @@ enum KeyboardShortcutGuide {
             .init(keys: "↑ ↓  Tab  ↩  esc", action: "In the prompt: choose a suggestion, or hide them", inThreadList: false),
             .init(keys: "⌘S", action: "Save a routine (in Routines)", inThreadList: false),
         ]),
+        Group(title: "Windows", shortcuts: [
+            .init(keys: "⌘0", action: "The mail window (after closing it)", inThreadList: false),
+        ]),
         Group(title: "Help", shortcuts: [
             .init(keys: "⇧⌘/", action: "Keyboard shortcuts", inThreadList: false),
         ]),

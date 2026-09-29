@@ -20,6 +20,7 @@ struct ListToolbar: ToolbarContent {
                     }
                 }
                 .help(ToolbarHelp.text(for: "Category", model: model) ?? "")
+                .accessibilityLabel("Category")
                 .disabled(model.tasks.selected == nil)
             }
         } else {

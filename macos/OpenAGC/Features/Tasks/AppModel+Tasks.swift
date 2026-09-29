@@ -97,6 +97,9 @@ extension AppModel {
     /// Claude, or open it empty when no agent is ready.
     func openTaskDialog(now: Date = .now) async {
         guard taskDraft == nil, let row = taskTarget, let core else { return }
+        // The agents are found when the agent bar is first used; `t` may
+        // come first.
+        if agent.providers.isEmpty { await agent.loadProviders() }
         let categories = (try? await core.taskCategories()) ?? []
         let draft = TaskDraft(threadID: row.id, subject: row.subject.isEmpty ? "(no subject)" : row.subject,
                               sender: ThreadRowView.senderLine(row), categories: categories, now: now)
@@ -122,6 +125,7 @@ extension AppModel {
         guard bulkTasks == nil, taskDraft == nil, !isTaskList, let core else { return }
         let targets = bulkTaskTargets
         guard !targets.isEmpty else { return }
+        if agent.providers.isEmpty { await agent.loadProviders() }
         let categories = (try? await core.taskCategories()) ?? []
         let withTasks = Set((try? await core.threadsWithOpenTasks(targets.map(\.id))) ?? [])
         let rows = targets.map { row in
