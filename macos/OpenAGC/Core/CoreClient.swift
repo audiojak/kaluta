@@ -185,10 +185,6 @@ final class CoreClient: Sendable {
         try await call { try await core.compareTransports(accountId: accountID) }
     }
 
-    func disableIMAP(_ accountID: String) async throws(CoreClientError) {
-        try await call { try await core.disableImap(accountId: accountID) }
-    }
-
     func isArchive(_ accountID: String) -> Bool { core.accountIsArchive(accountId: accountID) }
 
     /// Development/test hook: a listed account with a synthetic mailbox and

@@ -460,27 +460,6 @@ impl Core {
         .await
     }
 
-    /// Stop using IMAP for an account's backfill (turning it on means
-    /// signing in again with full mail access). Takes effect when its sync
-    /// next starts.
-    pub async fn disable_imap(&self, account_id: String) -> Result<(), CoreError> {
-        let data_dir = self.data_path();
-        let entry = {
-            let _guard = self.index_lock.lock().await;
-            runtime::run(async move {
-                tokio::task::spawn_blocking(move || load_index(&data_dir))
-                    .await
-                    .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))
-            })
-            .await?
-            .into_iter()
-            .find(|e| e.id == account_id)
-        };
-        let Some(mut entry) = entry else { return Err(CoreError::new(ErrorKind::NotFound, "no such account")) };
-        entry.imap = Some(false);
-        self.register_account(entry).await
-    }
-
     /// Account directories that no listed account owns (left behind by an
     /// older "Sign In Again", or a crash mid-removal). The demo is not one.
     pub async fn orphaned_stores(&self) -> Result<Vec<OrphanedStore>, CoreError> {
@@ -662,8 +641,8 @@ mod tests {
         assert_eq!(list[1].display_name.as_deref(), Some("Two"));
         assert_eq!(list.iter().map(|a| a.position).collect::<Vec<_>>(), [0, 1, 2]);
 
-        // The IMAP grant is recorded, kept by later registrations that do
-        // not mention it, and can be turned off.
+        // The IMAP grant is recorded and kept by later registrations that
+        // do not mention it (IMAP is not optional: no way to turn it off).
         let mut granted = IndexEntry {
             id: "one".into(),
             kind: AccountKind::Gmail,
@@ -680,9 +659,6 @@ mod tests {
             block_on(core.list_accounts()).unwrap().iter().find(|a| a.id == "one").unwrap().imap_enabled
         };
         assert!(imap(&core));
-        block_on(core.disable_imap("one".into())).unwrap();
-        assert!(!imap(&core));
-        assert!(block_on(core.disable_imap("nobody".into())).is_err());
 
         block_on(core.move_account("three".into(), 0)).unwrap();
         let order: Vec<String> = block_on(core.list_accounts()).unwrap().into_iter().map(|a| a.id).collect();
