@@ -17,6 +17,7 @@
 		16F271E116BA5AD078A38B81 /* DraftClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C8234BE90C43AB48FCA078 /* DraftClient.swift */; };
 		1970C5710634017B9B3E926B /* CoreClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA889A74036D5319EED2E94 /* CoreClientTests.swift */; };
 		19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */; };
+		1CFC767DC485D2BD803BE144 /* SyncDebuggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC0913B609E033D24E8FB9A3 /* SyncDebuggerTests.swift */; };
 		1EE4D994E6332B9D2D7B1772 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A65BAFCB0A37F91E630541F2 /* SidebarView.swift */; };
 		216E07D01A157F0BCAAB350D /* AgentSuggestionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD34CB7C1FA0DB564F8F5DC1 /* AgentSuggestionTests.swift */; };
 		22FED86B0464F6B629120D6E /* SidebarTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */; };
@@ -25,6 +26,7 @@
 		277A64612543D96AB16DA154 /* OnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56136D185C680F33C31C33A6 /* OnboardingTests.swift */; };
 		290545266B859DE81481C714 /* Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662ED4D20063A892C72301EF /* Snapshot.swift */; };
 		2D0D0324CD5B8C0B57B55A0D /* AgentSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */; };
+		3157AC86805032982564725B /* SyncDebuggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6AF53B3D3F46C3B31646E28 /* SyncDebuggerView.swift */; };
 		319185B7856E5D37CAB6C52A /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4372C03A0DB7F78DF414F892 /* PerformanceTests.swift */; };
 		3383C90F028074A9FDD81433 /* GoogleClientConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33717E284E8BBBD24A611B4F /* GoogleClientConfiguration.swift */; };
 		366FA0C92B6526C208B62372 /* LabelPickerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD60D05E2A25A84E52603E5F /* LabelPickerTests.swift */; };
@@ -211,6 +213,7 @@
 		BD6458B52C0ABAB8AED1A828 /* MailboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailboxStore.swift; sourceTree = "<group>"; };
 		BE6FF06BED85F5FE72CF32A5 /* AgentFFITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentFFITests.swift; sourceTree = "<group>"; };
 		C05AE95A75189A1675986338 /* ComposerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerStore.swift; sourceTree = "<group>"; };
+		C6AF53B3D3F46C3B31646E28 /* SyncDebuggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerView.swift; sourceTree = "<group>"; };
 		C869C66EBC8340DA185D26D9 /* NotificationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationTests.swift; sourceTree = "<group>"; };
 		CD2ED5356A1BBFFEABB704F9 /* KeychainSecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainSecretStore.swift; sourceTree = "<group>"; };
 		CEACE15E5A6BE04DA48CAEFA /* RoutineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineTests.swift; sourceTree = "<group>"; };
@@ -223,6 +226,7 @@
 		E37D8F4A094C1AC18DB808DC /* InboxCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxCategories.swift; sourceTree = "<group>"; };
 		E4C676A513B753ECEBB6FF97 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E7851B97C95FA512DB3CEF19 /* LabelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPicker.swift; sourceTree = "<group>"; };
+		EC0913B609E033D24E8FB9A3 /* SyncDebuggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerTests.swift; sourceTree = "<group>"; };
 		EC1B952488DEE5A94BB9D8BF /* MenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuTests.swift; sourceTree = "<group>"; };
 		F3FE3957640F5FB9A22D3965 /* UpdaterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterTests.swift; sourceTree = "<group>"; };
 		FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surfaces.swift; sourceTree = "<group>"; };
@@ -420,6 +424,7 @@
 				CEACE15E5A6BE04DA48CAEFA /* RoutineTests.swift */,
 				D5D8587064562266E1C5E1DC /* SearchTests.swift */,
 				BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */,
+				EC0913B609E033D24E8FB9A3 /* SyncDebuggerTests.swift */,
 				66E8DBF47559E5EC82041284 /* UndoTests.swift */,
 				F3FE3957640F5FB9A22D3965 /* UpdaterTests.swift */,
 			);
@@ -496,10 +501,19 @@
 				0D3F6879D8FD7DD1B2FFD214 /* Routines */,
 				8A7408779DD1060A1ED75B09 /* Settings */,
 				69C4720C0FA23E101118BEBF /* Sidebar */,
+				C58A684B9FA6EE763854A3A5 /* SyncDebugger */,
 				B755F7DDAB76557EFF1EA484 /* ThreadList */,
 				41A4803B6ABF0BDBE2711120 /* Undo */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		C58A684B9FA6EE763854A3A5 /* SyncDebugger */ = {
+			isa = PBXGroup;
+			children = (
+				C6AF53B3D3F46C3B31646E28 /* SyncDebuggerView.swift */,
+			);
+			path = SyncDebugger;
 			sourceTree = "<group>";
 		};
 		CE7481F262DA91540E01D859 /* Composer */ = {
@@ -756,6 +770,7 @@
 				4CE51440690817A4081731E3 /* RoutineTests.swift in Sources */,
 				AB0A75C26EE77D8683A01474 /* SearchTests.swift in Sources */,
 				22FED86B0464F6B629120D6E /* SidebarTreeTests.swift in Sources */,
+				1CFC767DC485D2BD803BE144 /* SyncDebuggerTests.swift in Sources */,
 				DDDC17F9FCF6F1E7462D3B7D /* UndoTests.swift in Sources */,
 				D9D7C636BB9415D3857A891E /* UpdaterTests.swift in Sources */,
 			);
@@ -811,6 +826,7 @@
 				1EE4D994E6332B9D2D7B1772 /* SidebarView.swift in Sources */,
 				290545266B859DE81481C714 /* Snapshot.swift in Sources */,
 				7E970B4006C6E0C0A357D7F9 /* Surfaces.swift in Sources */,
+				3157AC86805032982564725B /* SyncDebuggerView.swift in Sources */,
 				E65B21770ED2B172D35054C7 /* SyncStatusView.swift in Sources */,
 				D9974F0610B1100DD537D0A5 /* ThreadListStore.swift in Sources */,
 				B46DC7164B626E812E646EDE /* ThreadListView.swift in Sources */,
