@@ -14,13 +14,14 @@ use crate::{Core, CoreError, CoreEvent, ErrorKind, runtime};
 /// The label's name in Gmail.
 pub const TASK_LABEL: &str = "Task";
 
-/// What replying to the email means for a task.
+/// What the user will do with the email to finish a task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum TaskAction {
     Reply,
     ReplyAll,
     Forward,
-    None,
+    /// Nothing to send (stored as `none`).
+    NoEmail,
 }
 
 impl TaskAction {
@@ -29,7 +30,7 @@ impl TaskAction {
             TaskAction::Reply => "reply",
             TaskAction::ReplyAll => "reply_all",
             TaskAction::Forward => "forward",
-            TaskAction::None => "none",
+            TaskAction::NoEmail => "none",
         }
     }
 
@@ -38,7 +39,7 @@ impl TaskAction {
             "reply" => Some(TaskAction::Reply),
             "reply_all" | "replyall" => Some(TaskAction::ReplyAll),
             "forward" => Some(TaskAction::Forward),
-            "none" | "" => Some(TaskAction::None),
+            "none" | "" => Some(TaskAction::NoEmail),
             _ => None,
         }
     }
@@ -80,7 +81,7 @@ impl From<TaskRow> for TaskItem {
             notes: t.notes,
             category: t.category,
             due_day: t.due_day,
-            action: TaskAction::parse(&t.action).unwrap_or(TaskAction::None),
+            action: TaskAction::parse(&t.action).unwrap_or(TaskAction::NoEmail),
             done: t.status == "done",
             from_ai: t.source == "ai",
             why: t.why,
@@ -556,7 +557,7 @@ mod tests {
                     notes: String::new(),
                     category: "Reply".into(),
                     due_day: None,
-                    action: TaskAction::None,
+                    action: TaskAction::NoEmail,
                 }
             ))
             .is_err()

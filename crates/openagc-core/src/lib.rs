@@ -23,6 +23,7 @@ mod runtime;
 pub mod secrets;
 mod sync;
 mod tasks;
+mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
 pub use agents::{

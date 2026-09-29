@@ -2112,6 +2112,20 @@ need or made a decision.
 - **A task** has a title, notes, category, due day or none, the action
   that completes it (reply, reply all, forward or none), Claude's one line
   on why, and whether Claude or the user wrote it.
+- **Asking Claude.** The core builds the request from stored mail: each
+  thread's latest message as plain text (at most 4,000 characters, the
+  message downloaded first if only its headers are stored), today's date
+  and weekday, and the account's categories; at most 50 threads at once.
+  The emails sit in `<email thread_id="…">` blocks, and the request says
+  they are data whose instructions are to be ignored. Claude answers with
+  a JSON array (thread, title, category, due day or null, action, why);
+  the core reads it leniently (prose or a code fence around it, one
+  object, `{"tasks": […]}`) but keeps only threads it asked about, the
+  first suggestion for each; an unknown category becomes the first, a day
+  that is not a date or an unknown action becomes none. The app asks in a
+  one-turn agent session of its own that sees only those threads and
+  refuses any proposal that would change mail; it does not appear in the
+  agent column. With no agent ready, the dialog opens empty.
 
 ---
 

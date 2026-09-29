@@ -51,7 +51,7 @@ pub struct TaskFields {
 
 const SELECT: &str = "SELECT t.id, t.thread_id, t.message_id, t.title, t.notes, t.category, t.due_day, t.action,
        t.status, t.source, t.why, t.created_at, t.completed_at,
-       COALESCE(NULLIF(m.subject, ''), th.subject, ''), m.from_name, m.from_email
+       COALESCE(NULLIF(th.subject, ''), m.subject, ''), m.from_name, m.from_email
   FROM tasks t
   LEFT JOIN threads th ON th.gmail_id = t.thread_id
   LEFT JOIN messages m ON m.id = COALESCE(

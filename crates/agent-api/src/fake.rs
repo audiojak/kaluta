@@ -10,7 +10,8 @@ use crate::{
     Usage,
 };
 
-/// Replies "You said: <prompt>" to every turn.
+/// Replies "You said: <prompt>" to every turn, except OpenAGC's task
+/// prompts, which get [`task_answer`]'s fixed JSON.
 pub struct FakeAgent {
     id: ProviderId,
     status: AgentStatus,
@@ -53,6 +54,38 @@ impl AgentProvider for FakeAgent {
     }
 }
 
+/// The fake's answer to an OpenAGC task prompt (spec §14.8), or `None`
+/// for any other prompt: one suggestion per `<email thread_id="…">` block,
+/// titled after its subject, alternating between a reply due today and a
+/// review with no date, so tests and snapshots see both.
+pub fn task_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC task suggestions") {
+        return None;
+    }
+    let today = prompt
+        .split("Today is ")
+        .nth(1)
+        .and_then(|rest| rest.get(..10))
+        .map(|d| format!("\"{d}\""))
+        .unwrap_or_else(|| "null".into());
+    let mut items = Vec::new();
+    for (i, block) in prompt.split("<email thread_id=\"").skip(1).enumerate() {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let subject = rest.lines().find_map(|l| l.strip_prefix("Subject: ")).map(str::trim).filter(|s| !s.is_empty());
+        let subject = subject.unwrap_or("this email").replace(['"', '\\'], "");
+        items.push(if i % 2 == 0 {
+            format!(
+                r#"{{"thread_id": "{id}", "title": "Reply about {subject}", "category": "Reply", "due": {today}, "action": "reply", "why": "The sender is waiting for an answer."}}"#
+            )
+        } else {
+            format!(
+                r#"{{"thread_id": "{id}", "title": "Review {subject}", "category": "Review", "due": null, "action": "none", "why": "Worth reading before it is archived."}}"#
+            )
+        });
+    }
+    Some(format!("[{}]", items.join(", ")))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -62,7 +95,8 @@ struct FakeSession {
 impl AgentSession for FakeSession {
     async fn send(&mut self, turn: TurnInput) -> AgentResult<()> {
         self.sink.emit(AgentEvent::TurnStarted);
-        self.sink.emit(AgentEvent::TextDelta { text: format!("You said: {}", turn.prompt) });
+        let text = task_answer(&turn.prompt).unwrap_or_else(|| format!("You said: {}", turn.prompt));
+        self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {
             usage: Some(Usage { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0 }),
             cost_usd: None,
