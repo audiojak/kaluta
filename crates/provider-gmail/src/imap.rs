@@ -246,9 +246,7 @@ impl ImapBackfill {
 #[async_trait]
 impl BackfillSource for ImapBackfill {
     async fn fetch(&self, ids: &[MessageId]) -> ProviderResult<Vec<FetchedMessage>> {
-        if self.is_refused() || self.over_budget().await {
-            return self.rest.fetch_messages(ids, Priority::Background).await;
-        }
+        self.available().await?;
         // Ids the map does not know yet: reload it once (new mail since).
         let parsed: Vec<(MessageId, Option<u64>)> =
             ids.iter().map(|id| (id.clone(), u64::from_str_radix(id.as_str(), 16).ok())).collect();
@@ -260,24 +258,14 @@ impl BackfillSource for ImapBackfill {
             let mut state = self.state.lock().await;
             let mut session = match state.session.take() {
                 Some(s) => s,
-                None => match self.connect().await {
-                    Ok(s) => s,
-                    Err(_) => {
-                        drop(state);
-                        return self.rest.fetch_messages(ids, Priority::Background).await;
-                    }
-                },
+                None => self.connect().await?,
             };
             match self.load_map(&mut session).await {
                 Ok(map) => {
                     state.map = map;
                     state.session = Some(session);
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, "IMAP id map failed; this batch goes over the API");
-                    drop(state);
-                    return self.rest.fetch_messages(ids, Priority::Background).await;
-                }
+                Err(e) => return Err(ProviderError::Network(format!("IMAP id map: {e}"))),
             }
         }
         let (via_imap, via_rest) = {
@@ -292,13 +280,8 @@ impl BackfillSource for ImapBackfill {
             }
             (imap, rest)
         };
-        let mut out = match self.fetch_imap(&via_imap).await {
-            Ok(messages) => messages,
-            Err(e) => {
-                tracing::warn!(error = %e, "IMAP fetch failed; this batch goes over the API");
-                return self.rest.fetch_messages(ids, Priority::Background).await;
-            }
-        };
+        let mut out =
+            self.fetch_imap(&via_imap).await.map_err(|e| ProviderError::Network(format!("IMAP fetch: {e}")))?;
         // Anything IMAP did not return (moved to Spam or Trash since the
         // map loaded, or unparseable) goes over the API too; backfill
         // drops every requested id from its queue, so none may be skipped.
@@ -325,23 +308,16 @@ impl BackfillSource for ImapBackfill {
     }
 
     async fn fetch_headers(&self, ids: &[MessageId]) -> ProviderResult<Option<Vec<FetchedMessage>>> {
-        if self.is_refused() || self.over_budget().await {
-            return Ok(None);
-        }
+        self.available().await?;
         let wanted: Vec<u64> = ids.iter().filter_map(|id| u64::from_str_radix(id.as_str(), 16).ok()).collect();
         let mut state = self.state.lock().await;
         let mut session = match state.session.take() {
             Some(s) => s,
-            None => match self.connect().await {
-                Ok(s) => s,
-                Err(_) => return Ok(None),
-            },
+            None => self.connect().await?,
         };
         if wanted.iter().any(|m| !state.map.contains_key(m)) {
-            match self.load_map(&mut session).await {
-                Ok(map) => state.map = map,
-                Err(_) => return Ok(None),
-            }
+            state.map =
+                self.load_map(&mut session).await.map_err(|e| ProviderError::Network(format!("IMAP id map: {e}")))?;
         }
         let uids: Vec<u32> = wanted.iter().filter_map(|m| state.map.get(m).map(|l| l.uid)).collect();
         let labels = self.labels.read().unwrap_or_else(|e| e.into_inner()).clone();
@@ -376,7 +352,7 @@ impl BackfillSource for ImapBackfill {
         }
         self.count_bytes(bytes);
         if failed {
-            return Ok(None);
+            return Err(ProviderError::Network("IMAP header fetch failed".into()));
         }
         state.session = Some(session);
         Ok(Some(out))
@@ -392,6 +368,17 @@ impl BackfillSource for ImapBackfill {
 }
 
 impl ImapBackfill {
+    /// IMAP may be used now: not refused for the account, budget left.
+    async fn available(&self) -> ProviderResult<()> {
+        if self.is_refused() {
+            return Err(ProviderError::Unavailable("IMAP sign-in was refused for this account".into()));
+        }
+        if self.over_budget().await {
+            return Err(ProviderError::Unavailable("today's IMAP download budget is used".into()));
+        }
+        Ok(())
+    }
+
     async fn over_budget(&self) -> bool {
         self.bytes_today().await >= self.config.daily_budget_bytes
     }

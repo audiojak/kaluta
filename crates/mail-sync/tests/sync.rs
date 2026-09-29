@@ -686,3 +686,54 @@ async fn drafts_sync_through_the_drafts_list_whatever_the_window() {
     assert!(db.read(|c| read::list_threads(c, "DRAFT", None, 10)).await.unwrap().rows.is_empty());
     assert_consistent(&db);
 }
+
+/// An IMAP source whose connection keeps failing.
+struct BrokenImap(std::sync::atomic::AtomicUsize);
+
+#[async_trait::async_trait]
+impl provider_api::BackfillSource for BrokenImap {
+    async fn fetch(&self, _ids: &[MessageId]) -> provider_api::ProviderResult<Vec<FetchedMessage>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(provider_api::ProviderError::Network("IMAP connection timed out".into()))
+    }
+    fn cheap_headers(&self) -> bool {
+        true
+    }
+    fn name(&self) -> &'static str {
+        "imap"
+    }
+}
+
+#[tokio::test]
+async fn a_failing_imap_falls_back_to_the_api_per_batch_and_trips_the_breaker() {
+    use mail_sync::transport::{BREAKER_FAILURES, Job, Via};
+    let (fake, db, _recorder, engine) = setup("imap-breaker");
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    seed_mailbox(&fake);
+    fake.seed(message("recent-too", "t7", 5, &[])); // a fourth body, after the breaker opens
+    let broken = Arc::new(BrokenImap(Default::default()));
+    engine.set_backfill_source(broken.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    // One message per batch, so every batch asks IMAP first.
+    while engine.backfill_batch(1).await.unwrap() > 0 {}
+    assert_eq!(db.read(queue::counts).await.unwrap().0, 0, "every body came down over the API");
+    assert_eq!(
+        broken.0.load(std::sync::atomic::Ordering::SeqCst),
+        BREAKER_FAILURES as usize,
+        "after three failures IMAP is not asked again for a while"
+    );
+
+    let snap = engine.transport_snapshot();
+    assert!(snap.breaker_open_until.is_some());
+    assert!(snap.last_imap_error.as_deref().is_some_and(|e| e.contains("timed out")));
+    let bodies: Vec<_> = snap.recent.iter().filter(|r| r.job == Job::Bodies).collect();
+    assert!(bodies.iter().all(|r| r.via == Via::Api && r.ok));
+    assert!(bodies.last().unwrap().reason.as_deref().unwrap().starts_with("IMAP failed"));
+    assert!(bodies[0].reason.as_deref().unwrap().starts_with("IMAP paused"), "then the breaker's reason");
+    assert!(snap.recent.iter().any(|r| r.job == Job::List && r.via == Via::Api), "listing is recorded too");
+
+    engine.reset_transport();
+    assert!(engine.transport_snapshot().breaker_open_until.is_none(), "a refresh tries IMAP again");
+    assert_consistent(&db);
+}

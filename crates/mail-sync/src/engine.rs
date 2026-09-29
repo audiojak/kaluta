@@ -217,6 +217,9 @@ pub struct SyncEngine {
     /// All Mail since they were listed): left to the body backfill, which
     /// falls back to the API, and not asked for again.
     headers_missed: std::sync::Mutex<std::collections::HashSet<MessageId>>,
+    /// IMAP or the API per job, the breaker, and recent operations
+    /// (docs/plans/imap-first-sync.md).
+    pub(crate) transport: crate::transport::Transport,
 }
 
 /// One label change the outbox pushed.
@@ -251,6 +254,109 @@ impl SyncEngine {
             drain_lock: tokio::sync::Mutex::new(()),
             own_changes: std::sync::Mutex::new(Vec::new()),
             headers_missed: Default::default(),
+            transport: Default::default(),
+        }
+    }
+
+    /// Which transport served each job lately, the breaker, recent
+    /// operations: for the Sync Debugger and the sync footer.
+    pub fn transport_snapshot(&self) -> crate::transport::TransportSnapshot {
+        self.transport.snapshot()
+    }
+
+    /// Try IMAP again at once (the user asked for a refresh).
+    pub fn reset_transport(&self) {
+        self.transport.reset();
+    }
+
+    /// Record an operation served by the API by design (no IMAP path, or
+    /// the API is the faster one for this job).
+    pub(crate) fn record_api(
+        &self,
+        timer: &crate::transport::Timer,
+        job: crate::transport::Job,
+        reason: &str,
+        items: usize,
+        ok: bool,
+    ) {
+        self.transport.record(timer.finish(job, crate::transport::Via::Api, Some(reason.to_owned()), items, ok));
+    }
+
+    /// Whole messages: over IMAP when the account has it and the breaker
+    /// allows, else over the API, recording which and why.
+    async fn fetch_bodies(
+        &self,
+        ids: &[MessageId],
+        priority: Priority,
+    ) -> SyncResult<Vec<provider_api::FetchedMessage>> {
+        use crate::transport::{Job, Timer, Via};
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let reason = match self.imap_gate(source.as_ref()) {
+            Ok(()) => {
+                let timer = Timer::start();
+                match source.fetch(ids).await {
+                    Ok(v) => {
+                        self.transport.imap_succeeded();
+                        self.transport.record(timer.finish(Job::Bodies, Via::Imap, None, v.len(), true));
+                        return Ok(v);
+                    }
+                    Err(e) => self.imap_error(&e),
+                }
+            }
+            Err(reason) => reason,
+        };
+        let timer = Timer::start();
+        let result = self.provider.fetch_messages(ids, priority).await;
+        self.transport.record(timer.finish(
+            Job::Bodies,
+            Via::Api,
+            Some(reason),
+            result.as_ref().map_or(0, Vec::len),
+            result.is_ok(),
+        ));
+        Ok(result?)
+    }
+
+    /// Headers without bodies, when IMAP can give them cheaply; `None`
+    /// otherwise (the API charges as much for headers as for bodies).
+    async fn fetch_headers(&self, ids: &[MessageId]) -> SyncResult<Option<Vec<provider_api::FetchedMessage>>> {
+        use crate::transport::{Job, Timer, Via};
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        if self.imap_gate(source.as_ref()).is_err() {
+            return Ok(None);
+        }
+        let timer = Timer::start();
+        match source.fetch_headers(ids).await {
+            Ok(Some(v)) => {
+                self.transport.imap_succeeded();
+                self.transport.record(timer.finish(Job::Headers, Via::Imap, None, v.len(), true));
+                Ok(Some(v))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => {
+                let reason = self.imap_error(&e);
+                self.transport.record(timer.finish(Job::Headers, Via::Imap, Some(reason), 0, false));
+                Ok(None)
+            }
+        }
+    }
+
+    /// Whether IMAP may serve now; otherwise why not.
+    fn imap_gate(&self, source: &dyn BackfillSource) -> Result<(), String> {
+        match source.name() {
+            "rest" => Err("IMAP is not set up for this account".into()),
+            "imap-refused" => Err("IMAP sign-in was refused for this account".into()),
+            _ if !self.transport.imap_allowed(crate::outbox::now_millis()) => Err(self.transport.breaker_reason()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Note an IMAP error: a failure counts towards the breaker; a source
+    /// that is unavailable by design (refused, budget used) does not.
+    fn imap_error(&self, e: &provider_api::ProviderError) -> String {
+        match e {
+            provider_api::ProviderError::Unavailable(why) => why.clone(),
+            other => self.transport.imap_failed(&other.to_string(), crate::outbox::now_millis()),
         }
     }
 
@@ -419,8 +525,7 @@ impl SyncEngine {
             return Ok(0);
         }
         tracing::debug!(count = ids.len(), "backfill batch: fetching");
-        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let fetched = source.fetch(&ids).await?;
+        let fetched = self.fetch_bodies(&ids, Priority::Background).await?;
         tracing::debug!(count = fetched.len(), "backfill batch: storing");
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let processed = ids.len();
@@ -475,7 +580,7 @@ impl SyncEngine {
             return Ok(0);
         }
         let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let Some(headers) = source.fetch_headers(&ids).await? else {
+        let Some(headers) = self.fetch_headers(&ids).await? else {
             if !source.cheap_headers() {
                 // Headers cost as much as bodies now (IMAP refused): fetch
                 // the headers-only tier in full rather than never.
@@ -522,7 +627,17 @@ impl SyncEngine {
     /// Interactive: the user is waiting. Returns how many were downloaded.
     pub async fn search_server(&self, query: &str, max: usize) -> SyncResult<usize> {
         let filter = ListFilter { label_ids: vec![], query: Some(query.to_owned()), include_spam_trash: false };
-        let page = self.provider.list_message_ids(&filter, None).await?;
+        let timer = crate::transport::Timer::start();
+        let found = self.provider.list_message_ids(&filter, None).await;
+        let count = found.as_ref().map_or(0, |p| p.ids.len());
+        self.record_api(
+            &timer,
+            crate::transport::Job::Search,
+            "searching over IMAP is not built yet",
+            count,
+            found.is_ok(),
+        );
+        let page = found?;
         let ids: Vec<MessageId> = page.ids.into_iter().map(|(id, _)| id).take(max).collect();
         // Matches stored with headers only get their bodies too (tiered
         // download), the same way an opened message does.
@@ -538,12 +653,7 @@ impl SyncEngine {
         if missing.is_empty() {
             return Ok(0);
         }
-        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
-        let fetched = if source.cheap_headers() {
-            source.fetch(&missing).await?
-        } else {
-            self.provider.fetch_messages(&missing, Priority::Interactive).await?
-        };
+        let fetched = self.fetch_bodies(&missing, Priority::Interactive).await?;
         let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
         let count = incoming.len();
         let changes = self
@@ -589,7 +699,17 @@ impl SyncEngine {
     /// removed, and which draft holds which message is recorded for
     /// editing. Returns how many draft messages were downloaded.
     pub async fn sync_drafts(&self) -> SyncResult<usize> {
-        let Some(listed) = self.provider.list_drafts().await? else { return Ok(0) };
+        let timer = crate::transport::Timer::start();
+        let drafts = self.provider.list_drafts().await;
+        let count = drafts.as_ref().ok().and_then(|d| d.as_ref()).map_or(0, Vec::len);
+        self.record_api(
+            &timer,
+            crate::transport::Job::Drafts,
+            "draft ids come only from the API",
+            count,
+            drafts.is_ok(),
+        );
+        let Some(listed) = drafts? else { return Ok(0) };
         let held: Vec<String> = listed.iter().map(|(_, m)| m.0.clone()).collect();
         let (missing, stale) = self
             .db
@@ -648,7 +768,16 @@ impl SyncEngine {
         };
         // Push local intent first so history does not appear to undo it.
         self.drain_outbox().await?;
-        let set = match self.provider.changes_since(&provider_api::SyncCursor(cursor)).await {
+        let timer = crate::transport::Timer::start();
+        let changed = self.provider.changes_since(&provider_api::SyncCursor(cursor)).await;
+        self.record_api(
+            &timer,
+            crate::transport::Job::Changes,
+            "faster over the API: Gmail's IMAP keeps no change log",
+            changed.as_ref().map_or(0, |s| s.changes.len()),
+            changed.is_ok(),
+        );
+        let set = match changed {
             Ok(set) => set,
             Err(ProviderError::CursorExpired) => {
                 self.start_resync().await?;
@@ -839,7 +968,17 @@ impl SyncEngine {
         let mut page: Option<PageToken> = None;
         loop {
             tracing::debug!(priority, has_page = page.is_some(), "listing phase page");
-            let result = self.provider.list_message_ids(&filter, page.take()).await?;
+            let timer = crate::transport::Timer::start();
+            let listed = self.provider.list_message_ids(&filter, page.take()).await;
+            let count = listed.as_ref().map_or(0, |r| r.ids.len());
+            self.record_api(
+                &timer,
+                crate::transport::Job::List,
+                "listing over IMAP is not built yet",
+                count,
+                listed.is_ok(),
+            );
+            let result = listed?;
             let ids: Vec<MessageId> = result.ids.into_iter().map(|(id, _)| id).collect();
             self.db.write(move |tx| queue::enqueue(tx, priority, &ids, refetch)).await?;
             match result.next {

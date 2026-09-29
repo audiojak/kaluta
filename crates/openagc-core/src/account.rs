@@ -52,7 +52,37 @@ struct StoredClient {
 }
 
 /// An account's backfill transport (spec §7.4 IMAP amendment).
+/// One sync operation, for the Sync Debugger.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportOp {
+    /// "list", "headers", "bodies", "changes", "drafts", "search", "write".
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    /// Why the API served it, if it did.
+    pub reason: Option<String>,
+    pub at: i64,
+    pub millis: u64,
+    pub items: u32,
+    pub ok: bool,
+}
+
+/// How an account is syncing, by transport (docs/plans/imap-first-sync.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SyncDiagnostics {
+    pub syncing: bool,
+    pub backfill: BackfillStatus,
+    /// When IMAP is tried again, if paused after failures.
+    pub breaker_open_until: Option<i64>,
+    pub consecutive_imap_failures: u32,
+    pub last_imap_error: Option<String>,
+    /// The latest operation for each job.
+    pub latest_by_job: Vec<TransportOp>,
+    /// Newest first, up to 200.
+    pub recent: Vec<TransportOp>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct BackfillStatus {
     /// "rest", "imap", "imap-refused", or "none" when not syncing.
     pub transport: String,
@@ -323,7 +353,10 @@ impl From<ProviderError> for CoreError {
             ProviderError::Forbidden(_) => ErrorKind::PermissionDenied,
             ProviderError::NotFound(_) => ErrorKind::NotFound,
             ProviderError::RateLimited { .. } => ErrorKind::RateLimited,
-            ProviderError::Network(_) | ProviderError::Server { .. } | ProviderError::Decode(_) => ErrorKind::Network,
+            ProviderError::Network(_)
+            | ProviderError::Server { .. }
+            | ProviderError::Decode(_)
+            | ProviderError::Unavailable(_) => ErrorKind::Network,
             ProviderError::CursorExpired | ProviderError::Invalid(_) => ErrorKind::Internal,
         };
         CoreError::new(kind, e.to_string())
@@ -635,6 +668,36 @@ impl Core {
         .await
     }
 
+    /// Which transport serves each sync job for an account, why, the
+    /// breaker, and recent operations (docs/plans/imap-first-sync.md): for
+    /// the Sync Debugger and the sync footer. Empty when not syncing.
+    pub async fn sync_diagnostics(&self, account_id: String) -> SyncDiagnostics {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let status = self.backfill_status(account_id).await;
+        let Some(service) = service else {
+            return SyncDiagnostics { syncing: false, backfill: status, ..Default::default() };
+        };
+        let snap = service.engine().transport_snapshot();
+        let op = |r: &mail_sync::transport::OpRecord| TransportOp {
+            job: r.job.name().to_owned(),
+            via: r.via.name().to_owned(),
+            reason: r.reason.clone(),
+            at: r.at,
+            millis: r.millis,
+            items: r.items as u32,
+            ok: r.ok,
+        };
+        SyncDiagnostics {
+            syncing: true,
+            backfill: status,
+            breaker_open_until: snap.breaker_open_until,
+            consecutive_imap_failures: snap.consecutive_failures,
+            last_imap_error: snap.last_imap_error.clone(),
+            latest_by_job: snap.latest_by_job().iter().map(op).collect(),
+            recent: snap.recent.iter().map(op).collect(),
+        }
+    }
+
     /// How an account's backfill is fetching bodies (Settings shows it).
     pub async fn backfill_status(&self, account_id: String) -> BackfillStatus {
         let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
@@ -805,9 +868,11 @@ impl Core {
         .await
     }
 
-    /// Sync now (foreground, wake from sleep, network regained, ⌘R).
+    /// Sync now (foreground, wake from sleep, network regained, ⌘R). IMAP
+    /// is tried again at once even if it failed lately.
     pub fn sync_now(&self) {
         for service in self.accounts.all() {
+            service.engine().reset_transport();
             service.sync_now();
         }
     }
@@ -1001,6 +1066,13 @@ mod tests {
             assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no REST body fetches");
             let status = core.backfill_status("acct".into()).await;
             assert_eq!(status.transport, "imap");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.syncing && diag.breaker_open_until.is_none());
+            let bodies = diag.latest_by_job.iter().find(|op| op.job == "bodies").expect("bodies recorded");
+            assert_eq!((bodies.via.as_str(), bodies.ok), ("imap", true));
+            let list = diag.latest_by_job.iter().find(|op| op.job == "list").expect("listing recorded");
+            assert_eq!(list.via, "api");
+            assert!(list.reason.is_some(), "the API's use says why");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
 

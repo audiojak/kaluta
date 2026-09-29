@@ -8,7 +8,7 @@ use mail_domain::{LabelId, MessageId, ThreadId};
 use mail_mime::mbox::fixture::FixtureMessage;
 use provider_api::fake::FakeProvider;
 use provider_api::token::StaticToken;
-use provider_api::{BackfillSource, FetchedMessage};
+use provider_api::{BackfillSource, FetchedMessage, ProviderError};
 use provider_gmail::imap::{ImapBackfill, ImapConfig, ImapEndpoint};
 use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
 
@@ -116,14 +116,16 @@ async fn big_and_unknown_messages_go_over_the_api() {
 
 #[tokio::test]
 async fn a_refused_login_means_the_api_from_then_on() {
+    // The source says so; the engine's transport serves the batch over the
+    // API (docs/plans/imap-first-sync.md) and records why.
     let (server, rest, source) = setup("wrong-token").await;
-    let fetched = source.fetch(&[hex(MSG_BIG)]).await.unwrap();
-    assert_eq!(fetched.len(), 1);
+    assert!(source.fetch(&[hex(MSG_BIG)]).await.is_err());
     assert!(source.is_refused());
     assert_eq!(source.name(), "imap-refused");
-    source.fetch(&[hex(MSG_BIG)]).await.unwrap();
+    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap_err();
+    assert!(matches!(again, ProviderError::Unavailable(_)), "refused is unavailable, not a failure: {again}");
     assert_eq!(server.logins(), 0);
-    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 2, "no second login attempt");
+    assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no second login attempt, no API");
 }
 
 #[tokio::test]
@@ -143,8 +145,8 @@ async fn the_daily_budget_hands_over_to_the_api() {
     };
     source.fetch(&[hex(MSG_A)]).await.unwrap();
     assert_eq!(server.body_fetches(), 1);
-    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap();
-    assert_eq!(again[0].subject, "from REST");
+    let again = source.fetch(&[hex(MSG_BIG)]).await.unwrap_err();
+    assert!(matches!(again, ProviderError::Unavailable(_)), "over budget: the API's turn");
     assert_eq!(server.body_fetches(), 1, "over budget: no more IMAP today");
 }
 
@@ -162,7 +164,7 @@ async fn headers_come_without_bodies_for_a_browsable_list() {
     assert_eq!(server.body_fetches(), 0);
 
     let (_s2, _r2, refused) = setup("wrong-token").await;
-    assert!(refused.fetch_headers(&[hex(MSG_A)]).await.unwrap().is_none(), "no cheap headers without IMAP");
+    assert!(refused.fetch_headers(&[hex(MSG_A)]).await.is_err(), "no cheap headers without IMAP");
 }
 
 fn crlf(s: &str) -> Vec<u8> {

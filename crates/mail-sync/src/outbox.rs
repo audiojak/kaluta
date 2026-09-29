@@ -242,6 +242,7 @@ impl SyncEngine {
             if !self.db().write(move |tx| outbox::claim(tx, claimed_id)).await? {
                 continue;
             }
+            let timer = crate::transport::Timer::start();
             let result = match &queued.op {
                 OutboxOp::ModifyLabels { message_ids, add, remove } => {
                     // Before the call: history may report it before we return.
@@ -287,6 +288,13 @@ impl SyncEngine {
                 OutboxOp::SyncDraft { draft_id, from } => self.mirror_draft(*draft_id, from).await?,
                 OutboxOp::DeleteDraft { gmail_draft_id } => self.provider().delete_draft(gmail_draft_id).await,
             };
+            self.record_api(
+                &timer,
+                crate::transport::Job::Write,
+                "one API call per change, with exact undo",
+                1,
+                result.is_ok(),
+            );
             let id = queued.id;
             match result {
                 Ok(()) => {

@@ -7,6 +7,7 @@ mod engine;
 mod error;
 pub mod import;
 mod outbox;
+pub mod transport;
 
 pub use attachments::{AttachmentFile, attachment_file, safe_filename};
 pub use compose::{draft_for_editing, forward_draft, reply_draft, schedule_draft_sync, send_draft};
