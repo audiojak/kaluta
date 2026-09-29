@@ -25,9 +25,12 @@ use tokio::time::Instant;
 pub const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify openid profile";
-/// With full mail access, which IMAP requires (spec §7.4 IMAP amendment).
-/// Asked for only when the user turns on faster download for an account.
-pub const SCOPE_WITH_IMAP: &str = "https://mail.google.com/ openid profile";
+/// With full mail access, which IMAP requires: the default since
+/// docs/plans/imap-first-sync.md. `gmail.modify` is asked for too, so an
+/// account whose owner unticks full access on Google's consent screen still
+/// works, over the API.
+pub const SCOPE_WITH_IMAP: &str =
+    "https://mail.google.com/ https://www.googleapis.com/auth/gmail.modify openid profile";
 pub const FULL_MAIL_SCOPE: &str = "https://mail.google.com/";
 
 /// Refresh this long before the access token actually expires.
@@ -426,7 +429,7 @@ mod tests {
         let q: std::collections::HashMap<String, String> =
             url::Url::parse(&adding.url).unwrap().query_pairs().into_owned().collect();
         assert_eq!(q["prompt"], "consent select_account", "adding: Google shows its account chooser");
-        assert_eq!(q["scope"], SCOPE_WITH_IMAP, "full mail access only when asked for");
+        assert_eq!(q["scope"], SCOPE_WITH_IMAP, "full mail access when asked for, the default");
         assert!(!q.contains_key("login_hint"));
     }
 

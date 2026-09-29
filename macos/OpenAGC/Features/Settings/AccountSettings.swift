@@ -126,8 +126,15 @@ struct AccountRow: View {
     ]
 
     /// Whether to suggest IMAP: a large mailbox still on the API.
-    static func suggestsIMAP(imapEnabled: Bool, storedMessages: UInt64?) -> Bool {
-        !imapEnabled && (storedMessages ?? 0) > suggestIMAPAbove
+    /// The Downloads row: which transport and, if not IMAP, why.
+    static func transportText(imapEnabled: Bool, transport: String?) -> String {
+        guard imapEnabled else { return "Over the Gmail API (this sign-in does not allow IMAP)" }
+        switch transport {
+        case "imap": return "Over IMAP"
+        case "imap-refused": return "Over the Gmail API (IMAP was refused)"
+        case nil, "none": return "Over IMAP when syncing"
+        default: return "Over the Gmail API"
+        }
     }
 
     var body: some View {
@@ -179,13 +186,15 @@ struct AccountRow: View {
                 }
                 .hoverHelp("How far back OpenAGC keeps a copy of this account's mail")
                 .disabled(window == nil)
-                Toggle(isOn: Binding(get: { account.imapEnabled },
-                                     set: { on in Task { await model.setFasterDownload(on, for: account.id) } })) {
-                    Text("Download faster over IMAP")
-                    Text("Asks Google for full mail access, which IMAP needs. OpenAGC still never deletes mail permanently.")
+                LabeledContent("Downloads") {
+                    Text(Self.transportText(imapEnabled: account.imapEnabled, transport: backfill?.transport))
+                        .foregroundStyle(.secondary)
                 }
-                .hoverHelp("Download over IMAP, much faster for large mailboxes")
-                .disabled(signedIn != true)
+                .hoverHelp("IMAP is used for downloading; the Gmail API for categories, drafts, changes made elsewhere and sending, and whenever IMAP fails")
+                if !account.imapEnabled, signedIn == true {
+                    Button("Sign In Again for IMAP…") { Task { await model.signInAgainForIMAP(account.id) } }
+                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. OpenAGC still never deletes mail permanently.")
+                }
                 if account.imapEnabled {
                     // Tiered download (spec §7.4): older mail in the range
                     // comes down as headers; bodies when needed.
@@ -202,10 +211,6 @@ struct AccountRow: View {
                     }
                     .disabled(bodyWindow == nil)
                     .hoverHelp("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full.")
-                } else if signedIn == true, Self.suggestsIMAP(imapEnabled: false, storedMessages: backfill?.storedMessages) {
-                    Label("A mailbox this large downloads much faster over IMAP.", systemImage: "bolt")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
         }

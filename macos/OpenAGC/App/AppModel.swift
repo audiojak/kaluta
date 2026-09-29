@@ -200,6 +200,17 @@ final class AppModel {
     /// How the open account's backfill downloads bodies ("imap", "rest",
     /// "imap-refused"), for the sidebar's sync line.
     private(set) var backfillTransport: String?
+    /// Why the account is on the Gmail API when it should be on IMAP (it
+    /// failed, or was refused); nil otherwise. A quiet line in the sync
+    /// footer (maintainer decision 3, docs/plans/imap-first-sync.md).
+    private(set) var transportNote: String?
+
+    static func transportNote(_ d: SyncDiagnostics) -> String? {
+        guard d.syncing else { return nil }
+        if d.backfill.transport == "imap-refused" { return "IMAP was refused for this account" }
+        if d.breakerOpenUntil != nil { return "IMAP paused after errors" }
+        return nil
+    }
     @ObservationIgnored private var transportCheckedAt: Date = .distantPast
     /// Set when Google rejected the stored credentials; shows a banner.
     private(set) var needsReauthentication = false
@@ -329,7 +340,9 @@ final class AppModel {
     /// Sign in to Gmail: again as the open account, or (`adding`) as a new
     /// one, in which case Google shows its account chooser and a cancelled
     /// sign-in returns to the account that was open (spec §7.7).
-    func signIn(with client: GoogleClientConfiguration, adding: Bool = false, fullAccess: Bool = false) async {
+    /// Full mail access is asked for by default: IMAP is the default
+    /// transport (docs/plans/imap-first-sync.md).
+    func signIn(with client: GoogleClientConfiguration, adding: Bool = false, fullAccess: Bool = true) async {
         guard let core, client.isUsable else { return }
         let previous = openAccountID
         accountBeforeSignIn = previous
@@ -372,17 +385,11 @@ final class AppModel {
         }
     }
 
-    /// Faster download over IMAP for an account (spec §7.4): on means
-    /// signing in again with full mail access; off stops using it.
-    func setFasterDownload(_ on: Bool, for accountID: String) async {
-        guard let core else { return }
-        if on {
-            await switchAccount(to: accountID)
-            await signIn(with: .effective(), fullAccess: true)
-        } else {
-            try? await core.disableIMAP(accountID)
-            await reloadAccounts()
-        }
+    /// Sign an account in again, which grants the full mail access IMAP
+    /// needs (an account signed in before IMAP became the default).
+    func signInAgainForIMAP(_ accountID: String) async {
+        await switchAccount(to: accountID)
+        await signIn(with: .effective())
     }
 
     /// Add another Gmail account (the avatar menu's Add Account…).
@@ -650,8 +657,11 @@ final class AppModel {
         guard let core, let id = openAccountID, force || Date().timeIntervalSince(transportCheckedAt) > 5 else { return }
         transportCheckedAt = Date()
         Task {
-            let status = await core.backfillStatus(id)
-            if openAccountID == id, backfillTransport != status.transport { backfillTransport = status.transport }
+            let diagnostics = await core.syncDiagnostics(id)
+            guard openAccountID == id else { return }
+            if backfillTransport != diagnostics.backfill.transport { backfillTransport = diagnostics.backfill.transport }
+            let note = Self.transportNote(diagnostics)
+            if transportNote != note { transportNote = note }
         }
     }
 

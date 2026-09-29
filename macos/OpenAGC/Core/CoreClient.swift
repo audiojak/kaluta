@@ -173,6 +173,12 @@ final class CoreClient: Sendable {
         await core.backfillStatus(accountId: accountID)
     }
 
+    /// Which transport serves each sync job and why, the breaker, recent
+    /// operations (the Sync Debugger, the sync footer).
+    func syncDiagnostics(_ accountID: String) async -> SyncDiagnostics {
+        await core.syncDiagnostics(accountId: accountID)
+    }
+
     func disableIMAP(_ accountID: String) async throws(CoreClientError) {
         try await call { try await core.disableImap(accountId: accountID) }
     }
@@ -771,6 +777,8 @@ typealias DraftInfo = OpenAGCCore.DraftInfo
 typealias DraftStatus = OpenAGCCore.DraftStatus
 typealias LabelInfo = OpenAGCCore.LabelInfo
 typealias InboxCategory = OpenAGCCore.InboxCategory
+typealias SyncDiagnostics = OpenAGCCore.SyncDiagnostics
+typealias TransportOp = OpenAGCCore.TransportOp
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow

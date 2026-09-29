@@ -476,8 +476,8 @@ impl Core {
 #[uniffi::export]
 impl Core {
     /// Begin Gmail sign-in: returns the URL Swift opens in the browser.
-    /// `full_access` also asks for `https://mail.google.com/`, which faster
-    /// download over IMAP needs (spec §7.4 IMAP amendment); off by default.
+    /// `full_access` also asks for `https://mail.google.com/`, which IMAP
+    /// needs; the app always asks for it (docs/plans/imap-first-sync.md).
     pub async fn begin_gmail_sign_in(
         &self,
         client: OAuthClientConfig,

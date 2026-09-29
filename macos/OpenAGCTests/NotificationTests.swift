@@ -128,18 +128,20 @@ struct NotificationTests {
     }
 }
 
-struct IMAPSuggestionTests {
-    @Test func onlyLargeMailboxesWithoutIMAPAreNudged() {
-        #expect(AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 25_000))
-        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: 5_000))
-        #expect(!AccountRow.suggestsIMAP(imapEnabled: true, storedMessages: 25_000))
-        #expect(!AccountRow.suggestsIMAP(imapEnabled: false, storedMessages: nil))
+@MainActor
+struct TransportTextTests {
+    @Test func settingsSaysHowAnAccountDownloads() {
+        #expect(AccountRow.transportText(imapEnabled: true, transport: "imap") == "Over IMAP")
+        #expect(AccountRow.transportText(imapEnabled: true, transport: "imap-refused") == "Over the Gmail API (IMAP was refused)")
+        #expect(AccountRow.transportText(imapEnabled: false, transport: "rest").contains("does not allow IMAP"))
     }
 }
 
+@MainActor
 struct SyncStatusTextTests {
-    private func lines(_ d: AppModel.SyncDisplay, _ transport: String? = nil, signIn: Bool = false) -> [String?] {
-        guard let f = SyncStatusView.footer(d, transport: transport, needsSignIn: signIn) else { return [] }
+    private func lines(_ d: AppModel.SyncDisplay, _ transport: String? = nil, note: String? = nil,
+                       signIn: Bool = false) -> [String?] {
+        guard let f = SyncStatusView.footer(d, transport: transport, note: note, needsSignIn: signIn) else { return [] }
         return [f.title, f.detail]
     }
 
@@ -152,5 +154,10 @@ struct SyncStatusTextTests {
         #expect(lines(.offline).first == "Offline")
         #expect(lines(.idle).isEmpty, "nothing to say when idle")
         #expect(lines(.idle, signIn: true).first == "Not Syncing")
+        // IMAP failed: a quiet note (maintainer decision 3).
+        #expect(lines(.syncing(pending: 40), "imap", note: "IMAP paused after errors")
+            == ["Downloading over the Gmail API", "IMAP paused after errors · 40 left"])
+        #expect(lines(.idle, "imap-refused", note: "IMAP was refused for this account")
+            == ["Using the Gmail API", "IMAP was refused for this account"])
     }
 }
