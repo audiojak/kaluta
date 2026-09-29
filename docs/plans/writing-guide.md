@@ -21,6 +21,19 @@ user accepts, edits or rejects each one.
   forwards, in the composer, the agent column and routines.
 - **Review:** batches with merged proposals; each proposal shows example
   quotes from the user's mail; accept, edit or reject one by one.
+- **Audience groups:** inferred from the mail and confirmed by the user.
+  With fewer than five, the set is filled from the obvious gaps (from:
+  colleagues, direct reports, customers, investors, vendors, candidates,
+  advisers such as lawyers, friends and family, strangers), each marked
+  "suggested" until confirmed.
+- **Checks** run only on what an AI drafts, never on what the user types.
+  When the user writes a prompt in the writing help box, their draft is
+  part of the prompt; the message the AI writes from it follows the guide
+  and is checked.
+- **One guide for every agent** (Claude, Codex): assumed, to be confirmed.
+- **Categories:** the maintainer's second list (26 categories, 2026-09-29)
+  was compared with this one; ten were added and one broadened, marked
+  "added" below. The rest were already covered under other names.
 
 ## Two kinds of entry
 
@@ -44,6 +57,10 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | A1 | Overall voice | formality, warmth, directness, confidence vs hedging | learned |
 | A2 | Tone by situation | saying no, bad news, apologising, asking a favour, chasing, thanking, disagreeing, congratulating | learned |
 | A3 | Humour, emoji, exclamation marks | whether, how much, with whom | learned |
+| A4 | Directness (added) | "Can you send this by Friday?" vs "Would you be able to…"; how plainly requests are stated | learned |
+| A5 | Uncertainty in your voice (added) | "I think…", "My understanding is…"; when not to sound certain | learned |
+| A6 | Enthusiasm and acknowledgements (added) | "Great", "Sounds good", "Perfect", "Love it"; how often | learned |
+| A7 | Personality markers (added) | regional words (Australianisms), colloquialisms, lowercase replies | learned |
 
 ### B. Structure
 | # | Category | Examples | From |
@@ -56,6 +73,9 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | B6 | Sign-off and name | "Best," "Thanks," none; "John" / "JK" | learned |
 | B7 | Signature block | when it is included; which one | learned + asked |
 | B8 | Subject lines | style for new messages; when to change one | learned |
+| B9 | Context (added) | how much background before the point; what recipients are assumed to know | learned |
+| B10 | Calls to action (added) | where the ask goes; explicit deadlines; one clear next step | learned |
+| B11 | Questions (added) | one at a time or several; inline or bulleted; open or specific | learned |
 
 ### C. Language
 | # | Category | Examples | From |
@@ -67,7 +87,7 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | C5 | Numbers, dates, times, money | "3pm PT", "Oct 2", "$5k" | learned |
 | C6 | Abbreviations and jargon | which are used, with whom | learned |
 | C7 | Favoured words and phrases | phrases the user really uses | learned |
-| C8 | Banned words and phrases | words the user never uses; AI tells | learned (absence) + asked |
+| C8 | Things you never do (broadened) | banned words, phrases and clichés; formatting never used; AI habits to avoid | learned (absence) + asked |
 | C9 | Sentence style | length, fragments, active voice | learned |
 | C10 | Languages | which language to answer in | learned |
 
@@ -77,7 +97,8 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | D1 | Audience groups | colleagues, customers, investors, vendors, recruiters, friends and family: register for each | learned + asked |
 | D2 | Particular people | nickname, formality, things to remember for one person or domain | learned |
 | D3 | Forms of address | first names, titles | learned |
-| D4 | First contact vs established | how a cold or first message differs | learned |
+| D4 | First contact vs established | how a cold or first message differs; warm vs transactional | learned |
+| D5 | Seniority (added) | senior, peer, direct report | learned + asked |
 
 ### E. Message types (playbooks)
 | # | Category | Examples | From |
@@ -93,6 +114,7 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | E9 | Thanks and acknowledgements | one line or more | learned |
 | E10 | Recipients | reply all habits, who is copied, Cc vs Bcc | learned |
 | E11 | Attachments and links | how they are mentioned | learned |
+| E12 | Disagreeing and negotiating (added) | correcting, pushing back, negotiating | learned |
 
 ### F. Content rules
 | # | Category | Examples | From |
@@ -116,6 +138,10 @@ mail can show it; "asked" means it cannot, and the interview (below) asks.
 | H1 | Missing information | ask me, leave a [bracket], or offer options | asked |
 | H2 | Conflicts and precedence | rules beat guidelines; a person's entry beats a group's | fixed, shown to the user |
 | H3 | Model examples | real sent messages kept as examples per message type | chosen by the user |
+| H4 | Draft, send or stay silent (added) | when to only draft, when to ask first, when not to reply at all | asked |
+
+H4 is guidance to the agent; what an agent is *able* to do without
+approval stays with Settings › Permissions, which the guide cannot loosen.
 
 ## An entry
 
@@ -169,7 +195,10 @@ times. A rejected proposal is remembered so it is not proposed again.
   result of the draft tools (`mail_create_draft`, `mail_update_draft`,
   forward and send), so a long conversation does not lose it.
 - **Checks.** Entries with a `check` are tested by the core on every AI
-  draft; a failure is shown on the draft ("Uses 'circle back', which your
+  draft, and only on AI drafts: text the user types is never checked. In
+  writing help the user's own draft goes in as part of the prompt; the
+  message that comes back is what is checked. A failure is shown on the
+  draft ("Uses 'circle back', which your
   rules ban") and, in writing help, sent back once for a rewrite.
 - Drafts written under a guide say which version they used.
 
@@ -218,8 +247,5 @@ account's store on this Mac.
 
 ## Open questions
 
-- Audience groups: a fixed starting set the user edits (as task
-  categories), or inferred from mail and confirmed?
 - The default sample: latest 200 sent messages in batches of 20?
-- Should checks also run on what the user types, or only on AI drafts?
-- One guide for every agent (Claude, Codex), or per agent?
+- One guide for every agent (Claude, Codex), or per agent? (Assumed: one.)
