@@ -4,6 +4,7 @@ import SwiftUI
 /// "Ask Claude…" with the agent switcher. Sending opens the inspector.
 struct AgentPromptBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openSettings) private var openSettings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
     /// The chip ↑/↓/Tab moved to; Return chooses it.
@@ -41,7 +42,10 @@ struct AgentPromptBar: View {
                         .disabled({ if case .ready = provider.status { false } else { true } }())
                     }
                     Divider() // menu
-                    Button("Agent Settings…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
+                    Button("Agent Settings…") { // no-help: menu item
+                        model.settingsTab = .agents
+                        openSettings()
+                    }
                 } label: {
                     Image(systemName: "sparkles")
                 }
@@ -91,6 +95,10 @@ struct AgentPromptBar: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: chips)
         .task { await agent.loadProviders() }
         .onChange(of: model.agentFocusRequests) { focused = true }
+        // Sending from under the reader opens the column, and the prompt
+        // moves under the conversation: it keeps the cursor for the
+        // follow-up.
+        .onAppear { if model.agent.isPresented { focused = true } }
         .onChange(of: focused) { _, isFocused in
             if !isFocused { chipsHidden = false }
             highlighted = nil

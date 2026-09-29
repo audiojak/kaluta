@@ -105,3 +105,19 @@ struct ReaderStoreTests {
         #expect(model.reader.detail == nil)
     }
 }
+
+struct DraftCardTests {
+    @Test func aDraftInTheThreadIsMarkedAsOne() {
+        let sent = EmailDocument.Message(id: "1", fromName: "Ann", fromEmail: "ann@x.com", recipients: ["Me"],
+                                         date: .now, snippet: "hi", isRead: true, html: "<p>hi</p>")
+        let draft = EmailDocument.Message(id: "2", fromName: "Me", fromEmail: "me@x.com", recipients: ["Ann"],
+                                          date: .now, snippet: "reply", isRead: true, html: "<p>reply</p>",
+                                          isDraft: true)
+        let html = EmailDocument.thread([sent, draft], isDark: false)
+        #expect(html.contains("<details class=\"msg draft\" open id=\"m-2\">"))
+        #expect(html.contains("<span class=\"badge\">Draft</span>"))
+        #expect(html.contains("Saved "))
+        #expect(html.contains("<details class=\"msg\" open id=\"m-1\">") == false, "the sent one is collapsed, read")
+        #expect(html.components(separatedBy: "class=\"badge\"").count == 2, "only the draft is marked")
+    }
+}

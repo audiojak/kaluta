@@ -235,7 +235,7 @@ struct TaskListTests {
         #expect(model.tasks.tasks.first { $0.id == task.id }?.title == task.title)
     }
 
-    @Test func aReplyFromTheListCompletesItsTaskWhenSent() async throws {
+    @Test func sendingATasksReplyAsksWhetherItIsDone() async throws {
         let model = try await demoWithTasks()
         let account = try #require(model.openAccountID)
         var opened: [ComposeRequest] = []
@@ -247,9 +247,17 @@ struct TaskListTests {
         #expect(opened.first?.taskID == task.id, "the reply carries its task")
 
         await model.messageSent(heldDraftID: nil, taskID: task.id, accountID: account)
+        #expect(model.taskDoneQuestion?.task.id == task.id, "sending asks whether the task is done")
+        await model.answerTaskDone(false)
+        #expect(model.taskDoneQuestion == nil)
         try await settle(model)
-        #expect(!model.tasks.tasks.contains { $0.id == task.id }, "sending finished it")
-        #expect(model.undo.notice?.text.hasPrefix("Sent. Task done") == true)
+        #expect(model.tasks.tasks.contains { $0.id == task.id }, "No keeps it open")
+
+        await model.messageSent(heldDraftID: nil, taskID: task.id, accountID: account)
+        await model.answerTaskDone(true)
+        try await settle(model)
+        #expect(!model.tasks.tasks.contains { $0.id == task.id }, "Yes finishes it")
+        #expect(model.undo.notice?.text.hasPrefix("Task done") == true)
         model.undo.undo(in: account)
         try await settle(model)
         #expect(model.tasks.tasks.contains { $0.id == task.id }, "undo opens it again")

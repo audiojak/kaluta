@@ -22,6 +22,10 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
             TaskDialog(draft: draft)
         }
+        .sheet(item: Binding(get: { model.taskDoneQuestion },
+                             set: { if $0 == nil, model.taskDoneQuestion != nil { Task { await model.answerTaskDone(false) } } })) {
+            TaskDoneDialog(question: $0)
+        }
         .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in
             BulkTaskSheet(draft: draft)
         }
@@ -60,16 +64,27 @@ struct MainWindow: View {
                 VStack(spacing: 0) {
                     detail
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    AgentPromptBar()
-                        .frame(maxWidth: 680)
-                        .padding(.horizontal, Space.xl)
-                        .padding(.vertical, Space.l)
+                    if !model.agent.isPresented {
+                        AgentPromptBar()
+                            .frame(maxWidth: 680)
+                            .padding(.horizontal, Space.xl)
+                            .padding(.vertical, Space.l)
+                    }
                 }
                 if model.agent.isPresented {
                     PaneDivider()
-                    AgentInspector()
-                        .frame(width: 340)
-                        .transition(.move(edge: .trailing))
+                    // While the conversation is open the prompt sits under
+                    // it, like a chat, so a follow-up goes where the answer
+                    // is; closed, it goes back under the reader.
+                    VStack(spacing: 0) {
+                        AgentInspector()
+                            .frame(maxHeight: .infinity)
+                        AgentPromptBar()
+                            .padding(.horizontal, Space.l)
+                            .padding(.vertical, Space.l)
+                    }
+                    .frame(width: 340)
+                    .transition(.move(edge: .trailing))
                 }
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)

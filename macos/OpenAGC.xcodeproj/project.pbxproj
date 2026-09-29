@@ -28,6 +28,7 @@
 		277A64612543D96AB16DA154 /* OnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56136D185C680F33C31C33A6 /* OnboardingTests.swift */; };
 		290545266B859DE81481C714 /* Snapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 662ED4D20063A892C72301EF /* Snapshot.swift */; };
 		2D0D0324CD5B8C0B57B55A0D /* AgentSuggestions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */; };
+		2E16834C01A31E6C6CB6D4BE /* TaskDoneDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0EC7D80ED73FC741D5DBAEA /* TaskDoneDialog.swift */; };
 		3157AC86805032982564725B /* SyncDebuggerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6AF53B3D3F46C3B31646E28 /* SyncDebuggerView.swift */; };
 		319185B7856E5D37CAB6C52A /* PerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4372C03A0DB7F78DF414F892 /* PerformanceTests.swift */; };
 		3383C90F028074A9FDD81433 /* GoogleClientConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33717E284E8BBBD24A611B4F /* GoogleClientConfiguration.swift */; };
@@ -217,6 +218,7 @@
 		99F36E7595DF6E9B290AE189 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
 		9B2ED3B92D6E529688C7C31B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9FCBE0C4FC7F267DC74AB18D /* ImportMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportMailbox.swift; sourceTree = "<group>"; };
+		A0EC7D80ED73FC741D5DBAEA /* TaskDoneDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDoneDialog.swift; sourceTree = "<group>"; };
 		A1FA403B0E890A2F61D2E8BC /* DesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTests.swift; sourceTree = "<group>"; };
 		A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSettings.swift; sourceTree = "<group>"; };
 		A3ECF1113029DF896EFBDA03 /* openagc_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = openagc_core.swift; sourceTree = "<group>"; };
@@ -397,6 +399,7 @@
 				BE0D26F833C2199E4C16795D /* AppModel+Tasks.swift */,
 				7CD73699F481A160A310E527 /* BulkTaskSheet.swift */,
 				12119B6B5E72875BDA8E5C10 /* TaskDialog.swift */,
+				A0EC7D80ED73FC741D5DBAEA /* TaskDoneDialog.swift */,
 				30E76B5CB7759AE57FCB348E /* TaskListStore.swift */,
 				15F8DEBC281B735D98308AF6 /* TaskListView.swift */,
 				A87408B632453437C40B6BA3 /* TaskSuggester.swift */,
@@ -883,6 +886,7 @@
 				3157AC86805032982564725B /* SyncDebuggerView.swift in Sources */,
 				E65B21770ED2B172D35054C7 /* SyncStatusView.swift in Sources */,
 				D6E08EA9EAAE6A740E84FB05 /* TaskDialog.swift in Sources */,
+				2E16834C01A31E6C6CB6D4BE /* TaskDoneDialog.swift in Sources */,
 				9AFD2006E7CC41E471932A6F /* TaskListStore.swift in Sources */,
 				A4A20FA8D51236C1AD565F6D /* TaskListView.swift in Sources */,
 				AD2C4E55FC6F0A17CCD71C7C /* TaskSettings.swift in Sources */,

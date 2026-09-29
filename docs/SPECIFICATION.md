@@ -2088,6 +2088,16 @@ last 30 days) and shows which was faster per item. It downloads a sample
 but stores nothing, changes no mail, and leaves the breaker and the
 operation record alone.
 
+**Amendments 2026-09-29 (maintainer feedback).** In the reader, a draft
+in a thread is an outlined, unfilled card marked **Draft**, its time
+"Saved …", so it never looks like mail that went. The composer sends with
+⌘Return as well as ⇧⌘D, as in Gmail, and a new message or a forward opens
+with the cursor in To. While the agent column is open, the Ask bar sits at
+the bottom of that column under the conversation, like a chat, and takes
+the cursor; closed, it returns under the reader. The agent column's Agent
+Settings… opens Settings on the Agents tab, where a Default agent picker
+and a Default tag show which agent answers.
+
 ### 14.8 Tasks **(Amendment 2026-09-29)**
 
 A task-based way through email that changes the app as little as
@@ -2152,9 +2162,12 @@ need or made a decision.
   same in the context menu, and Mark as Done and Category in the list
   column's toolbar. Every change goes on the undo stack with a notice.
   A reply or forward started from the task list answers the task: when it
-  is sent, the task is done (and the thread's `Task` label goes with its
-  last open task); Undo Send takes back both, and once the message has
-  gone, ⌘Z opens the task again. Searching while in Tasks shows mail
+  is sent, the app asks "Mark the Task Done?" (Y or Return: done, and the
+  thread's `Task` label goes with its last open task; N or Escape: it
+  stays open). ⌘Z reopens a task marked done; Undo Send takes the message
+  back and reopens the task, and sending it again asks again
+  (amended 2026-09-29 at the maintainer's request: it had completed the
+  task without asking). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
   results as anywhere else.
 - **Many emails: `⇧T`.** In a mail list, `⇧T` (also Message › Create
   Tasks… and the context menu) opens the **bulk sheet** for the

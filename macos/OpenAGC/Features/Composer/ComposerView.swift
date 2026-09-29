@@ -60,6 +60,16 @@ struct ComposerView: View {
                        systemImage: "sparkles", intent: .info)
             }
             header(store)
+                .background {
+                    // ⌘Return sends too, as in Gmail (not while reviewing an
+                    // agent's draft: that send is the approval card's).
+                    if request.agentName == nil {
+                        Button("Send") { Task { await store.send() } } // no-help: hidden
+                            .keyboardShortcut(.return, modifiers: .command)
+                            .disabled(!store.canSend)
+                            .hidden()
+                    }
+                }
             if let error = store.saveError {
                 Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
@@ -120,7 +130,10 @@ struct ComposerView: View {
         let suggest: (String) -> [AddressInfo] = { [drafts = store.drafts] text in drafts?.suggestContactsNow(text) ?? [] }
         return VStack(spacing: 0) {
             row("To:") {
-                RecipientField(addresses: $store.to, suggest: suggest, accessibilityLabel: "To")
+                // With no one to write to yet (a new message, a forward), the
+                // cursor starts here; a reply starts in the body.
+                RecipientField(addresses: $store.to, suggest: suggest, accessibilityLabel: "To",
+                               focusOnAppear: store.to.isEmpty)
                 if !store.showsCcBcc {
                     Button("Cc/Bcc") { store.showsCcBcc = true }
                         .hoverHelp("Add Cc and Bcc fields")

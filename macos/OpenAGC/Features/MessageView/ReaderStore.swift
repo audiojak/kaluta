@@ -140,7 +140,8 @@ final class ReaderStore {
                 date: Date(timeIntervalSince1970: TimeInterval(m.date) / 1000),
                 snippet: m.snippet,
                 isRead: m.isRead,
-                html: bodies[m.id]?.html)
+                html: bodies[m.id]?.html,
+                isDraft: m.isDraft)
         }
     }
 

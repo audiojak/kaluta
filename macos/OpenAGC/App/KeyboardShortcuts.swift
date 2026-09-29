@@ -56,7 +56,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "⇧T", action: "Create tasks for the highlighted emails, or the latest 20", inThreadList: true),
         ]),
         Group(title: "Writing", shortcuts: [
-            .init(keys: "⇧⌘D", action: "Send", inThreadList: false),
+            .init(keys: "⇧⌘D  or  ⌘↩", action: "Send", inThreadList: false),
             .init(keys: "⇧⌘A", action: "Attach files", inThreadList: false),
             .init(keys: "⌘B  ⌘I  ⌘U", action: "Bold, italic, underline", inThreadList: false),
         ]),

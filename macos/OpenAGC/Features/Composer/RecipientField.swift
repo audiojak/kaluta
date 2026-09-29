@@ -7,6 +7,8 @@ struct RecipientField: NSViewRepresentable {
     @Binding var addresses: [AddressInfo]
     let suggest: (String) -> [AddressInfo]
     var accessibilityLabel = "To"
+    /// Take the cursor when the composer opens (a new message, a forward).
+    var focusOnAppear = false
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -25,6 +27,9 @@ struct RecipientField: NSViewRepresentable {
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         field.setAccessibilityLabel(accessibilityLabel)
         field.objectValue = addresses.map(Token.init)
+        if focusOnAppear {
+            DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
+        }
         return field
     }
 

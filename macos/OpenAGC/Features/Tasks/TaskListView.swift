@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The task list (spec §14.8): tasks grouped by when they are due, in the
@@ -7,6 +8,7 @@ import SwiftUI
 struct TaskListView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
+    @State private var keys = TaskListKeys()
 
     var body: some View {
         let sections = model.tasks.sections()
@@ -15,6 +17,7 @@ struct TaskListView: View {
                 Section {
                     ForEach(section.tasks, id: \.id) { task in
                         TaskRow(task: task)
+                            .background(TableProbe(keys: keys))
                             .tag(task.id)
                             .contextMenu { TaskMenu(task: task) }
                     }
@@ -28,17 +31,17 @@ struct TaskListView: View {
         }
         .listStyle(.inset)
         .focused($focused)
-        .onAppear { focused = true }
-        .onKeyPress(characters: .init(charactersIn: "raefcjk"), phases: .down) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            return handle(press.characters) ? .handled : .ignored
+        .onAppear {
+            focused = true
+            // The list's table view takes ⌫, ↩ and letters before SwiftUI's
+            // key handlers see them, so the keys are caught on the way in,
+            // only while that table has focus.
+            keys.start { event in handle(event) }
         }
+        .onDisappear { keys.stop() }
         .popover(isPresented: Bindable(model.tasks).choosingCategory, arrowEdge: .trailing) {
             CategoryChooser()
         }
-        .onKeyPress(.return) { edit() }
-        .onKeyPress(.delete) { delete() }
-        .onKeyPress(.deleteForward) { delete() }
         .overlay {
             if model.tasks.loaded, sections.isEmpty {
                 if model.tasks.showsDone {
@@ -48,6 +51,15 @@ struct TaskListView: View {
                                            description: Text("Press t on an email to make a task of it"))
                 }
             }
+        }
+    }
+
+    /// A key pressed while the list has focus; true when it was a task key.
+    private func handle(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 36, 76: return edit() // return, enter
+        case 51, 117: return delete() // delete, forward delete
+        default: return handle(event.charactersIgnoringModifiers ?? "")
         }
     }
 
@@ -66,16 +78,18 @@ struct TaskListView: View {
         return true
     }
 
-    private func edit() -> KeyPress.Result {
-        guard model.tasks.selected != nil else { return .ignored }
+    private func edit() -> Bool {
+        guard model.tasks.selected != nil else { return false }
         Task { await model.editSelectedTask() }
-        return .handled
+        return true
     }
 
-    private func delete() -> KeyPress.Result {
-        guard model.tasks.selected != nil else { return .ignored }
+    /// The task only: its email stays; the `Task` label goes with the
+    /// thread's last open task.
+    private func delete() -> Bool {
+        guard model.tasks.selected != nil else { return false }
         Task { await model.deleteSelectedTask() }
-        return .handled
+        return true
     }
 
     private func move(_ delta: Int) {
@@ -208,5 +222,72 @@ struct TaskMenu: View {
 
     private func select() {
         if model.tasks.selectedID != task.id { model.selectTask(task.id) }
+    }
+}
+
+/// The task list's single keys (spec §14.8), caught before the list's table
+/// view uses them: only while that table is the key window's first
+/// responder, with no sheet open and no ⌘, ⌃ or ⌥ held.
+@MainActor
+final class TaskListKeys {
+    /// The table view SwiftUI draws the list with, found by `TableProbe`.
+    weak var table: NSTableView?
+    private var monitor: Any?
+
+    func start(_ handle: @escaping @MainActor (NSEvent) -> Bool) {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Local monitors run on the main thread.
+            nonisolated(unsafe) let pressed = event
+            let taken = MainActor.assumeIsolated {
+                guard let self, self.accepts(pressed),
+                      pressed.modifierFlags.intersection([.command, .control, .option]).isEmpty
+                else { return false }
+                return handle(pressed)
+            }
+            return taken ? nil : event
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    /// Whether `event` would be taken as a task key (tests).
+    func accepts(_ event: NSEvent) -> Bool {
+        guard let table, let window = event.window else { return false }
+        return window.firstResponder === table && window.attachedSheet == nil
+    }
+}
+
+/// Finds the table view a row is drawn in, for `TaskListKeys`.
+private struct TableProbe: NSViewRepresentable {
+    let keys: TaskListKeys
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.keys = keys
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.keys = keys
+        view.find()
+    }
+
+    final class ProbeView: NSView {
+        weak var keys: TaskListKeys?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            find()
+        }
+
+        func find() {
+            var view = superview
+            while let current = view, !(current is NSTableView) { view = current.superview }
+            if let table = view as? NSTableView { keys?.table = table }
+        }
     }
 }

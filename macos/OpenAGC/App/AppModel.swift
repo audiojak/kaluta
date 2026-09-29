@@ -310,6 +310,10 @@ final class AppModel {
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
     var bulkTasks: BulkTaskDraft?
+    /// The Settings tab to show when Settings next opens.
+    var settingsTab: SettingsTab = .general
+    /// Asked after a task's reply is sent: is the task done?
+    var taskDoneQuestion: TaskDoneQuestion?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.
@@ -975,40 +979,48 @@ final class AppModel {
     }
 
     /// A message was sent (or is held for Undo Send). A reply a task
-    /// called for completes the task (spec §14.8): Undo Send takes back
-    /// both; once the message has gone, undo reopens the task.
+    /// called for asks whether that task is done (spec §14.8): the answer
+    /// is the user's, in `taskDoneQuestion`.
     func messageSent(heldDraftID: Int64?, taskID: Int64?, accountID: String) async {
-        var completed: TaskItem?
-        if let taskID, let core { completed = try? await core.setTaskDone(taskID, true) }
-        if let heldDraftID {
-            sendHeld(draftID: heldDraftID, accountID: accountID, reopen: completed)
-        } else if let completed, let core {
-            undo.record(accountID: accountID, actionName: "Complete Task",
-                        noticeText: "Sent. Task done: “\(completed.title)”",
-                        undo: { _ = try? await core.setTaskDone(completed.id, false) },
-                        redo: { _ = try? await core.setTaskDone(completed.id, true) })
-        }
+        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: taskID) }
+        guard let taskID, let core, let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }),
+              !task.done
+        else { return }
+        taskDoneQuestion = TaskDoneQuestion(task: task, accountID: accountID, held: heldDraftID != nil)
     }
 
-    func sendHeld(draftID: Int64, accountID: String, reopen task: TaskItem? = nil) {
+    /// The answer to "Mark the task done?": done (undoable), or kept open.
+    func answerTaskDone(_ done: Bool) async {
+        guard let question = taskDoneQuestion else { return }
+        taskDoneQuestion = nil
+        guard done, let core else { return }
+        let task = question.task
+        guard (try? await core.setTaskDone(task.id, true)) != nil else { return }
+        await tasks.load()
+        // While a send is held, its Undo Send notice stays on screen; ⌘Z
+        // still reopens the task first.
+        undo.record(accountID: question.accountID, actionName: "Complete Task",
+                    noticeText: "Task done: “\(task.title)”", showNotice: !question.held,
+                    undo: { _ = try? await core.setTaskDone(task.id, false) },
+                    redo: { _ = try? await core.setTaskDone(task.id, true) })
+    }
+
+    func sendHeld(draftID: Int64, accountID: String, taskID: Int64? = nil) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
             guard let self else { return }
             if await core.cancelSend(draftID, in: accountID) {
-                if let task { _ = try? await core.setTaskDone(task.id, false) }
+                // Taken back: its task is not done after all.
+                if let taskID { _ = try? await core.setTaskDone(taskID, false) }
+                if self.taskDoneQuestion?.task.id == taskID { self.taskDoneQuestion = nil }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
-                // Sending it again still completes the task.
-                self.compose(.draft(id: draftID, task: task?.id))
-            } else if let task {
-                // The message has gone; the task comes back (spec §14.8).
-                _ = try? await core.setTaskDone(task.id, false)
-                self.undo.show("Already sent. Task open again: “\(task.title)”", accountID: accountID)
+                // Sending it again still answers the task.
+                self.compose(.draft(id: draftID, task: taskID))
             } else {
                 self.undo.show("Already sent", accountID: accountID)
             }
         }
     }
-
 
     /// Undo the open account's last mail action (the notice's button, and
     /// ⌘Z when no text is being edited).

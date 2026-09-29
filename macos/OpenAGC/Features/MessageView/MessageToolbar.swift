@@ -152,7 +152,7 @@ enum ToolbarHelp {
         switch label {
         case "Attach": "Attach files (⇧⌘A)"
         case "Discard": "Delete this draft"
-        case "Send": "Send (⇧⌘D)"
+        case "Send": "Send (⇧⌘D or ⌘Return)"
         default: label
         }
     }

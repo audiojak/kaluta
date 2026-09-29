@@ -201,14 +201,14 @@ final class MailUndo {
     /// task (spec §14.8): on its account's stack as `actionName`, with the
     /// notice's text; undo and redo run the given steps, in order with any
     /// other undo.
-    func record(accountID: String, actionName: String, noticeText: String,
+    func record(accountID: String, actionName: String, noticeText: String, showNotice: Bool = true,
                 undo: @escaping @MainActor () async -> Void, redo: @escaping @MainActor () async -> Void) {
         let manager = manager(for: accountID)
         manager.beginUndoGrouping()
         registerSteps(actionName: actionName, undo: undo, redo: redo, on: manager)
         manager.endUndoGrouping()
         revision += 1
-        show(noticeText, accountID: accountID)
+        if showNotice { show(noticeText, accountID: accountID) }
     }
 
     private func registerSteps(actionName: String, undo: @escaping @MainActor () async -> Void,
