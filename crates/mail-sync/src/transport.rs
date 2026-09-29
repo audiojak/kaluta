@@ -27,11 +27,13 @@ pub enum Job {
     Search,
     /// The user's changes going to the server (outbox).
     Write,
+    /// Waiting for new mail (IMAP IDLE).
+    Push,
 }
 
 impl Job {
-    pub const ALL: [Job; 7] =
-        [Job::List, Job::Headers, Job::Bodies, Job::Changes, Job::Drafts, Job::Search, Job::Write];
+    pub const ALL: [Job; 8] =
+        [Job::List, Job::Headers, Job::Bodies, Job::Changes, Job::Drafts, Job::Search, Job::Write, Job::Push];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -42,6 +44,7 @@ impl Job {
             Job::Drafts => "drafts",
             Job::Search => "search",
             Job::Write => "write",
+            Job::Push => "push",
         }
     }
 }

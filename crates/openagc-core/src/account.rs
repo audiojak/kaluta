@@ -122,6 +122,10 @@ impl provider_api::BackfillSource for LabelRefreshingImap {
         self.inner.list(query).await
     }
 
+    async fn watch(&self, max: std::time::Duration) -> provider_api::ProviderResult<Option<bool>> {
+        self.inner.watch(max).await
+    }
+
     fn cheap_headers(&self) -> bool {
         self.inner.cheap_headers()
     }
@@ -1095,6 +1099,33 @@ mod tests {
             assert!(changes.is_none_or(|c| c.via == "api" && c.reason.is_some()), "changes: the API, and why");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
+
+            // New mail arrives at once over IDLE, without waiting for the
+            // 30 s poll or a sync_now.
+            let mut fresh = message("1a0000000000003", &["INBOX", "UNREAD"]);
+            fresh.subject = "pushed".into();
+            rest.deliver(fresh);
+            server.add(FakeImapMessage {
+                uid: 3,
+                msgid: 0x1a0000000000003,
+                thrid: 0x1a0000000000003,
+                labels: vec!["\\Inbox".into()],
+                flags: vec![],
+                raw: b"From: s@example.com\r\nSubject: pushed\r\n\r\nNew\r\n".to_vec(),
+            });
+            let pushed = std::time::Instant::now();
+            while pushed.elapsed() < Duration::from_secs(10) {
+                let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
+                if rows.len() == 3 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(core.list_threads("INBOX".into(), None, 10).await.unwrap().rows.len(), 3, "pushed over IDLE");
+            assert!(server.idles() >= 1);
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let push = diag.latest_by_job.iter().find(|op| op.job == "push").expect("push recorded");
+            assert_eq!(push.via, "imap");
 
             // Tiered download: the body window is per account.
             assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::Month, "default");

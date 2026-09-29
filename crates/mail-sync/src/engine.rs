@@ -383,6 +383,31 @@ impl SyncEngine {
         }
     }
 
+    /// Wait up to `max` for new mail over IMAP IDLE: `Some(true)` when the
+    /// mailbox changed (run an incremental round now), `Some(false)` when
+    /// the wait ran out, `None` when push is not available now (no IMAP,
+    /// the breaker open, or the connection failed; the poll carries on).
+    /// IDLE failures do not count towards the breaker: a connection that a
+    /// router drops after a few idle minutes says nothing about fetching.
+    pub async fn wait_for_push(&self, max: std::time::Duration) -> Option<bool> {
+        use crate::transport::{Job, Timer, Via};
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        self.imap_gate(source.as_ref()).ok()?;
+        let timer = Timer::start();
+        match source.watch(max).await {
+            Ok(Some(changed)) => {
+                self.transport.record(timer.finish(Job::Push, Via::Imap, None, usize::from(changed), true));
+                Some(changed)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::debug!(error = %e, "IMAP IDLE ended");
+                self.transport.record(timer.finish(Job::Push, Via::Imap, Some(e.to_string()), 0, false));
+                None
+            }
+        }
+    }
+
     /// Note an IMAP error: a failure counts towards the breaker; a source
     /// that is unavailable by design (refused, budget used) does not.
     fn imap_error(&self, e: &provider_api::ProviderError) -> String {

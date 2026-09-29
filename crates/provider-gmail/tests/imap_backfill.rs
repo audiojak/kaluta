@@ -329,3 +329,33 @@ async fn spam_trash_and_drafts_come_from_their_folders_with_their_labels() {
     assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no API calls");
     assert_eq!(server.logins(), 1, "one session, switching folders");
 }
+
+#[tokio::test]
+async fn idle_reports_new_mail_at_once_and_times_out_quietly() {
+    use std::time::Duration;
+    let (server, _rest, source) = setup("good-token").await;
+    assert_eq!(source.watch(Duration::from_millis(100)).await.unwrap(), Some(false), "nothing new: the wait runs out");
+
+    let server = Arc::new(server);
+    let adder = server.clone();
+    let add = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        adder.add(FakeImapMessage {
+            uid: 13,
+            msgid: 0x18a1_0000_0000_0020,
+            thrid: THREAD,
+            labels: vec!["\\Inbox".into()],
+            flags: vec![],
+            raw: FixtureMessage::simple(9).to_rfc822(),
+        });
+    });
+    let started = std::time::Instant::now();
+    assert_eq!(source.watch(Duration::from_secs(20)).await.unwrap(), Some(true), "new mail wakes the wait");
+    assert!(started.elapsed() < Duration::from_secs(5), "at once, not at the timeout");
+    add.await.unwrap();
+    assert_eq!(server.idles(), 2);
+    assert_eq!(server.logins(), 1, "one IDLE connection, kept between waits");
+
+    let (_s2, _r2, refused) = setup("wrong-token").await;
+    assert!(refused.watch(Duration::from_millis(50)).await.is_err());
+}

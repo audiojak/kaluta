@@ -2,7 +2,9 @@
 //! backfill loop and an incremental poll, all on the core runtime.
 //!
 //! Poll interval: 30 s while the app is active, 5 min in the background,
-//! immediately on `sync_now` (foreground, wake, network regained). Transient
+//! immediately on `sync_now` (foreground, wake, network regained), and at
+//! once when IMAP IDLE reports new mail (the poll stays as a backstop for
+//! changes IDLE does not see). Transient
 //! failures back off; an authorization failure stops sync and tells Swift.
 
 use std::sync::Arc;
@@ -22,6 +24,8 @@ pub const ACTIVE_POLL: Duration = Duration::from_secs(30);
 pub const BACKGROUND_POLL: Duration = Duration::from_secs(300);
 pub const DRAFT_MIRROR_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
+/// IDLE is re-issued this often: Gmail ends idle sessions at about 29 min.
+pub const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
 /// Messages per headers-first batch.
 const HEADERS_BATCH: usize = 1_000;
 
@@ -178,7 +182,9 @@ impl SyncService {
         let outbox = tokio::spawn(async move { pusher.outbox_loop().await });
         let mirror = self.clone();
         let drafts = tokio::spawn(async move { mirror.drafts_loop().await });
-        self.tasks.lock().unwrap_or_else(|e| e.into_inner()).extend([backfill, outbox, drafts]);
+        let listener = self.clone();
+        let push = tokio::spawn(async move { listener.push_loop().await });
+        self.tasks.lock().unwrap_or_else(|e| e.into_inner()).extend([backfill, outbox, drafts, push]);
         self.poll_loop().await;
     }
 
@@ -277,6 +283,26 @@ impl SyncService {
                 Ok(0) => {}
                 Ok(_) => self.outbox_wake.notify_one(),
                 Err(e) => tracing::warn!(error = %e, "scheduling draft sync failed"),
+            }
+        }
+    }
+
+    /// New mail at once over IMAP IDLE; when push is not available, try
+    /// again later, backing off.
+    async fn push_loop(self: Arc<Self>) {
+        let first = Duration::from_secs(30);
+        let mut backoff = first;
+        loop {
+            match self.engine.wait_for_push(IDLE_RENEW).await {
+                Some(true) => {
+                    backoff = first;
+                    self.poll_now.notify_one();
+                }
+                Some(false) => backoff = first,
+                None => {
+                    tokio::time::sleep(backoff).await;
+                    backoff = (backoff * 2).min(MAX_BACKOFF);
+                }
             }
         }
     }

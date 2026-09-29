@@ -143,6 +143,12 @@ pub trait BackfillSource: Send + Sync {
     async fn list(&self, _query: &str) -> ProviderResult<Option<Vec<MessageId>>> {
         Ok(None)
     }
+    /// Wait up to `max` for the mailbox to change (IMAP IDLE): `Some(true)`
+    /// when something arrived or changed, `Some(false)` when the wait ran
+    /// out; `None` when this source cannot push.
+    async fn watch(&self, _max: std::time::Duration) -> ProviderResult<Option<bool>> {
+        Ok(None)
+    }
     /// Whether [`BackfillSource::fetch_headers`] is cheap here at all (it
     /// may still answer `None` for a while, e.g. over its daily budget).
     /// Decides tiered download (spec §7.4 amendment 2026-09-27).

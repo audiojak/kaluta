@@ -266,6 +266,9 @@ pub struct ImapBackfill {
     rest: Arc<dyn MailProvider>,
     labels: LabelNames,
     state: Mutex<State>,
+    /// A connection of its own for IDLE, so waiting for mail never holds
+    /// up fetching.
+    idle: Mutex<Option<Session>>,
     /// Google refused the login (IMAP disabled, or the token lacks the
     /// scope): REST only from here on.
     refused: AtomicBool,
@@ -288,6 +291,7 @@ impl ImapBackfill {
             rest,
             labels,
             state: Mutex::new(State::default()),
+            idle: Mutex::new(None),
             refused: AtomicBool::new(false),
             day: Default::default(),
             bytes_today: Default::default(),
@@ -531,6 +535,40 @@ impl BackfillSource for ImapBackfill {
             uids.into_iter().filter_map(|u| by_uid.get(&u)).map(|m| MessageId(format!("{m:x}"))).collect();
         ids.sort_by(|a, b| b.0.len().cmp(&a.0.len()).then_with(|| b.0.cmp(&a.0)));
         Ok(Some(ids))
+    }
+
+    async fn watch(&self, max: std::time::Duration) -> ProviderResult<Option<bool>> {
+        self.available().await?;
+        let mut slot = self.idle.lock().await;
+        let session = match slot.take() {
+            Some(s) => s,
+            None => {
+                let mut s = self.connect().await?;
+                let names = folder_names(&mut s).await;
+                let all = names.get(&Folder::AllMail).map_or(Folder::AllMail.default_name(), String::as_str);
+                s.examine(all).await.map_err(imap)?;
+                s
+            }
+        };
+        // A dropped connection shows as an error here; the next call
+        // reconnects.
+        let mut handle = session.idle();
+        match tokio::time::timeout(IO_TIMEOUT, handle.init()).await {
+            Ok(result) => result.map_err(imap)?,
+            Err(_) => return Err(ProviderError::Network("IMAP IDLE timed out".into())),
+        }
+        let response = {
+            let (wait, stop) = handle.wait_with_timeout(max);
+            let response = wait.await.map_err(imap)?;
+            drop(stop);
+            response
+        };
+        let session = match tokio::time::timeout(IO_TIMEOUT, handle.done()).await {
+            Ok(result) => result.map_err(imap)?,
+            Err(_) => return Err(ProviderError::Network("IMAP IDLE did not end".into())),
+        };
+        *slot = Some(session);
+        Ok(Some(matches!(response, async_imap::extensions::idle::IdleResponse::NewData(_))))
     }
 
     fn cheap_headers(&self) -> bool {

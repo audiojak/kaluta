@@ -5,7 +5,8 @@
 //! UID FETCH (UID, FLAGS, X-GM-MSGID, X-GM-THRID, X-GM-LABELS,
 //! RFC822.SIZE, BODY.PEEK[], BODY.PEEK[HEADER], BODY.PEEK[TEXT]<0.n>),
 //! UID SEARCH (ALL, or X-GM-RAW with `in:`, `label:`, `is:unread`,
-//! `is:starred`, `newer_than:Nd`), NOOP and LOGOUT. Nothing here ever
+//! `is:starred`, `newer_than:Nd`), IDLE (an `EXISTS` when a message is
+//! added), NOOP and LOGOUT. Nothing here ever
 //! connects anywhere.
 
 use std::sync::{Arc, Mutex};
@@ -51,12 +52,15 @@ struct State {
     /// "Now" for `newer_than:` (ms); the real clock when unset.
     now: Option<i64>,
     searches: usize,
+    idles: usize,
 }
 
 /// A running fake server. Dropping it stops accepting connections.
 pub struct FakeImapServer {
     pub addr: std::net::SocketAddr,
     state: Arc<Mutex<State>>,
+    /// Rung when a message is added, for sessions in IDLE.
+    bell: Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -72,6 +76,11 @@ impl FakeImapServer {
         self.state.lock().unwrap().now = Some(now_ms);
     }
 
+    /// `IDLE` commands started.
+    pub fn idles(&self) -> usize {
+        self.state.lock().unwrap().idles
+    }
+
     /// `UID SEARCH` commands answered.
     pub fn searches(&self) -> usize {
         self.state.lock().unwrap().searches
@@ -82,16 +91,17 @@ impl FakeImapServer {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind the fake IMAP server");
         let addr = listener.local_addr().expect("fake IMAP address");
         let state = Arc::new(Mutex::new(State { token: token.to_owned(), ..Default::default() }));
-        let accept_state = state.clone();
+        let bell = Arc::new(tokio::sync::Notify::new());
+        let (accept_state, accept_bell) = (state.clone(), bell.clone());
         let task = tokio::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
-                let state = accept_state.clone();
+                let (state, bell) = (accept_state.clone(), accept_bell.clone());
                 tokio::spawn(async move {
-                    let _ = serve(stream, state).await;
+                    let _ = serve(stream, state, bell).await;
                 });
             }
         });
-        Self { addr, state, task }
+        Self { addr, state, bell, task }
     }
 
     /// Add a message to All Mail.
@@ -103,6 +113,7 @@ impl FakeImapServer {
     /// are per folder, as in Gmail.
     pub fn add_to(&self, folder: &str, message: FakeImapMessage) {
         self.state.lock().unwrap().messages.push((folder.to_owned(), message));
+        self.bell.notify_waiters();
     }
 
     /// Take a message out of All Mail (moved to Spam or Trash).
@@ -129,7 +140,7 @@ impl FakeImapServer {
     }
 }
 
-async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<()> {
+async fn serve(stream: TcpStream, state: Arc<Mutex<State>>, bell: Arc<tokio::sync::Notify>) -> std::io::Result<()> {
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read);
     write.write_all(b"* OK Gimap ready (fake)\r\n").await?;
@@ -146,7 +157,7 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
         let (command, args) = rest.split_once(' ').unwrap_or((rest, ""));
         match command.to_ascii_uppercase().as_str() {
             "CAPABILITY" => {
-                write.write_all(b"* CAPABILITY IMAP4rev1 UIDPLUS X-GM-EXT-1 AUTH=XOAUTH2 AUTH=PLAIN\r\n").await?;
+                write.write_all(b"* CAPABILITY IMAP4rev1 UIDPLUS IDLE X-GM-EXT-1 AUTH=XOAUTH2 AUTH=PLAIN\r\n").await?;
                 write.write_all(format!("{tag} OK Thats all she wrote!\r\n").as_bytes()).await?;
             }
             "AUTHENTICATE" => {
@@ -300,6 +311,34 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>) -> std::io::Result<(
                     write.write_all(b")\r\n").await?;
                 }
                 write.write_all(format!("{tag} OK Success\r\n").as_bytes()).await?;
+            }
+            "IDLE" if authenticated => {
+                state.lock().unwrap().idles += 1;
+                // Listen before answering, so a message added meanwhile rings.
+                let mut rung = std::pin::pin!(bell.notified());
+                rung.as_mut().enable();
+                write.write_all(b"+ idling\r\n").await?;
+                loop {
+                    let mut done = String::new();
+                    tokio::select! {
+                        read = lines.read_line(&mut done) => {
+                            if read? == 0 {
+                                return Ok(());
+                            }
+                            if done.trim().eq_ignore_ascii_case("DONE") {
+                                write.write_all(format!("{tag} OK IDLE terminated (Success)\r\n").as_bytes()).await?;
+                                break;
+                            }
+                        }
+                        () = rung.as_mut() => {
+                            let count =
+                                state.lock().unwrap().messages.iter().filter(|(f, _)| *f == selected).count();
+                            write.write_all(format!("* {count} EXISTS\r\n").as_bytes()).await?;
+                            rung.set(bell.notified());
+                            rung.as_mut().enable();
+                        }
+                    }
+                }
             }
             "NOOP" => write.write_all(format!("{tag} OK Success\r\n").as_bytes()).await?,
             "LOGOUT" => {
