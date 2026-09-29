@@ -29,7 +29,7 @@ struct OnboardingView: View {
                         ProgressView().controlSize(.small)
                         Text("Finish signing in with Google in your browser…")
                         Spacer()
-                        Button("Cancel") { model.cancelSignIn() }
+                        Button("Cancel") { model.cancelSignIn() } // inline: not a dialog
                             .hoverHelp("Stop waiting for the sign-in in your browser")
                     }
                 } else {
@@ -53,7 +53,7 @@ struct OnboardingView: View {
                             .foregroundStyle(.secondary)
                     }
                     if let error = model.signInError {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.callout)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tone.failure).font(.callout)
                     }
                 }
 

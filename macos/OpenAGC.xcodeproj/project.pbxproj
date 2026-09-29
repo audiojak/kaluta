@@ -13,6 +13,7 @@
 		086E815909ECAC5832721F96 /* DesignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1FA403B0E890A2F61D2E8BC /* DesignTests.swift */; };
 		0C3A1E2BB1395CFE3826E5C0 /* SchemeHandlers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B84FAD449704789E8707C7 /* SchemeHandlers.swift */; };
 		116A2EC55EB66E0F8E5ACCF0 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4C676A513B753ECEBB6FF97 /* SettingsView.swift */; };
+		128E02DDE73BAE2DEF77E3DF /* DueDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1980692C7F9190146DE301 /* DueDay.swift */; };
 		169E901DDE62D2B0DE7DEF3F /* ComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0853C589261B9BC5E99D0106 /* ComposerTests.swift */; };
 		16A834C86559A500A03CD574 /* ComposerAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 045C8138124940FF93D5F90B /* ComposerAssistant.swift */; };
 		16F271E116BA5AD078A38B81 /* DraftClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00C8234BE90C43AB48FCA078 /* DraftClient.swift */; };
@@ -196,6 +197,7 @@
 		83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelTests.swift; sourceTree = "<group>"; };
 		88FDA6A53B22BE15E4B5B603 /* OpenAGCApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAGCApp.swift; sourceTree = "<group>"; };
 		8ABFBCC58A855BB41D27E0B4 /* RecipientField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipientField.swift; sourceTree = "<group>"; };
+		8B1980692C7F9190146DE301 /* DueDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DueDay.swift; sourceTree = "<group>"; };
 		9036B10AEDC12CF3CF3416BD /* MainWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindow.swift; sourceTree = "<group>"; };
 		90CE9D77767388614457FBCE /* AgentPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelTests.swift; sourceTree = "<group>"; };
 		948C111ADD342515B7C70DDB /* OpenAGCTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenAGCTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -472,6 +474,7 @@
 			isa = PBXGroup;
 			children = (
 				282C65C46EFBD9CE2DB7AE30 /* Components.swift */,
+				8B1980692C7F9190146DE301 /* DueDay.swift */,
 				FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */,
 				59E288D150328C8BC8F1B8D1 /* Tokens.swift */,
 			);
@@ -812,6 +815,7 @@
 				69662C039B9C1E122F754EDE /* ComposerView.swift in Sources */,
 				36A454FB046BB704125EF7F3 /* CoreClient.swift in Sources */,
 				16F271E116BA5AD078A38B81 /* DraftClient.swift in Sources */,
+				128E02DDE73BAE2DEF77E3DF /* DueDay.swift in Sources */,
 				710081AB6EAF380590EA91BF /* EmailDocument.swift in Sources */,
 				3383C90F028074A9FDD81433 /* GoogleClientConfiguration.swift in Sources */,
 				6FD0B155169950868B0E2D83 /* ImportMailbox.swift in Sources */,

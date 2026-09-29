@@ -77,6 +77,8 @@ enum Tone {
     static let chipDefaultNS = NSColor.tertiaryLabelColor
     /// How strongly a label's colour fills its chip.
     static let chipFillOpacity: CGFloat = 0.28
+    /// A chosen chip, where chips are picked (the task dialog).
+    static let chipSelectedOpacity: CGFloat = 0.55
 
     /// A label chip's fill for a Gmail `#rrggbb` colour.
     static func chipFill(hex: String?) -> NSColor {
@@ -110,6 +112,28 @@ enum Tone {
             case .info, .caution, .neutral: AnyShapeStyle(Color.clear)
             }
         }
+    }
+
+    /// Status text. Red only for failure; orange for a consequence to
+    /// weigh (a task that is overdue, a prompt missing its safety lines);
+    /// green only for "approved".
+    static let failure = Color.red
+    static let failureNS = NSColor.systemRed
+    static let caution = Color.orange
+    static let cautionNS = NSColor.systemOrange
+    static let approved = Color.green
+
+    /// A task category's colour (spec §14.8): from a fixed palette of
+    /// system colours by the name, so a category keeps its colour whatever
+    /// its place in the list, in both appearances. Red, orange and yellow
+    /// are left out: they mean failure, caution and Important.
+    static func category(_ name: String) -> NSColor {
+        let palette: [NSColor] = [.systemBlue, .systemGreen, .systemPurple, .systemTeal, .systemPink,
+                                  .systemIndigo, .systemBrown, .systemMint, .systemCyan]
+        // FNV-1a: stable across launches, unlike `hashValue`.
+        var hash: UInt32 = 2_166_136_261
+        for byte in name.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        return palette[Int(hash % UInt32(palette.count))]
     }
 
     /// A highlighted (keyboard-selected) item inside glass.

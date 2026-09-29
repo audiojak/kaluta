@@ -65,7 +65,7 @@ struct SyncDebuggerView: View {
             Text("Lists up to 10,000 ids, fetches 500 headers and 500 messages, and reads changes, over IMAP and over the API. It downloads but stores nothing.")
                 .font(TypeRole.caption).foregroundStyle(.secondary)
             if let comparisonError {
-                Text(comparisonError).font(TypeRole.meta).foregroundStyle(.red)
+                Text(comparisonError).font(TypeRole.meta).foregroundStyle(Tone.failure)
             }
             if !comparison.isEmpty {
                 Grid(alignment: .leading, horizontalSpacing: Space.xl, verticalSpacing: Space.xs) {
@@ -268,7 +268,7 @@ private struct OpsGrid: View {
                     Text(SyncDebugger.duration(op.millis)).monospacedDigit()
                     Text(op.items.formatted()).monospacedDigit()
                     Text(op.ok ? (op.reason ?? "") : "Failed: \(op.reason ?? "")")
-                        .foregroundStyle(op.ok ? Color.secondary : Color.red)
+                        .foregroundStyle(op.ok ? Color.secondary : Tone.failure)
                         .lineLimit(2)
                 }
                 .font(TypeRole.meta)

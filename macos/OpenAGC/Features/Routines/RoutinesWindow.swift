@@ -58,7 +58,7 @@ private struct RoutineList: View {
                         Text(routine.name).font(.headline)
                         HStack(spacing: Space.s) {
                             Text(RoutineRunner(rawValue: routine.runner)?.badge ?? routine.runner)
-                            if routine.changedSincePublish { Text("· unpublished changes").foregroundStyle(.orange) }
+                            if routine.changedSincePublish { Text("· unpublished changes").foregroundStyle(Tone.caution) }
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -137,7 +137,7 @@ private struct RoutineEditor: View {
             }
             if d.wrappedValue.advancedPrompt != nil {
                 Label("The prompt was edited by hand, so the settings below no longer change it.", systemImage: "pencil.and.outline")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Tone.caution)
             }
         }
     }
@@ -308,7 +308,7 @@ private struct RoutineEditor: View {
         let store = model.routines
         return VStack(spacing: Space.s) {
             if let error = store.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).font(.callout)
+                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Tone.failure).font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if let message = store.message {
                 Label(message, systemImage: "checkmark.circle").foregroundStyle(.secondary).font(.callout)
@@ -483,35 +483,31 @@ private struct PromptEditor: View {
     @State private var text = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            Text("Prompt").font(.headline)
-            Text("This is what the agent is told. Editing it by hand stops the settings from changing it until you reset.")
-                .font(.callout).foregroundStyle(.secondary)
+        Dialog(title: "Prompt",
+               message: "This is what the agent is told. Editing it by hand stops the settings from changing it until you reset.",
+               width: nil) {
             TextEditor(text: $text).font(.body.monospaced()).frame(minWidth: 640, minHeight: 420)
             let missing = PromptSafety.missing(text)
             if !missing.isEmpty {
                 Label("This prompt no longer says: \(missing.joined(separator: ", ")).", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Tone.caution)
             }
-            HStack {
-                Button("Reset to Generated") {
-                    draft.advancedPrompt = nil
-                    dismiss()
-                }
-                .hoverHelp("Go back to the prompt built from the settings")
-                .disabled(draft.advancedPrompt == nil)
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .hoverHelp("Close without changing the prompt")
-                Button("Use This Prompt") {
-                    draft.advancedPrompt = text
-                    dismiss()
-                }
-                .hoverHelp("Use your edited prompt; the settings will no longer change it")
-                .buttonStyle(.borderedProminent)
+        } leading: {
+            Button("Reset to Generated") {
+                draft.advancedPrompt = nil
+                dismiss()
             }
+            .hoverHelp("Go back to the prompt built from the settings")
+            .disabled(draft.advancedPrompt == nil)
+        } buttons: {
+            CancelButton(help: "Close without changing the prompt (Esc)") { dismiss() }
+            Button("Use This Prompt") {
+                draft.advancedPrompt = text
+                dismiss()
+            }
+            .keyboardShortcut(.defaultAction)
+            .hoverHelp("Use your edited prompt; the settings will no longer change it (Return)")
         }
-        .padding(Space.xl)
         .task {
             if let custom = draft.advancedPrompt {
                 text = custom
@@ -544,8 +540,7 @@ private struct HandoffSheet: View {
     private var isChatGPT: Bool { handoff.url.contains("chatgpt") }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            Text(isChatGPT ? "Set up in ChatGPT" : "Set up at claude.ai").font(.headline)
+        Dialog(title: isChatGPT ? "Set up in ChatGPT" : "Set up at claude.ai", width: Self.width) {
             if isChatGPT {
                 Text("1. Copy the prompt and open ChatGPT.\n2. Start a new chat, paste the prompt and ask ChatGPT to “create a scheduled task” with it, \(handoff.scheduleText.lowercased()).\n3. Make sure the Gmail app is connected in ChatGPT.")
             } else {
@@ -560,23 +555,20 @@ private struct HandoffSheet: View {
             if !isChatGPT {
                 TextField("https://claude.ai/code/routines/trig_…", text: $pasted)
             }
-            HStack {
-                Spacer()
-                Button("Close") { dismiss() }
-                    .hoverHelp("Close; you can set it up later")
-                if !isChatGPT {
-                    Button("Link Routine") { Task { await model.routines.attach(url: pasted) } }
-                        .hoverHelp("Connect the routine you created at claude.ai so OpenAGC shows its runs")
-                        .disabled(pasted.isEmpty)
-                }
-                Button("Copy Prompt and Open") { model.routines.copyAndOpen(handoff) }
-                    .hoverHelp("Copy the routine's prompt and open the site to paste it")
-                    .buttonStyle(.borderedProminent)
+        } buttons: {
+            CancelButton(title: "Close", help: "Close; you can set it up later (Esc)") { dismiss() }
+            if !isChatGPT {
+                Button("Link Routine") { Task { await model.routines.attach(url: pasted) } }
+                    .hoverHelp("Connect the routine you created at claude.ai so OpenAGC shows its runs")
+                    .disabled(pasted.isEmpty)
             }
+            Button("Copy Prompt and Open") { model.routines.copyAndOpen(handoff) }
+                .keyboardShortcut(.defaultAction)
+                .hoverHelp("Copy the routine's prompt and open the site to paste it (Return)")
         }
-        .padding(Space.xl)
-        .frame(width: 620)
     }
+
+    private static let width: CGFloat = 620
 }
 
 extension RoutineHandoff: @retroactive Identifiable {
@@ -600,7 +592,7 @@ private struct LaunchAtLoginToggle: View {
         }))
         .hoverHelp("Start OpenAGC when you log in, so routines on this Mac run on time")
         if let error {
-            Text(error).font(.caption).foregroundStyle(.red)
+            Text(error).font(.caption).foregroundStyle(Tone.failure)
         }
     }
 }

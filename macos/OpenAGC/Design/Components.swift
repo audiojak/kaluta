@@ -88,6 +88,88 @@ struct LabelChip: View {
     }
 }
 
+/// A task's category as a chip: the category's colour, faint, behind its
+/// name, the same shape as a label chip. `selected` draws the stronger
+/// fill used where categories are chosen (the task dialog).
+struct CategoryChip: View {
+    let name: String
+    var selected = false
+
+    var body: some View {
+        Text(name)
+            .font(Font(TypeRole.chip))
+            .lineLimit(1)
+            .padding(.horizontal, Space.xs)
+            .padding(.vertical, Space.hair)
+            .background(Color(nsColor: Tone.category(name).withAlphaComponent(selected ? Tone.chipSelectedOpacity
+                                                                                        : Tone.chipFillOpacity)),
+                        in: .rect(cornerRadius: Radius.chip))
+            .accessibilityLabel("Category: \(name)")
+    }
+}
+
+/// A sheet asking for one decision or a short form (spec §14.8's task
+/// dialog, Import Mailbox, a routine's prompt): a title, at most one
+/// sentence under it, the content, and a button bar. In the bar, extra
+/// actions go leading ("Ask Again"); trailing come Cancel and then the
+/// default action. Cancel answers Escape (`CancelButton`) and the default
+/// action Return (`.keyboardShortcut(.defaultAction)`); focus starts in the
+/// first field.
+struct Dialog<Content: View, Leading: View, Buttons: View>: View {
+    let title: String
+    var message: String?
+    /// Fixed width; `nil` lets the content decide (a large editor).
+    var width: CGFloat? = DialogMetrics.width
+    @ViewBuilder var content: Content
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var buttons: Buttons
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xl) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(title).font(TypeRole.title)
+                if let message {
+                    Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            content
+            HStack(spacing: Space.m) {
+                leading
+                Spacer(minLength: 0)
+                buttons
+            }
+        }
+        .padding(Space.xxxl)
+        .frame(width: width)
+    }
+}
+
+extension Dialog where Leading == EmptyView {
+    init(title: String, message: String? = nil, width: CGFloat? = DialogMetrics.width,
+         @ViewBuilder content: () -> Content, @ViewBuilder buttons: () -> Buttons) {
+        self.init(title: title, message: message, width: width, content: content, leading: { EmptyView() },
+                  buttons: buttons)
+    }
+}
+
+enum DialogMetrics {
+    /// A dialog's usual width.
+    static let width: CGFloat = 460
+}
+
+/// A dialog's Cancel: answers Escape.
+struct CancelButton: View {
+    var title = "Cancel"
+    var help = "Close without changes (Esc)"
+    let action: () -> Void
+
+    var body: some View {
+        Button(title, role: .cancel, action: action)
+            .keyboardShortcut(.cancelAction)
+            .hoverHelp(help)
+    }
+}
+
 /// A row of tabs as pills, for a column header (the Inbox's category
 /// tabs), as Mail draws them: equal pills with a symbol each; the chosen
 /// one widens to show its name. Counts are in the help tag and read by

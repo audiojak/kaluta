@@ -45,7 +45,7 @@ struct AgentPermissionsSettings: View {
                     }
                 }
                 if let keyError {
-                    Text(keyError).foregroundStyle(.red).font(.callout)
+                    Text(keyError).foregroundStyle(Tone.failure).font(.callout)
                 }
             } header: {
                 Text("Claude API Key (Optional)")
@@ -156,9 +156,9 @@ struct AgentActivityView: View {
 
     static func stateColor(_ state: String) -> Color {
         switch state {
-        case "denied", "failed": .red
+        case "denied", "failed": Tone.failure
         case "rejected", "expired": .secondary
-        case "pending": .orange
+        case "pending": Tone.caution
         default: .primary
         }
     }

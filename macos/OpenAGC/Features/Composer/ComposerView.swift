@@ -239,7 +239,7 @@ struct ComposerView: View {
                 }
                 .font(TypeRole.caption)
             case let .failed(message):
-                Text(message).font(TypeRole.caption).foregroundStyle(.red)
+                Text(message).font(TypeRole.caption).foregroundStyle(Tone.failure)
             default:
                 EmptyView()
             }

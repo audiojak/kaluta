@@ -312,7 +312,7 @@ private struct EntryView: View {
                     switch state {
                     case .running: ProgressView().controlSize(.mini)
                     case .succeeded: Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
-                    case .failed: Image(systemName: "xmark.octagon").foregroundStyle(.red)
+                    case .failed: Image(systemName: "xmark.octagon").foregroundStyle(Tone.failure)
                     }
                     Text(AgentStore.toolTitle(name))
                     if !arguments.isEmpty {
@@ -336,7 +336,7 @@ private struct EntryView: View {
         case let .error(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Tone.failure)
         case let .proposal(actionID, tool, summary, draftID, state):
             ProposalCard(actionID: actionID, tool: tool, summary: summary, draftID: draftID, state: state)
         }
@@ -376,7 +376,7 @@ private struct ProposalCard: View {
                 }
                 .controlSize(.small)
             case .approved:
-                Label("Approved", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(.green)
+                Label("Approved", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(Tone.approved)
             case let .sending(until):
                 HStack {
                     ProgressView().controlSize(.mini)

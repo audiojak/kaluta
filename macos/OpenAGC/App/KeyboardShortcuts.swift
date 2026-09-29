@@ -31,10 +31,12 @@ enum KeyboardShortcutGuide {
             .init(keys: "⇧⌘L", action: "Star or unstar", inThreadList: false),
             .init(keys: "⇧⌘I", action: "Load remote images", inThreadList: false),
             .init(keys: "⇧⌘N", action: "Check for new mail", inThreadList: false),
+            .init(keys: "⌘Z  ⇧⌘Z", action: "Undo or redo the last mail action", inThreadList: false),
         ]),
         Group(title: "Finding mail", shortcuts: [
             .init(keys: "⌘F", action: "Search mail", inThreadList: false),
             .init(keys: "⌘1 – ⌘6", action: "Inbox, Starred, Sent, Drafts, Archive, Trash", inThreadList: false),
+            .init(keys: "⌃1 – ⌃9", action: "Switch account", inThreadList: false),
         ]),
         Group(title: "In the thread list", shortcuts: [
             .init(keys: "↑ ↓  or  j k", action: "Previous or next thread", inThreadList: true),
@@ -60,6 +62,11 @@ enum KeyboardShortcutGuide {
             .init(keys: "⌘K", action: "Ask the agent", inThreadList: false),
             .init(keys: "⌥⌘I", action: "Show or hide the agent panel", inThreadList: false),
             .init(keys: "⌥⌘R", action: "Routines", inThreadList: false),
+            .init(keys: "↑ ↓  Tab  ↩  esc", action: "In the prompt: choose a suggestion, or hide them", inThreadList: false),
+            .init(keys: "⌘S", action: "Save a routine (in Routines)", inThreadList: false),
+        ]),
+        Group(title: "Help", shortcuts: [
+            .init(keys: "⇧⌘/", action: "Keyboard shortcuts", inThreadList: false),
         ]),
     ]
 }
@@ -72,7 +79,7 @@ struct KeyboardShortcutsView: View {
                 ForEach(KeyboardShortcutGuide.groups) { group in
                     VStack(alignment: .leading, spacing: Space.s) {
                         Text(group.title).font(.headline)
-                        Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 4) {
+                        Grid(alignment: .leading, horizontalSpacing: Space.xl, verticalSpacing: Space.xs) {
                             ForEach(group.shortcuts, id: \.self) { s in
                                 GridRow {
                                     Text(s.keys).font(.body.monospaced()).gridColumnAlignment(.trailing)
