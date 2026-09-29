@@ -80,6 +80,23 @@ pub struct SyncDiagnostics {
     pub latest_by_job: Vec<TransportOp>,
     /// Newest first, up to 200.
     pub recent: Vec<TransportOp>,
+    /// What Gmail's IMAP server supports, from the last login.
+    pub imap_capabilities: Vec<String>,
+    /// IMAP bytes per day before the API takes over.
+    pub imap_budget_bytes: u64,
+}
+
+/// One job measured one way (the Sync Debugger's comparison).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportComparison {
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    pub note: Option<String>,
+    pub millis: u64,
+    pub items: u32,
+    /// Why it was not measured, or how it failed.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
@@ -681,9 +698,18 @@ impl Core {
     /// the Sync Debugger and the sync footer. Empty when not syncing.
     pub async fn sync_diagnostics(&self, account_id: String) -> SyncDiagnostics {
         let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let imap = self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let (imap_capabilities, imap_budget_bytes) =
+            imap.map_or_else(|| (Vec::new(), 0), |i| (i.capabilities(), i.daily_budget_bytes()));
         let status = self.backfill_status(account_id).await;
         let Some(service) = service else {
-            return SyncDiagnostics { syncing: false, backfill: status, ..Default::default() };
+            return SyncDiagnostics {
+                syncing: false,
+                backfill: status,
+                imap_capabilities,
+                imap_budget_bytes,
+                ..Default::default()
+            };
         };
         let snap = service.engine().transport_snapshot();
         let op = |r: &mail_sync::transport::OpRecord| TransportOp {
@@ -703,7 +729,33 @@ impl Core {
             last_imap_error: snap.last_imap_error.clone(),
             latest_by_job: snap.latest_by_job().iter().map(op).collect(),
             recent: snap.recent.iter().map(op).collect(),
+            imap_capabilities,
+            imap_budget_bytes,
         }
+    }
+
+    /// Time each sync job over IMAP and over the API for an account (the
+    /// Sync Debugger's comparison). Reads only; changes no mail.
+    pub async fn compare_transports(&self, account_id: String) -> Result<Vec<TransportComparison>, CoreError> {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let Some(service) = service else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "that account is not syncing"));
+        };
+        let rows = runtime::run(async move {
+            service.engine().compare_transports(Default::default()).await.map_err(CoreError::from)
+        })
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| TransportComparison {
+                job: r.job.name().to_owned(),
+                via: r.via.name().to_owned(),
+                note: r.note,
+                millis: r.millis,
+                items: r.items.min(u32::MAX as usize) as u32,
+                error: r.error,
+            })
+            .collect())
     }
 
     /// How an account's backfill is fetching bodies (Settings shows it).
@@ -1126,6 +1178,26 @@ mod tests {
             let diag = core.sync_diagnostics("acct".into()).await;
             let push = diag.latest_by_job.iter().find(|op| op.job == "push").expect("push recorded");
             assert_eq!(push.via, "imap");
+
+            // The Sync Debugger: capabilities from the login, and each job
+            // timed both ways without storing anything.
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.imap_capabilities.iter().any(|c| c == "X-GM-EXT-1"), "{:?}", diag.imap_capabilities);
+            assert!(diag.imap_budget_bytes > 0);
+            let stored = core.backfill_status("acct".into()).await.stored_messages;
+            let rows = core.compare_transports("acct".into()).await.unwrap();
+            let find = |job: &str, via: &str| {
+                rows.iter().find(|r| r.job == job && r.via == via).unwrap_or_else(|| panic!("{job} {via}: {rows:?}"))
+            };
+            assert_eq!((find("list", "imap").items, find("list", "imap").error.as_deref()), (3, None));
+            assert_eq!(find("list", "api").items, 3);
+            assert_eq!(find("headers", "imap").items, 3);
+            assert!(find("headers", "api").error.is_some(), "the API has no cheaper headers");
+            assert_eq!((find("bodies", "imap").items, find("bodies", "api").items), (3, 3));
+            assert!(find("changes", "api").error.is_none());
+            assert!(find("changes", "imap").note.as_deref().is_some_and(|n| n.contains("no change log")));
+            assert_eq!(core.backfill_status("acct".into()).await.stored_messages, stored, "nothing stored");
+            assert!(core.compare_transports("other".into()).await.is_err());
 
             // Tiered download: the body window is per account.
             assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::Month, "default");

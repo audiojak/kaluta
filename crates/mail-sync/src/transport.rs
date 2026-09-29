@@ -191,6 +191,37 @@ impl Transport {
     }
 }
 
+/// How much the Sync Debugger's comparison reads each way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ComparisonSizes {
+    /// Ids listed over the API (IMAP lists the whole of All Mail in one
+    /// search).
+    pub list: usize,
+    pub headers: usize,
+    pub bodies: usize,
+    /// Messages whose labels and flags IMAP re-reads for "changes".
+    pub changes: usize,
+}
+
+impl Default for ComparisonSizes {
+    fn default() -> Self {
+        Self { list: 10_000, headers: 500, bodies: 500, changes: 5_000 }
+    }
+}
+
+/// One measurement: a job done one way.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comparison {
+    pub job: Job,
+    pub via: Via,
+    /// What exactly was measured, when it differs between the two ways.
+    pub note: Option<String>,
+    pub millis: u64,
+    pub items: usize,
+    /// Why it could not be measured, or the error it ended with.
+    pub error: Option<String>,
+}
+
 /// Times an operation for its record.
 pub(crate) struct Timer {
     started: std::time::Instant,

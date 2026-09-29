@@ -266,6 +266,8 @@ pub struct ImapBackfill {
     rest: Arc<dyn MailProvider>,
     labels: LabelNames,
     state: Mutex<State>,
+    /// What the server said it supports at the last login (diagnostics).
+    capabilities: std::sync::RwLock<Vec<String>>,
     /// A connection of its own for IDLE, so waiting for mail never holds
     /// up fetching.
     idle: Mutex<Option<Session>>,
@@ -292,6 +294,7 @@ impl ImapBackfill {
             labels,
             state: Mutex::new(State::default()),
             idle: Mutex::new(None),
+            capabilities: Default::default(),
             refused: AtomicBool::new(false),
             day: Default::default(),
             bytes_today: Default::default(),
@@ -301,6 +304,16 @@ impl ImapBackfill {
     /// Whether IMAP was refused and everything now goes through REST.
     pub fn is_refused(&self) -> bool {
         self.refused.load(Ordering::Relaxed)
+    }
+
+    /// The server's capabilities at the last login; empty before one.
+    pub fn capabilities(&self) -> Vec<String> {
+        self.capabilities.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Bytes per day over IMAP before yielding to the API.
+    pub fn daily_budget_bytes(&self) -> u64 {
+        self.config.daily_budget_bytes
     }
 
     /// Bytes fetched over IMAP today (diagnostics).
@@ -344,7 +357,7 @@ impl ImapBackfill {
         client.read_response().await.map_err(net)?.ok_or_else(|| ProviderError::Network("no IMAP greeting".into()))?;
         let token = self.tokens.access_token().await?;
         let auth = XOAuth2(format!("user={}\u{1}auth=Bearer {}\u{1}\u{1}", self.config.email, token.expose()));
-        let session = match client.authenticate("XOAUTH2", auth).await {
+        let mut session = match client.authenticate("XOAUTH2", auth).await {
             Ok(session) => session,
             Err((e, _)) => {
                 self.refused.store(true, Ordering::Relaxed);
@@ -352,6 +365,18 @@ impl ImapBackfill {
                 return Err(ProviderError::Forbidden("IMAP login refused".into()));
             }
         };
+        if let Ok(caps) = session.capabilities().await {
+            let mut names: Vec<String> = caps
+                .iter()
+                .filter_map(|c| match c {
+                    async_imap::types::Capability::Atom(a) => Some(a.to_string()),
+                    async_imap::types::Capability::Auth(a) => Some(format!("AUTH={a}")),
+                    _ => None,
+                })
+                .collect();
+            names.sort();
+            *self.capabilities.write().unwrap_or_else(|e| e.into_inner()) = names;
+        }
         Ok(session)
     }
 

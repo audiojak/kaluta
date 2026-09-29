@@ -1,6 +1,6 @@
 # Plan: IMAP-first sync
 
-Status: accepted 2026-09-28 with the maintainer's decisions (end of file).
+Status: implemented 2026-09-28 (steps 1–6; spec §7.3, §7.4 and §14.7a amended). Accepted with the maintainer's decisions (end of file).
 Supersedes the "hybrid, IMAP for bulk only" design of spec §7.4
 (amendment 2026-09-26) once accepted.
 

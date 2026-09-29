@@ -25,6 +25,7 @@ import os
 ///   -OpenAGCSnapshotRoutine <runner>    open the Routines window (creating
 ///                                       a routine if there is none) and
 ///                                       capture it
+///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
 ///   -OpenAGCSnapshotMode pdf            draw through AppKit's PDF (print) path
 ///   -OpenAGCSnapshotMode layer          render the CALayer tree instead
 ///                                       (catches layer-only SwiftUI content)
@@ -101,6 +102,11 @@ enum Snapshot {
                 model.openRoutines?()
                 try? await Task.sleep(for: .milliseconds(800))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("routines") ?? false) }
+            }
+            if defaults.bool(forKey: "OpenAGCSnapshotSyncDebugger"), let model = delegate.model {
+                model.openSyncDebugger?()
+                try? await Task.sleep(for: .milliseconds(1500))
+                window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
             }
             if let compose = defaults.string(forKey: "OpenAGCSnapshotCompose"), let model = delegate.model {
                 try? await Task.sleep(for: .milliseconds(500))

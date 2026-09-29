@@ -625,6 +625,11 @@ turns into eight 60-second stalls.
   combination (`readonly`+`compose`+`send`) is equally *restricted* in
   Google's classification, so splitting scopes buys nothing and complicates
   consent. `mail.google.com` (full access) is never requested.
+  *(Amended 2026-09-28, IMAP-first sync, §7.4: sign-in asks for
+  `https://mail.google.com/` plus `gmail.modify`, `openid` and `profile`.
+  `gmail.modify` is already restricted, so verification and CASA are
+  unchanged; the consent wording is broader. An account signed in without
+  the full scope keeps working over the API until its next sign-in.)*
 - **Client ID policy (decided):** OpenAGC ships a project OAuth client ID
   and, because installed apps cannot keep secrets (Google's own statement),
   the client secret is in the repo and treated as public. Settings ›
@@ -705,7 +710,9 @@ Conflict rule: server wins for labels/read state on the next history sync;
 the outbox is drained *before* history is applied so local intent is not
 overwritten while in flight.
 
-**Amendment (2026-09-26): bulk backfill over IMAP.** Planned; the REST
+**Amendment (2026-09-26): bulk backfill over IMAP.** *Superseded by the
+2026-09-28 amendment, IMAP-first sync, at the end of this section; kept for
+the history of the decision.* Planned; the REST
 backfill stays as the fallback and the only path for incremental sync.
 
 *Why.* The REST API charges 20 units per `messages.get` whatever the format,
@@ -850,6 +857,40 @@ the window was fetched. A 5,000-message version of the same run is in the
 gate and checks the tiers, that only in-window bodies are fetched, and a
 generous time bound. Rerun:
 `cargo test --release -p mail-sync --test scale -- --ignored --nocapture`.
+
+**Amendment (2026-09-28): IMAP-first sync.** Implemented
+(docs/plans/imap-first-sync.md; supersedes the 2026-09-26 "hybrid"
+design). IMAP is the default transport for Gmail accounts, not an option.
+The API serves a job only when it is faster, when there is no other way to
+get the data, or when IMAP fails.
+
+| Job | Transport |
+| --- | --- |
+| Listing the window's phases | IMAP `UID SEARCH X-GM-RAW "…"` (the phase as a Gmail search) |
+| Headers and bodies | IMAP; messages over 2 MB through the API |
+| Spam, Trash, Drafts | IMAP folders found by `LIST` special-use (`\Junk`, `\Trash`, `\Drafts`, `\All`; English names as fallback), labelled `SPAM`/`TRASH`/`DRAFT` from the folder. Spam and Trash are listed whole with the last month (Gmail empties them after 30 days) |
+| New mail | IMAP `IDLE` on All Mail, its own connection, re-issued every 25 min; any change runs an incremental round at once. The 30 s / 5 min poll stays as the backstop |
+| Changes made elsewhere | API `history.list`: Gmail IMAP keeps no change log |
+| Draft ids, categories, label colours | API: no other way |
+| Writes (outbox), send, drafts | API: one call per change with exact undo (§14.6a), threading, draft ids |
+| Server search | IMAP `X-GM-RAW`, the API as fallback |
+
+*Fallback.* Each operation falls back to the API on its own. Three IMAP
+failures in a row open a breaker for 15 minutes (then one try); a refresh
+closes it. A refused login or the day's bandwidth budget (2,000 MB) makes
+IMAP unavailable without counting as failures. IDLE failures back off and
+never open the breaker. When the API is serving for one of these reasons,
+the sidebar's sync footer says so in a quiet note ("Using the Gmail API ·
+IMAP was refused for this account").
+
+*Record.* Every operation is recorded (job, transport, why the API, time,
+items, success; the last 200 per account) and shown in the Sync Debugger
+(§14.7a).
+
+*Testing.* Fakes only: the in-process IMAP server speaks `LIST` with
+special-use attributes, per-folder `SELECT`/`EXAMINE`, `UID SEARCH` with
+`X-GM-RAW`, `IDLE`, and refused logins; a failing source exercises the
+fallback and the breaker. Nothing connects to Gmail.
 
 ### 7.5 Sending and threading **(Verified)**
 
@@ -2004,6 +2045,25 @@ Standard menu bar with all commands and shortcuts; `NSUserNotification` via
 `UNUserNotificationCenter` for new mail in Inbox (opt-in per sender
 category later); Dock badge for unread; full VoiceOver labeling on custom
 AppKit rows; Services and Spotlight are deferred.
+
+*(Amended 2026-09-28.)* Settings › Accounts no longer offers "Download
+faster over IMAP": it shows how the account downloads ("Over IMAP", or
+"Over the Gmail API" and why), with "Sign In Again for IMAP…" only for an
+account whose sign-in lacks the full scope.
+
+### 14.7a Sync Debugger **(Amendment 2026-09-28)**
+
+A permanent window (Window › Sync Debugger) for diagnosing sync, per Gmail
+account: the transport downloading mail, the IMAP breaker, the last IMAP
+error, IMAP bytes today against the budget, the server's IMAP
+capabilities, the messages stored, the latest operation for each job and
+the recent operations (time, job, IMAP or API, duration, items, and why
+the API served it). *Run Comparison* times each job both ways (up to
+10,000 ids listed, 500 headers, 500 messages, and the changes: API history
+since the last sync against re-reading labels and flags over IMAP for the
+last 30 days) and shows which was faster per item. It downloads a sample
+but stores nothing, changes no mail, and leaves the breaker and the
+operation record alone.
 
 ---
 

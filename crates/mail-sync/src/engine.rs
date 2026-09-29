@@ -408,6 +408,146 @@ impl SyncEngine {
         }
     }
 
+    /// Measure each job both ways for the Sync Debugger
+    /// (docs/plans/imap-first-sync.md, "Measure before deciding"): list
+    /// ids, fetch headers, fetch bodies, and read changes, over IMAP and
+    /// over the API. Reads only: nothing is stored, no mail changes, and
+    /// the breaker and the operation log are left alone. IMAP bytes count
+    /// towards the day's budget, as they are real downloads.
+    pub async fn compare_transports(
+        &self,
+        sizes: crate::transport::ComparisonSizes,
+    ) -> SyncResult<Vec<crate::transport::Comparison>> {
+        use crate::transport::{Comparison, Job, Via};
+        async fn timed<T, F: std::future::Future<Output = Result<T, String>>>(f: F) -> (Result<T, String>, u64) {
+            let started = std::time::Instant::now();
+            let result = f.await;
+            (result, started.elapsed().as_millis() as u64)
+        }
+        fn row<T>(
+            job: Job,
+            via: Via,
+            note: Option<&str>,
+            (result, millis): &(Result<T, String>, u64),
+            count: impl Fn(&T) -> usize,
+        ) -> Comparison {
+            Comparison {
+                job,
+                via,
+                note: note.map(str::to_owned),
+                millis: *millis,
+                items: result.as_ref().map_or(0, count),
+                error: result.as_ref().err().cloned(),
+            }
+        }
+        let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let imap_off = self.imap_gate(source.as_ref()).err();
+        let unavailable =
+            |job: Job| Comparison { job, via: Via::Imap, note: None, millis: 0, items: 0, error: imap_off.clone() };
+        let mut rows = Vec::new();
+
+        // Listing.
+        let api_list = timed(async {
+            let mut ids = Vec::new();
+            let mut page = None;
+            loop {
+                let listed = self
+                    .provider
+                    .list_message_ids(&ListFilter::default(), page.take())
+                    .await
+                    .map_err(|e| e.to_string())?;
+                ids.extend(listed.ids.into_iter().map(|(id, _)| id));
+                match listed.next {
+                    Some(next) if ids.len() < sizes.list => page = Some(next),
+                    _ => return Ok(ids),
+                }
+            }
+        })
+        .await;
+        let list_note = format!("API: up to {} ids, 500 a page; IMAP: all of All Mail in one search", sizes.list);
+        rows.push(row(Job::List, Via::Api, Some(&list_note), &api_list, Vec::len));
+        let imap_list = if imap_off.is_some() {
+            None
+        } else {
+            let listed =
+                timed(async { source.list("").await.map_err(|e| e.to_string())?.ok_or_else(|| "cannot list".into()) })
+                    .await;
+            rows.push(row(Job::List, Via::Imap, Some(&list_note), &listed, Vec::len));
+            listed.0.ok()
+        };
+        if imap_list.is_none() && imap_off.is_some() {
+            rows.push(unavailable(Job::List));
+        }
+        let sample: Vec<MessageId> = match (&api_list.0, imap_list) {
+            (Ok(ids), _) if !ids.is_empty() => ids.clone(),
+            (_, Some(ids)) => ids,
+            _ => Vec::new(),
+        };
+
+        // Headers: the API has no cheaper headers-only fetch here.
+        let head: Vec<MessageId> = sample.iter().take(sizes.headers).cloned().collect();
+        if imap_off.is_some() {
+            rows.push(unavailable(Job::Headers));
+        } else {
+            let fetched = timed(async {
+                source.fetch_headers(&head).await.map_err(|e| e.to_string())?.ok_or_else(|| "no headers".into())
+            })
+            .await;
+            rows.push(row(Job::Headers, Via::Imap, None, &fetched, Vec::len));
+        }
+        rows.push(Comparison {
+            job: Job::Headers,
+            via: Via::Api,
+            note: Some("the API charges as much for headers as for whole messages".into()),
+            millis: 0,
+            items: 0,
+            error: Some("not measured".into()),
+        });
+
+        // Bodies.
+        let bodies: Vec<MessageId> = sample.iter().take(sizes.bodies).cloned().collect();
+        let body_note = "IMAP sends messages over its size cap through the API";
+        let api_bodies = timed(async {
+            self.provider.fetch_messages(&bodies, Priority::Background).await.map_err(|e| e.to_string())
+        })
+        .await;
+        rows.push(row(Job::Bodies, Via::Api, None, &api_bodies, Vec::len));
+        if imap_off.is_some() {
+            rows.push(unavailable(Job::Bodies));
+        } else {
+            let fetched = timed(async { source.fetch(&bodies).await.map_err(|e| e.to_string()) }).await;
+            rows.push(row(Job::Bodies, Via::Imap, Some(body_note), &fetched, Vec::len));
+        }
+
+        // Changes: the API's history against re-reading labels and flags.
+        let cursor = self.db.read(|c| read::sync_state(c, KEY_CURSOR)).await?;
+        let api_changes = timed(async {
+            let cursor = cursor.ok_or_else(|| "not synced yet".to_owned())?;
+            self.provider.changes_since(&provider_api::SyncCursor(cursor)).await.map_err(|e| e.to_string())
+        })
+        .await;
+        rows.push(row(Job::Changes, Via::Api, Some("history since the last sync"), &api_changes, |s| s.changes.len()));
+        if imap_off.is_some() {
+            rows.push(unavailable(Job::Changes));
+        } else {
+            let limit = sizes.changes;
+            let reread = timed(async {
+                let ids = source
+                    .list("newer_than:30d")
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .ok_or_else(|| "cannot list".to_owned())?;
+                let ids: Vec<MessageId> = ids.into_iter().take(limit).collect();
+                source.fetch_headers(&ids).await.map_err(|e| e.to_string())?.ok_or_else(|| "no headers".into())
+            })
+            .await;
+            let note =
+                format!("no change log over IMAP: labels and flags re-read for up to {limit} of the last 30 days");
+            rows.push(row(Job::Changes, Via::Imap, Some(&note), &reread, Vec::len));
+        }
+        Ok(rows)
+    }
+
     /// Note an IMAP error: a failure counts towards the breaker; a source
     /// that is unavailable by design (refused, budget used) does not.
     fn imap_error(&self, e: &provider_api::ProviderError) -> String {

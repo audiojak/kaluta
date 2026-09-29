@@ -45,6 +45,13 @@ struct OpenAGCApp: App {
         }
         .defaultSize(width: 980, height: 720)
 
+        // Listed in the Window menu; kept for diagnosing sync (decision 4).
+        Window("Sync Debugger", id: "sync-debugger") {
+            SyncDebuggerView()
+                .environment(model)
+        }
+        .defaultSize(width: 900, height: 720)
+
         Settings {
             SettingsView()
                 .environment(model)

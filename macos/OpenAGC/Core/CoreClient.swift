@@ -179,6 +179,12 @@ final class CoreClient: Sendable {
         await core.syncDiagnostics(accountId: accountID)
     }
 
+    /// Time each sync job over IMAP and over the API (the Sync Debugger).
+    /// Reads only; changes no mail.
+    func compareTransports(_ accountID: String) async throws(CoreClientError) -> [TransportComparison] {
+        try await call { try await core.compareTransports(accountId: accountID) }
+    }
+
     func disableIMAP(_ accountID: String) async throws(CoreClientError) {
         try await call { try await core.disableImap(accountId: accountID) }
     }
@@ -779,6 +785,7 @@ typealias LabelInfo = OpenAGCCore.LabelInfo
 typealias InboxCategory = OpenAGCCore.InboxCategory
 typealias SyncDiagnostics = OpenAGCCore.SyncDiagnostics
 typealias TransportOp = OpenAGCCore.TransportOp
+typealias TransportComparison = OpenAGCCore.TransportComparison
 typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow

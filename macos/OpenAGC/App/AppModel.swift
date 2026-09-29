@@ -238,6 +238,7 @@ final class AppModel {
     @ObservationIgnored var openComposer: ((ComposeRequest) -> Void)?
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
+    @ObservationIgnored var openSyncDebugger: (() -> Void)?
 
     let notifier: NewMailNotifier
     let mailboxes: MailboxStore
