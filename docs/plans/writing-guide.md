@@ -30,7 +30,7 @@ user accepts, edits or rejects each one.
   When the user writes a prompt in the writing help box, their draft is
   part of the prompt; the message the AI writes from it follows the guide
   and is checked.
-- **One guide for every agent** (Claude, Codex): assumed, to be confirmed.
+- **One guide for every agent** (Claude, Codex): confirmed.
 - **Categories:** the maintainer's second list (26 categories, 2026-09-29)
   was compared with this one; ten were added and one broadened, marked
   "added" below. The rest were already covered under other names.
@@ -248,4 +248,3 @@ account's store on this Mac.
 ## Open questions
 
 - The default sample: latest 200 sent messages in batches of 20?
-- One guide for every agent (Claude, Codex), or per agent? (Assumed: one.)
