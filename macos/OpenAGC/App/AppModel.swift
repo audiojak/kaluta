@@ -517,6 +517,8 @@ final class AppModel {
 
     /// Bumped when routines change, so their views reload.
     private(set) var routinesRevision = 0
+    /// Bumped when a task was added, changed or removed (spec §14.8).
+    private(set) var tasksRevision = 0
 
     // MARK: Agent
 
@@ -1206,6 +1208,8 @@ final class AppModel {
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:
             routinesRevision += 1
+        case .tasksChanged:
+            tasksRevision += 1
         case let .importProgress(status):
             imports[tagged.accountID ?? ""] = status
             if status.done {

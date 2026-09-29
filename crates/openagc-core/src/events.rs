@@ -144,6 +144,8 @@ pub enum CoreEvent {
     },
     /// A routine was saved, deleted, ran or finished; re-read the list.
     RoutinesChanged,
+    /// A task was added, changed or removed (spec §14.8); re-read them.
+    TasksChanged,
     /// One agent session's events from one 16 ms frame (spec §9.5).
     AgentEvents {
         session_id: String,

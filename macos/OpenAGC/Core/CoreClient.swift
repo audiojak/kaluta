@@ -834,6 +834,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
+    case tasksChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -913,6 +914,8 @@ private extension CoreClientEvent {
             self = .error(CoreClientError(kind: .init(kind), message: message))
         case .routinesChanged:
             self = .routinesChanged
+        case .tasksChanged:
+            self = .tasksChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

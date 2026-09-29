@@ -521,6 +521,15 @@ is a virtual label row (`@archive`, kind `virtual`) whose `thread_labels`
 entries mark threads with no INBOX label that are not wholly spam or trash,
 so Archive lists use the same index as every other mailbox.
 
+**Tasks (Amendment 2026-09-29, migration `0009_tasks`).** Each account's
+store also holds its tasks (§14.8): `tasks` (thread and message by Gmail
+id, not foreign key, so a task outlives its thread leaving the store;
+title, notes, category, due day as `YYYY-MM-DD` or none, action `reply`,
+`reply_all`, `forward` or `none`, status `open` or `done`, source `ai` or
+`you`, Claude's one-line why, created and completed times),
+`task_categories` (name, unique in any case, and position; seeded with the
+starting set) and `task_meta` (the id of the account's `Task` label).
+
 ### 6.3 Full-text search **(Verified)**
 
 Two FTS5 tables *(amended in M1)*:
@@ -2077,6 +2086,32 @@ since the last sync against re-reading labels and flags over IMAP for the
 last 30 days) and shows which was faster per item. It downloads a sample
 but stores nothing, changes no mail, and leaves the breaker and the
 operation record alone.
+
+### 14.8 Tasks **(Amendment 2026-09-29)**
+
+A task-based way through email that changes the app as little as
+possible: Claude reads an email and suggests what the user has to do about
+it, by when, and in which category; accepted tasks go in a task list the
+user works through, usually by replying once they have gathered what they
+need or made a decision.
+
+- **Stored on this Mac,** per account (§6.2). No Google Tasks: it would
+  need another Google scope. Gmail sees tasks only as the account's
+  **`Task` label**: found by name (any case) or created the first time a
+  task is accepted, and remembered by id. A thread carries it while it has
+  an open task: accepting adds it, completing or deleting the thread's
+  last open task removes it, reopening or restoring adds it back. These
+  are ordinary label changes through the outbox, not separate entries on
+  the undo stack: undoing a task operation moves the label with it. A
+  `Task` label the user puts on a thread by hand, with no task here, is
+  never touched. Accepting leaves the email where it is (no archive).
+- **Categories:** a starting set (Reply, Decide, Gather Info, Schedule,
+  Review, Admin, Follow Up), editable, reorderable and resettable in
+  Settings › Tasks; Claude picks from the account's list. A task keeps
+  its category's name when the category is removed.
+- **A task** has a title, notes, category, due day or none, the action
+  that completes it (reply, reply all, forward or none), Claude's one line
+  on why, and whether Claude or the user wrote it.
 
 ---
 
