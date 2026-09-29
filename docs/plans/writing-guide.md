@@ -31,6 +31,13 @@ user accepts, edits or rejects each one.
   part of the prompt; the message the AI writes from it follows the guide
   and is checked.
 - **One guide for every agent** (Claude, Codex): confirmed.
+- **Additions (maintainer, 2026-09-29):** processing runs in the
+  background and deciding can start, stop and resume while it runs; two
+  progress bars (analysis, decisions); the guide is a section to read;
+  large changes by prompt, confirmed through questions and answers; all
+  processing through the user's connected agents, with a clear message
+  when none is connected; merging a guide into an account with or without
+  one; and switching the audience of an AI draft to get a new draft.
 - **Categories:** the maintainer's second list (26 categories, 2026-09-29)
   was compared with this one; ten were added and one broadened, marked
   "added" below. The rest were already covered under other names.
@@ -184,6 +191,80 @@ times. A rejected proposal is remembered so it is not proposed again.
    "nothing yet", so gaps are visible. Learning can be run again later on
    newer mail; only new messages are processed.
 
+### In the background
+
+- A learning run is a job in the core, per account, recorded in the store
+  batch by batch. It carries on when the dialog or the window closes and
+  while the user works in mail. Quitting pauses it; it resumes at the next
+  launch. It can be paused, resumed and cancelled (what was analysed is
+  kept).
+- **Deciding does not wait for analysis.** Proposals can be decided as soon
+  as the first batch is in, and the user can leave and come back at any
+  point: every decision is saved as it is made. While analysis continues:
+  more evidence for an undecided proposal updates it in place; more
+  evidence for an accepted entry is added quietly; a rejected proposal is
+  not raised again; mail that contradicts an accepted entry raises a new
+  decision.
+- **Two progress bars**, in the Writing Guide section and, compactly, in
+  the sidebar's footer while a run is active: *Analysis* ("120 of 200
+  messages") and *Decisions* ("34 of 51 decided"; the total grows while
+  analysis runs, and says so). A notification when analysis finishes and
+  when decisions are waiting.
+
+### Agents
+
+All processing (learning, changes by prompt, merging, drafting) runs
+through the agents the user has connected: their own Claude Code or Codex
+CLI, in read-only sessions. The app makes no model calls of its own. With
+no agent ready, each entry point says so instead of starting: "Connect
+Claude Code or Codex to learn from your mail", with the agent's status
+(not installed, not signed in, too old), the command to fix it and a
+button to Settings › Agents. A run whose agent stops being ready pauses
+with the same message.
+
+## Changing the guide by prompt
+
+In the Writing Guide section, "Ask Claude to change the guide…" takes a
+request in the user's words ("make everything for customers more formal",
+"I've moved to the UK: British spelling and dates"). The agent gets the
+guide and the request and answers with proposed changes (add, edit,
+rescope, remove), grouped into **questions**: each question is one decision
+in plain words with what changes before and after, and the entries it
+touches. The user answers each (yes, no, or edit); nothing changes until
+they do. The answers apply as one change that Undo reverses, and the guide
+keeps its earlier versions.
+
+## Merging a guide
+
+A guide can be merged into an account from another account in the app or
+from an exported file.
+
+- **Into an account without a guide:** the entries come in as they are,
+  listed for a look before they are saved; audience groups and people are
+  matched to this account's or added.
+- **Into an account with a guide:** identical entries are skipped and
+  entries on points the account's guide does not cover are listed to add.
+  For the rest, the agent compares the two and writes a short set of
+  **high-level decisions**, one per point of difference ("Sign-off: *Best*
+  here, *Cheers* incoming"), each covering the entries involved. For each:
+  keep mine, take the incoming one, or keep both with a scope (the
+  incoming one only for an audience). Facts and content rules (F) are
+  always a decision, never taken silently.
+- Evidence does not travel: quotes are mail from the other account, and
+  nothing is merged across accounts (ADR 0004). Merged entries say where
+  they came from.
+- The merge is one change, undoable, and makes a new guide version.
+
+## Drafting with an audience
+
+An AI draft is written for an audience, chosen from the recipients (their
+group, or a person's own entries). The draft shows it: "Written for
+Customers". Choosing another audience from that menu writes a new draft
+under that audience's guidelines, from the same request and the same
+message so far. Drafts are kept per audience for the life of the composer,
+so switching back is immediate, and Undo still returns to the user's own
+text. The same control is on agent drafts opened for review.
+
 ## Following the guide
 
 - The core renders the accepted entries as text: rules and facts always;
@@ -215,11 +296,17 @@ times. A rejected proposal is remembered so it is not proposed again.
 
 ## UI
 
-- **Writing Guide** window (Window menu, and Settings › Writing opens it):
-  categories in a sidebar with counts, entries in the list, evidence and
-  scope in the detail; add, edit, delete; coverage at a glance.
-- **Learn from Sent Mail…**: a dialog for the sample, progress by batch
-  (cancellable, resumable), then the review.
+- **Writing Guide** section: an entry in the sidebar (under Tasks) that
+  shows the guide in the main window, readable as a document by category,
+  with counts and coverage; entries open to their evidence and scope; add,
+  edit, delete. At the top: the two progress bars while a run is active,
+  "Decisions waiting (17)", Learn from Sent Mail…, Ask Claude to change
+  the guide…, Merge…, Export….
+- **Learn from Sent Mail…**: a dialog for the sample; then it runs in the
+  background.
+- **Decisions**: proposals by category, one at a time or as a list, with
+  keys for accept, edit and reject; leave at any time and resume where it
+  stopped.
 - The composer's writing help bar shows "Following your writing guide"
   with a link to it; a draft that fails a check says why.
 
@@ -234,16 +321,24 @@ account's store on this Mac.
 ## Issues, in order
 
 1. Spec §14.9 and ADR 0011: the taxonomy, entry schema and precedence.
-2. Store and core API (migration, CRUD, render, Markdown export/import).
+2. Store and core API (migration, CRUD, versions, render, export/import).
 3. Gather and prepare: sample selection, own-text extraction, signature
    detection.
-4. The processing function: prompt, parser, quote verification, merge;
-   the fake agent's answers.
-5. Review UI: proposals by category, accept, edit, reject, contradictions.
-6. Writing Guide window and the interview for what mail cannot show.
-7. Following the guide: system prompt, draft tools, routines, composer.
-8. Checks on AI drafts and the rewrite loop.
-9. Re-learning from newer mail; guide versions.
+4. The processing function: prompt, parser, quote verification, merge of
+   proposals; the fake agent's answers.
+5. The background run: job, persistence, pause/resume, progress events,
+   the no-agent message.
+6. Writing Guide section with the two progress bars.
+7. Decisions: review by category, resumable, arriving proposals,
+   contradictions.
+8. Audience groups: inferred, confirmed, filled to five.
+9. The interview for what mail cannot show.
+10. Following the guide: system prompt, draft tools, routines, composer.
+11. Checks on AI drafts and the rewrite loop.
+12. Drafting with an audience: the audience menu and per-audience drafts.
+13. Changing the guide by prompt, with questions and answers.
+14. Merging a guide: from an account or a file; high-level decisions.
+15. Re-learning from newer mail.
 
 ## Open questions
 
