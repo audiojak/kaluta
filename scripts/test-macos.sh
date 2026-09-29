@@ -44,7 +44,7 @@ cleanup() {
   find "$HOME/Library/Preferences" -maxdepth 1 -newer "$MARKER" \
     -regex ".*/\(openagc-tests-\|openagc-scratch-\|ai\.actual\.openagc\.tests\.\)$UUID_RE\.plist" \
     -delete 2>/dev/null || true
-  rm -f "$MARKER"
+  rm -f "$MARKER" "${prefs_copy:-}"
 }
 trap cleanup EXIT
 
@@ -53,6 +53,8 @@ trap cleanup EXIT
 # check can only warn.
 REAL_PREFS="$HOME/Library/Preferences/ai.actual.openagc.plist"
 prefs_before=$(stat -f %m "$REAL_PREFS" 2>/dev/null || echo none)
+prefs_copy=$(mktemp -t openagc-prefs)
+plutil -p "$REAL_PREFS" >"$prefs_copy" 2>/dev/null || true
 app_running=$(pgrep -f 'OpenAGC.app/Contents/MacOS/OpenAGC' >/dev/null && echo yes || echo no)
 
 set +e
@@ -75,7 +77,7 @@ if [[ "$ACTION" == test ]]; then
     else
       echo "isolation: the test run wrote the real preferences ($REAL_PREFS)"
       # Name what was written, so the leak can be found.
-      plutil -p "$REAL_PREFS" 2>/dev/null | sed 's/^/isolation:   /' | head -40
+      plutil -p "$REAL_PREFS" 2>/dev/null | diff "$prefs_copy" - | sed 's/^/isolation:   /' | head -40
       [[ $status -eq 0 ]] && status=1
     fi
   fi
