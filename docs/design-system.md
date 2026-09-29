@@ -11,7 +11,7 @@ The code lives in `macos/OpenAGC/Design/`:
 | --- | --- |
 | `Tokens.swift` | `Space`, `Radius`, `TypeRole`, `Tone` |
 | `Surfaces.swift` | `glassCapsule()`, `card(_:)`, `bandBackground(_:)`, `columnHeader { }` |
-| `Components.swift` | `ListHeaderBar`, `InsetRule`, `PaneDivider`, `Banner`, `LabelChip` |
+| `Components.swift` | `ListHeaderBar`, `InsetRule`, `PaneDivider`, `Banner`, `LabelChip`, `TipCard`, `CapsuleTabs` |
 
 `scripts/design-lint.sh` checks the rules below that a grep can check.
 `scripts/test-macos.sh` runs it in strict mode, so a literal padding or a
@@ -121,6 +121,11 @@ is only for "approved".
   `inset:` lines it up with the content it sits over (the reader uses
   `Space.xxl`).
 - **`LabelChip`**: a label's name on its faint colour.
+- **`TipCard`**: introduces a feature, as Mail introduces Categories: an
+  icon, a title, one sentence, the main action and a dismiss ("Turn Off",
+  "Not Now"). An info card under the Inbox's header, one tip at a time
+  (`Tip`: Categories, Important Only, the agent); any button puts it away
+  for good.
 - **Empty states**: `ContentUnavailableView`, with a title, an SF Symbol
   and at most one sentence.
 - **Menus** keep `Divider()` as their separator; mark the line `// menu`.

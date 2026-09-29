@@ -160,9 +160,23 @@ struct MainWindow: View {
     }
 
     /// The row under the title: the Inbox's category tabs, as Mail shows
-    /// them; nothing elsewhere. Filter and View Options are in the title
-    /// bar (`ListToolbar`).
+    /// them, and a tip when there is one; nothing elsewhere. Filter and
+    /// View Options are in the title bar (`ListToolbar`).
     @ViewBuilder private var listHeader: some View {
+        VStack(spacing: 0) {
+            categoryTabs
+            if let tip = model.currentTip {
+                TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
+                        actionHelp: tip.actionHelp, dismiss: tip.dismiss,
+                        onAction: { model.finishTip(tip, accept: true) },
+                        onDismiss: { model.finishTip(tip, accept: false) })
+                    .padding(.horizontal, Space.l)
+                    .padding(.bottom, Space.m)
+            }
+        }
+    }
+
+    @ViewBuilder private var categoryTabs: some View {
         if !model.inboxCategoryTabs.isEmpty, model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
             ListHeaderBar {
                 CapsuleTabs(tabs: model.inboxCategoryTabs.map {

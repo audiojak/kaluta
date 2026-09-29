@@ -159,3 +159,43 @@ private struct ToolTipArea: NSViewRepresentable {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
+
+/// A tip introducing a feature, as Mail introduces Categories: an icon, a
+/// title, one sentence, the main action and a dismiss. Shown one at a time
+/// at the top of a column; any button puts it away for good.
+struct TipCard: View {
+    let systemImage: String
+    let title: String
+    let text: String
+    let action: String
+    let actionHelp: String
+    let dismiss: String
+    let onAction: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Space.m) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(title).font(TypeRole.groupLabel)
+                Text(text).font(TypeRole.meta).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: Space.m) {
+                    Button(action, action: onAction)
+                        .buttonStyle(.borderedProminent)
+                        .hoverHelp(actionHelp)
+                    Button(dismiss, action: onDismiss)
+                        .hoverHelp("Put this tip away; it will not come back")
+                }
+                .controlSize(.small)
+                .padding(.top, Space.xs)
+            }
+            Spacer(minLength: 0)
+        }
+        .card(.info)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
+    }
+}

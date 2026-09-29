@@ -98,6 +98,35 @@ final class AppModel {
     @ObservationIgnored private var categoryGeneration = 0
 
     static func showCategoriesKey(_ accountID: String) -> String { "inboxShowCategories.\(accountID)" }
+    static let dismissedTipsKey = "dismissedTips"
+
+    /// Tips the user acted on or put away; they never come back.
+    private(set) var dismissedTips: Set<String> = []
+
+    /// The tip over the Inbox now, if any.
+    var currentTip: Tip? {
+        Tip.next(dismissed: dismissedTips, context: Tip.Context(
+            inInbox: selectedMailboxID == "INBOX",
+            searching: threads.searchQuery != nil,
+            categoriesAvailable: inboxCategoryCounts.contains { $0.id != InboxCategories.primary && $0.totalCount > 0 },
+            categoriesShown: showCategories,
+            importantOnly: inboxImportantOnly,
+            agentShown: agent.isPresented))
+    }
+
+    /// Act on a tip (`accept`) or put it away; either way it is done.
+    func finishTip(_ tip: Tip, accept: Bool) {
+        switch (tip, accept) {
+        case (.categories, false): showCategories = false
+        case (.importantOnly, true): inboxImportantOnly = true
+        case (.agent, true):
+            agent.isPresented = true
+            focusAgentPrompt()
+        default: break
+        }
+        dismissedTips.insert(tip.rawValue)
+        defaults.set(Array(dismissedTips).sorted(), forKey: Self.dismissedTipsKey)
+    }
     static func inboxCategoryKey(_ accountID: String) -> String { "inboxCategory.\(accountID)" }
 
     /// The tabs above the Inbox list; empty when categories are off or
@@ -280,6 +309,7 @@ final class AppModel {
         self.core = core
         self.defaults = defaults
         accountEmail = defaults.string(forKey: "accountEmail")
+        dismissedTips = Set(defaults.stringArray(forKey: Self.dismissedTipsKey) ?? [])
         undoSendSeconds = (defaults.object(forKey: Self.undoSendKey) as? Int).map { UInt32(clamping: $0) } ?? 10
         mailboxes = MailboxStore(core: core)
         threads = ThreadListStore(core: core)
