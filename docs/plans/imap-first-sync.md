@@ -1,6 +1,6 @@
 # Plan: IMAP-first sync
 
-Status: proposed 2026-09-28, for the maintainer's decisions (end of file).
+Status: accepted 2026-09-28 with the maintainer's decisions (end of file).
 Supersedes the "hybrid, IMAP for bulk only" design of spec §7.4
 (amendment 2026-09-26) once accepted.
 
@@ -61,8 +61,8 @@ both an IMAP session and API tokens from the same sign-in.
 1. **Sign-in asks for `mail.google.com` by default.** The Settings toggle
    "Download faster over IMAP" goes away; Settings shows the transport in
    use and why ("IMAP", or "Gmail API: IMAP is turned off in Gmail's
-   settings"). Existing accounts signed in with `gmail.modify` keep working
-   on the API and get a one-time banner offering to sign in again.
+   settings"). Accounts signed in with `gmail.modify` keep working on the
+   API (decision 2: no banner).
 2. **A transport layer in `mail-sync`** replaces `BackfillSource` with a
    `Transport` that each engine job asks for by capability (`list`,
    `fetch_headers`, `fetch_bodies`, `watch`, `changes`, …). It picks IMAP or
@@ -91,11 +91,10 @@ both an IMAP session and API tokens from the same sign-in.
 ## Measure before deciding "faster"
 
 A benchmark on the fakes cannot say whether IMAP or the API is faster
-against Gmail. Before switching a job's transport, the maintainer runs a
-one-off comparison on their own account (a debug menu item, off by default,
-logging only timings and counts): listing 10,000 ids, fetching 500 headers,
-500 bodies, and detecting 100 label changes, each both ways. The table
-above is the expected outcome; the numbers decide.
+against Gmail. The Sync Debugger (decision 4) runs a comparison on demand:
+listing 10,000 ids, fetching 500 headers, 500 bodies, and reading the
+changes of the last day, each both ways, reporting timings and counts
+only. The table above is the expected outcome; the numbers decide.
 
 ## Order of work (issues)
 
@@ -106,7 +105,7 @@ above is the expected outcome; the numbers decide.
 3. Listing over IMAP (`X-GM-RAW` phases).
 4. Spam, Trash and Drafts folders over IMAP.
 5. IDLE push for new mail.
-6. The timing comparison (debug menu), and the spec amendments.
+6. The Sync Debugger with the comparison, and the spec amendments.
 7. Remove the IMAP opt-in and the REST-only listing path once 1–6 are in.
 
 Each step is tested against the fake IMAP server and `FakeProvider`: the
@@ -114,14 +113,18 @@ fake IMAP server gains folders, `X-GM-RAW`, `IDLE` and failure injection
 (refused auth, dropped connection, budget exhausted) so every fallback is
 exercised. Nothing in automation connects to Gmail.
 
-## Decisions for the maintainer
+## Decisions (maintainer, 2026-09-28)
 
-1. **Consent wording.** New accounts will see Google's "permanently delete
-   all your email" line on the consent screen. Acceptable?
-2. **Existing accounts.** Offer the switch with a banner (proposed), or
-   switch silently at the next sign-in?
-3. **Fallback visibility.** Show a quiet note in the sync footer when an
-   account is running on the API because IMAP failed (proposed), or only in
-   Settings?
-4. **Timing comparison.** OK to add the debug-menu comparison and run it
-   once on your account?
+1. **Consent wording:** accepted. New accounts sign in with
+   `mail.google.com`.
+2. **Existing accounts:** switched silently. The only existing account
+   already granted `mail.google.com` (it backfills over IMAP), so it moves
+   to IMAP-first with no prompt; the re-sign-in banner is dropped. An
+   account without the scope stays on the API until its next sign-in.
+3. **Fallback visibility:** a quiet note in the sidebar's sync footer
+   ("Using the Gmail API: IMAP is turned off in Gmail's settings").
+4. **Sync debugger:** built and kept, not a one-off. A Sync Debugger window
+   (Window menu) shows per account the transport serving each job and why,
+   the breaker's state, IMAP capabilities and bandwidth used today, recent
+   operations with timings, and runs the IMAP-vs-API comparison on demand.
+   It reads and times only; it changes no mail.
