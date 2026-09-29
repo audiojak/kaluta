@@ -26,6 +26,9 @@ pub const DRAFT_MIRROR_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
 /// IDLE is re-issued this often: Gmail ends idle sessions at about 29 min.
 pub const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
+/// Inbox categories are listed again this often, and whenever the
+/// download queue empties.
+pub const CATEGORY_REFRESH: Duration = Duration::from_secs(10 * 60);
 /// Messages per headers-first batch.
 const HEADERS_BATCH: usize = 1_000;
 
@@ -74,6 +77,7 @@ pub(crate) struct SyncService {
     backfill_wake: Notify,
     outbox_wake: Notify,
     drafts_wake: Notify,
+    categories_wake: Notify,
     external: Option<ExternalChanges>,
     tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
 }
@@ -93,6 +97,7 @@ impl SyncService {
             backfill_wake: Notify::new(),
             outbox_wake: Notify::new(),
             drafts_wake: Notify::new(),
+            categories_wake: Notify::new(),
             external,
             tasks: std::sync::Mutex::new(Vec::new()),
         });
@@ -184,19 +189,25 @@ impl SyncService {
         let drafts = tokio::spawn(async move { mirror.drafts_loop().await });
         let listener = self.clone();
         let push = tokio::spawn(async move { listener.push_loop().await });
-        self.tasks.lock().unwrap_or_else(|e| e.into_inner()).extend([backfill, outbox, drafts, push]);
+        let sorter = self.clone();
+        let categories = tokio::spawn(async move { sorter.categories_loop().await });
+        self.tasks.lock().unwrap_or_else(|e| e.into_inner()).extend([backfill, outbox, drafts, push, categories]);
         self.poll_loop().await;
     }
 
     async fn backfill_loop(self: Arc<Self>) {
         let mut backoff = Duration::from_secs(2);
+        let mut busy = false;
         loop {
             // Headers first where the source makes them cheap (IMAP), so
             // the list fills in minutes; bodies follow (spec §7.4).
             loop {
                 match self.engine.headers_pass(HEADERS_BATCH).await {
                     Ok(0) => break,
-                    Ok(_) => continue,
+                    Ok(_) => {
+                        busy = true;
+                        continue;
+                    }
                     Err(e) => {
                         tracing::warn!(error = %e, "headers pass failed; bodies continue");
                         break;
@@ -206,13 +217,20 @@ impl SyncService {
             match self.engine.backfill_batch(BACKFILL_BATCH).await {
                 Ok(0) => {
                     backoff = Duration::from_secs(2);
+                    // Downloads finished: their categories can be applied.
+                    if std::mem::take(&mut busy) {
+                        self.categories_wake.notify_one();
+                    }
                     // Nothing queued: sleep until something is.
                     tokio::select! {
                         () = self.backfill_wake.notified() => {}
                         () = tokio::time::sleep(Duration::from_secs(60)) => {}
                     }
                 }
-                Ok(_) => backoff = Duration::from_secs(2),
+                Ok(_) => {
+                    backoff = Duration::from_secs(2);
+                    busy = true;
+                }
                 Err(e) if Self::is_fatal(&e) => {
                     self.fail(e);
                     return;
@@ -283,6 +301,21 @@ impl SyncService {
                 Ok(0) => {}
                 Ok(_) => self.outbox_wake.notify_one(),
                 Err(e) => tracing::warn!(error = %e, "scheduling draft sync failed"),
+            }
+        }
+    }
+
+    /// Inbox categories for mail downloaded over IMAP, which leaves them
+    /// out: at start, when the download queue empties, and every
+    /// [`CATEGORY_REFRESH`].
+    async fn categories_loop(self: Arc<Self>) {
+        loop {
+            if let Err(e) = self.engine.sync_categories().await {
+                tracing::warn!(error = %e, "inbox categories not refreshed");
+            }
+            tokio::select! {
+                () = self.categories_wake.notified() => {}
+                () = tokio::time::sleep(CATEGORY_REFRESH) => {}
             }
         }
     }

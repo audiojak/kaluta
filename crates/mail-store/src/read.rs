@@ -59,8 +59,16 @@ pub fn list_mailboxes(conn: &Connection) -> StoreResult<Vec<Mailbox>> {
     )?;
     let mut out = Vec::new();
     for (kind, id, name) in SYSTEM {
-        let (total, unread): (i64, i64) =
+        let (total, mut unread): (i64, i64) =
             counts.query_row([id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?.unwrap_or((0, 0));
+        // With categories, the Inbox counts Primary's unread, as Gmail's
+        // own Inbox count does; promotions and notifications do not add up.
+        if *kind == MailboxKind::Inbox {
+            let categories = inbox_categories(conn, None)?;
+            if categories.iter().any(|c| c.id != PRIMARY && c.total > 0) {
+                unread = categories.iter().find(|c| c.id == PRIMARY).map_or(0, |c| i64::from(c.unread));
+            }
+        }
         out.push(Mailbox {
             kind: *kind,
             label_id: (*kind != MailboxKind::Archive).then(|| LabelId::new(*id)),
@@ -234,6 +242,25 @@ pub fn inbox_categories(conn: &Connection, also: Option<&str>) -> StoreResult<Ve
             CategoryCount { id: id.to_owned(), total: total.max(0) as u32, unread: unread.max(0) as u32 }
         })
         .collect())
+}
+
+/// Of `ids`, the stored messages in the Inbox that lack `label`.
+pub fn inbox_messages_missing(conn: &Connection, ids: &[MessageId], label: &LabelId) -> StoreResult<Vec<MessageId>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT 1 FROM messages m
+         WHERE m.gmail_id = ?1
+           AND EXISTS(SELECT 1 FROM message_labels a JOIN labels l ON l.id = a.label_id
+                      WHERE a.message_id = m.id AND l.gmail_id = 'INBOX')
+           AND NOT EXISTS(SELECT 1 FROM message_labels a JOIN labels l ON l.id = a.label_id
+                          WHERE a.message_id = m.id AND l.gmail_id = ?2)",
+    )?;
+    let mut out = Vec::new();
+    for id in ids {
+        if stmt.exists([id.as_str(), label.as_str()])? {
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
 }
 
 pub fn get_thread_summary(conn: &Connection, id: &ThreadId) -> StoreResult<Option<ThreadSummary>> {

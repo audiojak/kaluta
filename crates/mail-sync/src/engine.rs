@@ -408,6 +408,75 @@ impl SyncEngine {
         }
     }
 
+    /// Inbox categories for stored mail. Gmail's IMAP leaves categories out
+    /// of a message's labels, so mail downloaded over IMAP would all look
+    /// like Primary: each category is listed as a Gmail search
+    /// (`in:inbox category:promotions`, over IMAP; the API as fallback)
+    /// and stored Inbox messages missing it get it, losing any other
+    /// category. Only adds what is listed: mail that moved to Primary
+    /// elsewhere arrives through the change history. Returns how many
+    /// messages changed.
+    pub async fn sync_categories(&self) -> SyncResult<usize> {
+        use crate::transport::{Job, Timer};
+        let mut listed: Vec<(LabelId, Vec<MessageId>)> = Vec::new();
+        for category in read::CATEGORIES {
+            let search = format!("in:inbox category:{}", category.trim_start_matches("CATEGORY_").to_ascii_lowercase());
+            let ids = match self.list_via_imap(&search, Job::Categories).await {
+                Ok(ids) => ids,
+                Err(reason) => {
+                    let filter = ListFilter {
+                        label_ids: vec![LabelId::new(system_labels::INBOX), LabelId::new(*category)],
+                        query: None,
+                        include_spam_trash: false,
+                    };
+                    let mut ids = Vec::new();
+                    let mut page = None;
+                    loop {
+                        let timer = Timer::start();
+                        let result = self.provider.list_message_ids(&filter, page.take()).await;
+                        let count = result.as_ref().map_or(0, |r| r.ids.len());
+                        self.record_api(&timer, Job::Categories, &reason, count, result.is_ok());
+                        let result = result?;
+                        ids.extend(result.ids.into_iter().map(|(id, _)| id));
+                        match result.next {
+                            Some(next) => page = Some(next),
+                            None => break,
+                        }
+                    }
+                    ids
+                }
+            };
+            listed.push((LabelId::new(*category), ids));
+        }
+        let changes = self
+            .db
+            .write(move |tx| {
+                let mut wanted: Vec<(MessageId, LabelId)> = Vec::new();
+                for (category, ids) in &listed {
+                    for id in read::inbox_messages_missing(tx, ids, category)? {
+                        wanted.push((id, category.clone()));
+                    }
+                }
+                let mut w = MailWriter::new(tx);
+                for (id, category) in &wanted {
+                    let others: Vec<LabelId> = read::CATEGORIES
+                        .iter()
+                        .filter(|c| **c != category.as_str())
+                        .map(|c| LabelId::new(*c))
+                        .collect();
+                    w.modify_message_labels(id, std::slice::from_ref(category), &others)?;
+                }
+                Ok((wanted.len(), w.finish()?))
+            })
+            .await?;
+        let (changed, thread_changes) = changes;
+        self.publish(&thread_changes);
+        if changed > 0 {
+            tracing::info!(changed, "inbox categories applied");
+        }
+        Ok(changed)
+    }
+
     /// Measure each job both ways for the Sync Debugger
     /// (docs/plans/imap-first-sync.md, "Measure before deciding"): list
     /// ids, fetch headers, fetch bodies, and read changes, over IMAP and

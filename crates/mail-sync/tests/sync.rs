@@ -738,3 +738,45 @@ async fn a_failing_imap_falls_back_to_the_api_per_batch_and_trips_the_breaker() 
     assert!(engine.transport_snapshot().breaker_open_until.is_none(), "a refresh tries IMAP again");
     assert_consistent(&db);
 }
+
+#[tokio::test]
+async fn inbox_categories_missing_from_downloaded_mail_are_applied_and_the_inbox_counts_primary() {
+    let (fake, db, _recorder, engine) = setup("categories");
+    fake.seed(message("promo", "t1", 1, &["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"]));
+    fake.seed(message("social", "t2", 1, &["INBOX", "UNREAD", "CATEGORY_SOCIAL"]));
+    fake.seed(message("friend", "t3", 1, &["INBOX", "UNREAD"]));
+    fake.seed(message("old-promo", "t4", 1, &["CATEGORY_PROMOTIONS"]));
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    engine.backfill_all().await.unwrap();
+    // As if downloaded over IMAP, which carries no categories.
+    db.write(|tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        for id in ["promo", "social"] {
+            w.modify_message_labels(
+                &MessageId::new(id),
+                &[],
+                &[LabelId::new("CATEGORY_PROMOTIONS"), LabelId::new("CATEGORY_SOCIAL")],
+            )?;
+        }
+        w.finish()
+    })
+    .await
+    .unwrap();
+    let inbox_unread = |db: Db| async move {
+        let boxes = db.read(read::list_mailboxes).await.unwrap();
+        boxes.iter().find(|m| read::mailbox_label(m) == "INBOX").unwrap().unread_count
+    };
+    assert_eq!(inbox_unread(db.clone()).await, 3, "no categories known: everything is Primary");
+
+    assert_eq!(engine.sync_categories().await.unwrap(), 2, "promo and social; the archived one is left alone");
+    let counts = db.read(|c| read::inbox_categories(c, None)).await.unwrap();
+    let unread = |id: &str| counts.iter().find(|c| c.id == id).unwrap().unread;
+    assert_eq!((unread("CATEGORY_PERSONAL"), unread("CATEGORY_PROMOTIONS"), unread("CATEGORY_SOCIAL")), (1, 1, 1));
+    assert_eq!(inbox_unread(db.clone()).await, 1, "with categories, the Inbox counts Primary, as Gmail does");
+    assert_eq!(engine.sync_categories().await.unwrap(), 0, "nothing left to change");
+    let snap = engine.transport_snapshot();
+    let op = snap.latest_by_job().into_iter().find(|r| r.job == mail_sync::transport::Job::Categories).unwrap();
+    assert_eq!(op.via, mail_sync::transport::Via::Api, "no IMAP here: the API lists them");
+    assert_consistent(&db);
+}

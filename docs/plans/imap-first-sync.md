@@ -47,7 +47,7 @@ visible in the sync status and the log, and testable.
 | Drafts | **IMAP** `[Gmail]/Drafts` for content; **API** `drafts.list` for draft ids | Editing and saving in place need the draft id (no other way) |
 | New mail, at once | **IMAP IDLE** on All Mail (and Inbox) | Push instead of a 30 s poll |
 | Label and read-state changes made elsewhere | **API** `history.list` (2 units) | Faster: Gmail IMAP has no change log (no `CONDSTORE`/`QRESYNC`, spec §7.4), so the IMAP way is re-reading flags for the whole window |
-| Categories (Primary, Promotions…) | **API** | Not exposed over IMAP |
+| Categories (Primary, Promotions…) | **IMAP** `X-GM-RAW "category:…"` searches, API as fallback | Not in `X-GM-LABELS`, but searchable (found 2026-09-28: IMAP-downloaded mail all looked like Primary, oagc-736) |
 | Labels, colours, visibility | **API** `labels.list` | Colours and ids only there |
 | Archive, label, read, star, junk, trash (outbox) | **API** `batchModify` / `trash` | One call for up to 1,000 messages; exact per-message diffs for undo (§14.6a); our own changes are recognised in history |
 | Send, save and delete drafts | **API** | Threading and draft ids; SMTP would need a separate path for nothing gained |

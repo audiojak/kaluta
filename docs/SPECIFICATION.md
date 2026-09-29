@@ -871,7 +871,8 @@ get the data, or when IMAP fails.
 | Spam, Trash, Drafts | IMAP folders found by `LIST` special-use (`\Junk`, `\Trash`, `\Drafts`, `\All`; English names as fallback), labelled `SPAM`/`TRASH`/`DRAFT` from the folder. Spam and Trash are listed whole with the last month (Gmail empties them after 30 days) |
 | New mail | IMAP `IDLE` on All Mail, its own connection, re-issued every 25 min; any change runs an incremental round at once. The 30 s / 5 min poll stays as the backstop |
 | Changes made elsewhere | API `history.list`: Gmail IMAP keeps no change log |
-| Draft ids, categories, label colours | API: no other way |
+| Inbox categories | IMAP `X-GM-RAW "in:inbox category:…"` per category, API as fallback: IMAP leaves categories out of a message's labels, so they are applied to stored Inbox mail at start, when the download queue empties, and every 10 minutes (only added; moves to Primary arrive through history). With categories in use, the Inbox's unread count is Primary's, as in Gmail |
+| Draft ids, label colours | API: no other way |
 | Writes (outbox), send, drafts | API: one call per change with exact undo (§14.6a), threading, draft ids |
 | Server search | IMAP `X-GM-RAW`, the API as fallback |
 

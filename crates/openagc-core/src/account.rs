@@ -1100,7 +1100,13 @@ mod tests {
                     uid: n,
                     msgid,
                     thrid: msgid,
-                    labels: vec!["\\Inbox".into()],
+                    // Message 2 is a promotion: Gmail's IMAP says so only
+                    // through a search.
+                    labels: if n == 2 {
+                        vec!["\\Inbox".into(), "category:promotions".into()]
+                    } else {
+                        vec!["\\Inbox".into()]
+                    },
                     flags: vec![],
                     raw: raw.into_bytes(),
                 });
@@ -1151,6 +1157,22 @@ mod tests {
             assert!(changes.is_none_or(|c| c.via == "api" && c.reason.is_some()), "changes: the API, and why");
             assert!(status.imap_bytes_today > 0);
             assert_eq!(core.backfill_status("other".into()).await.transport, "none");
+
+            // Inbox categories come from IMAP searches, as the messages
+            // themselves carry none.
+            let mut promotions = 0;
+            for _ in 0..200 {
+                let counts = core.inbox_categories(false).await.unwrap_or_default();
+                promotions = counts.iter().find(|c| c.id == "CATEGORY_PROMOTIONS").map_or(0, |c| c.total_count);
+                if promotions == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(promotions, 1, "the promotion was found by an IMAP search");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let op = diag.latest_by_job.iter().find(|op| op.job == "categories").expect("categories recorded");
+            assert_eq!(op.via, "imap");
 
             // New mail arrives at once over IDLE, without waiting for the
             // 30 s poll or a sync_now.

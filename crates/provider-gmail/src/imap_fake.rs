@@ -29,7 +29,9 @@ pub struct FakeImapMessage {
     /// Gmail's message id (decimal here; the API writes it in hex).
     pub msgid: u64,
     pub thrid: u64,
-    /// `X-GM-LABELS`: system labels as `\Inbox`, `\Sent`…; user labels by name.
+    /// `X-GM-LABELS`: system labels as `\Inbox`, `\Sent`…; user labels by
+    /// name. `category:promotions` (and the like) puts it in that Inbox
+    /// category for `X-GM-RAW` searches only, since Gmail sends none.
     pub labels: Vec<String>,
     /// `\Seen`, `\Flagged`.
     pub flags: Vec<String>,
@@ -380,6 +382,10 @@ fn matches_search(criteria: &str, m: &FakeImapMessage, now: i64) -> bool {
         let term = term.to_ascii_lowercase();
         if let Some(name) = term.strip_prefix("in:").or_else(|| term.strip_prefix("label:")) {
             has_label(name)
+        } else if term.starts_with("category:") {
+            // Gmail lists no categories in X-GM-LABELS; a fake message
+            // joins one with a label spelled like the search term.
+            has_label(&term)
         } else if term == "is:unread" {
             !m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\Seen"))
         } else if term == "is:starred" {
