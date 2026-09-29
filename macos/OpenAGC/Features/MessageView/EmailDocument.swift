@@ -140,7 +140,7 @@ enum EmailDocument {
     private static let stylesheet = """
     :root { color-scheme: light dark; --card: color-mix(in srgb, CanvasText 4%, Canvas); \
     --line: color-mix(in srgb, CanvasText 10%, transparent); }
-    html, body { margin: 0; background: Canvas; color: CanvasText; }
+    html, body { margin: 0; background: Canvas; color: CanvasText; overflow-x: hidden; }
     body { font: 14px/1.45 -apple-system, system-ui, sans-serif; padding: 8px 20px 24px; overflow-wrap: anywhere; }
     .msg { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 0 0 8px; }
     summary { list-style: none; cursor: default; display: flex; gap: 10px; align-items: flex-start; }
@@ -159,9 +159,10 @@ enum EmailDocument {
     .to { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .snippet { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     details[open] .snippet { display: none; }
-    .body { margin: 12px 0 2px 42px; }
+    .body { margin: 12px 0 2px 42px; overflow-x: auto; }
     .body img { max-width: 100%; height: auto; }
     .body table { max-width: 100%; }
+    .body pre { white-space: pre-wrap; }
     .body.paper { background: #ffffff; color: #111111; color-scheme: light; border-radius: 8px; padding: 12px; }
     .body.pending { color: GrayText; font-style: italic; }
     blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }

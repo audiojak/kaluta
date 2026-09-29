@@ -58,11 +58,29 @@ struct ListFilterMenu: View {
                                                 : "line.3.horizontal.decrease.circle")
         }
         .labelStyle(.iconOnly)
-        .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
-        .fixedSize()
-        .hoverHelp(active ? "Filtered: \(ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))"
-                          : "Filter: show only unread, starred or with attachments")
+        .help(ToolbarHelp.text(for: "Filter", model: model) ?? "") // toolbar
         .accessibilityValue(active ? ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ") : "None")
+    }
+}
+
+/// View options for the list, in the title bar as in Mail: Important
+/// Only in the Inbox, and Show Categories when the account uses them.
+struct ListViewOptionsMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Menu {
+            Toggle("Important Only", isOn: $model.inboxImportantOnly)
+            if InboxCategories.inUse(model.inboxCategoryCounts) {
+                Toggle("Show Categories", isOn: $model.showCategories)
+            }
+        } label: {
+            Label("View Options", systemImage: "ellipsis.circle")
+        }
+        .labelStyle(.iconOnly)
+        .menuIndicator(.hidden)
+        .help(ToolbarHelp.text(for: "View Options", model: model) ?? "") // toolbar
     }
 }

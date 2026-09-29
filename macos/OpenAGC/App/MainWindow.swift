@@ -91,7 +91,12 @@ struct MainWindow: View {
     /// the sidebar's footer.
     private var listSubtitle: String {
         var parts: [String] = []
-        if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
+        if model.threads.searchQuery == nil, model.selectedMailboxID == "INBOX", let tab = model.activeInboxCategory,
+           let counts = model.inboxCategoryTabs.first(where: { $0.id == tab }) {
+            // As Mail puts it: "Primary · 667 unread".
+            parts.append(InboxCategories.title(tab))
+            if counts.unreadCount > 0 { parts.append("\(counts.unreadCount.formatted()) unread") }
+        } else if model.threads.searchQuery == nil, let mailbox = selectedMailbox, mailbox.unreadCount > 0 {
             parts.append("\(mailbox.unreadCount.formatted()) unread")
         }
         if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.inboxImportantOnly {
@@ -153,43 +158,18 @@ struct MainWindow: View {
         }
     }
 
-    /// The list column's header: in the Inbox, the category tabs and a
-    /// View Options menu (Important Only, Show Categories) when the
-    /// account uses categories, otherwise the Important-only switch; in
-    /// every mailbox and search, the filter button.
-    private var listHeader: some View {
-        @Bindable var model = model
-        let inbox = model.selectedMailboxID == "INBOX" && model.threads.searchQuery == nil
-        let categories = inbox && InboxCategories.inUse(model.inboxCategoryCounts)
-        return ListHeaderBar {
-            if categories, model.showCategories {
+    /// The row under the title: the Inbox's category tabs, as Mail shows
+    /// them; nothing elsewhere. Filter and View Options are in the title
+    /// bar (`ListToolbar`).
+    @ViewBuilder private var listHeader: some View {
+        if !model.inboxCategoryTabs.isEmpty, model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+            ListHeaderBar {
                 CapsuleTabs(tabs: model.inboxCategoryTabs.map {
                     CapsuleTabs.Tab(id: $0.id, title: InboxCategories.title($0.id),
                                     symbol: InboxCategories.symbol($0.id), count: Int($0.unreadCount))
                 }, selection: Binding(get: { model.activeInboxCategory },
                                       set: { if let id = $0 { model.inboxCategory = id } }))
                 .accessibilityLabel("Categories")
-            }
-            Spacer(minLength: 0)
-            if inbox, !categories {
-                Toggle("Important only", isOn: $model.inboxImportantOnly)
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .hoverHelp("Show only the Inbox threads Gmail marked Important")
-            }
-            ListFilterMenu()
-            if categories {
-                Menu {
-                    Toggle("Important Only", isOn: $model.inboxImportantOnly)
-                    Toggle("Show Categories", isOn: $model.showCategories)
-                } label: {
-                    Label("View Options", systemImage: "ellipsis.circle")
-                }
-                .labelStyle(.iconOnly)
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .hoverHelp("View options: Important Only, Show Categories")
             }
         }
     }

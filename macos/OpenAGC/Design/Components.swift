@@ -88,15 +88,16 @@ struct LabelChip: View {
     }
 }
 
-/// A row of tabs as capsules, for a column header (the Inbox's category
-/// tabs). Each tab shows its symbol and count; the chosen one also its
-/// name, so the row fits a narrow column.
+/// A row of tabs as pills, for a column header (the Inbox's category
+/// tabs), as Mail draws them: equal pills with a symbol each; the chosen
+/// one widens to show its name. Counts are in the help tag and read by
+/// VoiceOver; the list's subtitle carries the chosen tab's.
 struct CapsuleTabs: View {
     struct Tab: Identifiable, Equatable {
         let id: String
         let title: String
         let symbol: String
-        /// Shown after the symbol when non-zero (unread threads).
+        /// Read in the help tag and by VoiceOver when non-zero (unread).
         var count: Int = 0
     }
 
@@ -106,21 +107,19 @@ struct CapsuleTabs: View {
     var countNoun = "unread"
 
     var body: some View {
-        HStack(spacing: Space.xs) {
+        HStack(spacing: Space.s) {
             ForEach(tabs) { tab in
                 let chosen = tab.id == selection
                 Button { selection = tab.id } label: {
                     HStack(spacing: Space.xs) {
                         Image(systemName: tab.symbol)
                         if chosen { Text(tab.title).fontWeight(.medium) }
-                        if tab.count > 0 {
-                            Text(tab.count.formatted()).monospacedDigit().foregroundStyle(.secondary)
-                        }
                     }
                     .lineLimit(1)
+                    .frame(minWidth: Self.pillWidth, maxWidth: chosen ? .infinity : nil)
                     .padding(.horizontal, Space.m)
-                    .padding(.vertical, Space.xs)
-                    .background(chosen ? Tone.highlight : AnyShapeStyle(.clear), in: .capsule)
+                    .padding(.vertical, Space.s)
+                    .background(chosen ? Tone.highlight : Tone.controlFill, in: .capsule)
                     .contentShape(.capsule)
                 }
                 .buttonStyle(.plain)
@@ -132,6 +131,9 @@ struct CapsuleTabs: View {
         }
         .accessibilityElement(children: .contain)
     }
+
+    /// Unchosen pills are this wide at least, so they line up.
+    static let pillWidth: CGFloat = 28
 }
 
 extension View {

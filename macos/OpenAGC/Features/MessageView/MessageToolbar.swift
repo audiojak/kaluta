@@ -7,6 +7,12 @@ struct ListToolbar: ToolbarContent {
     @Environment(AppModel.self) private var model
 
     var body: some ToolbarContent {
+        // Filter and View Options beside the title, as in Mail.
+        ToolbarItem { ListFilterMenu() }
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+            ToolbarItem { ListViewOptionsMenu() }
+        }
+        ToolbarSpacer(.fixed)
         ToolbarItem {
             Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
                 .help(ToolbarHelp.text(for: "New Message", model: model) ?? "")
@@ -155,6 +161,12 @@ enum ToolbarHelp {
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
         case "New Routine": "Create a routine that sorts important mail on a schedule"
+        case "Filter":
+            model.listFilters.isEmpty ? "Filter: show only unread, starred or with attachments"
+                : "Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ")
+        case "View Options":
+            InboxCategories.inUse(model.inboxCategoryCounts) ? "View options: Important Only, Show Categories"
+                : "View options: Important Only"
         default: nil
         }
     }
