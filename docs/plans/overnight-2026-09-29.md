@@ -53,8 +53,13 @@ Decisions (maintainer, 2026-09-29):
   picks from the account's list.
 - **Where:** a **Tasks** entry in the sidebar under Favorites. Choosing
   it swaps the list column to tasks; the reader shows the task's email.
-- **Accepting a task leaves the email where it is.** Nothing changes in
-  Gmail; the task links to the thread and message.
+- **Accepting a task leaves the email where it is** (no archive) and
+  **labels it `Task` in Gmail**, so it shows on the web and phone too. The
+  label comes off when the thread's last open task is done or deleted.
+  Both are ordinary label changes: through the outbox, undoable.
+- **The Inbox can hide emails with tasks**: a View Options toggle, "Hide
+  Emails with Tasks", remembered per account like Important Only, so the
+  Inbox shows only what still needs sorting.
 - **Sending the reply a task called for marks it done**, with the undo
   notice to bring it back.
 
@@ -64,8 +69,22 @@ Design:
   (id, thread and message ids, title, notes, category, due date or none,
   suggested action (reply, reply all, forward, none), status (open, done),
   created, completed, source: AI or you) and `task_categories` (name,
-  position). Local only: no Google Tasks (it would need another Google
-  scope and account actions).
+  position). The tasks themselves stay on this Mac: no Google Tasks (it
+  would need another Google scope and account actions); only the `Task`
+  label reaches Gmail.
+- **The `Task` label:** the core finds the account's user label named
+  `Task` (case-insensitive) or creates it the first time a task is
+  accepted, and remembers its id. Accepting adds it to the thread;
+  completing or deleting the thread's last open task removes it;
+  reopening adds it back. Each change is one user action with exact
+  undo (§14.6a), so Undo on a task also undoes its label change. A
+  `Task` label added in Gmail by hand, with no task here, is left alone.
+- **Hiding emails with tasks:** the store gains exclusion narrowings
+  (`INBOX+!Label_12`, "and not labelled"), next to today's inclusion
+  (`INBOX+IMPORTANT`); list counts and category tabs honour them. The
+  toggle in View Options narrows the Inbox by `!<Task label id>`; it
+  combines with Important Only, category tabs and filters, and search
+  ignores it as it ignores the tabs.
 - **Core API** (openagc-core, FFI): create, update, complete, reopen,
   delete and list tasks (open first, by due date); categories get, set
   and reorder; `task_prompt(thread_ids)` builds the request from stored
@@ -95,16 +114,21 @@ Design:
   reply all, `f` forward, `e` done (as Archive is in mail), `⌫` delete,
   `c` change category; the same as toolbar buttons and a context menu.
   Replying opens the composer with the task attached; sending completes
-  the task (undoable). A done filter shows finished tasks.
+  the task and takes the `Task` label off (one undo brings both back). A
+  done filter shows finished tasks. Mail rows with a task show the
+  `Task` label chip like any label.
 - **Look:** no new window and no new chrome: the sidebar entry, the same
   list column, reader and toolbar, and the dialog/sheet patterns from
   step one.
-- **Spec:** a new §14.8 Tasks, and the store (§8) gains the two tables.
+- **Spec:** a new §14.8 Tasks, the store (§8) gains the two tables and
+  exclusion narrowings, and §14.3 the Inbox toggle.
 
 Issues, in order:
 
 3. **Tasks in the store and core** (oagc-0pq.1): migration, core API,
-   categories with defaults, FFI, Rust tests.
+   categories with defaults, the `Task` label (find or create; add on
+   accept, remove with the last open task, undoable), FFI, Rust tests
+   against `FakeProvider`.
 4. **Claude's task suggestions** (oagc-0pq.2): prompt and parser in the core,
    the fake agent's JSON answers, the one-turn session in Swift, tests.
 5. **`t`: the task dialog** (oagc-0pq.3): menu item, key, dialog, accept,
@@ -114,8 +138,11 @@ Issues, in order:
    with undo; demo tasks for snapshots.
 7. **`⇧T`: bulk creation** (oagc-0pq.5): sheet, default selection, one
    request, review and add.
-8. **Settings › Tasks** (oagc-0pq.6): edit, reorder and reset categories.
-9. If time remains: a Dock badge or sidebar count of tasks due today.
+8. **Hide emails with tasks** (oagc-0pq.7): exclusion narrowings in the
+   store (lists, counts, category tabs), the View Options toggle
+   remembered per account; tests and snapshots.
+9. **Settings › Tasks** (oagc-0pq.6): edit, reorder and reset categories.
+10. If time remains: a Dock badge or sidebar count of tasks due today.
 
 ## Checks before closing an issue
 
