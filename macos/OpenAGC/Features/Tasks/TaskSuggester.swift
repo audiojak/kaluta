@@ -14,6 +14,8 @@ final class TaskSuggester {
     }
 
     private(set) var state: State = .idle
+    /// Told when suggestions arrive (the dialog fills its fields).
+    @ObservationIgnored var onDone: (([TaskSuggestion]) -> Void)?
 
     @ObservationIgnored private var sessionID: String?
     @ObservationIgnored private var threadIDs: [String] = []
@@ -81,7 +83,9 @@ final class TaskSuggester {
         let ids = threadIDs
         finish()
         do {
-            state = .done(try await core.parseTaskSuggestions(text, threadIDs: ids))
+            let found = try await core.parseTaskSuggestions(text, threadIDs: ids)
+            state = .done(found)
+            onDone?(found)
         } catch let error as CoreClientError {
             state = .failed(error.message)
         } catch {

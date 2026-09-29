@@ -26,6 +26,9 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
+///                                       thread (use -OpenAGCFakeAgents YES)
+///                                       and capture the sheet
 ///   -OpenAGCSnapshotMode pdf            draw through AppKit's PDF (print) path
 ///   -OpenAGCSnapshotMode layer          render the CALayer tree instead
 ///                                       (catches layer-only SwiftUI content)
@@ -108,6 +111,14 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
             }
+            if defaults.bool(forKey: "OpenAGCSnapshotTask"), let model = delegate.model {
+                await model.agent.loadProviders()
+                try? await Task.sleep(for: .milliseconds(300))
+                await model.openTaskDialog()
+                try? await Task.sleep(for: .milliseconds(1200))
+                window = NSApp.windows.first { $0.isVisible && $0.sheetParent != nil }
+                FileHandle.standardError.write(Data("snapshot task sheet: \(window != nil)\n".utf8))
+            }
             if let compose = defaults.string(forKey: "OpenAGCSnapshotCompose"), let model = delegate.model {
                 try? await Task.sleep(for: .milliseconds(500))
                 switch compose {
@@ -135,6 +146,10 @@ enum Snapshot {
                 }
             }
             capture(window, to: URL(filePath: path))
+            // A sheet left open keeps the app from quitting.
+            delegate.model?.closeTaskDialog()
+            for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
+            try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)
         }
     }

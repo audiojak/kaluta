@@ -110,7 +110,7 @@ Status text takes its colour from `Tone`, never a literal:
 | `failure` / `failureNS` | system red | something failed: an error line, a failed tool call, a failed run |
 | `caution` / `cautionNS` | system orange | a consequence to weigh: an overdue task, a prompt missing its safety lines, unpublished changes, a request waiting on you |
 | `approved` | system green | an approved agent action |
-| `category(_:)` | a system colour by name | a task category's chip (never red, orange or yellow) |
+| `category(_:)` | a system colour per category | a task category's chip: one each for the starting set, others by name (never red, orange, yellow or pink) |
 
 Red is only for failure (a failed tool call, an attachment error). Green
 is only for "approved". Orange is text or a band's fill, never an error.
@@ -360,3 +360,4 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Agent column, light](design/agent-light.png) | ![Agent column, dark](design/agent-dark.png) |
 | ![Undo notice, light](design/undo-light.png) | |
 | ![Composer replying, light](design/compose-light.png) | ![Composer replying, dark](design/compose-dark.png) |
+| ![Task dialog, light](design/task-light.png) | ![Task dialog, dark](design/task-dark.png) |

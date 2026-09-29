@@ -52,6 +52,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "f", action: "Forward", inThreadList: true),
             .init(keys: "c", action: "New message", inThreadList: true),
             .init(keys: "/", action: "Search mail", inThreadList: true),
+            .init(keys: "t", action: "New task from the email (Claude suggests it)", inThreadList: true),
         ]),
         Group(title: "Writing", shortcuts: [
             .init(keys: "⇧⌘D", action: "Send", inThreadList: false),

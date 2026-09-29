@@ -2126,6 +2126,17 @@ need or made a decision.
   one-turn agent session of its own that sees only those threads and
   refuses any proposal that would change mail; it does not appear in the
   agent column. With no agent ready, the dialog opens empty.
+- **One email: `t`.** In a mail list, `t` (also Message › New Task from
+  Email… and the list's context menu) opens the **task dialog** for the
+  thread being read and asks Claude at once: the email's sender and
+  subject, a line saying what Claude is doing, then Claude's guess filled
+  in: the title, the category as chips, the due day (a checkbox and a date
+  picker, read as "Today", "Tomorrow", …), what finishes it (Reply, Reply
+  All, Forward, No Email) and notes, with Claude's why under the heading.
+  A title typed before Claude answers is kept. Return adds the task, Escape
+  cancels, Ask Again asks once more. Adding closes the dialog and shows
+  "Added a task: “…”" in the undo notice; ⌘Z removes it (and the label, if
+  it was the thread's only open task), ⇧⌘Z puts it back.
 
 ---
 

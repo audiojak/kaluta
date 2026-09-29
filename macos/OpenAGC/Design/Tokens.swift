@@ -123,18 +123,26 @@ enum Tone {
     static let cautionNS = NSColor.systemOrange
     static let approved = Color.green
 
-    /// A task category's colour (spec §14.8): from a fixed palette of
-    /// system colours by the name, so a category keeps its colour whatever
-    /// its place in the list, in both appearances. Red, orange and yellow
-    /// are left out: they mean failure, caution and Important.
+    /// A task category's colour (spec §14.8): the starting set has one
+    /// each, told apart at a glance; any other name takes one from the same
+    /// palette by its name, so a category keeps its colour whatever its
+    /// place in the list. Red, orange, yellow and pink are left out: they
+    /// mean failure, caution and Important, or look like them.
     static func category(_ name: String) -> NSColor {
-        let palette: [NSColor] = [.systemBlue, .systemGreen, .systemPurple, .systemTeal, .systemPink,
-                                  .systemIndigo, .systemBrown, .systemMint, .systemCyan]
+        let key = name.lowercased()
+        if let fixed = startingCategories[key] { return fixed }
+        let palette: [NSColor] = [.systemBlue, .systemPurple, .systemTeal, .systemGreen, .systemIndigo, .systemBrown,
+                                  .systemCyan, .systemMint]
         // FNV-1a: stable across launches, unlike `hashValue`.
         var hash: UInt32 = 2_166_136_261
-        for byte in name.lowercased().utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        for byte in key.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
         return palette[Int(hash % UInt32(palette.count))]
     }
+
+    private static let startingCategories: [String: NSColor] = [
+        "reply": .systemBlue, "decide": .systemPurple, "gather info": .systemTeal, "schedule": .systemGreen,
+        "review": .systemIndigo, "admin": .systemBrown, "follow up": .systemCyan,
+    ]
 
     /// A highlighted (keyboard-selected) item inside glass.
     static let highlight = AnyShapeStyle(.tint.opacity(0.25))

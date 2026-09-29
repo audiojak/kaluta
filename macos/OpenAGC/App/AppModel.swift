@@ -284,6 +284,8 @@ final class AppModel {
     /// progress sheet).
     var importDraft: ImportDraft?
     var runningImport: String?
+    /// The task dialog, while open (spec §14.8).
+    var taskDraft: TaskDraft?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.

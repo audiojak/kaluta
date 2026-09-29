@@ -194,6 +194,9 @@ struct MailCommands: Commands {
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(noTargets)
             Divider() // menu
+            Button("New Task from Email…") { Task { await model.openTaskDialog() } }
+                .disabled(!mailKey || model.taskTarget == nil)
+            Divider() // menu
             Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k")
                 .disabled(!mailKey)

@@ -108,6 +108,50 @@ struct CategoryChip: View {
     }
 }
 
+/// Chips laid out in lines, wrapping at the available width (the task
+/// dialog's categories).
+struct ChipFlow: Layout {
+    var spacing: CGFloat = Space.xs
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = lines(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in lines(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.items {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Line { var items: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
+
+    private func lines(width: CGFloat, subviews: Subviews) -> [Line] {
+        var rows: [Line] = [Line()]
+        for (index, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            let added = rows[rows.count - 1].items.isEmpty ? size.width : rows[rows.count - 1].width + spacing + size.width
+            if added > width, !rows[rows.count - 1].items.isEmpty {
+                rows.append(Line(items: [index], width: size.width, height: size.height))
+            } else {
+                rows[rows.count - 1].items.append(index)
+                rows[rows.count - 1].width = added
+                rows[rows.count - 1].height = max(rows[rows.count - 1].height, size.height)
+            }
+        }
+        return rows
+    }
+}
+
 /// A sheet asking for one decision or a short form (spec §14.8's task
 /// dialog, Import Mailbox, a routine's prompt): a title, at most one
 /// sentence under it, the content, and a button bar. In the bar, extra

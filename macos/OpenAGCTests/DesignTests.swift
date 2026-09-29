@@ -88,12 +88,12 @@ struct DueDayTests {
 struct CategoryToneTests {
     @Test func aCategoryKeepsItsColourAndNeverTakesAStatusColour() {
         #expect(Tone.category("Reply") == Tone.category("reply"))
-        let status: [NSColor] = [.systemRed, .systemOrange, .systemYellow]
+        let status: [NSColor] = [.systemRed, .systemOrange, .systemYellow, .systemPink]
         for name in ["Reply", "Decide", "Gather Info", "Schedule", "Review", "Admin", "Follow Up", "x"] {
             #expect(!status.contains(Tone.category(name)))
         }
         let distinct = Set(["Reply", "Decide", "Gather Info", "Schedule", "Review", "Admin", "Follow Up"]
             .map { Tone.category($0) })
-        #expect(distinct.count >= 4, "the starting set is told apart by colour")
+        #expect(distinct.count == 7, "the starting set is told apart by colour")
     }
 }

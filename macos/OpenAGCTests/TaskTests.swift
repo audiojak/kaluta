@@ -66,3 +66,68 @@ struct TaskSuggesterTests {
         #expect(try await core.taskCategories().first == "Reply")
     }
 }
+
+@MainActor
+struct TaskDialogTests {
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { throw Timeout() }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+    private struct Timeout: Error {}
+
+    @Test func claudesGuessFillsTheDialogAndAddingItCanBeUndone() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let row = try #require(model.threads.rows.first)
+        model.selectedThreadID = row.id
+        let now = try #require(DueDay.date("2026-09-28"))
+
+        await model.openTaskDialog(now: now)
+        let draft = try #require(model.taskDraft)
+        try await waitUntil { draft.suggester.state != .working }
+        #expect(draft.title.hasPrefix("Reply about "))
+        #expect(draft.category == "Reply" && draft.action == .reply)
+        #expect(draft.hasDue && DueDay.string(draft.due) == "2026-09-28")
+        #expect(draft.categories.count == 7)
+
+        draft.title = "Send Emerson the plan"
+        draft.category = "Follow Up"
+        await model.acceptTask(draft)
+        #expect(model.taskDraft == nil, "the dialog closes")
+        let tasks = try await model.core!.listTasks()
+        #expect(tasks.map(\.title) == ["Send Emerson the plan"])
+        #expect(tasks[0].category == "Follow Up" && tasks[0].dueDay == "2026-09-28")
+        #expect(tasks[0].fromAi == false, "the user rewrote Claude's title")
+        #expect(model.undo.notice?.text == "Added a task: “Send Emerson the plan”")
+        let account = try #require(model.openAccountID)
+        #expect(model.undo.undoTitle(in: account) == "Undo Add Task")
+
+        model.undo.undo(in: account)
+        try await waitUntil { model.undo.canRedo(in: account) }
+        for _ in 0..<50 where try await !model.core!.listTasks().isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await model.core!.listTasks().isEmpty)
+        model.undo.redo(in: account)
+        for _ in 0..<50 where try await model.core!.listTasks().isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await model.core!.listTasks().map(\.id) == tasks.map(\.id))
+    }
+
+    @Test func aTitleTypedWhileClaudeThinksIsKept() {
+        let draft = TaskDraft(threadID: "t1", subject: "Lunch", sender: "Ann", categories: ["Reply", "Decide"])
+        draft.title = "My own"
+        draft.apply(TaskSuggestion(threadId: "t1", title: "Claude's", category: "Decide", dueDay: nil,
+                                   action: .noEmail, why: "Because"))
+        #expect(draft.title == "My own")
+        #expect(draft.category == "Decide" && !draft.hasDue && draft.action == .noEmail)
+        #expect(draft.newTask.fromAi == false && draft.newTask.why == "Because")
+        let fresh = TaskDraft(threadID: "t1", subject: "Lunch", sender: "Ann", categories: ["Reply"])
+        fresh.apply(TaskSuggestion(threadId: "t1", title: "Claude's", category: "Reply", dueDay: "2026-10-01",
+                                   action: .reply, why: ""))
+        #expect(fresh.title == "Claude's" && fresh.newTask.fromAi && fresh.newTask.dueDay == "2026-10-01")
+        #expect(!TaskDraft(threadID: "t", subject: "", sender: "", categories: []).canAdd)
+    }
+}
