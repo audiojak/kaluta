@@ -410,7 +410,7 @@ fn the_inbox_splits_into_category_tabs_with_primary_as_everything_uncategorised(
     assert_eq!(ids("INBOX+IMPORTANT+CATEGORY_PERSONAL"), ["t6"], "tabs combine with Important only");
     assert_eq!(ids("INBOX+CATEGORY_PROMOTIONS+IMPORTANT"), ["t4"]);
 
-    let counts = db.read_blocking(|c| read::inbox_categories(c, None)).unwrap();
+    let counts = db.read_blocking(|c| read::inbox_categories(c, &[])).unwrap();
     let summary: Vec<_> = counts.iter().map(|c| (c.id.as_str(), c.total, c.unread)).collect();
     assert_eq!(
         summary,
@@ -422,11 +422,36 @@ fn the_inbox_splits_into_category_tabs_with_primary_as_everything_uncategorised(
             ("CATEGORY_FORUMS", 0, 0),
         ]
     );
-    let important = db.read_blocking(|c| read::inbox_categories(c, Some("IMPORTANT"))).unwrap();
+    let important = db.read_blocking(|c| read::inbox_categories(c, &["IMPORTANT"])).unwrap();
     assert_eq!(important.iter().map(|c| c.total).collect::<Vec<_>>(), [1, 1, 0, 0, 0]);
 
-    let too_narrow = db.read_blocking(|c| read::list_threads(c, "INBOX+A+B+C+D+E+F+G", None, 10));
+    let too_narrow = db.read_blocking(|c| read::list_threads(c, "INBOX+A+B+C+D+E+F+G+H", None, 10));
     assert!(too_narrow.is_err());
+}
+
+#[test]
+fn exclusions_leave_out_threads_with_a_label_in_lists_and_tabs() {
+    let db = open("exclusions");
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX", "UNREAD", "Label_task"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX", "IMPORTANT"])).unwrap();
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "IMPORTANT", "Label_task"])).unwrap();
+        w.upsert_message(&msg("m4", "t4", 4_000, &["INBOX", "CATEGORY_SOCIAL", "UNREAD"])).unwrap();
+    });
+    let ids = |mailbox: &'static str| {
+        db.read_blocking(move |c| read::list_threads(c, mailbox, None, 10))
+            .unwrap()
+            .rows
+            .iter()
+            .map(|t| t.id.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids("INBOX+!Label_task"), ["t4", "t2"]);
+    assert_eq!(ids("INBOX+IMPORTANT+!Label_task"), ["t2"], "combines with Important only");
+    assert_eq!(ids("INBOX+CATEGORY_PERSONAL+!Label_task+@unread"), Vec::<String>::new());
+    assert_eq!(ids("INBOX+!Label_unknown"), ["t4", "t3", "t2", "t1"], "an unknown label excludes nothing");
+    let counts = db.read_blocking(|c| read::inbox_categories(c, &["!Label_task"])).unwrap();
+    assert_eq!(counts.iter().map(|c| (c.total, c.unread)).take(3).collect::<Vec<_>>(), [(1, 0), (0, 0), (1, 1)]);
 }
 
 #[test]

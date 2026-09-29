@@ -77,6 +77,8 @@ enum Tone {
     static let chipDefaultNS = NSColor.tertiaryLabelColor
     /// How strongly a label's colour fills its chip.
     static let chipFillOpacity: CGFloat = 0.28
+    /// A chosen chip, where chips are picked (the task dialog).
+    static let chipSelectedOpacity: CGFloat = 0.55
 
     /// A label chip's fill for a Gmail `#rrggbb` colour.
     static func chipFill(hex: String?) -> NSColor {
@@ -111,6 +113,36 @@ enum Tone {
             }
         }
     }
+
+    /// Status text. Red only for failure; orange for a consequence to
+    /// weigh (a task that is overdue, a prompt missing its safety lines);
+    /// green only for "approved".
+    static let failure = Color.red
+    static let failureNS = NSColor.systemRed
+    static let caution = Color.orange
+    static let cautionNS = NSColor.systemOrange
+    static let approved = Color.green
+
+    /// A task category's colour (spec §14.8): the starting set has one
+    /// each, told apart at a glance; any other name takes one from the same
+    /// palette by its name, so a category keeps its colour whatever its
+    /// place in the list. Red, orange, yellow and pink are left out: they
+    /// mean failure, caution and Important, or look like them.
+    static func category(_ name: String) -> NSColor {
+        let key = name.lowercased()
+        if let fixed = startingCategories[key] { return fixed }
+        let palette: [NSColor] = [.systemBlue, .systemPurple, .systemTeal, .systemGreen, .systemIndigo, .systemBrown,
+                                  .systemCyan, .systemMint]
+        // FNV-1a: stable across launches, unlike `hashValue`.
+        var hash: UInt32 = 2_166_136_261
+        for byte in key.utf8 { hash = (hash ^ UInt32(byte)) &* 16_777_619 }
+        return palette[Int(hash % UInt32(palette.count))]
+    }
+
+    private static let startingCategories: [String: NSColor] = [
+        "reply": .systemBlue, "decide": .systemPurple, "gather info": .systemTeal, "schedule": .systemGreen,
+        "review": .systemIndigo, "admin": .systemBrown, "follow up": .systemCyan,
+    ]
 
     /// A highlighted (keyboard-selected) item inside glass.
     static let highlight = AnyShapeStyle(.tint.opacity(0.25))

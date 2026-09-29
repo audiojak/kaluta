@@ -7,6 +7,14 @@ struct OpenAGCApp: App {
     @State private var model = AppModel(core: OpenAGCApp.makeCore(), defaults: OpenAGCApp.defaults)
     @State private var updater = Updater()
 
+    /// A test host or scratch run (demo data, throwaway preferences).
+    static var isolated: Bool { CoreClient.isRunningTests || CoreClient.isScratchRun }
+
+    init() {
+        // Before any scene exists (see NSWindow.refuseFrameAutosave).
+        if CoreClient.isRunningTests || CoreClient.isScratchRun { NSWindow.refuseFrameAutosave() }
+    }
+
     var body: some Scene {
         WindowGroup("OpenAGC", id: "main") {
             MainWindow()
@@ -14,6 +22,10 @@ struct OpenAGCApp: App {
                 .onAppear { appDelegate.model = model }
         }
         .defaultSize(width: 1200, height: 760)
+        // Test and scratch runs share the app's saved window state with
+        // the user's own OpenAGC: a scratch run that closed its window made
+        // the next launch open with none. They neither save nor restore it.
+        .restorationBehavior(Self.isolated ? .disabled : .automatic)
         .commands {
             MailCommands(model: model)
             CommandGroup(after: .appInfo) {
@@ -140,6 +152,15 @@ struct MailCommands: Commands {
             Link("OpenAGC on GitHub", destination: URL(string: "https://github.com/audiojak/openagc")!)
         }
         CommandGroup(after: .windowList) {
+            // As Mail's Message Viewer: the mail window back after closing it.
+            Button("Mail") {
+                if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+                    main.makeKeyAndOrderFront(nil)
+                } else {
+                    openWindow(id: "main")
+                }
+            }
+            .keyboardShortcut("0")
             Button("Routines") { openWindow(id: "routines") }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }
@@ -188,6 +209,11 @@ struct MailCommands: Commands {
             Button("Star or Unstar") { model.toggleStarSelection() }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(noTargets)
+            Divider() // menu
+            Button("New Task from Email…") { Task { await model.openTaskDialog() } }
+                .disabled(!mailKey || model.taskTarget == nil)
+            Button("Create Tasks…") { Task { await model.openBulkTasks() } }
+                .disabled(!mailKey || model.isTaskList || model.threads.rows.isEmpty)
             Divider() // menu
             Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k")

@@ -19,6 +19,16 @@ struct MainWindow: View {
             }
         }
         .focusedSceneValue(\.isMailWindow, true)
+        .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
+            TaskDialog(draft: draft)
+        }
+        .sheet(item: Binding(get: { model.taskDoneQuestion },
+                             set: { if $0 == nil, model.taskDoneQuestion != nil { Task { await model.answerTaskDone(false) } } })) {
+            TaskDoneDialog(question: $0)
+        }
+        .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in
+            BulkTaskSheet(draft: draft)
+        }
         .sheet(item: Binding(get: { model.importDraft }, set: { model.importDraft = $0 })) { draft in
             ImportMailboxSheet(draft: draft)
         }
@@ -54,16 +64,27 @@ struct MainWindow: View {
                 VStack(spacing: 0) {
                     detail
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    AgentPromptBar()
-                        .frame(maxWidth: 680)
-                        .padding(.horizontal, Space.xl)
-                        .padding(.vertical, Space.l)
+                    if !model.agent.isPresented {
+                        AgentPromptBar()
+                            .frame(maxWidth: 680)
+                            .padding(.horizontal, Space.xl)
+                            .padding(.vertical, Space.l)
+                    }
                 }
                 if model.agent.isPresented {
                     PaneDivider()
-                    AgentInspector()
-                        .frame(width: 340)
-                        .transition(.move(edge: .trailing))
+                    // While the conversation is open the prompt sits under
+                    // it, like a chat, so a follow-up goes where the answer
+                    // is; closed, it goes back under the reader.
+                    VStack(spacing: 0) {
+                        AgentInspector()
+                            .frame(maxHeight: .infinity)
+                        AgentPromptBar()
+                            .padding(.horizontal, Space.l)
+                            .padding(.vertical, Space.l)
+                    }
+                    .frame(width: 340)
+                    .transition(.move(edge: .trailing))
                 }
             }
             .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: model.agent.isPresented)
@@ -87,6 +108,7 @@ struct MainWindow: View {
     /// The list column's title, as Mail shows it: the mailbox's name.
     private var listTitle: String {
         if model.threads.searchQuery != nil { return "Search Results" }
+        if model.isTaskList { return "Tasks" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
     }
 
@@ -94,6 +116,12 @@ struct MainWindow: View {
     /// the sidebar's footer.
     private var listSubtitle: String {
         var parts: [String] = []
+        if model.isTaskList {
+            if model.tasks.showsDone { return "Done" }
+            if model.tasks.openCount > 0 { parts.append("\(model.tasks.openCount.formatted()) open") }
+            if model.tasks.dueCount > 0 { parts.append("\(model.tasks.dueCount.formatted()) due") }
+            return parts.joined(separator: " · ")
+        }
         if model.threads.searchQuery == nil, model.selectedMailboxID == "INBOX", let tab = model.activeInboxCategory,
            let counts = model.inboxCategoryTabs.first(where: { $0.id == tab }) {
             // As Mail puts it: "Primary · 667 unread".
@@ -104,6 +132,9 @@ struct MainWindow: View {
         }
         if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.inboxImportantOnly {
             parts.append("Important only")
+        }
+        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil, model.hiddenTaskLabel != nil {
+            parts.append("Tasks hidden")
         }
         if !model.listFilters.isEmpty {
             parts.append("Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))
@@ -140,7 +171,9 @@ struct MainWindow: View {
                     .foregroundStyle(.secondary)
                     .padding(Space.m)
                 }
-                if model.threads.rows.isEmpty {
+                if model.isTaskList {
+                    TaskListView()
+                } else if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
                         ContentUnavailableView.search(text: model.searchText)
                     } else {
@@ -167,6 +200,7 @@ struct MainWindow: View {
     @ViewBuilder private var listHeader: some View {
         VStack(spacing: 0) {
             categoryTabs
+            taskTabs
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,
@@ -174,6 +208,20 @@ struct MainWindow: View {
                         onDismiss: { model.finishTip(tip, accept: false) })
                     .padding(.horizontal, Space.l)
                     .padding(.bottom, Space.m)
+            }
+        }
+    }
+
+    /// The task list's Open and Done, as the Inbox's category tabs.
+    @ViewBuilder private var taskTabs: some View {
+        if model.isTaskList {
+            ListHeaderBar {
+                CapsuleTabs(tabs: [
+                    CapsuleTabs.Tab(id: "open", title: "Open", symbol: "circle", count: model.tasks.openCount),
+                    CapsuleTabs.Tab(id: "done", title: "Done", symbol: "checkmark.circle"),
+                ], selection: Binding(get: { model.tasks.showsDone ? "done" : "open" },
+                                      set: { model.tasks.showsDone = $0 == "done" }), countNoun: "open")
+                .accessibilityLabel("Show")
             }
         }
     }

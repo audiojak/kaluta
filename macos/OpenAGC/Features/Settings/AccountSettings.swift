@@ -25,7 +25,7 @@ struct AccountSettings: View {
                         LabeledContent("Account") { Text(model.accountEmail ?? "Connected") }
                     }
                     if model.needsReauthentication {
-                        Label(reauthenticationHint, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        Label(reauthenticationHint, systemImage: "exclamationmark.triangle").foregroundStyle(Tone.caution)
                     }
                     Button("Add Account…") { Task { await model.addAccount() } }
                         .hoverHelp("Sign in to another Gmail account")
@@ -67,7 +67,7 @@ struct AccountSettings: View {
                             }
                         }
                     }
-                    .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected.")
+                    .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected")
                 }
                 HStack {
                     Button("Show Mail Data") {
@@ -153,7 +153,7 @@ struct AccountRow: View {
                 }
                 if account.kind == .gmail, signedIn == true {
                     Button("Refresh from Gmail") { Task { _ = try? await model.core?.refreshFromServer(account.id) } }
-                        .hoverHelp("Download this account's mail again so labels and messages match Gmail. Nothing is sent or changed on the server.")
+                        .hoverHelp("Download this account's mail again so labels and messages match Gmail. Nothing is sent or changed on the server")
                 }
                 if account.kind == .archive {
                     Button("Re-import…") { Task { _ = try? await model.core?.reimportArchive(account.id) } }
@@ -193,7 +193,7 @@ struct AccountRow: View {
                 .hoverHelp("IMAP is used for downloading; the Gmail API for categories, drafts, changes made elsewhere and sending, and whenever IMAP fails")
                 if !account.imapEnabled, signedIn == true {
                     Button("Sign In Again for IMAP…") { Task { await model.signInAgainForIMAP(account.id) } }
-                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. OpenAGC still never deletes mail permanently.")
+                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. OpenAGC still never deletes mail permanently")
                 }
                 if account.imapEnabled {
                     // Tiered download (spec §7.4): older mail in the range
@@ -210,7 +210,7 @@ struct AccountRow: View {
                         }
                     }
                     .disabled(bodyWindow == nil)
-                    .hoverHelp("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full.")
+                    .hoverHelp("Older mail shows its sender, subject and a preview; its full text downloads when you open it, search for it, or an agent reads it. The Inbox always comes down in full")
                 }
             }
         }

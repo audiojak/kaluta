@@ -64,7 +64,7 @@ pub fn list_mailboxes(conn: &Connection) -> StoreResult<Vec<Mailbox>> {
         // With categories, the Inbox counts Primary's unread, as Gmail's
         // own Inbox count does; promotions and notifications do not add up.
         if *kind == MailboxKind::Inbox {
-            let categories = inbox_categories(conn, None)?;
+            let categories = inbox_categories(conn, &[])?;
             if categories.iter().any(|c| c.id != PRIMARY && c.total > 0) {
                 unread = categories.iter().find(|c| c.id == PRIMARY).map_or(0, |c| i64::from(c.unread));
             }
@@ -119,8 +119,8 @@ pub const FILTER_STARRED: &str = "@starred";
 pub const FILTER_ATTACHMENTS: &str = "@attachments";
 
 /// At most this many narrowings after the mailbox
-/// (`INBOX+IMPORTANT+CATEGORY_SOCIAL+@unread+@starred+@attachments`).
-const MAX_NARROWINGS: usize = 6;
+/// (`INBOX+IMPORTANT+CATEGORY_SOCIAL+!Label_7+@unread+@starred+@attachments`).
+const MAX_NARROWINGS: usize = 7;
 
 /// Threads in a mailbox, newest first, keyset-paged: cost is O(page)
 /// however deep the user scrolls (spec §4.2). `mailbox` is a label id,
@@ -128,7 +128,8 @@ const MAX_NARROWINGS: usize = 6;
 /// (`INBOX+IMPORTANT`: the Inbox's "Important only" view;
 /// `INBOX+CATEGORY_SOCIAL`: a category tab; `PRIMARY` narrows to threads
 /// in no other category; `@unread`, `@starred` and `@attachments` are the
-/// list filters). Ordered by the first label.
+/// list filters; `!Label_7` excludes threads carrying that label, as the
+/// Inbox hides emails with tasks). Ordered by the first label.
 pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limit: u32) -> StoreResult<ThreadPage> {
     let limit = limit.clamp(1, MAX_PAGE_SIZE);
     let (after_at, after_id) = match cursor {
@@ -173,13 +174,22 @@ pub fn list_threads(conn: &Connection, mailbox: &str, cursor: Option<&str>, limi
 }
 
 /// The SQL that narrows `tl.thread_id` to threads also carrying `label`
-/// (or, for `PRIMARY`, carrying no other category), binding its values.
+/// (or, for `PRIMARY`, carrying no other category; for `!label`, not
+/// carrying it), binding its values.
 fn narrowing_clause(label: &str, values: &mut Vec<rusqlite::types::Value>) -> String {
     match label {
         FILTER_UNREAD => return " AND t.unread_count > 0".into(),
         FILTER_STARRED => return " AND t.is_starred".into(),
         FILTER_ATTACHMENTS => return " AND t.has_attachments".into(),
         _ => {}
+    }
+    if let Some(excluded) = label.strip_prefix('!') {
+        values.push(excluded.to_owned().into());
+        return format!(
+            " AND NOT EXISTS (SELECT 1 FROM thread_labels n
+                 WHERE n.thread_id = tl.thread_id AND n.label_id = (SELECT id FROM labels WHERE gmail_id = ?{}))",
+            values.len()
+        );
     }
     if label == PRIMARY {
         let first = values.len() + 1;
@@ -210,15 +220,16 @@ pub struct CategoryCount {
 
 /// The Inbox's category tabs with their counts, Primary first, then
 /// `CATEGORIES` in order; `also` narrows as in `list_threads`
-/// (`IMPORTANT` for Important-only). Every tab is returned, empty ones
-/// with zero counts; a thread in two categories counts in the first.
-pub fn inbox_categories(conn: &Connection, also: Option<&str>) -> StoreResult<Vec<CategoryCount>> {
+/// (`IMPORTANT` for Important-only, `!Label_7` to leave out emails with
+/// tasks). Every tab is returned, empty ones with zero counts; a thread in
+/// two categories counts in the first.
+pub fn inbox_categories(conn: &Connection, also: &[&str]) -> StoreResult<Vec<CategoryCount>> {
     let mut values: Vec<rusqlite::types::Value> =
         CATEGORIES.iter().map(|c| rusqlite::types::Value::from((*c).to_owned())).collect();
     let placeholders = (1..=CATEGORIES.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
     let order =
         CATEGORIES.iter().enumerate().map(|(i, _)| format!("WHEN ?{} THEN {i}", i + 1)).collect::<Vec<_>>().join(" ");
-    let narrowing = also.map(|label| narrowing_clause(label, &mut values)).unwrap_or_default();
+    let narrowing: String = also.iter().map(|label| narrowing_clause(label, &mut values)).collect();
     let sql = format!(
         "SELECT (SELECT cl.gmail_id FROM thread_labels c JOIN labels cl ON cl.id = c.label_id
                  WHERE c.thread_id = tl.thread_id AND cl.gmail_id IN ({placeholders})

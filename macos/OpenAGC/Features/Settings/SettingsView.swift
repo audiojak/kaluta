@@ -1,24 +1,36 @@
 import SwiftUI
 
+/// The Settings window's tabs; `AppModel.settingsTab` picks one before
+/// the window opens (the agent column's Agent Settings…).
+enum SettingsTab: String, Hashable {
+    case general, accounts, agents, permissions, tasks, routines, privacy
+}
+
 struct SettingsView: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        TabView {
-            Tab("General", systemImage: "gearshape") {
+        @Bindable var model = model
+        TabView(selection: $model.settingsTab) {
+            Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
                 GeneralSettings()
             }
-            Tab("Accounts", systemImage: "person.crop.circle") {
+            Tab("Accounts", systemImage: "person.crop.circle", value: SettingsTab.accounts) {
                 AccountSettings()
             }
-            Tab("Agents", systemImage: "sparkles") {
+            Tab("Agents", systemImage: "sparkles", value: SettingsTab.agents) {
                 AgentSettings()
             }
-            Tab("Permissions", systemImage: "hand.raised") {
+            Tab("Permissions", systemImage: "hand.raised", value: SettingsTab.permissions) {
                 AgentPermissionsSettings()
             }
-            Tab("Routines", systemImage: "clock.arrow.2.circlepath") {
+            Tab("Tasks", systemImage: "checklist", value: SettingsTab.tasks) {
+                TaskSettings()
+            }
+            Tab("Routines", systemImage: "clock.arrow.2.circlepath", value: SettingsTab.routines) {
                 RoutineSettings()
             }
-            Tab("Privacy", systemImage: "lock.shield") {
+            Tab("Privacy", systemImage: "lock.shield", value: SettingsTab.privacy) {
                 PrivacySettings()
             }
         }

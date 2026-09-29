@@ -84,13 +84,24 @@ impl Core {
     }
 
     /// The Inbox's category tabs, Primary first, with thread and unread
-    /// counts (narrowed to Important when `important_only`). Every tab
-    /// comes back; the app shows those with mail.
-    pub async fn inbox_categories(&self, important_only: bool) -> Result<Vec<InboxCategory>, CoreError> {
+    /// counts (narrowed to Important when `important_only`; without threads
+    /// carrying `hidden_label`, as when the Inbox hides emails with tasks).
+    /// Every tab comes back; the app shows those with mail.
+    pub async fn inbox_categories(
+        &self,
+        important_only: bool,
+        hidden_label: Option<String>,
+    ) -> Result<Vec<InboxCategory>, CoreError> {
         let db = self.db()?;
         runtime::run(async move {
-            let also = important_only.then_some("IMPORTANT");
-            let counts = db.read(move |c| read::inbox_categories(c, also)).await?;
+            let mut also: Vec<String> = Vec::new();
+            if important_only {
+                also.push("IMPORTANT".into());
+            }
+            also.extend(hidden_label.map(|l| format!("!{l}")));
+            let counts = db
+                .read(move |c| read::inbox_categories(c, &also.iter().map(String::as_str).collect::<Vec<_>>()))
+                .await?;
             Ok(counts
                 .into_iter()
                 .map(|c| InboxCategory { id: c.id, total_count: c.total, unread_count: c.unread })

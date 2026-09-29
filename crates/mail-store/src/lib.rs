@@ -14,6 +14,7 @@ pub mod queue;
 pub mod read;
 pub mod routines;
 pub mod search;
+pub mod tasks;
 pub mod undo;
 mod write;
 

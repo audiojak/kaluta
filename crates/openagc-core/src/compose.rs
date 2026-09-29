@@ -475,7 +475,7 @@ impl Core {
 /// A message stored with headers only has no text to quote and no
 /// attachments to forward: download it first. Best effort: offline, the
 /// reply opens with what is stored.
-async fn download_for_quote(service: Option<&crate::sync::SyncService>, id: &MessageId) {
+pub(crate) async fn download_for_quote(service: Option<&crate::sync::SyncService>, id: &MessageId) {
     if let Some(service) = service
         && let Err(e) = service.engine().ensure_bodies(vec![id.clone()]).await
     {

@@ -11,6 +11,19 @@ struct AgentSettings: View {
     var body: some View {
         Form {
             Section {
+                Picker("Default agent", selection: Binding(get: { model.agent.providerID },
+                                                           set: { model.agent.providerID = $0 })) {
+                    ForEach(providers, id: \.id) { provider in
+                        Text(AgentStatusText(provider).isReady ? provider.name : "\(provider.name) (not ready)")
+                            .tag(provider.id)
+                    }
+                }
+                .disabled(providers.isEmpty)
+                .hoverHelp("The agent that answers in the agent column, writing help and task suggestions")
+            } footer: {
+                Text("Used for new conversations, writing help and task suggestions. The agent column's ✦ menu switches it too.")
+            }
+            Section {
                 if providers.isEmpty {
                     HStack {
                         ProgressView().controlSize(.small)
@@ -18,7 +31,7 @@ struct AgentSettings: View {
                     }
                 }
                 ForEach(providers, id: \.id) { provider in
-                    AgentRow(provider: provider)
+                    AgentRow(provider: provider, isDefault: provider.id == model.agent.providerID)
                 }
             } header: {
                 Text("Agents")
@@ -53,6 +66,7 @@ struct AgentSettings: View {
 
 private struct AgentRow: View {
     let provider: AgentProviderInfo
+    let isDefault: Bool
 
     var body: some View {
         let status = AgentStatusText(provider)
@@ -60,7 +74,17 @@ private struct AgentRow: View {
             Image(systemName: status.symbol)
                 .foregroundStyle(status.isReady ? .green : .secondary)
             VStack(alignment: .leading, spacing: Space.hair) {
-                Text(provider.name).font(.headline)
+                HStack(spacing: Space.s) {
+                    Text(provider.name).font(.headline)
+                    if isDefault {
+                        Text("Default")
+                            .font(Font(TypeRole.chip))
+                            .padding(.horizontal, Space.xs)
+                            .padding(.vertical, Space.hair)
+                            .background(Tone.highlight, in: .rect(cornerRadius: Radius.chip))
+                            .accessibilityLabel("the default agent")
+                    }
+                }
                 Text(status.detail).font(.callout).foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }

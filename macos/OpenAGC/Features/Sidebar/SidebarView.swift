@@ -18,6 +18,12 @@ struct SidebarView: View {
                 ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)
                 }
+                // Tasks made from email (spec §14.8); the badge counts those
+                // due today or overdue.
+                Label("Tasks", systemImage: "checklist")
+                    .badge(model.tasks.dueCount)
+                    .tag(AppModel.tasksMailboxID)
+                    .hoverHelp("Tasks you made from email, by when they are due")
             }
             Section(model.accountSectionTitle) {
                 ForEach(model.mailboxes.accountMailboxes, id: \.id) { mailbox in

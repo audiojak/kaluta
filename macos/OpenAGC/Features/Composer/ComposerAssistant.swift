@@ -40,8 +40,8 @@ final class ComposerAssistant {
         state = .working
         reply = ""
         do {
-            let session = try await core.startAgentSession(provider: model.agent.providerID,
-                                                           selection: store.threadID.map { [$0] } ?? [])
+            let session = try await core.startReadOnlyAgentSession(provider: model.agent.providerID,
+                                                                   selection: store.threadID.map { [$0] } ?? [])
             sessionID = session
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
             let prompt = Self.prompt(instruction: text, from: store.from, to: store.to.map(\.email),

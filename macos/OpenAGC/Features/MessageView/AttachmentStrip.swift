@@ -27,7 +27,7 @@ struct AttachmentStrip: View {
             if let error {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Tone.failure)
                     .padding(.horizontal, Space.xxl)
             }
         }

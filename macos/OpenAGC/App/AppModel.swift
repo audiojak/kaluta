@@ -61,6 +61,27 @@ final class AppModel {
 
     static func importantOnlyKey(_ accountID: String) -> String { "inboxImportantOnly.\(accountID)" }
 
+    /// The Inbox leaves out threads with an open task (they carry the
+    /// account's `Task` label; spec §14.8, §14.3), remembered per account.
+    var inboxHidesTasks: Bool {
+        get { inboxHidesTasksLoaded }
+        set {
+            guard newValue != inboxHidesTasksLoaded else { return }
+            inboxHidesTasksLoaded = newValue
+            if let id = openAccountID { defaults.set(newValue, forKey: Self.hideTasksKey(id)) }
+            relist()
+        }
+    }
+
+    private var inboxHidesTasksLoaded = false
+    /// The open account's `Task` label, once it has one.
+    var taskLabelID: String?
+
+    static func hideTasksKey(_ accountID: String) -> String { "inboxHideTasks.\(accountID)" }
+
+    /// The narrowing that hides emails with tasks, when on and possible.
+    var hiddenTaskLabel: String? { inboxHidesTasks ? taskLabelID : nil }
+
     /// The open account's addresses, aliases included: rows show other
     /// people, and "Me" only when it is just you.
     private(set) var ownAddresses: Set<String> = []
@@ -144,10 +165,11 @@ final class AppModel {
     /// narrowed to Important when that switch is on and to the category
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
-        guard let id = selectedMailboxID else { return nil }
+        guard let id = selectedMailboxID, id != Self.tasksMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
+            if let hidden = hiddenTaskLabel { parts.append("!" + hidden) }
             if let category = activeInboxCategory { parts.append(category) }
         }
         parts += ListFilter.ordered(listFilters).map(\.rawValue)
@@ -206,7 +228,7 @@ final class AppModel {
         categoryGeneration += 1
         let generation = categoryGeneration
         let before = listMailboxID
-        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly)) ?? []
+        let counts = (try? await core.inboxCategories(importantOnly: inboxImportantOnly, hiddenLabel: hiddenTaskLabel)) ?? []
         // A newer reload (the switch toggled again) wins.
         guard generation == categoryGeneration else { return false }
         inboxCategoryCounts = counts
@@ -284,11 +306,21 @@ final class AppModel {
     /// progress sheet).
     var importDraft: ImportDraft?
     var runningImport: String?
+    /// The task dialog, while open (spec §14.8).
+    var taskDraft: TaskDraft?
+    /// The bulk sheet (`⇧T`), while open.
+    var bulkTasks: BulkTaskDraft?
+    /// The Settings tab to show when Settings next opens.
+    var settingsTab: SettingsTab = .general
+    /// Asked after a task's reply is sent: is the task done?
+    var taskDoneQuestion: TaskDoneQuestion?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.
     @ObservationIgnored private var placeByAccount: [String: (mailbox: String?, thread: String?)] = [:]
     let routines: RoutinesStore
+    /// The task list (spec §14.8).
+    let tasks: TaskListStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -317,6 +349,7 @@ final class AppModel {
         notifier = NewMailNotifier(defaults: defaults)
         fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
+        tasks = TaskListStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -459,12 +492,15 @@ final class AppModel {
             await mailboxes.reload()
             await reloadAccounts()
             inboxImportantOnlyLoaded = defaults.bool(forKey: Self.importantOnlyKey(accountID))
+            inboxHidesTasksLoaded = defaults.bool(forKey: Self.hideTasksKey(accountID))
+            taskLabelID = try? await core.taskLabelID()
             showCategoriesLoaded = defaults.object(forKey: Self.showCategoriesKey(accountID)) as? Bool ?? true
             inboxCategoryLoaded = defaults.string(forKey: Self.inboxCategoryKey(accountID)) ?? InboxCategories.primary
             await reloadInboxCategories()
             ownAddresses = await core.ownAddresses()
             reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
+            await tasks.load()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -517,6 +553,8 @@ final class AppModel {
 
     /// Bumped when routines change, so their views reload.
     private(set) var routinesRevision = 0
+    /// Bumped when a task was added, changed or removed (spec §14.8).
+    private(set) var tasksRevision = 0
 
     // MARK: Agent
 
@@ -801,14 +839,16 @@ final class AppModel {
         openComposer?(request)
     }
 
+    /// In the task list, the reply answers the selected task: sending it
+    /// completes the task (spec §14.8).
     func reply(all: Bool) {
         guard let id = replyTargetMessageID else { return }
-        compose(.reply(messageID: id, all: all))
+        compose(.reply(messageID: id, all: all, task: answeringTaskID))
     }
 
     func forward() {
         guard let id = replyTargetMessageID else { return }
-        compose(.forward(messageID: id))
+        compose(.forward(messageID: id, task: answeringTaskID))
     }
 
     // MARK: Actions on the selection
@@ -938,19 +978,49 @@ final class AppModel {
         return store
     }
 
-    func sendHeld(draftID: Int64, accountID: String) {
+    /// A message was sent (or is held for Undo Send). A reply a task
+    /// called for asks whether that task is done (spec §14.8): the answer
+    /// is the user's, in `taskDoneQuestion`.
+    func messageSent(heldDraftID: Int64?, taskID: Int64?, accountID: String) async {
+        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: taskID) }
+        guard let taskID, let core, let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }),
+              !task.done
+        else { return }
+        taskDoneQuestion = TaskDoneQuestion(task: task, accountID: accountID, held: heldDraftID != nil)
+    }
+
+    /// The answer to "Mark the task done?": done (undoable), or kept open.
+    func answerTaskDone(_ done: Bool) async {
+        guard let question = taskDoneQuestion else { return }
+        taskDoneQuestion = nil
+        guard done, let core else { return }
+        let task = question.task
+        guard (try? await core.setTaskDone(task.id, true)) != nil else { return }
+        await tasks.load()
+        // While a send is held, its Undo Send notice stays on screen; ⌘Z
+        // still reopens the task first.
+        undo.record(accountID: question.accountID, actionName: "Complete Task",
+                    noticeText: "Task done: “\(task.title)”", showNotice: !question.held,
+                    undo: { _ = try? await core.setTaskDone(task.id, false) },
+                    redo: { _ = try? await core.setTaskDone(task.id, true) })
+    }
+
+    func sendHeld(draftID: Int64, accountID: String, taskID: Int64? = nil) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
             guard let self else { return }
             if await core.cancelSend(draftID, in: accountID) {
+                // Taken back: its task is not done after all.
+                if let taskID { _ = try? await core.setTaskDone(taskID, false) }
+                if self.taskDoneQuestion?.task.id == taskID { self.taskDoneQuestion = nil }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
-                self.compose(.draft(id: draftID))
+                // Sending it again still answers the task.
+                self.compose(.draft(id: draftID, task: taskID))
             } else {
                 self.undo.show("Already sent", accountID: accountID)
             }
         }
     }
-
 
     /// Undo the open account's last mail action (the notice's button, and
     /// ⌘Z when no text is being edited).
@@ -1107,6 +1177,7 @@ final class AppModel {
         selectedThreadIDs = []
         searchText = ""
 
+        if isTaskList { Task { await tasks.load() } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1206,6 +1277,15 @@ final class AppModel {
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:
             routinesRevision += 1
+        case .tasksChanged:
+            tasksRevision += 1
+            await tasks.load()
+            // The first task made the label: the Inbox can now hide by it.
+            let label = try? await core?.taskLabelID()
+            if label != taskLabelID {
+                taskLabelID = label
+                if inboxHidesTasks { relist() }
+            }
         case let .importProgress(status):
             imports[tagged.accountID ?? ""] = status
             if status.done {

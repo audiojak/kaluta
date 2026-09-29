@@ -197,6 +197,36 @@ final class MailUndo {
         show(UndoableAction(kind: .send, count: 1).noticeText, accountID: accountID, for: hold, pausable: false)
     }
 
+    /// A change that is not a mail action, such as adding or finishing a
+    /// task (spec §14.8): on its account's stack as `actionName`, with the
+    /// notice's text; undo and redo run the given steps, in order with any
+    /// other undo.
+    func record(accountID: String, actionName: String, noticeText: String, showNotice: Bool = true,
+                undo: @escaping @MainActor () async -> Void, redo: @escaping @MainActor () async -> Void) {
+        let manager = manager(for: accountID)
+        manager.beginUndoGrouping()
+        registerSteps(actionName: actionName, undo: undo, redo: redo, on: manager)
+        manager.endUndoGrouping()
+        revision += 1
+        if showNotice { show(noticeText, accountID: accountID) }
+    }
+
+    private func registerSteps(actionName: String, undo: @escaping @MainActor () async -> Void,
+                               redo: @escaping @MainActor () async -> Void, on manager: UndoManager) {
+        manager.registerUndo(withTarget: self) { target in
+            MainActor.assumeIsolated {
+                target.registerSteps(actionName: actionName, undo: redo, redo: undo, on: manager)
+                target.revision += 1
+                let previous = target.replaying
+                target.replaying = Task {
+                    await previous?.value
+                    await undo()
+                }
+            }
+        }
+        manager.setActionName(actionName)
+    }
+
     // MARK: The notice
 
     /// Show a notice, replacing any other; VoiceOver hears it without

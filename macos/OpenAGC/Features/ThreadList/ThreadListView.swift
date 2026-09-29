@@ -219,6 +219,8 @@ final class ThreadTableView: NSTableView {
         case "a": model.reply(all: true)
         case "f": model.forward()
         case "c": model.compose(.new(to: nil))
+        case "t": Task { await model.openTaskDialog() }
+        case "T": Task { await model.openBulkTasks() }
         case "j": moveSelection(by: 1)
         case "k": moveSelection(by: -1)
         case "/": model.focusSearch()
@@ -250,6 +252,9 @@ final class ThreadTableView: NSTableView {
         let labels = NSMenuItem(title: "Label", action: nil, keyEquivalent: "")
         labels.submenu = labelMenu()
         menu.addItem(labels)
+        menu.addItem(.separator())
+        menu.addItem(ActionItem("New Task from Email…", key: "t") { Task { await model.openTaskDialog() } })
+        menu.addItem(ActionItem("Create Tasks…", key: "T") { Task { await model.openBulkTasks() } })
         menu.addItem(.separator())
         if model.canJunk {
             menu.addItem(ActionItem(model.isSpamMailbox ? "Not Junk" : "Mark as Junk", key: "!") { model.toggleJunkSelection() })

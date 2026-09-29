@@ -2,7 +2,9 @@
 # Design-system lint (docs/design-system.md): outside macos/OpenAGC/Design/,
 # SwiftUI views take spacing and radii from the tokens and draw no raw
 # Divider(). Menus may use Divider() (they are separators there, not
-# rules); mark such lines with `// menu`.
+# rules); mark such lines with `// menu`. Status colours come from `Tone`
+# (failure, caution, approved), and dialogs use `CancelButton`, which
+# answers Escape; a Cancel that is not a dialog's is marked `// inline`.
 # Usage: scripts/design-lint.sh [--strict]   (--strict exits 1 on findings)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,11 +15,15 @@ findings=$(grep -rnE \
   -e '\.padding\((\.[a-zA-Z]+, *)?[0-9]+(\.[0-9]+)?\)' \
   -e '\.padding\([0-9]+(\.[0-9]+)?\)' \
   -e 'cornerRadius: *[0-9]' \
-  -e 'spacing: *[1-9][0-9]*(\.[0-9]+)?[,)]' \
+  -e '[sS]pacing: *[1-9][0-9]*(\.[0-9]+)?[,)]' \
+  -e '\.foregroundStyle\(\.(orange|red|green)\)' \
+  -e '(^|[^A-Za-z.])Color\.(orange|red|green)([^A-Za-z]|$)' \
+  -e 'Button\("Cancel"' \
   -e '(^|[^A-Za-z])Divider\(\)' \
   --include='*.swift' . \
   | grep -v '^\./Design/' \
   | grep -v '// menu' \
+  | grep -v '// inline' \
   | grep -v '^\./App/Snapshot\.swift:' || true)
 
 if [[ -z "$findings" ]]; then
@@ -26,6 +32,6 @@ if [[ -z "$findings" ]]; then
 fi
 count=$(printf '%s\n' "$findings" | wc -l | tr -d ' ')
 printf '%s\n' "$findings" | sed 's/^/design-lint: /'
-echo "design-lint: $count finding(s); use Space/Radius tokens, InsetRule or PaneDivider (docs/design-system.md)"
+echo "design-lint: $count finding(s); use Space/Radius/Tone tokens, InsetRule, PaneDivider or CancelButton (docs/design-system.md)"
 [[ "${1:-}" == "--strict" ]] && exit 1
 exit 0

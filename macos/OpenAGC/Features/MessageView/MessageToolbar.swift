@@ -7,10 +7,28 @@ struct ListToolbar: ToolbarContent {
     @Environment(AppModel.self) private var model
 
     var body: some ToolbarContent {
-        // Filter and View Options beside the title, as in Mail.
-        ToolbarItem { ListFilterMenu() }
-        if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
-            ToolbarItem { ListViewOptionsMenu() }
+        if model.isTaskList {
+            // The selected task's own actions (spec §14.8).
+            ToolbarItemGroup {
+                Button(model.tasks.selected?.done == true ? "Mark as Not Done" : "Mark as Done",
+                       systemImage: "checkmark.circle") { Task { await model.toggleSelectedTaskDone() } }
+                    .help(ToolbarHelp.text(for: "Mark as Done", model: model) ?? "")
+                    .disabled(model.tasks.selected == nil)
+                Menu("Category", systemImage: "square.grid.2x2") {
+                    ForEach(model.tasks.categories, id: \.self) { name in
+                        Button(name) { Task { await model.setSelectedTaskCategory(name) } } // no-help: menu
+                    }
+                }
+                .help(ToolbarHelp.text(for: "Category", model: model) ?? "")
+                .accessibilityLabel("Category")
+                .disabled(model.tasks.selected == nil)
+            }
+        } else {
+            // Filter and View Options beside the title, as in Mail.
+            ToolbarItem { ListFilterMenu() }
+            if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
+                ToolbarItem { ListViewOptionsMenu() }
+            }
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {
@@ -135,7 +153,7 @@ enum ToolbarHelp {
         switch label {
         case "Attach": "Attach files (⇧⌘A)"
         case "Discard": "Delete this draft"
-        case "Send": "Send (⇧⌘D)"
+        case "Send": "Send (⇧⌘D or ⌘Return)"
         default: label
         }
     }
@@ -147,13 +165,13 @@ enum ToolbarHelp {
         case "Reply": "Reply (⌘R)"
         case "Reply All": "Reply All (⇧⌘R)"
         case "Forward": "Forward (⇧⌘F)"
-        case "Archive": "Archive (E)"
+        case "Archive": "Archive (e)"
         case "Move to Trash": "Move to Trash (⌘⌫)"
         case "Mark as Junk": "Mark as Junk: move to Spam (⇧⌘J)"
         case "Not Junk": "Not Junk: move back to the Inbox (⇧⌘J)"
-        case "Label": "Label (L)"
-        case "Star": "Star (S)"
-        case "Unstar": "Unstar (S)"
+        case "Label": "Label (l)"
+        case "Star": "Star (s)"
+        case "Unstar": "Unstar (s)"
         case "Show Agent": "Show \(model.agent.providerName) (⌥⌘I)"
         case "Hide Agent": "Hide \(model.agent.providerName) (⌥⌘I)"
         case "Accounts": AccountMenuButton.helpText(model)
@@ -161,12 +179,16 @@ enum ToolbarHelp {
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
         case "New Routine": "Create a routine that sorts important mail on a schedule"
+        case "Mark as Done": model.tasks.selected?.done == true ? "Open the task again (e)" : "Mark the task done (e)"
+        case "Mark as Not Done": "Open the task again (e)"
+        case "Category": "Move the task to another category (c)"
         case "Filter":
             model.listFilters.isEmpty ? "Filter: show only unread, starred or with attachments"
                 : "Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", ")
         case "View Options":
-            InboxCategories.inUse(model.inboxCategoryCounts) ? "View options: Important Only, Show Categories"
-                : "View options: Important Only"
+            InboxCategories.inUse(model.inboxCategoryCounts)
+                ? "View options: Important Only, Hide Emails with Tasks, Show Categories"
+                : "View options: Important Only, Hide Emails with Tasks"
         default: nil
         }
     }

@@ -84,3 +84,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 }
+
+extension NSWindow {
+    /// Test hosts and scratch runs only: no window gets a frame autosave
+    /// name and no frame is saved by name, so nothing reaches the user's
+    /// preferences. On a fresh machine SwiftUI saves the main window's
+    /// first frame while creating it, before any notification could clear
+    /// the name. Installed once, as the app starts; cannot be undone.
+    static func refuseFrameAutosave() {
+        guard !frameAutosaveRefused else { return }
+        frameAutosaveRefused = true
+        swap(#selector(NSWindow.setFrameAutosaveName(_:)), #selector(NSWindow.openagc_setFrameAutosaveName(_:)))
+        swap(#selector(NSWindow.saveFrame(usingName:)), #selector(NSWindow.openagc_saveFrame(usingName:)))
+        // Split views save their column widths under their own names.
+        swap(#selector(setter: NSSplitView.autosaveName), #selector(NSSplitView.openagc_setAutosaveName(_:)),
+             in: NSSplitView.self)
+    }
+
+    private static func swap(_ original: Selector, _ replacement: Selector, in cls: AnyClass = NSWindow.self) {
+        guard let from = class_getInstanceMethod(cls, original),
+              let to = class_getInstanceMethod(cls, replacement) else { return }
+        method_exchangeImplementations(from, to)
+    }
+
+    @MainActor private(set) static var frameAutosaveRefused = false
+
+    /// Swapped in for setFrameAutosaveName(_:): an empty name still clears
+    /// (it reaches the original), anything else is refused.
+    @objc private func openagc_setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
+        if name.isEmpty { return openagc_setFrameAutosaveName(name) }
+        return false
+    }
+
+    /// Swapped in for saveFrame(usingName:): saves nothing.
+    @objc private func openagc_saveFrame(usingName name: NSWindow.FrameAutosaveName) {}
+}
+
+extension NSSplitView {
+    /// Swapped in for the `autosaveName` setter under
+    /// `NSWindow.refuseFrameAutosave()`: a name is never set.
+    @objc fileprivate func openagc_setAutosaveName(_ name: NSSplitView.AutosaveName?) {
+        openagc_setAutosaveName(nil)
+    }
+}

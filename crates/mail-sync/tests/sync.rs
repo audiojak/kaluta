@@ -770,7 +770,7 @@ async fn inbox_categories_missing_from_downloaded_mail_are_applied_and_the_inbox
     assert_eq!(inbox_unread(db.clone()).await, 3, "no categories known: everything is Primary");
 
     assert_eq!(engine.sync_categories().await.unwrap(), 2, "promo and social; the archived one is left alone");
-    let counts = db.read(|c| read::inbox_categories(c, None)).await.unwrap();
+    let counts = db.read(|c| read::inbox_categories(c, &[])).await.unwrap();
     let unread = |id: &str| counts.iter().find(|c| c.id == id).unwrap().unread;
     assert_eq!((unread("CATEGORY_PERSONAL"), unread("CATEGORY_PROMOTIONS"), unread("CATEGORY_SOCIAL")), (1, 1, 1));
     assert_eq!(inbox_unread(db.clone()).await, 1, "with categories, the Inbox counts Primary, as Gmail does");

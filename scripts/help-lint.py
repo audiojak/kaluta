@@ -60,6 +60,13 @@ for path in sorted(ROOT.rglob("*.swift")):
         if re.search(r'(?<![\w])\.help\(', line) and "// toolbar" not in line:
             findings.append(f"{rel}:{i + 1}: use .hoverHelp, not .help: {line.strip()[:70]}")
 
+# Help is a short sentence without a full stop (docs/design-system.md).
+for path in sorted(ROOT.rglob("*.swift")):
+    rel = path.relative_to(ROOT).as_posix()
+    for i, line in enumerate(path.read_text().split("\n")):
+        if re.search(r'\.(hover)?[hH]elp\("[^"]*\."\)', line):
+            findings.append(f"{rel}:{i + 1}: help ends with a full stop: {line.strip()[:70]}")
+
 for f in findings:
     print(f"help-lint: {f}")
 print(f"help-lint: {len(findings)} control(s) without .help" if findings else "help-lint: clean")

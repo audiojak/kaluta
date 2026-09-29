@@ -224,8 +224,8 @@ final class CoreClient: Sendable {
     }
 
     /// The Inbox's category tabs with their counts, Primary first.
-    func inboxCategories(importantOnly: Bool) async throws(CoreClientError) -> [InboxCategory] {
-        try await call { try await core.inboxCategories(importantOnly: importantOnly) }
+    func inboxCategories(importantOnly: Bool, hiddenLabel: String? = nil) async throws(CoreClientError) -> [InboxCategory] {
+        try await call { try await core.inboxCategories(importantOnly: importantOnly, hiddenLabel: hiddenLabel) }
     }
 
     func threads(in mailboxID: String, after cursor: String? = nil, limit: UInt32 = 100) async throws(CoreClientError) -> ThreadPage {
@@ -425,6 +425,64 @@ final class CoreClient: Sendable {
         core.suggestContactsNow(text: text, limit: limit)
     }
 
+    // MARK: Tasks (spec §14.8)
+
+    func listTasks(includeDone: Bool = false) async throws(CoreClientError) -> [TaskItem] {
+        try await call { try await core.listTasks(includeDone: includeDone) }
+    }
+
+    /// Adds the tasks and labels their threads `Task`.
+    func createTasks(_ tasks: [NewTask]) async throws(CoreClientError) -> [TaskItem] {
+        try await call { try await core.createTasks(new: tasks) }
+    }
+
+    func updateTask(_ id: Int64, _ edit: TaskEdit) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.updateTask(id: id, edit: edit) }
+    }
+
+    func setTaskDone(_ id: Int64, _ done: Bool) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.setTaskDone(id: id, done: done) }
+    }
+
+    /// Returns the task as it was, for `restoreTask` (undo).
+    func deleteTask(_ id: Int64) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.deleteTask(id: id) }
+    }
+
+    func restoreTask(_ task: TaskItem) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.restoreTask(task: task) }
+    }
+
+    func threadsWithOpenTasks(_ threadIDs: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.threadsWithOpenTasks(threadIds: threadIDs) }
+    }
+
+    func taskLabelID() async throws(CoreClientError) -> String? {
+        try await call { try await core.taskLabelId() }
+    }
+
+    func taskCategories() async throws(CoreClientError) -> [String] {
+        try await call { try await core.taskCategories() }
+    }
+
+    func setTaskCategories(_ names: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.setTaskCategories(names: names) }
+    }
+
+    func resetTaskCategories() async throws(CoreClientError) -> [String] {
+        try await call { try await core.resetTaskCategories() }
+    }
+
+    /// Claude's request for task suggestions about these threads, with
+    /// `today` as `YYYY-MM-DD` in the user's calendar.
+    func taskPrompt(_ threadIDs: [String], today: String) async throws(CoreClientError) -> String {
+        try await call { try await core.taskPrompt(threadIds: threadIDs, today: today) }
+    }
+
+    func parseTaskSuggestions(_ text: String, threadIDs: [String]) async throws(CoreClientError) -> [TaskSuggestion] {
+        try await call { try await core.parseTaskSuggestions(text: text, threadIds: threadIDs) }
+    }
+
     // MARK: Agents
 
     func agentProviders(refresh: Bool = false) async -> [AgentProviderInfo] {
@@ -435,6 +493,12 @@ final class CoreClient: Sendable {
     func startAgentSession(provider: String, selection: [String]? = nil,
                            resume: String? = nil) async throws(CoreClientError) -> String {
         try await call { try await core.startAgentSession(provider: provider, selection: selection, resume: resume) }
+    }
+
+    /// A session whose tools may only read: writing help and task
+    /// suggestions, which must not change mail whatever the agent is told.
+    func startReadOnlyAgentSession(provider: String, selection: [String]) async throws(CoreClientError) -> String {
+        try await call { try await core.startReadOnlyAgentSession(provider: provider, selection: selection) }
     }
 
     func sendAgentPrompt(_ sessionID: String, _ prompt: String,
@@ -798,6 +862,11 @@ typealias RenderedBody = OpenAGCCore.RenderedBody
 typealias ThreadDetail = OpenAGCCore.ThreadDetail
 typealias ThreadPage = OpenAGCCore.ThreadPage
 typealias ThreadRow = OpenAGCCore.ThreadRow
+typealias TaskItem = OpenAGCCore.TaskItem
+typealias NewTask = OpenAGCCore.NewTask
+typealias TaskEdit = OpenAGCCore.TaskEdit
+typealias TaskAction = OpenAGCCore.TaskAction
+typealias TaskSuggestion = OpenAGCCore.TaskSuggestion
 
 // MARK: - Events
 
@@ -834,6 +903,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
+    case tasksChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -913,6 +983,8 @@ private extension CoreClientEvent {
             self = .error(CoreClientError(kind: .init(kind), message: message))
         case .routinesChanged:
             self = .routinesChanged
+        case .tasksChanged:
+            self = .tasksChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

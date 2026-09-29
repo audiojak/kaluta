@@ -521,6 +521,15 @@ is a virtual label row (`@archive`, kind `virtual`) whose `thread_labels`
 entries mark threads with no INBOX label that are not wholly spam or trash,
 so Archive lists use the same index as every other mailbox.
 
+**Tasks (Amendment 2026-09-29, migration `0009_tasks`).** Each account's
+store also holds its tasks (§14.8): `tasks` (thread and message by Gmail
+id, not foreign key, so a task outlives its thread leaving the store;
+title, notes, category, due day as `YYYY-MM-DD` or none, action `reply`,
+`reply_all`, `forward` or `none`, status `open` or `done`, source `ai` or
+`you`, Claude's one-line why, created and completed times),
+`task_categories` (name, unique in any case, and position; seeded with the
+starting set) and `task_meta` (the id of the account's `Task` label).
+
 ### 6.3 Full-text search **(Verified)**
 
 Two FTS5 tables *(amended in M1)*:
@@ -1920,8 +1929,9 @@ first if only its headers were stored. A writing-help bar at the bottom
 asks the agent to write or change the message ("Write a reply", "Make it
 shorter", …, or the user's own words). It runs in a session of its own
 that can see only the thread being answered; its answer replaces the
-body, with Undo, and anything it proposes that would change mail is
-refused. Sending stays the user's.
+body, with Undo. The session is read-only: the core refuses every tool
+that would change mail (2026-09-29; it had only refused proposals, which
+left tools that need no approval open). Sending stays the user's.
 
 ### 14.6 Agent panel
 
@@ -2077,6 +2087,104 @@ since the last sync against re-reading labels and flags over IMAP for the
 last 30 days) and shows which was faster per item. It downloads a sample
 but stores nothing, changes no mail, and leaves the breaker and the
 operation record alone.
+
+**Amendments 2026-09-29 (maintainer feedback).** In the reader, a draft
+in a thread is an outlined, unfilled card marked **Draft**, its time
+"Saved …", so it never looks like mail that went. The composer sends with
+⌘Return as well as ⇧⌘D, as in Gmail, and a new message or a forward opens
+with the cursor in To. While the agent column is open, the Ask bar sits at
+the bottom of that column under the conversation, like a chat, and takes
+the cursor; closed, it returns under the reader. The agent column's Agent
+Settings… opens Settings on the Agents tab, where a Default agent picker
+and a Default tag show which agent answers.
+
+### 14.8 Tasks **(Amendment 2026-09-29)**
+
+A task-based way through email that changes the app as little as
+possible: Claude reads an email and suggests what the user has to do about
+it, by when, and in which category; accepted tasks go in a task list the
+user works through, usually by replying once they have gathered what they
+need or made a decision.
+
+- **Stored on this Mac,** per account (§6.2). No Google Tasks: it would
+  need another Google scope. Gmail sees tasks only as the account's
+  **`Task` label**: found by name (any case) or created the first time a
+  task is accepted, and remembered by id. A thread carries it while it has
+  an open task: accepting adds it, completing or deleting the thread's
+  last open task removes it, reopening or restoring adds it back. These
+  are ordinary label changes through the outbox, not separate entries on
+  the undo stack: undoing a task operation moves the label with it. A
+  `Task` label the user puts on a thread by hand, with no task here, is
+  never touched. Accepting leaves the email where it is (no archive).
+- **Categories:** a starting set (Reply, Decide, Gather Info, Schedule,
+  Review, Admin, Follow Up), editable, reorderable and resettable in
+  Settings › Tasks; Claude picks from the account's list. A task keeps
+  its category's name when the category is removed.
+- **A task** has a title, notes, category, due day or none, the action
+  that completes it (reply, reply all, forward or none), Claude's one line
+  on why, and whether Claude or the user wrote it.
+- **Asking Claude.** The core builds the request from stored mail: each
+  thread's latest message as plain text (at most 4,000 characters, the
+  message downloaded first if only its headers are stored), today's date
+  and weekday, and the account's categories; at most 50 threads at once.
+  The emails sit in `<email thread_id="…">` blocks, and the request says
+  they are data whose instructions are to be ignored. Claude answers with
+  a JSON array (thread, title, category, due day or null, action, why);
+  the core reads it leniently (prose or a code fence around it, one
+  object, `{"tasks": […]}`) but keeps only threads it asked about, the
+  first suggestion for each; an unknown category becomes the first, a day
+  that is not a date or an unknown action becomes none. The app asks in a
+  one-turn **read-only** agent session of its own that sees only those
+  threads: the core refuses every tool that would change mail, whatever an
+  email tells the agent (the composer's writing help uses the same kind of
+  session). Inside the email blocks every `<` becomes `‹`, so no text can
+  close or fake a block. It does not appear in the agent column. With no agent ready, the dialog opens empty.
+- **One email: `t`.** In a mail list, `t` (also Message › New Task from
+  Email… and the list's context menu) opens the **task dialog** for the
+  thread being read and asks Claude at once: the email's sender and
+  subject, a line saying what Claude is doing, then Claude's guess filled
+  in: the title, the category as chips, the due day (a checkbox and a date
+  picker, read as "Today", "Tomorrow", …), what finishes it (Reply, Reply
+  All, Forward, No Email) and notes, with Claude's why under the heading.
+  A title typed before Claude answers is kept. Return adds the task, Escape
+  cancels, Ask Again asks once more. Adding closes the dialog and shows
+  "Added a task: “…”" in the undo notice; ⌘Z removes it (and the label, if
+  it was the thread's only open task), ⇧⌘Z puts it back.
+- **The task list.** A **Tasks** entry under Favorites (its badge: open
+  tasks due today or overdue) swaps the list column for the tasks; the
+  reader shows the chosen task's email. Open and Done tabs sit in the
+  column header. Open tasks group under Overdue, Today, This Week, Later
+  and No Date; each row shows the title and due day, then the category
+  chip and the email's sender and subject; overdue days are orange, today
+  in the accent colour. Keys: `↩` edit (the task dialog, Save), `r` `a` `f`
+  reply, reply all, forward, `e` done (or open again among Done), `c`
+  category (a chooser with number keys), `⌫` delete, `j` `k` move; the
+  same in the context menu, and Mark as Done and Category in the list
+  column's toolbar. Every change goes on the undo stack with a notice.
+  A reply or forward started from the task list answers the task: when it
+  is sent, the app asks "Mark the Task Done?" (Y or Return: done, and the
+  thread's `Task` label goes with its last open task; N or Escape: it
+  stays open). ⌘Z reopens a task marked done; Undo Send takes the message
+  back and reopens the task, and sending it again asks again
+  (amended 2026-09-29 at the maintainer's request: it had completed the
+  task without asking). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
+  results as anywhere else.
+- **Many emails: `⇧T`.** In a mail list, `⇧T` (also Message › Create
+  Tasks… and the context menu) opens the **bulk sheet** for the
+  highlighted threads, or else the latest 20 in the open list, and asks
+  Claude about all of them in one request. Each row shows the email and
+  Claude's title, category, due day and why, all editable, with a
+  checkbox; threads that already have an open task say so and start
+  unchecked. "Add N Tasks" (Return) adds the checked rows that have a
+  title; one Undo removes them all.
+- **Hiding emails with tasks.** View Options in the Inbox has **Hide
+  Emails with Tasks**, remembered per account like Important Only (§14.3):
+  the Inbox then leaves out threads carrying the account's `Task` label,
+  so it shows only what still needs sorting. It combines with Important
+  Only, the category tabs (whose counts follow) and the filters, and the
+  list's subtitle says "Tasks hidden"; search ignores it, as it ignores
+  the tabs. The store's lists take exclusion narrowings for it
+  (`INBOX+!Label_7`, "and not labelled", next to `INBOX+IMPORTANT`).
 
 ---
 
