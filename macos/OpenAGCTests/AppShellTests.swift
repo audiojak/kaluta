@@ -19,5 +19,8 @@ struct AppShellTests {
         #expect(window.frameAutosaveName.isEmpty)
         window.saveFrame(usingName: "openagc-test-window")
         #expect(UserDefaults.standard.object(forKey: "NSWindow Frame openagc-test-window") == nil)
+        let split = NSSplitView()
+        split.autosaveName = "openagc-test-split"
+        #expect(split.autosaveName == nil, "split views would save their column widths")
     }
 }

@@ -96,11 +96,14 @@ extension NSWindow {
         frameAutosaveRefused = true
         swap(#selector(NSWindow.setFrameAutosaveName(_:)), #selector(NSWindow.openagc_setFrameAutosaveName(_:)))
         swap(#selector(NSWindow.saveFrame(usingName:)), #selector(NSWindow.openagc_saveFrame(usingName:)))
+        // Split views save their column widths under their own names.
+        swap(#selector(setter: NSSplitView.autosaveName), #selector(NSSplitView.openagc_setAutosaveName(_:)),
+             in: NSSplitView.self)
     }
 
-    private static func swap(_ original: Selector, _ replacement: Selector) {
-        guard let from = class_getInstanceMethod(NSWindow.self, original),
-              let to = class_getInstanceMethod(NSWindow.self, replacement) else { return }
+    private static func swap(_ original: Selector, _ replacement: Selector, in cls: AnyClass = NSWindow.self) {
+        guard let from = class_getInstanceMethod(cls, original),
+              let to = class_getInstanceMethod(cls, replacement) else { return }
         method_exchangeImplementations(from, to)
     }
 
@@ -115,4 +118,12 @@ extension NSWindow {
 
     /// Swapped in for saveFrame(usingName:): saves nothing.
     @objc private func openagc_saveFrame(usingName name: NSWindow.FrameAutosaveName) {}
+}
+
+extension NSSplitView {
+    /// Swapped in for the `autosaveName` setter under
+    /// `NSWindow.refuseFrameAutosave()`: a name is never set.
+    @objc fileprivate func openagc_setAutosaveName(_ name: NSSplitView.AutosaveName?) {
+        openagc_setAutosaveName(nil)
+    }
 }
