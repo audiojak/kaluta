@@ -7,13 +7,6 @@ import os
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var model: AppModel?
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // Before SwiftUI creates any window: on a machine with no saved
-        // frame, the main window saves its first frame as soon as it gets
-        // its autosave name, before any notification below could clear it.
-        if CoreClient.isRunningTests || CoreClient.isScratchRun { NSWindow.refuseFrameAutosave() }
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         // The test host starts with an empty Keychain service (a killed
         // run may have left items) and empties it again on quit.
@@ -93,14 +86,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension NSWindow {
-    /// Test hosts and scratch runs only: every later
-    /// `setFrameAutosaveName(_:)` does nothing, so no window frame reaches
-    /// the user's preferences. Installed once; cannot be undone.
+    /// Test hosts and scratch runs only: no window gets a frame autosave
+    /// name and no frame is saved by name, so nothing reaches the user's
+    /// preferences. On a fresh machine SwiftUI saves the main window's
+    /// first frame while creating it, before any notification could clear
+    /// the name. Installed once, as the app starts; cannot be undone.
     static func refuseFrameAutosave() {
         guard !frameAutosaveRefused else { return }
         frameAutosaveRefused = true
-        let original = #selector(NSWindow.setFrameAutosaveName(_:))
-        let replacement = #selector(NSWindow.openagc_refuseFrameAutosaveName(_:))
+        swap(#selector(NSWindow.setFrameAutosaveName(_:)), #selector(NSWindow.openagc_setFrameAutosaveName(_:)))
+        swap(#selector(NSWindow.saveFrame(usingName:)), #selector(NSWindow.openagc_saveFrame(usingName:)))
+    }
+
+    private static func swap(_ original: Selector, _ replacement: Selector) {
         guard let from = class_getInstanceMethod(NSWindow.self, original),
               let to = class_getInstanceMethod(NSWindow.self, replacement) else { return }
         method_exchangeImplementations(from, to)
@@ -108,10 +106,13 @@ extension NSWindow {
 
     @MainActor private(set) static var frameAutosaveRefused = false
 
-    @objc private func openagc_refuseFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
-        // Swapped in for setFrameAutosaveName(_:): an empty name still
-        // clears (it reaches the original), anything else is refused.
-        if name.isEmpty { return openagc_refuseFrameAutosaveName(name) }
+    /// Swapped in for setFrameAutosaveName(_:): an empty name still clears
+    /// (it reaches the original), anything else is refused.
+    @objc private func openagc_setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
+        if name.isEmpty { return openagc_setFrameAutosaveName(name) }
         return false
     }
+
+    /// Swapped in for saveFrame(usingName:): saves nothing.
+    @objc private func openagc_saveFrame(usingName name: NSWindow.FrameAutosaveName) {}
 }

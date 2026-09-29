@@ -7,6 +7,11 @@ struct OpenAGCApp: App {
     @State private var model = AppModel(core: OpenAGCApp.makeCore(), defaults: OpenAGCApp.defaults)
     @State private var updater = Updater()
 
+    init() {
+        // Before any scene exists (see NSWindow.refuseFrameAutosave).
+        if CoreClient.isRunningTests || CoreClient.isScratchRun { NSWindow.refuseFrameAutosave() }
+    }
+
     var body: some Scene {
         WindowGroup("OpenAGC", id: "main") {
             MainWindow()

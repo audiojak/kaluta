@@ -17,6 +17,7 @@ struct AppShellTests {
                               styleMask: [.titled], backing: .buffered, defer: true)
         #expect(window.setFrameAutosaveName("openagc-test-window") == false)
         #expect(window.frameAutosaveName.isEmpty)
+        window.saveFrame(usingName: "openagc-test-window")
         #expect(UserDefaults.standard.object(forKey: "NSWindow Frame openagc-test-window") == nil)
     }
 }
