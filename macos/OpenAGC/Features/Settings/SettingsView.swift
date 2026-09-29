@@ -15,6 +15,9 @@ struct SettingsView: View {
             Tab("Permissions", systemImage: "hand.raised") {
                 AgentPermissionsSettings()
             }
+            Tab("Tasks", systemImage: "checklist") {
+                TaskSettings()
+            }
             Tab("Routines", systemImage: "clock.arrow.2.circlepath") {
                 RoutineSettings()
             }

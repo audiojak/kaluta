@@ -86,6 +86,7 @@
 		AB0A75C26EE77D8683A01474 /* SearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D8587064562266E1C5E1DC /* SearchTests.swift */; };
 		AC828BE403824E10996A8DC8 /* RoutineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E9589E376D0608FB13DD219 /* RoutineModel.swift */; };
 		ACA4618DFA7FBAF468B9AF9C /* OpenAGCCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24AC691869E94971A95182AF /* OpenAGCCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AD2C4E55FC6F0A17CCD71C7C /* TaskSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */; };
 		B0F9127F48B25962A0D3E324 /* AgentFFITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE6FF06BED85F5FE72CF32A5 /* AgentFFITests.swift */; };
 		B2F035E69CB0D6421F8A763E /* AgentPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CE9D77767388614457FBCE /* AgentPanelTests.swift */; };
 		B453F38BECAF82D76E2FE0BF /* AppModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */; };
@@ -217,6 +218,7 @@
 		9B2ED3B92D6E529688C7C31B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9FCBE0C4FC7F267DC74AB18D /* ImportMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportMailbox.swift; sourceTree = "<group>"; };
 		A1FA403B0E890A2F61D2E8BC /* DesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTests.swift; sourceTree = "<group>"; };
+		A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSettings.swift; sourceTree = "<group>"; };
 		A3ECF1113029DF896EFBDA03 /* openagc_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = openagc_core.swift; sourceTree = "<group>"; };
 		A5846BE9A95C68C7383B2B7C /* SyncStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncStatusView.swift; sourceTree = "<group>"; };
 		A65BAFCB0A37F91E630541F2 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 			children = (
 				601938BEED9E6F66CF748199 /* AccountSettings.swift */,
 				E4C676A513B753ECEBB6FF97 /* SettingsView.swift */,
+				A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -882,6 +885,7 @@
 				D6E08EA9EAAE6A740E84FB05 /* TaskDialog.swift in Sources */,
 				9AFD2006E7CC41E471932A6F /* TaskListStore.swift in Sources */,
 				A4A20FA8D51236C1AD565F6D /* TaskListView.swift in Sources */,
+				AD2C4E55FC6F0A17CCD71C7C /* TaskSettings.swift in Sources */,
 				609C5D3ADC22861BD5BD958E /* TaskSuggester.swift in Sources */,
 				D9974F0610B1100DD537D0A5 /* ThreadListStore.swift in Sources */,
 				B46DC7164B626E812E646EDE /* ThreadListView.swift in Sources */,

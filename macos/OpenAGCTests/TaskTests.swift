@@ -339,3 +339,28 @@ struct HideTasksTests {
         #expect(model.threads.rows.contains { $0.id == row.id })
     }
 }
+
+@MainActor
+struct TaskSettingsTests {
+    @Test func categoriesAreAddedMovedRemovedAndReset() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        let model = AppModel(core: core)
+        await model.start(openDemo: true)
+        let editor = TaskCategoryEditor()
+        await editor.load(core: core)
+        #expect(editor.names.count == 7)
+        editor.newName = " Call back "
+        editor.add()
+        editor.newName = "reply"
+        #expect(!editor.canAdd, "names are unique in any case")
+        editor.move(from: IndexSet(integer: 7), to: 0)
+        editor.remove("Admin")
+        await editor.save(editor.names, core: core)
+        let stored = try await core.taskCategories()
+        #expect(stored.first == "Call back" && !stored.contains("Admin") && stored.count == 7)
+        editor.reset()
+        for _ in 0..<50 where editor.names.first != "Reply" { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await core.taskCategories().count == 7)
+        #expect(editor.names.first == "Reply")
+    }
+}
