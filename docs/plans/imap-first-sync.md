@@ -92,7 +92,7 @@ both an IMAP session and API tokens from the same sign-in.
 
 A benchmark on the fakes cannot say whether IMAP or the API is faster
 against Gmail. Before switching a job's transport, the maintainer runs a
-one-off comparison on his own account (a debug menu item, off by default,
+one-off comparison on their own account (a debug menu item, off by default,
 logging only timings and counts): listing 10,000 ids, fetching 500 headers,
 500 bodies, and detecting 100 label changes, each both ways. The table
 above is the expected outcome; the numbers decide.
