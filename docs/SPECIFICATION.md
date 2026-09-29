@@ -1801,7 +1801,9 @@ Every target in §1.3 traces to one of these rules.
   reader column, inset like the macOS 26 sidebar, rather than a bar pinned
   under the thread list. The list column has a header: the Inbox's
   Important-only switch, then a rule separating the title area from the
-  messages.)*
+  messages.)* *(Amended 2026-09-28: the capsule sits in a strip of its own
+  under the reader, with a margin above it, so a thread ends above it
+  rather than scrolling beneath it.)*
 
 **Amendment (2026-09-28): Mail-like layout.** Implemented 2026-09-28. The
 sidebar reads Favorites (Inbox, Starred, Sent), then the account's other

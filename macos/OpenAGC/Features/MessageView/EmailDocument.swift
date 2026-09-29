@@ -141,9 +141,7 @@ enum EmailDocument {
     :root { color-scheme: light dark; --card: color-mix(in srgb, CanvasText 4%, Canvas); \
     --line: color-mix(in srgb, CanvasText 10%, transparent); }
     html, body { margin: 0; background: Canvas; color: CanvasText; overflow-x: hidden; }
-    /* The bottom leaves room for the agent prompt, which floats over the
-       reader's foot: the last message scrolls clear of it. */
-    body { font: 14px/1.45 -apple-system, system-ui, sans-serif; padding: 8px 20px 76px; overflow-wrap: anywhere; }
+    body { font: 14px/1.45 -apple-system, system-ui, sans-serif; padding: 8px 20px 24px; overflow-wrap: anywhere; }
     .msg { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 0 0 8px; }
     summary { list-style: none; cursor: default; display: flex; gap: 10px; align-items: flex-start; }
     summary::-webkit-details-marker { display: none; }

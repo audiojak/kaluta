@@ -47,16 +47,18 @@ struct MainWindow: View {
             // The agent column sits beside the reader. (SwiftUI's
             // `.inspector` left its split item collapsed at zero width here.)
             HStack(spacing: 0) {
-                detail
-                    .frame(maxWidth: .infinity)
-                    // The agent prompt floats over the reader as an inset
-                    // glass capsule (macOS 26), not a bar pinned to a column.
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
-                        AgentPromptBar()
-                            .frame(maxWidth: 680)
-                            .padding(.horizontal, Space.xl)
-                            .padding(.bottom, Space.l)
-                    }
+                // The agent prompt sits in a strip of its own under the
+                // reader, so a thread ends above it instead of scrolling
+                // beneath it (the reader's web view does not take a safe-area
+                // inset, so a floating capsule covered the messages).
+                VStack(spacing: 0) {
+                    detail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    AgentPromptBar()
+                        .frame(maxWidth: 680)
+                        .padding(.horizontal, Space.xl)
+                        .padding(.vertical, Space.l)
+                }
                 if model.agent.isPresented {
                     PaneDivider()
                     AgentInspector()

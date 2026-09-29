@@ -103,7 +103,7 @@ is only for "approved".
 
 | Surface | API | Rules |
 | --- | --- | --- |
-| Glass capsule | `.glassCapsule()` | Floats over content with a margin; never pinned to a column edge; no dividers inside. The undo notice, the agent prompt. |
+| Glass capsule | `.glassCapsule()` | Inset with a margin, never pinned to a column edge; no dividers inside. The undo notice floats over the list; the agent prompt sits in a strip of its own under the reader, since the reader's web view cannot leave room for anything floating over it. |
 | Column header | `.columnHeader { … }` | A `safeAreaBar` at the top of a column with the hard scroll-edge effect. The content scrolls under it; the system draws the edge. It never draws its own rule. |
 | Card | `.card(intent)` | On the background, in content. The only content with outlines (attention cards only). |
 | Band | `Banner` (uses `.bandBackground`) | Full column width inside the column's safe area, tinted by intent, no rule above or below. |
