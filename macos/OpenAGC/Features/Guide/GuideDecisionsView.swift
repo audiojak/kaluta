@@ -80,7 +80,16 @@ struct GuideDecisionsView: View {
         guard let id = currentID(model.guide.decisions),
               let entry = model.guide.decisions.first(where: { $0.id == id }) else { return .ignored }
         switch action {
-        case .accept: Task { await model.decideGuide(entry, accept: true) }
+        case .accept:
+            // A proposal that contradicts an accepted entry replaces it, as
+            // its default button says; accepting both would leave two
+            // contradictory entries.
+            if let old = entry.contradictionOf.flatMap({ id in model.guide.entries.first { $0.id == id } }),
+               old.status == .accepted {
+                Task { await model.replaceGuideEntry(old, with: entry) }
+            } else {
+                Task { await model.decideGuide(entry, accept: true) }
+            }
         case .reject: Task { await model.decideGuide(entry, accept: false) }
         case .edit: model.guideSheet = .edit(entry, category: entry.category)
         }

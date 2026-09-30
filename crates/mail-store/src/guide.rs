@@ -118,14 +118,24 @@ pub fn evidence(conn: &Connection, entry_id: i64) -> StoreResult<Vec<EvidenceRow
 }
 
 /// Insert an entry (a new id when `id` is 0, else that id); returns its id.
+/// New ids are never an id used before, even by a deleted entry: undo
+/// brings deleted entries back by their id (spec §14.9, exact undo).
 pub fn insert_entry(tx: &Transaction<'_>, e: &EntryRow) -> StoreResult<i64> {
+    let last: i64 = tx.query_row(
+        "SELECT MAX(COALESCE((SELECT MAX(id) FROM guide_entries), 0),
+                    COALESCE((SELECT CAST(value AS INTEGER) FROM guide_meta WHERE key = 'last_entry_id'), 0))",
+        [],
+        |r| r.get(0),
+    )?;
+    let id = if e.id == 0 { last + 1 } else { e.id };
+    set_meta(tx, "last_entry_id", &last.max(id).to_string())?;
     tx.prepare_cached(
         "INSERT INTO guide_entries (id, category, kind, statement, norm, scope_json, status, source, origin,
            check_json, support, contradict, contradiction_of, run_id, created_at, updated_at, decided_at)
-         VALUES (NULLIF(?1, 0), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
     )?
     .execute(params![
-        e.id,
+        id,
         e.category,
         e.kind,
         e.statement,
@@ -143,7 +153,7 @@ pub fn insert_entry(tx: &Transaction<'_>, e: &EntryRow) -> StoreResult<i64> {
         e.updated_at,
         e.decided_at
     ])?;
-    Ok(tx.last_insert_rowid())
+    Ok(id)
 }
 
 /// Write every column of an existing entry.
@@ -211,20 +221,26 @@ pub fn snapshot(conn: &Connection, id: i64) -> StoreResult<Option<Snapshot>> {
     })
 }
 
-/// Make the entries `ids` exactly as in `snapshots`: written back (with
-/// their evidence) when present, deleted when not.
+/// Make the entries `ids` as in `snapshots`: written back when present,
+/// deleted when not. Evidence is only ever added: quotes learned since the
+/// change (learning adds them outside undo) are kept, with their counts.
 pub fn restore(tx: &Transaction<'_>, ids: &[i64], snapshots: &[Snapshot]) -> StoreResult<()> {
     for id in ids {
         match snapshots.iter().find(|s| s.entry.id == *id) {
             Some(s) => {
+                let now = get_entry(tx, *id)?;
                 if !write_entry(tx, &s.entry)? {
                     insert_entry(tx, &s.entry)?;
                 }
-                tx.prepare_cached("DELETE FROM guide_evidence WHERE entry_id = ?1")?.execute([id])?;
                 add_evidence(tx, *id, &s.evidence)?;
-                // Evidence counts come from the snapshot, which may predate
-                // quotes that were dropped.
-                write_entry(tx, &s.entry)?;
+                // Counts may include messages whose quotes were not kept:
+                // never fewer than the snapshot's or the entry's own.
+                let support = now.as_ref().map_or(0, |n| n.support).max(s.entry.support);
+                let contradict = now.as_ref().map_or(0, |n| n.contradict).max(s.entry.contradict);
+                tx.prepare_cached(
+                    "UPDATE guide_entries SET support = MAX(support, ?2), contradict = MAX(contradict, ?3) WHERE id = ?1",
+                )?
+                .execute(params![id, support, contradict])?;
             }
             None => {
                 delete_entry(tx, *id)?;
@@ -656,6 +672,35 @@ mod tests {
 
     fn quote(m: &str, q: &str) -> EvidenceRow {
         EvidenceRow { message_id: m.into(), quote: q.into(), contradicts: false }
+    }
+
+    #[test]
+    fn deleted_ids_are_never_reused_and_undo_keeps_later_evidence() {
+        let s = scratch("reuse");
+        let (first, second) =
+            s.1.write_blocking(|tx| {
+                let a = insert_entry(tx, &row("A1", "One", "accepted"))?;
+                let b = insert_entry(tx, &row("A1", "Two", "accepted"))?;
+                Ok((a, b))
+            })
+            .unwrap();
+        let before = s.1.read_blocking(move |c| snapshot(c, second)).unwrap().unwrap();
+        s.1.write_blocking(move |tx| delete_entry(tx, second)).unwrap();
+        let third = s.1.write_blocking(|tx| insert_entry(tx, &row("A1", "Three", "proposed"))).unwrap();
+        assert!(third > second, "a deleted entry's id is not given to a new one");
+        // Undo the delete: the entry comes back by its id; nothing else is touched.
+        s.1.write_blocking(move |tx| restore(tx, &[second], std::slice::from_ref(&before))).unwrap();
+        let back = s.1.read_blocking(move |c| Ok((get_entry(c, second)?, get_entry(c, third)?))).unwrap();
+        assert_eq!(back.0.unwrap().statement, "Two");
+        assert_eq!(back.1.unwrap().statement, "Three");
+
+        // Evidence learned after a change stays when the change is undone.
+        let snap = s.1.read_blocking(move |c| snapshot(c, first)).unwrap().unwrap();
+        s.1.write_blocking(move |tx| add_evidence(tx, first, &[quote("m9", "later")])).unwrap();
+        s.1.write_blocking(move |tx| restore(tx, &[first], std::slice::from_ref(&snap))).unwrap();
+        let e = s.1.read_blocking(move |c| get_entry(c, first)).unwrap().unwrap();
+        assert_eq!(e.support, 1);
+        assert_eq!(s.1.read_blocking(move |c| evidence(c, first)).unwrap().len(), 1);
     }
 
     #[test]

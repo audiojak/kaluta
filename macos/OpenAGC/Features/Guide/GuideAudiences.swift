@@ -122,10 +122,15 @@ private struct AudienceRow: View {
     }
 
     private func rename() async {
-        guard let core = model.core, name != group.name else { return }
+        guard let core = model.core, let accountID = model.openAccountID, name != group.name else { return }
+        let (id, old, new) = (group.id, group.name, name)
         do {
-            _ = try await core.renameAudienceGroup(group.id, to: name)
+            _ = try await core.renameAudienceGroup(id, to: new)
             error = nil
+            // Renaming back re-scopes the entries back too.
+            model.undo.record(accountID: accountID, actionName: "Rename Audience", noticeText: "Renamed “\(old)” to “\(new)”",
+                              undo: { [model] in _ = try? await core.renameAudienceGroup(id, to: old); await model.guide.load() },
+                              redo: { [model] in _ = try? await core.renameAudienceGroup(id, to: new); await model.guide.load() })
         } catch {
             self.error = error.message
             name = group.name
@@ -134,9 +139,30 @@ private struct AudienceRow: View {
     }
 
     private func merge(into other: AudienceGroup) async {
+        guard let core = model.core, let accountID = model.openAccountID else { return }
+        let (source, target) = (group, other)
         do {
-            _ = try await model.core?.mergeAudienceGroups(into: other.id, from: group.id)
+            let change = try await core.mergeAudienceGroups(into: target.id, from: source.id)
             error = nil
+            // Undo: the entries exactly as before, and both groups as they were.
+            model.undo.record(accountID: accountID, actionName: "Merge Audiences",
+                              noticeText: "Merged “\(source.name)” into “\(target.name)”",
+                              undo: { [model] in
+                                  if let change { try? await core.undoGuideChange(change) }
+                                  _ = try? await core.saveAudienceGroup(target)
+                                  _ = try? await core.saveAudienceGroup(AudienceGroup(id: 0, name: source.name, status: source.status,
+                                                                                      description: source.description,
+                                                                                      members: source.members))
+                                  await model.guide.load()
+                              },
+                              redo: { [model] in
+                                  let groups = (try? await core.audienceGroups()) ?? []
+                                  if let from = groups.first(where: { $0.name == source.name }),
+                                     let into = groups.first(where: { $0.name == target.name }) {
+                                      _ = try? await core.mergeAudienceGroups(into: into.id, from: from.id)
+                                  }
+                                  await model.guide.load()
+                              })
         } catch {
             self.error = error.message
         }

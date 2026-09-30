@@ -527,7 +527,8 @@ final class CoreClient: Sendable {
         try await call { try await core.renameAudienceGroup(id: id, name: name) }
     }
 
-    func mergeAudienceGroups(into: Int64, from: Int64) async throws(CoreClientError) -> [AudienceGroup] {
+    /// Returns the change that re-scoped entries, if any, for Undo.
+    func mergeAudienceGroups(into: Int64, from: Int64) async throws(CoreClientError) -> Int64? {
         try await call { try await core.mergeAudienceGroups(into: into, from: from) }
     }
 

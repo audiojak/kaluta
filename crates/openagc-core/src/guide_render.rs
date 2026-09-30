@@ -206,6 +206,9 @@ pub(crate) fn check(
     entries
         .iter()
         .filter(|e| e.status == GuideStatus::Accepted && applies(&e.scope, target, &audiences))
+        // Which language a draft is in is not known here: checks scoped to
+        // a language are left to the agent, which sees them in the guide.
+        .filter(|e| e.scope.languages.is_empty())
         .filter_map(|e| {
             let c = e.check.as_ref()?;
             let message = match c.kind {
@@ -346,6 +349,18 @@ mod tests {
             entry(6, GuideKind::Fact, "My calendar link: cal.com/john", GuideScope::default()),
             entry(7, GuideKind::Rule, "Include the support address", customers),
         ]
+    }
+
+    #[test]
+    fn language_scoped_entries_are_left_to_the_agent() {
+        let french = GuideScope { languages: vec!["French".into()], ..Default::default() };
+        let mut e = entry(1, GuideKind::Rule, "Never write 'Salut'", french);
+        e.check =
+            Some(crate::guide::GuideCheck { kind: crate::guide::GuideCheckKind::BannedPhrase, value: "Salut".into() });
+        let t = Target { recipients: vec![], message_type: Some("new".into()), audiences: None };
+        let (text, _) = render(std::slice::from_ref(&e), &[], Some(&t), &[], 1);
+        assert!(text.contains("Never write 'Salut' (when writing in French)"), "{text}");
+        assert!(check(&[e], &[], &t, "Salut Ann").is_empty(), "the draft's language is not known here");
     }
 
     #[test]

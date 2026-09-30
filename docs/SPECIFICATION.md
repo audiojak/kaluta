@@ -2241,8 +2241,11 @@ how the user writes to them) and confirmed by the user, who can rename,
 merge or reject them. With fewer than five confirmed, the set is filled
 from the obvious gaps (colleagues, direct reports, customers, investors,
 vendors, candidates, advisers, friends and family, strangers), marked
-*suggested* until confirmed. People and domains map to groups; a
-recipient's group is what scopes guideline entries.
+*suggested* until confirmed. Learning may add members to a suggested
+group but never changes a group the user confirmed or rejected. People and
+domains map to groups; a recipient's group is what scopes guideline
+entries. Renaming or merging a group re-scopes its entries and is
+undoable.
 
 **Learning.**
 1. *Gather.* Learn from Sent Mail… asks how many of the latest sent
@@ -2307,7 +2310,9 @@ rules are always a decision. Merged entries say where they came from.
 
 **Following the guide.** The core renders it for the message at hand:
 rules and facts always; guidelines by scope (the recipients' groups and
-people, the message type, the language); up to three model examples of the
+people, the message type); entries scoped to a language are shown with
+their scope for the agent to apply, since the draft's language is not known
+ahead, and their checks are left to it; up to three model examples of the
 type. It goes into every composing path: the writing-help prompt (the
 user's own draft stays part of the prompt), agent and routine sessions
 through the system prompt, and again in the results of the draft tools so
@@ -2321,12 +2326,15 @@ rules ban"); on an agent's draft the result shows on its approval card.
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
 audience writes a new draft under that audience's guidelines from the same
-request; drafts are kept per audience while the composer is open, and
-Undo returns to the user's own text.
+request, starting from the text the request was made on; drafts, with
+the user's edits to them, are kept per audience while the composer is
+open, and Undo goes back one step (the body before the last AI text).
 
 **Undo and versions.** Every change to the guide (a decision, an edit, an
-interview answer, a change by prompt, a merge) is undoable on the
-account's stack (§14.6a), and the guide keeps its versions.
+interview answer, a change by prompt, a merge, an audience rename or
+merge) is undoable on the account's stack (§14.6a), and the guide keeps its
+versions. Undo never removes evidence learned since the change, and an id
+is never reused, so undo cannot overwrite a later entry.
 
 **Privacy.** Learning sends the chosen sent mail to the user's own agent
 CLI, as the agent column does with mail it reads; the dialog says so, with

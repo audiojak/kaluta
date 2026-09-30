@@ -35,6 +35,12 @@ final class ComposerAssistant {
     /// from: a new audience gets a new draft from the same two.
     @ObservationIgnored private var lastInstruction: String?
     @ObservationIgnored private var original = ""
+    /// The body when the request was made: every audience's draft starts
+    /// from it.
+    @ObservationIgnored private var startText = ""
+    /// The audience key of the draft showing, so edits to it are kept when
+    /// switching away and back.
+    @ObservationIgnored private var shownKey: String?
     /// The audiences asked for on this run (nil: the recipients' own).
     @ObservationIgnored private var requestedAudiences: [String]?
     @ObservationIgnored private var rewrote = false
@@ -61,7 +67,9 @@ final class ComposerAssistant {
         draftsByAudience = [:]
         lastInstruction = text
         self.original = original
-        await write(text, store: store, model: model, audiences: nil)
+        startText = store.body.string
+        shownKey = nil
+        await write(text, base: startText, store: store, model: model, audiences: nil)
     }
 
     /// Write a new draft of the same request for other audiences, from the
@@ -72,14 +80,18 @@ final class ComposerAssistant {
     func switchAudience(to audiences: [String]?, store: ComposerStore, model: AppModel) async {
         guard state != .working else { return }
         let key = Self.key(audiences)
+        keepEdits(store)
         if let cached = draftsByAudience[key] {
-            if previousBody == nil { previousBody = store.body }
+            previousBody = store.body
             store.body = NSAttributedString(string: cached, attributes: [.font: ComposerHTML.bodyFont])
             writtenFor = audiences ?? guide?.audiences ?? []
+            shownKey = key
             return
         }
         let request = lastInstruction ?? "Rewrite this message for \((audiences ?? []).joined(separator: ", ")), keeping what it says"
-        await write(request, store: store, model: model, audiences: audiences)
+        // A draft the agent wrote on its own has no request: rewrite what shows.
+        let base = lastInstruction == nil ? store.body.string : startText
+        await write(request, base: base, store: store, model: model, audiences: audiences)
     }
 
     /// The audiences a draft can be switched to (the confirmed groups).
@@ -90,7 +102,12 @@ final class ComposerAssistant {
 
     static func key(_ audiences: [String]?) -> String { audiences.map { $0.sorted().joined(separator: "|") } ?? "" }
 
-    private func write(_ text: String, store: ComposerStore, model: AppModel, audiences: [String]?) async {
+    /// The user's edits to the draft showing stay with its audience.
+    private func keepEdits(_ store: ComposerStore) {
+        if let shownKey, draftsByAudience[shownKey] != nil { draftsByAudience[shownKey] = store.body.string }
+    }
+
+    private func write(_ text: String, base: String, store: ComposerStore, model: AppModel, audiences: [String]?) async {
         guard let core = model.core else { return }
         self.store = store
         self.model = model
@@ -102,8 +119,6 @@ final class ComposerAssistant {
         if audienceChoices.isEmpty {
             audienceChoices = ((try? await core.audienceGroups()) ?? []).filter { $0.status == .confirmed }.map(\.name)
         }
-        // Every draft starts from the user's own text, not an earlier draft.
-        let base = previousBody?.string ?? store.body.string
         do {
             // The account's writing guide for these recipients and this kind
             // of message (spec §14.9); the user's own draft stays part of
@@ -132,12 +147,13 @@ final class ComposerAssistant {
         state = .idle
     }
 
-    /// Back to the user's own text, whichever audience's draft is showing.
+    /// Back to what the body was before the agent's last text replaced it.
     func undo() {
         guard let previousBody, let store else { return }
         store.body = previousBody
         self.previousBody = nil
-        draftsByAudience = [:]
+        // The drafts stay for switching; which one shows is no longer known.
+        shownKey = nil
         writtenFor = []
         state = .idle
     }
@@ -164,6 +180,7 @@ final class ComposerAssistant {
         let text = Self.cleaned(reply)
         guard state == .working, let store else { return }
         guard !text.isEmpty else { return fail("The agent did not write anything. Try asking another way.") }
+        let rewriting = sessionID
         // Checks run on what the agent wrote, never on what the user typed
         // (spec §14.9). A failing draft goes back once for a rewrite.
         var failures: [String] = []
@@ -171,6 +188,8 @@ final class ComposerAssistant {
             failures = ((try? await core.checkGuideDraft(text, recipients: (store.to + store.cc).map(\.email),
                                                          messageType: Self.messageType(store), audiences: guide?.audiences))
                 ?? []).map(\.message)
+            // Cancelled while checking: nothing is applied.
+            guard state == .working, sessionID == rewriting else { return }
             if !failures.isEmpty, !rewrote, let sessionID {
                 rewrote = true
                 reply = ""
@@ -179,7 +198,9 @@ final class ComposerAssistant {
             }
         }
         checkFailures = failures
-        if previousBody == nil { previousBody = store.body }
+        keepEdits(store)
+        previousBody = store.body
+        shownKey = Self.key(requestedAudiences)
         draftsByAudience[Self.key(requestedAudiences)] = text
         writtenFor = requestedAudiences ?? guide?.audiences ?? []
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])

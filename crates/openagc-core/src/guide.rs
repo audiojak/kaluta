@@ -491,8 +491,9 @@ pub(crate) fn from_snapshot(s: Snapshot) -> GuideEntry {
 
 impl Core {
     /// Entries scoped to group `old` are scoped to `new` instead (or lose
-    /// the group when `None`), as one undoable change.
-    async fn rescope_group(&self, old: &str, new: Option<&str>) -> Result<(), CoreError> {
+    /// the group when `None`), as one undoable change; its id, if any
+    /// entry was scoped to `old`.
+    async fn rescope_group(&self, old: &str, new: Option<&str>) -> Result<Option<i64>, CoreError> {
         let edits: Vec<GuideEdit> = self
             .list_guide_entries(vec![])
             .await?
@@ -515,10 +516,10 @@ impl Core {
                 GuideEdit::Update { id: e.id, fields }
             })
             .collect();
-        if !edits.is_empty() {
-            self.apply_edits(edits, format!("group {old}")).await?;
+        if edits.is_empty() {
+            return Ok(None);
         }
-        Ok(())
+        Ok(Some(self.apply_edits(edits, format!("group {old}")).await?.change_id))
     }
 
     pub(crate) fn guide_changed(&self) {
@@ -721,7 +722,9 @@ pub(crate) fn scope_text(s: &GuideScope) -> String {
         parts.push(format!("in {}", s.message_types.join(", ")));
     }
     if !s.languages.is_empty() {
-        parts.push(format!("in {}", s.languages.join(", ")));
+        // The draft's language is not known ahead: the agent applies these
+        // when it writes in one of them.
+        parts.push(format!("when writing in {}", s.languages.join(" or ")));
     }
     parts.join("; ")
 }
@@ -904,8 +907,9 @@ impl Core {
     }
 
     /// Merge `from` into `into`: its members join, entries scoped to it are
-    /// scoped to `into`, and `from` goes.
-    pub async fn merge_audience_groups(&self, into: i64, from: i64) -> Result<Vec<AudienceGroup>, CoreError> {
+    /// scoped to `into`, and `from` goes. Returns the change that re-scoped
+    /// the entries, for the app's Undo (with the two groups as they were).
+    pub async fn merge_audience_groups(&self, into: i64, from: i64) -> Result<Option<i64>, CoreError> {
         let groups = self.list_audience_groups().await?;
         let find = |id| groups.iter().find(|g: &&AudienceGroup| g.id == id).cloned();
         let (Some(target), Some(source)) = (find(into), find(from)) else {
@@ -914,7 +918,7 @@ impl Core {
         if into == from {
             return Err(invalid("a group cannot merge into itself"));
         }
-        self.rescope_group(&source.name, Some(&target.name)).await?;
+        let change = self.rescope_group(&source.name, Some(&target.name)).await?;
         let mut members = target.members.clone();
         for m in source.members {
             if !members.contains(&m) {
@@ -923,7 +927,7 @@ impl Core {
         }
         self.save_audience_group(AudienceGroup { members, ..target }).await?;
         self.delete_audience_group(from).await?;
-        self.list_audience_groups().await
+        Ok(change)
     }
 
     /// Suggest groups for the obvious gaps until there are five.
@@ -1289,7 +1293,8 @@ pub(crate) mod tests {
         let other = groups.iter().find(|g| g.name == "Vendors").unwrap().id;
         block_on(core.save_audience_group(group("Vendors", AudienceStatus::Confirmed, &["ann@x.com"]))).unwrap();
         assert!(block_on(core.rename_audience_group(other, "coworkers".into())).is_err(), "names are unique");
-        let merged = block_on(core.merge_audience_groups(team, other)).unwrap();
+        assert_eq!(block_on(core.merge_audience_groups(team, other)).unwrap(), None, "no entry was scoped to Vendors");
+        let merged = block_on(core.list_audience_groups()).unwrap();
         let colleagues = merged.iter().find(|g| g.id == team).unwrap();
         assert_eq!(colleagues.members, ["@actual.ai", "ann@x.com"]);
         assert!(!merged.iter().any(|g| g.id == other));

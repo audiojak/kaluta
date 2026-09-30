@@ -140,8 +140,8 @@ struct AudienceTests {
                                                            description: customers.description, members: ["@acme.com"]))
         #expect(try await core.audienceFor(["ann@acme.com", "bob@x.com"]) == ["Customers"])
         let colleagues = try #require(filled.first { $0.name == "Colleagues" })
-        let merged = try await core.mergeAudienceGroups(into: customers.id, from: colleagues.id)
-        #expect(!merged.contains { $0.id == colleagues.id })
+        #expect(try await core.mergeAudienceGroups(into: customers.id, from: colleagues.id) == nil, "no entry to re-scope")
+        #expect(!(try await core.audienceGroups()).contains { $0.id == colleagues.id })
     }
 }
 
@@ -280,10 +280,14 @@ struct AudienceDraftTests {
         #expect(store.body.string.contains("My own words"), "from the user's own text, not the first draft")
         #expect(assistant.writtenFor == ["Investors"])
 
+        let investors = store.body.string + " Edited."
+        store.body = NSAttributedString(string: investors, attributes: [.font: ComposerHTML.bodyFont])
         await assistant.switchAudience(to: nil, store: store, model: model)
         #expect(assistant.state == .done && store.body.string == first, "switching back is immediate")
         assistant.undo()
-        #expect(store.body.string == "My own words")
+        #expect(store.body.string == investors, "undo goes back one step, keeping the user's edits")
+        await assistant.switchAudience(to: ["Investors"], store: store, model: model)
+        #expect(store.body.string == investors, "edits stay with their audience's draft")
     }
 }
 

@@ -44,7 +44,7 @@ pub fn prompt(request: &str, entries: &[GuideEntry], groups: &[AudienceGroup]) -
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let audiences: String = groups.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", ");
+    let audiences: String = groups.iter().map(|g| crate::guide_ai::fenced(&g.name)).collect::<Vec<_>>().join(", ");
     format!(
         "{CHANGE_MARKER}\n\n\
          The user wants to change their writing guide (the rules and guidelines an assistant follows when it \

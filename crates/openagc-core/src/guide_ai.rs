@@ -271,15 +271,16 @@ pub fn parse(text: &str, batch: &[Prepared], known: &[i64]) -> Option<Found> {
 ///   to) a proposal marked as contradicting it;
 /// - anything else is a new proposal of this run.
 ///
-/// Audiences become *suggested* groups, or add members to a group of that
-/// name the user has not rejected.
+/// Audiences become *suggested* groups, or add members to a suggested group
+/// of that name. Groups the user confirmed or rejected are theirs: mail
+/// never changes who is in them (spec §14.9).
 ///
 /// Returns how many proposals were new.
 pub fn merge(tx: &mail_store::Transaction<'_>, run_id: i64, found: &Found, now: i64) -> mail_store::StoreResult<usize> {
     let groups = store::groups(tx)?;
     for a in &found.audiences {
         match groups.iter().find(|g| g.name.eq_ignore_ascii_case(&a.name)) {
-            Some(g) if g.status == "rejected" => {}
+            Some(g) if g.status != "suggested" => {}
             Some(g) => {
                 let mut members = g.members.clone();
                 for m in &a.members {
@@ -510,6 +511,15 @@ mod tests {
             "decide".into(),
         ))
         .unwrap();
+        // The user confirms Colleagues as they want it: mail no longer
+        // changes who is in it.
+        let colleagues = groups.iter().find(|g| g.name == "Colleagues").unwrap().clone();
+        block_on(core.save_audience_group(crate::guide::AudienceGroup {
+            status: crate::guide::AudienceStatus::Confirmed,
+            members: vec!["only@example.com".into()],
+            ..colleagues
+        }))
+        .unwrap();
         let (batch, text, known) = block_on(core.guide_batch_prompt(halves[1].clone(), None, false)).unwrap();
         assert!(text.contains(&format!("#{} [A1 guideline, proposed]", voice.id)));
         assert!(!text.contains(&format!("#{rule} ")), "rejected entries are not offered");
@@ -519,6 +529,8 @@ mod tests {
         assert_eq!(all.iter().filter(|e| e.category == "A1").count(), 1, "merged by statement");
         assert!(all.iter().find(|e| e.category == "A1").unwrap().support > voice.support, "more evidence");
         assert_eq!(all.iter().find(|e| e.id == rule).unwrap().status, GuideStatus::Rejected);
+        let groups = block_on(core.list_audience_groups()).unwrap();
+        assert_eq!(groups.iter().find(|g| g.name == "Colleagues").unwrap().members, ["only@example.com"]);
         assert!(block_on(core.guide_merge_answer(run, &batch, &known, "no")).is_err());
     }
 }

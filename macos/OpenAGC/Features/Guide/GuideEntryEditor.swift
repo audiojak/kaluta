@@ -10,6 +10,7 @@ struct GuideEntryEditor: View {
     @State private var statement = ""
     @State private var groups: Set<String> = []
     @State private var people = ""
+    @State private var languages: String
     @State private var types: Set<String> = []
     @State private var checkKind: GuideCheckKind?
     @State private var checkValue = ""
@@ -24,6 +25,7 @@ struct GuideEntryEditor: View {
         _groups = State(initialValue: Set(entry?.scope.groups ?? []))
         _people = State(initialValue: (entry?.scope.people ?? []).joined(separator: ", "))
         _types = State(initialValue: Set(entry?.scope.messageTypes ?? []))
+        _languages = State(initialValue: (entry?.scope.languages ?? []).joined(separator: ", "))
         _checkKind = State(initialValue: entry?.check?.kind)
         _checkValue = State(initialValue: entry?.check?.value ?? "")
     }
@@ -98,7 +100,10 @@ struct GuideEntryEditor: View {
             }
             TextField("People or @domains (optional)", text: $people)
                 .textFieldStyle(.roundedBorder)
-            Text(groups.isEmpty && types.isEmpty && people.isEmpty ? "Always" : "Only where it matches all you chose")
+            TextField("Languages (optional)", text: $languages)
+                .textFieldStyle(.roundedBorder)
+                .hoverHelp("Only when a draft is in one of these languages, such as French")
+            Text(groups.isEmpty && types.isEmpty && people.isEmpty && languages.isEmpty ? "Always" : "Only where it matches all you chose")
                 .font(TypeRole.caption)
                 .foregroundStyle(.secondary)
         }
@@ -108,7 +113,9 @@ struct GuideEntryEditor: View {
         let scope = GuideScope(groups: Array(groups).sorted(),
                                people: people.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
                                    .filter { !$0.isEmpty },
-                               messageTypes: ["new", "reply", "forward"].filter(types.contains), languages: [])
+                               messageTypes: ["new", "reply", "forward"].filter(types.contains),
+                               languages: languages.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                                   .filter { !$0.isEmpty })
         let check = checkKind.map { GuideCheck(kind: $0, value: checkValue) }
         let fields = GuideEntryFields(category: category, kind: kind, statement: statement, scope: scope, check: check)
         var edits: [GuideEdit] = [entry.map { .update(id: $0.id, fields: fields) }

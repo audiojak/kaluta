@@ -319,16 +319,28 @@ impl Core {
 
     /// Batch by batch until the run is done, paused or cancelled. A batch
     /// whose answer cannot be read is tried once more, then skipped.
-    async fn run_job(self: &Arc<Self>, run: i64) -> Result<(), CoreError> {
+    ///
+    /// The job follows the account's run in progress: when its run was
+    /// stopped while a batch was with the agent and a new one started
+    /// meanwhile, it carries on with the new one (only one job per account).
+    async fn run_job(self: &Arc<Self>, mut run: i64) -> Result<(), CoreError> {
         loop {
             let db = self.db()?;
-            let (row, next) = runtime::run(async move {
-                Ok(db.read(move |c| Ok((store::get_run(c, run)?, store::next_batch(c, run)?))).await?)
+            let (row, next, active) = runtime::run(async move {
+                Ok(db
+                    .read(move |c| Ok((store::get_run(c, run)?, store::next_batch(c, run)?, store::active_run(c)?)))
+                    .await?)
             })
             .await?;
             let Some(row) = row else { return Ok(()) };
             if row.status != "running" {
-                return Ok(());
+                match active {
+                    Some(a) if a.id != run && a.status == "running" => {
+                        run = a.id;
+                        continue;
+                    }
+                    _ => return Ok(()),
+                }
             }
             let agent = row.agent.clone().unwrap_or_else(|| "claude-code".into());
             let Some((batch_no, ids)) = next else {
@@ -370,6 +382,12 @@ impl Core {
                             return Ok(());
                         }
                     };
+                    // Stopped while the agent worked: its answer is dropped.
+                    let db = self.db()?;
+                    let now = runtime::run(async move { Ok(db.read(move |c| store::get_run(c, run)).await?) }).await?;
+                    if now.is_none_or(|r| r.status == "cancelled") {
+                        break;
+                    }
                     match self.guide_merge_answer(run, &batch, &known, &answer).await {
                         Ok(_) => break,
                         Err(_) if attempts < 2 => continue,
@@ -402,10 +420,6 @@ impl Core {
         if let Some(why) = self.agent_not_ready(&request.agent).await? {
             return Err(CoreError::new(ErrorKind::Agent, why));
         }
-        let db = self.db()?;
-        if runtime::run(async move { Ok(db.read(store::active_run).await?) }).await?.is_some() {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "a learning run is already in progress"));
-        }
         let ids = self.run_sample(&request).await?;
         if ids.is_empty() {
             return Err(CoreError::new(ErrorKind::NotFound, "there is no sent mail left to analyse"));
@@ -416,6 +430,11 @@ impl Core {
         let run = runtime::run(async move {
             Ok(db
                 .write(move |tx| {
+                    // Checked in the same transaction, so two quick starts
+                    // cannot both make a run.
+                    if store::active_run(tx)?.is_some() {
+                        return Ok(None);
+                    }
                     let focus = req.focus.as_deref().map(|f| category(f).map(|c| c.id).unwrap_or(f).to_owned());
                     let id = store::create_run(
                         tx,
@@ -426,11 +445,12 @@ impl Core {
                         BATCH_SIZE,
                         now,
                     )?;
-                    store::get_run(tx, id)
+                    Ok(Some(store::get_run(tx, id)?))
                 })
                 .await?)
         })
         .await?
+        .ok_or_else(|| CoreError::new(ErrorKind::InvalidInput, "a learning run is already in progress"))?
         .ok_or_else(|| CoreError::new(ErrorKind::Internal, "the run was not recorded"))?;
         self.spawn_job(run.id);
         self.emit_progress();
@@ -611,6 +631,30 @@ mod tests {
             block_on(core.guide_progress()).unwrap().run.is_some_and(|r| r.status == GuideRunStatus::Done)
         });
         assert!(block_on(core.clone().resume_guide_run()).unwrap().is_none(), "nothing left to resume");
+    }
+
+    #[test]
+    fn a_job_left_on_a_stopped_run_carries_on_with_the_new_one() {
+        let s = demo("restart");
+        let core = &s.1;
+        core.debug_use_fake_agents();
+        block_on(core.debug_seed_demo_mailbox(60)).unwrap();
+        let ids = block_on(core.guide_sample(30, GuideSampleFilter::default())).unwrap();
+        // The old run was stopped while its job waited on the agent, and a
+        // new one started meanwhile: that job is the account's only job.
+        let (old, new) = core
+            .db()
+            .unwrap()
+            .write_blocking(move |tx| {
+                let old = store::create_run(tx, "latest", None, Some("claude-code"), &ids, 20, 1)?;
+                store::set_run_status(tx, old, "cancelled", None, 2)?;
+                let new = store::create_run(tx, "latest", None, Some("claude-code"), &ids, 20, 3)?;
+                Ok((old, new))
+            })
+            .unwrap();
+        block_on(core.run_job(old)).unwrap();
+        let run = block_on(core.guide_progress()).unwrap().run.unwrap();
+        assert_eq!((run.id, run.status), (new, GuideRunStatus::Done), "the new run was not left stalled");
     }
 
     #[test]
