@@ -34,3 +34,30 @@ struct GuideStoreTests {
         #expect(try core.readGuideExport(json).entries.isEmpty, "only accepted entries are exported")
     }
 }
+
+@MainActor
+struct GuideRunTests {
+    @Test func aLearningRunReportsProgressAndItsProposalsWaitUntilItIsDone() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let info = try await core.guideSampleInfo(count: 30, filter: GuideSampleFilter(excludePeople: [], excludeLabels: []))
+        #expect(info.sent > 0 && info.chosen > 0 && info.batches == (info.chosen + 19) / 20)
+
+        let run = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 30,
+                                                               filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
+                                                               focus: nil, agent: model.agent.providerID))
+        #expect(run.status == .running)
+        let deadline = ContinuousClock.now + .seconds(20)
+        while model.guideProgress?.run?.status != .done, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let progress = try #require(model.guideProgress, "progress arrives as events")
+        #expect(progress.run?.status == .done && progress.run?.done == progress.run?.total)
+        let decisions = try await core.guideDecisions()
+        #expect(!decisions.isEmpty && Int(progress.decisionsTotal) == decisions.count)
+        #expect(decisions.allSatisfy { !$0.evidence.isEmpty }, "every proposal quotes the user's mail")
+        #expect(model.agent.entries.isEmpty, "learning stays out of the agent column")
+    }
+}

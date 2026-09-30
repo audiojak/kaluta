@@ -22,6 +22,8 @@ mod write;
 pub use db::{Db, READER_COUNT, schema_version};
 pub use error::{StoreError, StoreResult};
 pub use read::ThreadPage;
+/// The writer's transaction, for callers that compose store functions in one.
+pub use rusqlite::Transaction;
 pub use write::{
     ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, ThreadChanges,
 };

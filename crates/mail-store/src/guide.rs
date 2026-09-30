@@ -427,6 +427,90 @@ pub fn analysed_messages(conn: &Connection) -> StoreResult<BTreeSet<String>> {
     Ok(ids)
 }
 
+/// The dates of the oldest and newest message any run has analysed.
+pub fn analysed_range(conn: &Connection) -> StoreResult<Option<(Millis, Millis)>> {
+    let row: (Option<Millis>, Option<Millis>) = conn
+        .prepare_cached(
+            "SELECT MIN(m.date), MAX(m.date) FROM guide_run_messages g JOIN messages m ON m.gmail_id = g.message_id
+             WHERE g.done",
+        )?
+        .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(row.0.zip(row.1))
+}
+
+/// Entries by status for the runs that have finished: what decisions
+/// count. Proposals of a run still going are not shown yet (§14.9).
+pub fn decision_counts(conn: &Connection) -> StoreResult<(u32, u32)> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT COUNT(*), COALESCE(SUM(e.status != 'proposed'), 0) FROM guide_entries e
+             JOIN guide_runs r ON r.id = e.run_id WHERE r.status NOT IN ('running', 'paused')",
+        )?
+        .query_row([], |r| Ok((r.get(0)?, r.get(1)?)))?)
+}
+
+// MARK: Sent mail
+
+/// A message the user sent, as the learning sample needs it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SentRow {
+    pub message_id: String,
+    pub subject: String,
+    pub date: Millis,
+    pub in_reply_to: Option<String>,
+    /// (name, address) of To and Cc recipients.
+    pub to: Vec<(Option<String>, String)>,
+    pub cc: Vec<(Option<String>, String)>,
+    pub labels: Vec<String>,
+}
+
+/// How many messages the user sent (drafts not counted).
+pub fn sent_count(conn: &Connection) -> StoreResult<u32> {
+    Ok(conn
+        .prepare_cached("SELECT COUNT(*) FROM messages WHERE is_sent_by_me AND NOT is_draft")?
+        .query_row([], |r| r.get(0))?)
+}
+
+/// Sent messages, newest first, at most `limit`, skipping `skip`.
+pub fn sent_messages(conn: &Connection, limit: u32, skip: &BTreeSet<String>) -> StoreResult<Vec<SentRow>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, gmail_id, subject, date, in_reply_to FROM messages
+         WHERE is_sent_by_me AND NOT is_draft ORDER BY internal_date DESC, id DESC",
+    )?;
+    let mut people = conn.prepare_cached(
+        "SELECT role, name, email FROM participants WHERE message_id = ?1 AND role IN ('to', 'cc') ORDER BY role, position",
+    )?;
+    let mut labels = conn.prepare_cached(
+        "SELECT l.gmail_id FROM message_labels ml JOIN labels l ON l.id = ml.label_id WHERE ml.message_id = ?1",
+    )?;
+    let mut rows = stmt.query([])?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next()? {
+        if out.len() >= limit as usize {
+            break;
+        }
+        let gmail_id: String = r.get(1)?;
+        if skip.contains(&gmail_id) {
+            continue;
+        }
+        let local: i64 = r.get(0)?;
+        let mut row = SentRow {
+            message_id: gmail_id,
+            subject: r.get(2)?,
+            date: r.get(3)?,
+            in_reply_to: r.get(4)?,
+            ..Default::default()
+        };
+        for p in people.query_map([local], |p| Ok((p.get::<_, String>(0)?, p.get(1)?, p.get(2)?)))? {
+            let (role, name, email): (String, Option<String>, String) = p?;
+            if role == "to" { row.to.push((name, email)) } else { row.cc.push((name, email)) }
+        }
+        row.labels = labels.query_map([local], |l| l.get(0))?.collect::<Result<Vec<String>, _>>()?;
+        out.push(row);
+    }
+    Ok(out)
+}
+
 // MARK: Audience groups
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

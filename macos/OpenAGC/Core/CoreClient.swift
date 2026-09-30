@@ -540,6 +540,39 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// For the learning dialog: sent mail, analysed before, and what a run
+    /// of `count` would analyse.
+    func guideSampleInfo(count: UInt32, filter: GuideSampleFilter) async throws(CoreClientError) -> GuideSampleInfo {
+        try await call { try await core.guideSampleInfo(count: count, filter: filter) }
+    }
+
+    func startGuideRun(_ request: GuideRunRequest) async throws(CoreClientError) -> GuideRunInfo {
+        try await call { try await core.startGuideRun(request: request) }
+    }
+
+    func pauseGuideRun() async throws(CoreClientError) {
+        try await call { try await core.pauseGuideRun() }
+    }
+
+    /// Resume a paused run, or one the app quit in the middle of.
+    @discardableResult
+    func resumeGuideRun() async throws(CoreClientError) -> GuideRunInfo? {
+        try await call { try await core.resumeGuideRun() }
+    }
+
+    func cancelGuideRun() async throws(CoreClientError) {
+        try await call { try await core.cancelGuideRun() }
+    }
+
+    func guideProgress() async throws(CoreClientError) -> GuideProgress {
+        try await call { try await core.guideProgress() }
+    }
+
+    /// Proposals ready to decide (from finished runs only).
+    func guideDecisions() async throws(CoreClientError) -> [GuideEntry] {
+        try await call { try await core.guideDecisions() }
+    }
+
     // MARK: Agents
 
     func agentProviders(refresh: Bool = false) async -> [AgentProviderInfo] {
@@ -939,6 +972,13 @@ typealias GuideQuote = OpenAGCCore.GuideQuote
 typealias GuideImport = OpenAGCCore.GuideImport
 typealias AudienceGroup = OpenAGCCore.AudienceGroup
 typealias AudienceStatus = OpenAGCCore.AudienceStatus
+typealias GuideProgress = OpenAGCCore.GuideProgress
+typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
+typealias GuideRunKind = OpenAGCCore.GuideRunKind
+typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
+typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
+typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
+typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
 
 // MARK: - Events
 
@@ -977,6 +1017,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case routinesChanged
     case tasksChanged
     case guideChanged
+    case guideProgress(GuideProgress)
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1060,6 +1101,8 @@ private extension CoreClientEvent {
             self = .tasksChanged
         case .guideChanged:
             self = .guideChanged
+        case let .guideProgress(progress):
+            self = .guideProgress(progress)
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

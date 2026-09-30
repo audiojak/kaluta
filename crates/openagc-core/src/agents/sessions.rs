@@ -176,7 +176,10 @@ async fn forward(mut rx: mpsc::UnboundedReceiver<(SessionId, AgentEvent)>, event
             });
             let account = core.upgrade().and_then(|c| c.agents.session_account(sid.as_str()));
             if let Some(core) = core.upgrade() {
-                crate::registry::scoped(account.clone(), core.persist_agent_events(&sid, &list)).await;
+                core.agents.feed_turn(sid.as_str(), &list);
+                if !core.agents.is_hidden(sid.as_str()) {
+                    crate::registry::scoped(account.clone(), core.persist_agent_events(&sid, &list)).await;
+                }
                 // Routine runs finish when their turn does (off this task, so
                 // the event stream keeps flowing while the run is recorded).
                 if let Some(succeeded) = ended {
@@ -186,6 +189,11 @@ async fn forward(mut rx: mpsc::UnboundedReceiver<(SessionId, AgentEvent)>, event
                         core.routine_turn_ended(&session, succeeded).await
                     }));
                 }
+            }
+            // The core's own sessions (writing-guide analysis) are not the
+            // window's business.
+            if core.upgrade().is_some_and(|c| c.agents.is_hidden(sid.as_str())) {
+                continue;
             }
             events
                 .for_account(account)
@@ -435,7 +443,9 @@ impl Core {
             };
             // A new prompt from the user resets the session's bulk count.
             self.agents.with_session(&session_id, |s| s.guard.new_user_prompt());
-            if let Ok(db) = self.db() {
+            if let Ok(db) = self.db()
+                && !self.agents.is_hidden(&session_id)
+            {
                 let (uuid, text) = (session_id.clone(), serde_json::to_string(&turn.prompt).unwrap_or_default());
                 let _ = runtime::run(async move {
                     Ok::<_, CoreError>(db.write(move |tx| mail_store::agents::append(tx, &uuid, "user", &text)).await?)

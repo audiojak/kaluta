@@ -86,6 +86,65 @@ pub fn task_answer(prompt: &str) -> Option<String> {
     Some(format!("[{}]", items.join(", ")))
 }
 
+/// The fake's answer to an OpenAGC writing-guide analysis prompt (spec
+/// §14.9), or `None` for any other prompt. For every message it proposes
+/// the same few entries, quoting the message's own first words and last
+/// line, so the quotes pass the core's check and the proposals merge
+/// across batches; and one audience from the first recipient's domain.
+pub fn guide_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC writing guide analysis") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"'], "");
+    let mut voice = Vec::new();
+    let mut signoff = Vec::new();
+    let mut domain = None;
+    for block in prompt.split("<message id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let body = rest.split("</message>").next().unwrap_or("");
+        if domain.is_none() {
+            domain = body
+                .lines()
+                .find_map(|l| l.strip_prefix("To: "))
+                .and_then(|to| to.split('@').nth(1))
+                .map(|d| d.trim_end_matches(['>', ',', ' ']).split([',', ' ', '>']).next().unwrap_or("").to_owned())
+                .filter(|d| !d.is_empty());
+        }
+        let text: Vec<&str> =
+            body.lines().skip_while(|l| !l.trim().is_empty()).map(str::trim).filter(|l| !l.is_empty()).collect();
+        if let Some(first) = text.first() {
+            let words: Vec<&str> = first.split_whitespace().take(4).collect();
+            voice.push(format!(r#"{{"message_id": "{id}", "quote": "{}"}}"#, esc(&words.join(" "))));
+        }
+        if let Some(last) = text.last().filter(|l| text.len() > 1 && l.split_whitespace().count() <= 3) {
+            signoff.push(format!(r#"{{"message_id": "{id}", "quote": "{}"}}"#, esc(last)));
+        }
+    }
+    let mut proposals = Vec::new();
+    if !voice.is_empty() {
+        proposals.push(format!(
+            r#"{{"category": "A1", "kind": "guideline", "statement": "Keep a friendly, direct tone", "evidence": [{}]}}"#,
+            voice.join(", ")
+        ));
+        proposals.push(format!(
+            r#"{{"category": "C8", "kind": "rule", "statement": "Never write 'circle back'", "check": {{"kind": "banned_phrase", "value": "circle back"}}, "evidence": [{}]}}"#,
+            voice[0]
+        ));
+    }
+    if !signoff.is_empty() {
+        proposals.push(format!(
+            r#"{{"category": "B6", "kind": "guideline", "statement": "Sign off with the first name only", "scope": {{"message_types": ["reply"]}}, "evidence": [{}]}}"#,
+            signoff.join(", ")
+        ));
+    }
+    let audiences = domain
+        .map(|d| {
+            format!(r#"{{"name": "Colleagues", "description": "People the user works with", "members": ["@{d}"]}}"#)
+        })
+        .unwrap_or_default();
+    Some(format!(r#"{{"proposals": [{}], "audiences": [{audiences}]}}"#, proposals.join(", ")))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -95,7 +154,9 @@ struct FakeSession {
 impl AgentSession for FakeSession {
     async fn send(&mut self, turn: TurnInput) -> AgentResult<()> {
         self.sink.emit(AgentEvent::TurnStarted);
-        let text = task_answer(&turn.prompt).unwrap_or_else(|| format!("You said: {}", turn.prompt));
+        let text = task_answer(&turn.prompt)
+            .or_else(|| guide_answer(&turn.prompt))
+            .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {
             usage: Some(Usage { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0 }),

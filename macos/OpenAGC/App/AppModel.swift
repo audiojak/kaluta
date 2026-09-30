@@ -501,6 +501,10 @@ final class AppModel {
             reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             await tasks.load()
+            // A learning run the app quit in the middle of carries on
+            // (spec §14.9); a paused one waits for the user.
+            guideProgress = try? await core.guideProgress()
+            if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -557,6 +561,8 @@ final class AppModel {
     private(set) var tasksRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
     private(set) var guideRevision = 0
+    /// The learning run's progress and the decisions waiting (spec §14.9).
+    var guideProgress: GuideProgress?
 
     // MARK: Agent
 
@@ -1281,6 +1287,8 @@ final class AppModel {
             routinesRevision += 1
         case .guideChanged:
             guideRevision += 1
+        case let .guideProgress(progress):
+            guideProgress = progress
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

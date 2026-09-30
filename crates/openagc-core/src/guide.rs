@@ -905,7 +905,7 @@ pub(crate) fn read_export(json: &str) -> Result<(Vec<GuideEntryFields>, Vec<Expo
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use futures::executor::block_on;
