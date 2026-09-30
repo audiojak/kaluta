@@ -45,6 +45,10 @@ private struct GuideCategoryDetail: View {
                 HStack(spacing: Space.m) {
                     Button("Add Entry…") { model.guideSheet = .edit(nil, category: category.id) }
                         .hoverHelp("Write a rule, guideline or fact for \(category.name)")
+                    if category.asked || entries.isEmpty {
+                        Button("Answer the Question…") { model.guideSheet = .interview(only: category.id) }
+                            .hoverHelp("A short question for \(category.name); no agent needed")
+                    }
                     if category.learned, category.evidence < Self.fewMessages, !model.guideRunActive {
                         Button("Improve from Sent Mail") { Task { await model.improveGuide(category.id) } }
                             .hoverHelp("Analyse the sent messages most likely to show \(category.name)")

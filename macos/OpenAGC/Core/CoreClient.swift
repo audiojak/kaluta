@@ -564,6 +564,11 @@ final class CoreClient: Sendable {
         try await call { try await core.guideSampleInfo(count: count, filter: filter) }
     }
 
+    /// The signature block the analysis found in sent mail, if any.
+    func guideSignature() async throws(CoreClientError) -> String? {
+        try await call { try await core.guideSignature() }
+    }
+
     func startGuideRun(_ request: GuideRunRequest) async throws(CoreClientError) -> GuideRunInfo {
         try await call { try await core.startGuideRun(request: request) }
     }

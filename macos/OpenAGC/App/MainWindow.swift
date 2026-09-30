@@ -31,6 +31,7 @@ struct MainWindow: View {
             switch sheet {
             case .learn: LearnSheet()
             case let .edit(entry, category): GuideEntryEditor(entry: entry, category: category)
+            case let .interview(only): InterviewSheet(only: only)
             }
         }
         .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in

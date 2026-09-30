@@ -144,3 +144,37 @@ struct AudienceTests {
         #expect(!merged.contains { $0.id == colleagues.id })
     }
 }
+
+struct GuideInterviewTests {
+    private func category(_ id: String, learned: Bool, asked: Bool, accepted: UInt32 = 0) -> GuideCategoryInfo {
+        GuideCategoryInfo(id: id, group: String(id.prefix(1)), groupName: "", name: "Name \(id)", looksFor: "how \(id)",
+                          learned: learned, asked: asked, accepted: accepted, proposed: 0, evidence: 0)
+    }
+
+    @Test func askedCategoriesAndEmptyLearnedOnesGetQuestions() {
+        let categories = [category("A1", learned: true, asked: false),
+                          category("A2", learned: true, asked: false, accepted: 2),
+                          category("F1", learned: false, asked: true)]
+        let qs = GuideInterview.questions(categories: categories, signature: "John\nCEO", answered: ["F5"])
+        #expect(qs.contains { $0.id == "F4" } && qs.contains { $0.id == "empty-A1" })
+        #expect(!qs.contains { $0.id == "empty-A2" }, "a covered category is not asked about")
+        #expect(!qs.contains { $0.id == "F5" }, "answered questions are not asked again")
+        #expect(qs.first { $0.id == "F3" }?.suggestion == "John\nCEO")
+    }
+
+    @Test func answersBecomeEntries() throws {
+        let qs = GuideInterview.questions(categories: [], signature: nil, answered: [])
+        let bans = try #require(qs.first { $0.id == "C8" })
+        let banned = GuideInterview.entries(for: bans, choice: nil, text: "circle back,\n per my last email ,", fields: [])
+        #expect(banned.map(\.statement) == ["Never write “circle back”", "Never write “per my last email”"])
+        #expect(banned.allSatisfy { $0.kind == .rule && $0.check?.kind == .bannedPhrase })
+        #expect(banned[1].check?.value == "per my last email")
+        let facts = try #require(qs.first { $0.id == "F3" })
+        let made = GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO, Actual AI", "", "Pacific"])
+        #expect(made.map(\.statement) == ["My role: CEO, Actual AI", "My time zone: Pacific"])
+        #expect(made.allSatisfy { $0.kind == .fact && $0.category == "F3" })
+        let invent = try #require(qs.first { $0.id == "F4" })
+        #expect(GuideInterview.entries(for: invent, choice: 0, text: "", fields: []).first?.kind == .rule)
+        #expect(GuideInterview.entries(for: invent, choice: nil, text: "", fields: []).isEmpty)
+    }
+}

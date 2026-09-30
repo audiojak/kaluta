@@ -270,6 +270,13 @@ impl Core {
         vec![DEFAULT_SAMPLE, BATCH_SIZE as u32]
     }
 
+    /// The signature block found in the user's sent mail (B7), if any: the
+    /// interview suggests answers from it.
+    pub async fn guide_signature(&self) -> Result<Option<String>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.read(|c| store::meta(c, SIGNATURE_KEY)).await?) }).await
+    }
+
     /// For the learning dialog: sent messages available, analysed before,
     /// and how many a run of `count` with this filter would analyse.
     pub async fn guide_sample_info(&self, count: u32, filter: GuideSampleFilter) -> Result<GuideSampleInfo, CoreError> {
