@@ -565,6 +565,11 @@ pub fn save_group(tx: &Transaction<'_>, g: &GroupRow) -> StoreResult<i64> {
     Ok(id)
 }
 
+pub fn rename_group(tx: &Transaction<'_>, id: i64, name: &str) -> StoreResult<()> {
+    tx.prepare_cached("UPDATE audience_groups SET name = ?2 WHERE id = ?1")?.execute(params![id, name])?;
+    Ok(())
+}
+
 pub fn delete_group(tx: &Transaction<'_>, id: i64) -> StoreResult<bool> {
     Ok(tx.prepare_cached("DELETE FROM audience_groups WHERE id = ?1")?.execute([id])? > 0)
 }

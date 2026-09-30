@@ -329,8 +329,16 @@ impl Core {
                 self.set_status(run, "done", None).await?;
                 let db = self.db()?;
                 let now = mail_sync::now_millis().to_string();
-                runtime::run(async move { Ok(db.write(move |tx| store::set_meta(tx, "last_run_at", &now)).await?) })
-                    .await?;
+                // With fewer than five audiences, suggest the obvious gaps.
+                runtime::run(async move {
+                    Ok(db
+                        .write(move |tx| {
+                            store::set_meta(tx, "last_run_at", &now)?;
+                            crate::guide::fill_gaps(tx).map(|_| ())
+                        })
+                        .await?)
+                })
+                .await?;
                 self.guide_changed();
                 self.emit_progress();
                 return Ok(());

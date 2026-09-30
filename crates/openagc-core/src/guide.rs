@@ -356,6 +356,60 @@ pub struct AudienceGroup {
 
 const STATEMENT_CAP: usize = 400;
 
+/// Groups suggested to fill the set to `MIN_GROUPS` when the mail showed
+/// fewer (spec §14.9), in order, with what each is for.
+pub const GAP_GROUPS: &[(&str, &str)] = &[
+    ("Colleagues", "People you work with"),
+    ("Customers", "People who buy from you or use your product"),
+    ("Investors", "Investors and board members"),
+    ("Vendors", "Suppliers and service providers"),
+    ("Candidates", "People you are hiring"),
+    ("Direct reports", "People who report to you"),
+    ("Advisers", "Lawyers, accountants and other advisers"),
+    ("Friends and family", "Personal mail"),
+    ("Strangers", "People you have not written to before"),
+];
+
+/// Audience groups the set is filled to.
+pub const MIN_GROUPS: usize = 5;
+
+/// Whether `address` belongs to a group with these members.
+pub(crate) fn is_member(address: &str, members: &[String]) -> bool {
+    let a = address.trim().to_lowercase();
+    members.iter().any(|m| {
+        let m = m.trim().to_lowercase();
+        m.strip_prefix('@').map_or(a == m, |d| a.ends_with(&format!("@{d}")))
+    })
+}
+
+/// Fill the groups to `MIN_GROUPS` (not counting rejected ones) from the
+/// obvious gaps, each *suggested*. Returns how many were added.
+pub(crate) fn fill_gaps(tx: &mail_store::Transaction<'_>) -> mail_store::StoreResult<usize> {
+    let groups = store::groups(tx)?;
+    let live = groups.iter().filter(|g| g.status != "rejected").count();
+    let mut added = 0;
+    for (name, description) in GAP_GROUPS {
+        if live + added >= MIN_GROUPS {
+            break;
+        }
+        if groups.iter().any(|g| g.name.eq_ignore_ascii_case(name)) {
+            continue;
+        }
+        store::save_group(
+            tx,
+            &GroupRow {
+                name: (*name).into(),
+                status: "suggested".into(),
+                description: (*description).into(),
+                position: (groups.len() + added) as i64,
+                ..Default::default()
+            },
+        )?;
+        added += 1;
+    }
+    Ok(added)
+}
+
 pub(crate) fn clean_text(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -436,6 +490,37 @@ pub(crate) fn from_snapshot(s: Snapshot) -> GuideEntry {
 }
 
 impl Core {
+    /// Entries scoped to group `old` are scoped to `new` instead (or lose
+    /// the group when `None`), as one undoable change.
+    async fn rescope_group(&self, old: &str, new: Option<&str>) -> Result<(), CoreError> {
+        let edits: Vec<GuideEdit> = self
+            .list_guide_entries(vec![])
+            .await?
+            .into_iter()
+            .filter(|e| e.scope.groups.iter().any(|g| g.eq_ignore_ascii_case(old)))
+            .map(|e| {
+                let mut fields = GuideEntryFields {
+                    category: e.category,
+                    kind: e.kind,
+                    statement: e.statement,
+                    scope: e.scope,
+                    check: e.check,
+                };
+                fields.scope.groups.retain(|g| !g.eq_ignore_ascii_case(old));
+                if let Some(new) = new
+                    && !fields.scope.groups.iter().any(|g| g.eq_ignore_ascii_case(new))
+                {
+                    fields.scope.groups.push(new.to_owned());
+                }
+                GuideEdit::Update { id: e.id, fields }
+            })
+            .collect();
+        if !edits.is_empty() {
+            self.apply_edits(edits, format!("group {old}")).await?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn guide_changed(&self) {
         self.account_events().emit(CoreEvent::GuideChanged);
     }
@@ -798,6 +883,70 @@ impl Core {
         Ok(groups)
     }
 
+    /// Rename a group; entries scoped to it follow (one undoable change).
+    pub async fn rename_audience_group(&self, id: i64, name: String) -> Result<Vec<AudienceGroup>, CoreError> {
+        let name = clean_text(&name);
+        if name.is_empty() {
+            return Err(invalid("a group needs a name"));
+        }
+        let groups = self.list_audience_groups().await?;
+        let old =
+            groups.iter().find(|g| g.id == id).ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no such group"))?;
+        if groups.iter().any(|g| g.id != id && g.name.eq_ignore_ascii_case(&name)) {
+            return Err(invalid(format!("there is already a group called {name}; merge them instead")));
+        }
+        let old_name = old.name.clone();
+        self.rescope_group(&old_name, Some(&name)).await?;
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.write(move |tx| store::rename_group(tx, id, &name)).await?) }).await?;
+        self.guide_changed();
+        self.list_audience_groups().await
+    }
+
+    /// Merge `from` into `into`: its members join, entries scoped to it are
+    /// scoped to `into`, and `from` goes.
+    pub async fn merge_audience_groups(&self, into: i64, from: i64) -> Result<Vec<AudienceGroup>, CoreError> {
+        let groups = self.list_audience_groups().await?;
+        let find = |id| groups.iter().find(|g: &&AudienceGroup| g.id == id).cloned();
+        let (Some(target), Some(source)) = (find(into), find(from)) else {
+            return Err(CoreError::new(ErrorKind::NotFound, "no such group"));
+        };
+        if into == from {
+            return Err(invalid("a group cannot merge into itself"));
+        }
+        self.rescope_group(&source.name, Some(&target.name)).await?;
+        let mut members = target.members.clone();
+        for m in source.members {
+            if !members.contains(&m) {
+                members.push(m);
+            }
+        }
+        self.save_audience_group(AudienceGroup { members, ..target }).await?;
+        self.delete_audience_group(from).await?;
+        self.list_audience_groups().await
+    }
+
+    /// Suggest groups for the obvious gaps until there are five.
+    pub async fn fill_audience_groups(&self) -> Result<Vec<AudienceGroup>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.write(fill_gaps).await?) }).await?;
+        self.guide_changed();
+        self.list_audience_groups().await
+    }
+
+    /// The confirmed groups these recipients belong to, in group order
+    /// (what scopes guidelines for a message).
+    pub async fn audience_for(&self, addresses: Vec<String>) -> Result<Vec<String>, CoreError> {
+        Ok(self
+            .list_audience_groups()
+            .await?
+            .into_iter()
+            .filter(|g| g.status == AudienceStatus::Confirmed)
+            .filter(|g| addresses.iter().any(|a| is_member(a, &g.members)))
+            .map(|g| g.name)
+            .collect())
+    }
+
     pub async fn delete_audience_group(&self, id: i64) -> Result<(), CoreError> {
         let db = self.db()?;
         runtime::run(async move { Ok(db.write(move |tx| store::delete_group(tx, id).map(|_| ())).await?) }).await?;
@@ -1096,6 +1245,57 @@ pub(crate) mod tests {
         assert_eq!(read.groups[0].name, "Customers");
         assert!(read_export("{\"format\":\"other\",\"version\":1,\"entries\":[]}").is_err());
         assert!(read_export("not json").is_err());
+    }
+
+    #[test]
+    fn groups_fill_to_five_rename_merge_and_scope_messages() {
+        let s = demo("groups");
+        let core = &s.1;
+        let group = |name: &str, status, members: &[&str]| AudienceGroup {
+            id: 0,
+            name: name.into(),
+            status,
+            description: String::new(),
+            members: members.iter().map(|m| (*m).to_owned()).collect(),
+        };
+        block_on(core.save_audience_group(group("Team", AudienceStatus::Confirmed, &["@actual.ai"]))).unwrap();
+        block_on(core.save_audience_group(group("Customers", AudienceStatus::Rejected, &[]))).unwrap();
+        let filled = block_on(core.fill_audience_groups()).unwrap();
+        let live: Vec<&AudienceGroup> = filled.iter().filter(|g| g.status != AudienceStatus::Rejected).collect();
+        assert_eq!(live.len(), MIN_GROUPS);
+        assert!(live.iter().skip(1).all(|g| g.status == AudienceStatus::Suggested));
+        assert!(!live.iter().any(|g| g.name == "Customers"), "a rejected group is not suggested again");
+        assert_eq!(block_on(core.fill_audience_groups()).unwrap().len(), filled.len(), "nothing more to fill");
+
+        // An entry scoped to Team follows a rename and a merge.
+        block_on(core.apply_guide_edits(
+            vec![GuideEdit::Add {
+                fields: GuideEntryFields {
+                    scope: GuideScope { groups: vec!["Team".into()], ..Default::default() },
+                    ..fields("A1", "Be brief with the team")
+                },
+                status: GuideStatus::Accepted,
+                source: GuideSource::You,
+                origin: None,
+            }],
+            "x".into(),
+        ))
+        .unwrap();
+        let team = filled.iter().find(|g| g.name == "Team").unwrap().id;
+        let groups = block_on(core.rename_audience_group(team, "Coworkers".into())).unwrap();
+        assert!(groups.iter().any(|g| g.name == "Coworkers" && g.id == team));
+        let entry = &block_on(core.list_guide_entries(vec![GuideStatus::Accepted])).unwrap()[0];
+        assert_eq!(entry.scope.groups, ["Coworkers"]);
+        let other = groups.iter().find(|g| g.name == "Vendors").unwrap().id;
+        block_on(core.save_audience_group(group("Vendors", AudienceStatus::Confirmed, &["ann@x.com"]))).unwrap();
+        assert!(block_on(core.rename_audience_group(other, "coworkers".into())).is_err(), "names are unique");
+        let merged = block_on(core.merge_audience_groups(team, other)).unwrap();
+        let colleagues = merged.iter().find(|g| g.id == team).unwrap();
+        assert_eq!(colleagues.members, ["@actual.ai", "ann@x.com"]);
+        assert!(!merged.iter().any(|g| g.id == other));
+
+        assert_eq!(block_on(core.audience_for(vec!["Bob@Actual.ai".into()])).unwrap(), ["Coworkers"]);
+        assert!(block_on(core.audience_for(vec!["x@elsewhere.com".into()])).unwrap().is_empty());
     }
 
     #[test]

@@ -126,3 +126,21 @@ struct GuideDecisionTests {
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Replace Entry")
     }
 }
+
+@MainActor
+struct AudienceTests {
+    @Test func audiencesAreFilledConfirmedAndFoundForRecipients() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let filled = try await core.fillAudienceGroups()
+        #expect(filled.count == 5 && filled.allSatisfy { $0.status == .suggested })
+        let customers = try #require(filled.first { $0.name == "Customers" })
+        _ = try await core.saveAudienceGroup(AudienceGroup(id: customers.id, name: customers.name, status: .confirmed,
+                                                           description: customers.description, members: ["@acme.com"]))
+        #expect(try await core.audienceFor(["ann@acme.com", "bob@x.com"]) == ["Customers"])
+        let colleagues = try #require(filled.first { $0.name == "Colleagues" })
+        let merged = try await core.mergeAudienceGroups(into: customers.id, from: colleagues.id)
+        #expect(!merged.contains { $0.id == colleagues.id })
+    }
+}

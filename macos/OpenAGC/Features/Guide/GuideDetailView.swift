@@ -31,6 +31,9 @@ private struct GuideCategoryDetail: View {
                         .foregroundStyle(.secondary)
                     Text(source).font(TypeRole.caption).foregroundStyle(.secondary)
                 }
+                if category.id == "D1" {
+                    GuideAudiences()
+                }
                 if entries.isEmpty {
                     Text(category.learned ? "Nothing yet. Learn from your sent mail, or add an entry yourself."
                          : "Nothing yet. Your mail cannot show this: answer the questions, or add an entry yourself.")

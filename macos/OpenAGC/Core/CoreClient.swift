@@ -523,6 +523,24 @@ final class CoreClient: Sendable {
         try await call { try await core.saveAudienceGroup(group: group) }
     }
 
+    func renameAudienceGroup(_ id: Int64, to name: String) async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.renameAudienceGroup(id: id, name: name) }
+    }
+
+    func mergeAudienceGroups(into: Int64, from: Int64) async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.mergeAudienceGroups(into: into, from: from) }
+    }
+
+    /// Suggest groups for the obvious gaps until there are five.
+    func fillAudienceGroups() async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.fillAudienceGroups() }
+    }
+
+    /// The confirmed groups these recipients belong to.
+    func audienceFor(_ addresses: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.audienceFor(addresses: addresses) }
+    }
+
     func deleteAudienceGroup(_ id: Int64) async throws(CoreClientError) {
         try await call { try await core.deleteAudienceGroup(id: id) }
     }
