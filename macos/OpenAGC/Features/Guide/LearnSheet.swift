@@ -8,11 +8,15 @@ struct LearnSheet: View {
     @State private var count = 1_000
     @State private var excluded = ""
     @State private var info: GuideSampleInfo?
+    /// Which mail: the latest (first time), or after that newer, older or a
+    /// re-check (further analysis).
+    @State private var kind: GuideRunKind = .latest
+    @State private var chosen: UInt32 = 0
     @State private var error: String?
     @State private var starting = false
 
     var body: some View {
-        Dialog(title: "Learn from Sent Mail",
+        Dialog(title: (info?.analysedBefore ?? 0) > 0 ? "Learn More from Sent Mail" : "Learn from Sent Mail",
                message: "\(model.agent.providerName) reads your sent messages in batches and proposes rules and guidelines. You decide on them when it has finished.") {
             if let why = notReady {
                 VStack(alignment: .leading, spacing: Space.s) {
@@ -23,6 +27,15 @@ struct LearnSheet: View {
                         .hoverHelp("Connect Claude Code or Codex")
                 }
                 .font(TypeRole.meta)
+            }
+            if (info?.analysedBefore ?? 0) > 0 {
+                Picker("Analyse", selection: $kind) {
+                    Text("Mail sent since last time").tag(GuideRunKind.newer)
+                    Text("Older mail, further back").tag(GuideRunKind.older)
+                    Text("A fresh sample, to re-check the guide").tag(GuideRunKind.recheck)
+                }
+                .pickerStyle(.radioGroup)
+                .hoverHelp("Which of your sent mail to analyse this time")
             }
             LabeledContent("Messages") {
                 HStack(spacing: Space.s) {
@@ -50,10 +63,10 @@ struct LearnSheet: View {
             CancelButton(help: "Close without starting (Esc)") { model.guideSheet = nil }
             Button("Start") { Task { await start() } }
                 .keyboardShortcut(.defaultAction)
-                .disabled(notReady != nil || starting || (info?.chosen ?? 0) == 0)
+                .disabled(notReady != nil || starting || chosen == 0)
                 .hoverHelp("Start analysing in the background (Return)")
         }
-        .task(id: "\(count)|\(excluded)") {
+        .task(id: "\(count)|\(excluded)|\(kind)") {
             try? await Task.sleep(for: .milliseconds(250))
             await refresh()
         }
@@ -76,13 +89,22 @@ struct LearnSheet: View {
     private func refresh() async {
         guard count > 0, let core = model.core else { info = nil; return }
         info = try? await core.guideSampleInfo(count: UInt32(count), filter: filter)
+        // Once some mail is analysed, the first-time choice becomes "newer".
+        if kind == .latest, (info?.analysedBefore ?? 0) > 0 { kind = .newer }
+        chosen = (try? await core.guideRunPreview(request)) ?? 0
+    }
+
+    private var request: GuideRunRequest {
+        GuideRunRequest(kind: kind, count: UInt32(max(count, 1)), filter: filter, focus: nil, agent: model.agent.providerID)
     }
 
     private func summary(_ info: GuideSampleInfo) -> String {
-        if info.chosen == 0 {
-            return info.sent == 0 ? "This account has no sent mail yet." : "Every sent message has been analysed already."
+        if chosen == 0 {
+            if info.sent == 0 { return "This account has no sent mail yet." }
+            return kind == .newer ? "Nothing sent since the last analysis." : "Every sent message has been analysed already."
         }
-        var s = "\(info.chosen.formatted()) messages in \(info.batches.formatted()) batches of 20"
+        let batches = (chosen + 19) / 20
+        var s = "\(chosen.formatted()) messages in \(batches.formatted()) batches of 20"
         s += " (you have sent \(info.sent.formatted())"
         s += info.analysedBefore > 0 ? "; \(info.analysedBefore.formatted()) analysed before)." : ")."
         return s
@@ -93,8 +115,7 @@ struct LearnSheet: View {
         starting = true
         defer { starting = false }
         do {
-            let run = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: UInt32(max(count, 1)), filter: filter,
-                                                                   focus: nil, agent: model.agent.providerID))
+            let run = try await core.startGuideRun(request)
             model.guideProgress = GuideProgress(run: run, decisionsTotal: model.guideProgress?.decisionsTotal ?? 0,
                                                 decisionsDone: model.guideProgress?.decisionsDone ?? 0)
             model.guideSheet = nil

@@ -344,3 +344,24 @@ struct MergeGuideTests {
         #expect(now.allSatisfy { $0.source == .merged && $0.origin == "an exported guide" })
     }
 }
+
+@MainActor
+struct FurtherAnalysisTests {
+    @Test func afterAFirstRunTheChoicesAreNewerOlderAndRecheck() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let none = GuideSampleFilter(excludePeople: [], excludeLabels: [])
+        func request(_ kind: GuideRunKind, _ count: UInt32, focus: String? = nil) -> GuideRunRequest {
+            GuideRunRequest(kind: kind, count: count, filter: none, focus: focus, agent: model.agent.providerID)
+        }
+        _ = try await core.startGuideRun(request(.latest, 20))
+        for _ in 0..<200 where (try await core.guideProgress()).run?.status != .done { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(try await core.guideRunPreview(request(.newer, 1000)) == 0)
+        #expect(try await core.guideRunPreview(request(.older, 5)) == 5)
+        #expect(try await core.guideRunPreview(request(.recheck, 10)) == 10)
+        await model.improveGuide("E2")
+        #expect(model.guideProgress?.run?.kind == .improve && model.guideProgress?.run?.focus == "E2")
+    }
+}

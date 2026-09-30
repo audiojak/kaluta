@@ -84,6 +84,10 @@ private struct AudienceRow: View {
                 .fixedSize()
                 .disabled(others.isEmpty)
                 .hoverHelp("Combine this audience with another")
+                if group.status == .confirmed, !model.guideRunActive {
+                    Button("Improve") { Task { await model.improveGuide(group.name) } }
+                        .hoverHelp("Analyse the sent messages to \(group.name) most likely to show how you write to them")
+                }
                 Button("Remove") { Task { await save(status: .rejected) } }
                     .hoverHelp("Remove this audience; it will not be suggested again")
             }

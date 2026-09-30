@@ -59,6 +59,11 @@ struct GuideHeader: View {
             if let progress = model.guideProgress, model.guideRunActive || progress.decisionsTotal > progress.decisionsDone {
                 GuideProgressBars(progress: progress)
             }
+            if let run = model.guideProgress?.run, run.status == .done, let finished = run.finishedAt {
+                Text("Last learned \(Date(timeIntervalSince1970: TimeInterval(finished) / 1000).formatted(date: .abbreviated, time: .omitted)) from \(run.total.formatted()) messages")
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
+            }
             HStack(spacing: Space.m) {
                 Button("Learn from Sent Mail…") { model.guideSheet = .learn }
                     .disabled(model.guideRunActive)

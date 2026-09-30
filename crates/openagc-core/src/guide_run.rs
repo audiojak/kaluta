@@ -437,6 +437,12 @@ impl Core {
         Ok(info(run))
     }
 
+    /// How many messages a run of this request would analyse (the
+    /// dialog's preview for further analysis).
+    pub async fn guide_run_preview(&self, request: GuideRunRequest) -> Result<u32, CoreError> {
+        Ok(self.run_sample(&request).await?.len() as u32)
+    }
+
     /// Pause the run after its current batch.
     pub async fn pause_guide_run(self: Arc<Self>) -> Result<(), CoreError> {
         let db = self.db()?;
@@ -621,6 +627,26 @@ mod tests {
         let improve = request(GuideRunKind::Improve, 10);
         assert_eq!(block_on(core.clone().start_guide_run(improve)).unwrap_err().kind(), ErrorKind::InvalidInput);
         assert!(block_on(core.guide_progress()).unwrap().run.is_none(), "no run was recorded");
+    }
+
+    #[test]
+    fn further_analysis_takes_newer_older_or_fresh_mail() {
+        let s = demo("further");
+        let core = &s.1;
+        core.debug_use_fake_agents();
+        block_on(core.debug_seed_demo_mailbox(150)).unwrap();
+        let preview = |kind, count| block_on(core.guide_run_preview(request(kind, count))).unwrap();
+        let first = preview(GuideRunKind::Latest, 20);
+        assert_eq!(first, 20.min(preview(GuideRunKind::Latest, 10_000)));
+        assert_eq!(preview(GuideRunKind::Newer, 1_000), preview(GuideRunKind::Latest, 1_000), "all is newer at first");
+        block_on(core.clone().start_guide_run(request(GuideRunKind::Latest, 20))).unwrap();
+        wait_for("the first run", || {
+            block_on(core.guide_progress()).unwrap().run.is_some_and(|r| r.status == GuideRunStatus::Done)
+        });
+        assert_eq!(preview(GuideRunKind::Newer, 1_000), 0, "nothing sent since");
+        let older = preview(GuideRunKind::Older, 1_000);
+        assert_eq!(older, preview(GuideRunKind::Latest, 10_000), "the rest is further back");
+        assert_eq!(preview(GuideRunKind::Recheck, 30), 30, "a re-check may re-read analysed mail");
     }
 
     #[test]

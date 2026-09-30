@@ -602,6 +602,11 @@ final class CoreClient: Sendable {
         try await call { try await core.guideSignature() }
     }
 
+    /// How many messages a run of this request would analyse.
+    func guideRunPreview(_ request: GuideRunRequest) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.guideRunPreview(request: request) }
+    }
+
     func startGuideRun(_ request: GuideRunRequest) async throws(CoreClientError) -> GuideRunInfo {
         try await call { try await core.startGuideRun(request: request) }
     }
