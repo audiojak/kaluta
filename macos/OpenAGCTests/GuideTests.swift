@@ -313,3 +313,34 @@ struct ChangeGuideTests {
         #expect(try await core.guideEntries([.accepted]).map(\.statement) == ["Use US spelling"])
     }
 }
+
+@MainActor
+struct MergeGuideTests {
+    @Test func aFileMergesWithDecisionsWhereTheGuidesDiffer() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .guideline, statement: "Sign off with 'Best'", scope: .always,
+                                          check: nil), status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let file = """
+        {"format": "openagc-writing-guide", "version": 1, "entries": [
+          {"category": "B6", "kind": "guideline", "statement": "Sign off with 'Cheers'"},
+          {"category": "A1", "kind": "guideline", "statement": "Be warm"}]}
+        """
+        let plan = try await core.planGuideMerge(fromAccount: nil, json: file, agent: model.agent.providerID)
+        #expect(plan.additions.map(\.statement) == ["Be warm"])
+        let decision = try #require(plan.decisions.first)
+        #expect(decision.mine.map(\.statement) == ["Sign off with 'Best'"])
+        // Take theirs, as the sheet would.
+        var edits: [GuideEdit] = plan.additions.map { .add(fields: $0, status: .accepted, source: .merged, origin: plan.origin) }
+        edits += decision.mine.map { .delete(id: $0.id) }
+        edits += decision.incoming.map { .add(fields: $0, status: .accepted, source: .merged, origin: plan.origin) }
+        _ = await model.applyGuideEdits(edits, reason: "merge", actionName: "Merge Guide", notice: "Merged")
+        let now = try await core.guideEntries([.accepted])
+        #expect(Set(now.map(\.statement)) == ["Be warm", "Sign off with 'Cheers'"])
+        #expect(now.allSatisfy { $0.source == .merged && $0.origin == "an exported guide" })
+    }
+}

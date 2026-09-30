@@ -33,6 +33,7 @@ struct MainWindow: View {
             case let .edit(entry, category): GuideEntryEditor(entry: entry, category: category)
             case let .interview(only): InterviewSheet(only: only)
             case .change: ChangeGuideSheet()
+            case .merge: MergeGuideSheet()
             }
         }
         .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in

@@ -165,6 +165,39 @@ pub fn change_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"questions": [{}]}}"#, questions.join(", ")))
 }
 
+/// The fake's answer to an OpenAGC writing-guide merge prompt: one
+/// decision per category listed, covering its entries.
+pub fn merge_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC writing guide merge") {
+        return None;
+    }
+    let mut decisions: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
+    for line in prompt.lines() {
+        if let Some(cat) = line.strip_prefix("Category ").and_then(|l| l.strip_suffix(':')) {
+            decisions.push((cat.to_owned(), vec![], vec![]));
+        } else if let Some(rest) = line.trim().strip_prefix("mine #") {
+            if let (Some(d), Some(id)) = (decisions.last_mut(), rest.split(' ').next()) {
+                d.1.push(id.to_owned());
+            }
+        } else if let Some(rest) = line.trim().strip_prefix("incoming @")
+            && let (Some(d), Some(i)) = (decisions.last_mut(), rest.split(' ').next())
+        {
+            d.2.push(i.to_owned());
+        }
+    }
+    let items: Vec<String> = decisions
+        .iter()
+        .map(|(cat, mine, incoming)| {
+            format!(
+                r#"{{"point": "Category {cat}", "summary": "The guides differ on {cat}", "mine": [{}], "incoming": [{}]}}"#,
+                mine.join(", "),
+                incoming.join(", ")
+            )
+        })
+        .collect();
+    Some(format!(r#"{{"decisions": [{}]}}"#, items.join(", ")))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -177,6 +210,7 @@ impl AgentSession for FakeSession {
         let text = task_answer(&turn.prompt)
             .or_else(|| guide_answer(&turn.prompt))
             .or_else(|| change_answer(&turn.prompt))
+            .or_else(|| merge_answer(&turn.prompt))
             .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {

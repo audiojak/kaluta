@@ -592,6 +592,11 @@ final class CoreClient: Sendable {
         try await call { try await core.proposeGuideChange(request: request, agent: agent) }
     }
 
+    /// What merging a guide from another account or a file would do.
+    func planGuideMerge(fromAccount: String?, json: String?, agent: String) async throws(CoreClientError) -> GuideMergePlan {
+        try await call { try await core.planGuideMerge(fromAccount: fromAccount, json: json, agent: agent) }
+    }
+
     /// The signature block the analysis found in sent mail, if any.
     func guideSignature() async throws(CoreClientError) -> String? {
         try await call { try await core.guideSignature() }
@@ -1033,6 +1038,8 @@ typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
 typealias GuideRendered = OpenAGCCore.GuideRendered
 typealias GuideCheckFailure = OpenAGCCore.GuideCheckFailure
 typealias GuideChangeQuestion = OpenAGCCore.GuideChangeQuestion
+typealias GuideMergePlan = OpenAGCCore.GuideMergePlan
+typealias GuideMergeDecision = OpenAGCCore.GuideMergeDecision
 
 // MARK: - Events
 

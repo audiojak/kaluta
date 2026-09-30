@@ -36,6 +36,7 @@
 		36A454FB046BB704125EF7F3 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE83811F68C4EBD9E870E49B /* CoreClient.swift */; };
 		3B54B418F1F02F8184CDE2B6 /* TipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37F9C0A836B2EBB9EAE9DA82 /* TipTests.swift */; };
 		3B95337114DDC3417F4D4D5D /* GuideInterview.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EB793CBF311E2EE4B99110 /* GuideInterview.swift */; };
+		3C19900E173BC0FE5EB17A0F /* MergeGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 340A7465144731D60D98AC7C /* MergeGuideSheet.swift */; };
 		3CFA63FC5E129133E7001146 /* KeychainSecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD2ED5356A1BBFFEABB704F9 /* KeychainSecretStore.swift */; };
 		3D209E9A5161913A2BFD1C6A /* RoutinesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 190E7BE352B8FB1A5BC8078E /* RoutinesWindow.swift */; };
 		403EB3F17C39C0781B552172 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 282C65C46EFBD9CE2DB7AE30 /* Components.swift */; };
@@ -194,6 +195,7 @@
 		30E76B5CB7759AE57FCB348E /* TaskListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListStore.swift; sourceTree = "<group>"; };
 		331D2F57E10A1874F6103AFF /* AccountAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAvatar.swift; sourceTree = "<group>"; };
 		33717E284E8BBBD24A611B4F /* GoogleClientConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleClientConfiguration.swift; sourceTree = "<group>"; };
+		340A7465144731D60D98AC7C /* MergeGuideSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeGuideSheet.swift; sourceTree = "<group>"; };
 		37F9C0A836B2EBB9EAE9DA82 /* TipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipTests.swift; sourceTree = "<group>"; };
 		3D8D9EFB8321E02452EFCF26 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		4372C03A0DB7F78DF414F892 /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
@@ -597,6 +599,7 @@
 				18F0249A501C89A849A51705 /* GuideView.swift */,
 				50741EBE28CA752FB58116F8 /* InterviewSheet.swift */,
 				F29EE263B741DE6C936C9E2B /* LearnSheet.swift */,
+				340A7465144731D60D98AC7C /* MergeGuideSheet.swift */,
 			);
 			path = Guide;
 			sourceTree = "<group>";
@@ -923,6 +926,7 @@
 				B79B36EDE217EE06866A9F40 /* MailUndo.swift in Sources */,
 				C9F5E1202A2849397390D3AC /* MailboxStore.swift in Sources */,
 				DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */,
+				3C19900E173BC0FE5EB17A0F /* MergeGuideSheet.swift in Sources */,
 				F79978E7E6CDFE26B5F9C6D8 /* MessageToolbar.swift in Sources */,
 				020FC5F4D626FA3D9FEC35D0 /* MessageWebView.swift in Sources */,
 				4FF62FFF28E05444455223CB /* NewMailNotifier.swift in Sources */,
