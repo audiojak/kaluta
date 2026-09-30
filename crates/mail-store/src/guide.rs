@@ -574,6 +574,20 @@ pub fn delete_group(tx: &Transaction<'_>, id: i64) -> StoreResult<bool> {
     Ok(tx.prepare_cached("DELETE FROM audience_groups WHERE id = ?1")?.execute([id])? > 0)
 }
 
+/// Record the guide version an AI draft was written under.
+pub fn set_draft_guide_version(tx: &Transaction<'_>, draft_id: i64, version: i64) -> StoreResult<()> {
+    tx.prepare_cached("UPDATE drafts SET guide_version = ?2 WHERE id = ?1")?.execute(params![draft_id, version])?;
+    Ok(())
+}
+
+pub fn draft_guide_version(conn: &Connection, draft_id: i64) -> StoreResult<Option<i64>> {
+    Ok(conn
+        .prepare_cached("SELECT guide_version FROM drafts WHERE id = ?1")?
+        .query_row([draft_id], |r| r.get(0))
+        .optional()?
+        .flatten())
+}
+
 // MARK: Examples and settings
 
 pub fn examples(conn: &Connection) -> StoreResult<Vec<(String, String)>> {

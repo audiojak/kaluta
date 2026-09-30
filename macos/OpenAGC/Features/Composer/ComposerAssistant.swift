@@ -19,6 +19,11 @@ final class ComposerAssistant {
     var instruction = ""
     /// The body before the agent's text replaced it, for Undo.
     private(set) var previousBody: NSAttributedString?
+    /// The writing guide the last draft followed (spec §14.9), if any.
+    private(set) var guide: GuideRendered?
+
+    /// The last draft followed a writing guide with something in it.
+    var followsGuide: Bool { !(guide?.text.isEmpty ?? true) }
 
     @ObservationIgnored private var sessionID: String?
     @ObservationIgnored private var reply = ""
@@ -40,12 +45,18 @@ final class ComposerAssistant {
         state = .working
         reply = ""
         do {
+            // The account's writing guide for these recipients and this kind
+            // of message (spec §14.9); the user's own draft stays part of
+            // the prompt.
+            guide = try? await core.guideForMessage(recipients: (store.to + store.cc).map(\.email),
+                                                    messageType: Self.messageType(store), audiences: nil)
             let session = try await core.startReadOnlyAgentSession(provider: model.agent.providerID,
                                                                    selection: store.threadID.map { [$0] } ?? [])
             sessionID = session
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
             let prompt = Self.prompt(instruction: text, from: store.from, to: store.to.map(\.email),
-                                     subject: store.subject, draft: store.body.string, original: original)
+                                     subject: store.subject, draft: store.body.string, original: original,
+                                     guide: guide?.text ?? "")
             try await core.sendAgentPrompt(session, prompt)
         } catch let error as CoreClientError {
             fail(error.message)
@@ -94,6 +105,14 @@ final class ComposerAssistant {
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])
         instruction = ""
         state = .done
+        // The draft records the guide version it was written under.
+        if let version = guide?.version, !(guide?.text.isEmpty ?? true), let core = model?.core {
+            Task { [weak store] in
+                guard let store else { return }
+                await store.save()
+                if store.draftID != 0 { try? await core.setDraftGuideVersion(store.draftID, version) }
+            }
+        }
         finish()
     }
 
@@ -112,8 +131,15 @@ final class ComposerAssistant {
 
     /// What the agent is asked: the user's request, the message so far, and
     /// the message being answered, with the rules for its answer.
+    /// `new`, `reply` or `forward`, as the guide scopes messages.
+    static func messageType(_ store: ComposerStore) -> String {
+        let subject = store.subject.trimmingCharacters(in: .whitespaces).lowercased()
+        if subject.hasPrefix("fwd:") || subject.hasPrefix("fw:") { return "forward" }
+        return store.inReplyTo == nil ? "new" : "reply"
+    }
+
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,
-                       original: String) -> String {
+                       original: String, guide: String = "") -> String {
         var parts = [
             "You are helping write an email in OpenAGC's composer. The user asks: \(instruction)",
             """
@@ -124,6 +150,7 @@ final class ComposerAssistant {
             "From: \(from)\nTo: \(to.isEmpty ? "(nobody yet)" : to.joined(separator: ", "))\nSubject: \(subject)",
             "The message so far:\n<<<\n\(draft.trimmingCharacters(in: .whitespacesAndNewlines))\n>>>",
         ]
+        if !guide.isEmpty { parts.append(guide) }
         let original = original.trimmingCharacters(in: .whitespacesAndNewlines)
         if !original.isEmpty {
             parts.append("The message being answered or forwarded:\n<<<\n\(String(original.prefix(12_000)))\n>>>")

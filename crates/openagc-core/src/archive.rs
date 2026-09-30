@@ -123,13 +123,21 @@ impl Core {
 
     /// The agent system prompt for this account: the shipped one, plus the
     /// archive note in an archive (written next to the session).
-    pub(crate) fn system_prompt_for_session(&self, shipped: &Path, session_dir: &Path) -> PathBuf {
+    /// The shipped system prompt, with what this account adds: the archive
+    /// note (§7.8) and its writing guide (§14.9) when there is one.
+    pub(crate) fn system_prompt_for_session(&self, shipped: &Path, session_dir: &Path, guide: &str) -> PathBuf {
         let archive = self.effective_account_id().is_some_and(|id| self.is_archive(&id));
-        if !archive {
+        if !archive && guide.is_empty() {
             return shipped.to_path_buf();
         }
         let mut text = std::fs::read_to_string(shipped).unwrap_or_default();
-        text.push_str(ARCHIVE_PROMPT);
+        if archive {
+            text.push_str(ARCHIVE_PROMPT);
+        }
+        if !guide.is_empty() {
+            text.push_str("\n\n## Writing guide\n\n");
+            text.push_str(guide);
+        }
         let path = session_dir.join("system-prompt.md");
         match std::fs::write(&path, text) {
             Ok(()) => path,
@@ -514,12 +522,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let shipped = t.0.join("prompt.md");
         std::fs::write(&shipped, "Base prompt.").unwrap();
-        let prompt = std::fs::read_to_string(core.system_prompt_for_session(&shipped, &dir)).unwrap();
+        let prompt = std::fs::read_to_string(core.system_prompt_for_session(&shipped, &dir, "")).unwrap();
         assert!(prompt.starts_with("Base prompt.") && prompt.contains("This account is an archive"));
 
         // A Gmail account gets the shipped prompt untouched.
         block_on(core.clone().set_current_account("gmail".into())).unwrap();
-        assert_eq!(core.system_prompt_for_session(&shipped, &dir), shipped);
+        assert_eq!(core.system_prompt_for_session(&shipped, &dir, ""), shipped);
         assert!(core.refuse_if_archive().is_ok());
     }
 }

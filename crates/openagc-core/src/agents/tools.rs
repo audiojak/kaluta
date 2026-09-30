@@ -568,6 +568,31 @@ fn addresses(list: Option<Vec<String>>) -> Result<Option<Vec<crate::ffi::Address
     list.map(|l| l.iter().map(|a| parse_address(a)).collect()).transpose()
 }
 
+/// A draft tool's result with the writing guide for the draft's
+/// recipients and type (spec §14.9), so a long conversation keeps it; the
+/// draft records the guide version it was written under.
+async fn draft_with_guide(core: &Arc<Core>, d: &crate::DraftInfo) -> Value {
+    let mut value = draft_json(d);
+    let recipients: Vec<String> = d.to.iter().chain(&d.cc).map(|a| a.email.clone()).collect();
+    let subject = d.subject.trim().to_lowercase();
+    let kind = if subject.starts_with("fwd:") || subject.starts_with("fw:") {
+        "forward"
+    } else if d.in_reply_to_message_id.is_some() {
+        "reply"
+    } else {
+        "new"
+    };
+    if let Ok(guide) = core.guide_for_message(recipients, Some(kind.into()), None).await
+        && !guide.text.is_empty()
+    {
+        value["writing_guide"] = json!(guide.text);
+        if let Err(e) = core.record_draft_guide(d.id, guide.version).await {
+            tracing::warn!(error = %e, "draft guide version not recorded");
+        }
+    }
+    value
+}
+
 fn draft_json(d: &crate::DraftInfo) -> Value {
     json!({
         "draft_id": d.id,
@@ -640,7 +665,7 @@ async fn create_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Resu
         s.guard.allow_draft(id);
         s.draft_quotes.insert(id, quote);
     });
-    Ok(Outcome::json(draft_json(&draft)))
+    Ok(Outcome::json(draft_with_guide(core, &draft).await))
 }
 
 #[derive(Deserialize)]
@@ -686,7 +711,7 @@ async fn update_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Resu
         draft.quoted_html = quote;
     }
     core.save_draft(draft.clone()).await.map_err(failed)?;
-    Ok(Outcome::json(draft_json(&draft)))
+    Ok(Outcome::json(draft_with_guide(core, &draft).await))
 }
 
 #[derive(Deserialize)]

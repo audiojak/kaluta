@@ -178,3 +178,35 @@ struct GuideInterviewTests {
         #expect(GuideInterview.entries(for: invent, choice: nil, text: "", fields: []).isEmpty)
     }
 }
+
+@MainActor
+struct GuideFollowingTests {
+    @Test func writingHelpFollowsTheGuideForItsRecipients() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .rule, statement: "Sign off with 'John'",
+                                          scope: .always, check: nil), status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let message = try #require(detail.messages.last)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+        #expect(ComposerAssistant.messageType(store) == "reply")
+
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done && assistant.followsGuide)
+        // The fake agent echoes the prompt: the guide reached it.
+        #expect(store.body.string.contains("Sign off with 'John'"))
+        #expect(store.body.string.contains("The user's writing guide (version"))
+        for _ in 0..<100 where store.draftID == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(try await core.draftGuideVersion(store.draftID) != nil, "the draft records the version")
+    }
+}

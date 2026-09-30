@@ -564,6 +564,20 @@ final class CoreClient: Sendable {
         try await call { try await core.guideSampleInfo(count: count, filter: filter) }
     }
 
+    /// The writing guide for a message being drafted (spec §14.9).
+    func guideForMessage(recipients: [String], messageType: String?,
+                         audiences: [String]?) async throws(CoreClientError) -> GuideRendered {
+        try await call { try await core.guideForMessage(recipients: recipients, messageType: messageType, audiences: audiences) }
+    }
+
+    func setDraftGuideVersion(_ draftID: Int64, _ version: Int64) async throws(CoreClientError) {
+        try await call { try await core.setDraftGuideVersion(draftId: draftID, version: version) }
+    }
+
+    func draftGuideVersion(_ draftID: Int64) async throws(CoreClientError) -> Int64? {
+        try await call { try await core.draftGuideVersion(draftId: draftID) }
+    }
+
     /// The signature block the analysis found in sent mail, if any.
     func guideSignature() async throws(CoreClientError) -> String? {
         try await call { try await core.guideSignature() }
@@ -1002,6 +1016,7 @@ typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
 typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
 typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
 typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
+typealias GuideRendered = OpenAGCCore.GuideRendered
 
 // MARK: - Events
 

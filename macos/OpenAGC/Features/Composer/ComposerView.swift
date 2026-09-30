@@ -245,7 +245,9 @@ struct ComposerView: View {
             switch assistant.state {
             case .done:
                 HStack(spacing: Space.m) {
-                    Text("Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    Text(assistant.followsGuide
+                         ? "Written by \(name), following your writing guide. Read it before sending."
+                         : "Written by \(name). Read it before sending.").foregroundStyle(.secondary)
                     Button("Undo") { assistant.undo() }
                         .buttonStyle(.link)
                         .hoverHelp("Put back the message as it was before")
