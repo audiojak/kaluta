@@ -2186,6 +2186,154 @@ need or made a decision.
   the tabs. The store's lists take exclusion narrowings for it
   (`INBOX+!Label_7`, "and not labelled", next to `INBOX+IMPORTANT`).
 
+### 14.9 Writing guide **(Amendment 2026-09-29)**
+
+Whenever an AI composes email for the user (a new message, a reply or a
+forward, in the composer's writing help, the agent column or a routine), it
+follows the account's **writing guide**: a ruleset and a style guide the
+user builds from their own sent mail. Decisions: ADR 0011; plan
+`docs/plans/writing-guide.md`.
+
+**Scope.** One guide per account, in the account's store (ADR 0004); one
+guide for every agent (Claude Code and Codex). Nothing in a guide crosses
+accounts except through an explicit merge, and evidence never does.
+
+**Entries.** Each entry is one sentence, imperative, in one category:
+
+- *Rule*: must or must never; no exceptions unless it states them.
+- *Guideline*: how the user usually writes; followed unless the message
+  calls for something else.
+- *Fact*: something true about the user the agent may use (role, calendar
+  link, time zone); never inferred silently, always confirmed.
+
+An entry has a category, kind, statement, **scope** (any of: audience
+groups, people or domains, message types (new, reply, forward), languages;
+none = always), **evidence** (quotes from the user's sent mail with their
+message ids, and how many analysed messages support and contradict it),
+source (*learned* or *you*), status (*proposed*, *accepted*, *rejected*),
+an optional **check** the core can test without an agent (a banned phrase,
+a pattern, a required sign-off, a spelling variant), and where it came from
+when merged. Rejected proposals are remembered and not proposed again.
+
+**Precedence.** Rules beat guidelines; a narrower scope beats a wider one
+(a person's entry beats their group's, a group's beats an unscoped one);
+among equals the newer wins. Settings › Permissions always wins over the
+guide: H4 can make an agent more careful, never less.
+
+**Categories.** The processing function checks every batch against the
+whole list, so coverage does not depend on the agent thinking of a
+category. *Learned* categories come from sent mail; *asked* ones cannot be
+seen in mail and come from the interview.
+
+| Group | Categories |
+| --- | --- |
+| A Voice and tone | A1 overall voice; A2 tone by situation (no, bad news, apologising, favours, chasing, thanks, disagreeing, congratulating); A3 humour, emoji, exclamation marks; A4 directness; A5 uncertainty in the user's voice; A6 enthusiasm and acknowledgements; A7 personality markers (regionalisms, colloquialisms, lowercase replies) |
+| B Structure | B1 greeting; B2 opening line; B3 body (answer first, paragraphs, lists); B4 length by message type; B5 closing line; B6 sign-off and name; B7 signature block (also asked); B8 subject lines; B9 context before the point; B10 calls to action; B11 questions |
+| C Language | C1 spelling variant; C2 punctuation; C3 capitalisation; C4 contractions; C5 numbers, dates, times, money; C6 abbreviations and jargon; C7 favoured words and phrases; C8 things never done (banned words, clichés, formatting, AI habits; also asked); C9 sentence style; C10 languages |
+| D Audience | D1 audience groups (also asked); D2 particular people and domains; D3 forms of address; D4 first contact vs established; D5 seniority (also asked) |
+| E Message types | E1 replies; E2 forwards; E3 introductions; E4 scheduling (also asked); E5 follow-ups; E6 declines; E7 requests and delegating; E8 status updates and hand-offs; E9 thanks; E10 recipients (reply all, Cc, Bcc); E11 attachments and links; E12 disagreeing and negotiating |
+| F Content rules (asked) | F1 commitments; F2 confidentiality; F3 facts about the user; F4 never invent (on by default); F5 AI disclosure; F6 required wording |
+| G Format | G1 plain or rich text; G2 quoting |
+| H When unsure (asked) | H1 missing information; H2 conflicts and precedence (fixed, as above, shown to the user); H3 model examples (chosen by the user); H4 draft, send or stay silent |
+
+**Audience groups** are inferred from the mail (recipients' domains and
+how the user writes to them) and confirmed by the user, who can rename,
+merge or reject them. With fewer than five confirmed, the set is filled
+from the obvious gaps (colleagues, direct reports, customers, investors,
+vendors, candidates, advisers, friends and family, strangers), marked
+*suggested* until confirmed. People and domains map to groups; a
+recipient's group is what scopes guideline entries.
+
+**Learning.**
+1. *Gather.* Learn from Sent Mail… asks how many of the latest sent
+   messages to use (default 1,000; the dialog shows how many the account
+   has) and which people or labels to leave out. Skipped: automatic
+   replies, calendar responses, messages with none of the user's own text.
+   Messages stored with headers only are downloaded first (§7.4).
+2. *Prepare* (core, no agent): the user's own text only (quoted replies
+   and forwarded originals stripped; the signature detected, removed and
+   kept once for B7), with the message type, recipients, length and
+   whether it answered someone.
+3. *Process*: batches of 20 go to the user's agent in a read-only session
+   (ADR 0007), fenced as in task prompts, with the category list and the
+   accepted guide. The agent answers in JSON per category: a new entry,
+   evidence for an entry, a contradiction, or nothing. The core reads it
+   leniently, keeps known categories only, drops any quote that does not
+   occur in the cited message, and merges across batches.
+4. *No questions until every batch is processed*: proposals merge over the
+   whole sample first, so each arrives once with all its evidence.
+   Deciding then opens; every decision is saved as it is made, and the
+   user can leave and come back.
+5. *Decisions*: proposals by category with quotes and counts; accept, edit
+   (statement, kind, scope, check) or reject. Mail that contradicts an
+   accepted entry is a decision: narrow it, change it, or keep it.
+6. *Interview*: short questions for the asked categories and for any
+   category left without evidence; answers become entries with source
+   *you*. It needs no agent.
+7. *Coverage*: the guide shows every category with its entries or
+   "nothing yet".
+
+A run is a background job in the core, recorded batch by batch in the
+store: it survives the dialog and window closing, pauses when the app
+quits and resumes at the next launch, and can be paused, resumed or
+cancelled (what was analysed is kept). Two progress bars, in the Writing
+Guide section and compactly in the sidebar's footer: *Analysis* (messages
+and batches done) and *Decisions* (decided of total, or "waiting for
+analysis"); a notification when analysis finishes. **Further analysis**,
+any time: newer mail since the last run; further back; improve one
+category or audience (the unanalysed messages most likely to show it,
+with that category asked for in particular); re-check the guide against a
+fresh sample (changes only). A message is never analysed twice.
+
+**Agents only.** Learning, changing, merging and drafting run through the
+user's connected Claude Code or Codex CLI; the app makes no model calls
+of its own. With no agent ready, each entry point says so instead of
+starting ("Connect Claude Code or Codex to learn from your mail"), with the
+agent's status, the command to fix it and a button to Settings › Agents; a
+run whose agent stops being ready pauses with the same message.
+
+**Changing the guide by prompt.** Ask Claude to change the guide… takes a
+request in the user's words. The agent answers with changes (add, edit,
+rescope, remove) grouped into questions, each one decision in plain words
+with before and after; nothing changes until the user answers, and the
+answers apply as one change.
+
+**Merging.** From another account in the app or an exported file. Into an
+account without a guide the entries are listed, then saved; into one with
+a guide identical entries are skipped, new points are listed to add, and
+the agent writes one high-level decision per point of difference (keep
+mine, take the incoming one, or keep both with a scope). Facts and content
+rules are always a decision. Merged entries say where they came from.
+
+**Following the guide.** The core renders it for the message at hand:
+rules and facts always; guidelines by scope (the recipients' groups and
+people, the message type, the language); up to three model examples of the
+type. It goes into every composing path: the writing-help prompt (the
+user's own draft stays part of the prompt), agent and routine sessions
+through the system prompt, and again in the results of the draft tools so
+a long conversation keeps it. Drafts record the guide version they used.
+
+**Checks** run in the core on AI-written drafts only, never on text the
+user typed. In writing help a failing draft is sent back once for a
+rewrite, then shown with the failure ("Uses 'circle back', which your
+rules ban"); on an agent's draft the result shows on its approval card.
+
+**Drafting with an audience.** An AI draft says who it is written for
+("Written for Customers"), chosen from the recipients. Choosing another
+audience writes a new draft under that audience's guidelines from the same
+request; drafts are kept per audience while the composer is open, and
+Undo returns to the user's own text.
+
+**Undo and versions.** Every change to the guide (a decision, an edit, an
+interview answer, a change by prompt, a merge) is undoable on the
+account's stack (§14.6a), and the guide keeps its versions.
+
+**Privacy.** Learning sends the chosen sent mail to the user's own agent
+CLI, as the agent column does with mail it reads; the dialog says so, with
+the number of messages, before it starts. The guide and its evidence stay
+in the account's store on this Mac. Export writes Markdown (readable) and
+JSON (for import and merge) without evidence quotes unless the user asks.
+
 ---
 
 ## 15. Security Model and Threat Model

@@ -18,3 +18,4 @@ stay in the spec's dated amendments and the nightly plans in `docs/plans/`.
 | [0008](0008-tasks-local-with-gmail-label.md) | Tasks live on the Mac; Gmail sees them as a `Task` label | 2026-09-29 |
 | [0009](0009-test-and-scratch-isolation.md) | Tests and scratch runs are isolated inside the app's bundle id | 2026-09-28 |
 | [0010](0010-design-system-in-code.md) | A design system in code, enforced by lint | 2026-09-28 |
+| [0011](0011-writing-guide.md) | A per-account writing guide, learned from sent mail through the user's own agent | 2026-09-29 |
