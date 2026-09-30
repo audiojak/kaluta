@@ -188,8 +188,24 @@ times. A rejected proposal is remembered so it is not proposed again.
    D1, E4), and for categories with no evidence, the app asks short
    questions; answers become entries with source "you".
 6. **Coverage.** The guide shows every category with its entries, or
-   "nothing yet", so gaps are visible. Learning can be run again later on
-   newer mail; only new messages are processed.
+   "nothing yet", so gaps are visible.
+7. **Further analysis** (maintainer, 2026-09-29): the user can run more
+   at any time from the Writing Guide section, and each run works like the
+   first (background, batches of 20, decisions after it finishes):
+   - **Newer mail:** everything sent since the last run.
+   - **Further back:** the next N older messages beyond what has been
+     analysed (the dialog shows how many remain).
+   - **Improve a category or an audience:** the app picks the unanalysed
+     messages most likely to show it (forwards for E2, replies to
+     customers for D1's customers entry, messages to one person) and asks
+     the agent to look for that category in particular. The guide offers
+     this on every category with little or no evidence ("Improve: 3
+     messages support this").
+   - **Re-check the guide:** the agent reads the accepted guide against a
+     fresh sample and proposes only changes: entries the mail no longer
+     supports, and contradictions.
+   Every run records which messages it covered, so nothing is analysed
+   twice, and the guide shows when it last learned and from how much.
 
 ### In the background
 
@@ -340,7 +356,8 @@ account's store on this Mac.
 12. Drafting with an audience: the audience menu and per-audience drafts.
 13. Changing the guide by prompt, with questions and answers.
 14. Merging a guide: from an account or a file; high-level decisions.
-15. Re-learning from newer mail.
+15. Further analysis: newer mail, further back, improve a category or
+    audience, re-check the guide.
 
 ## Notes
 
