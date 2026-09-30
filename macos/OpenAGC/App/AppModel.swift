@@ -165,7 +165,7 @@ final class AppModel {
     /// narrowed to Important when that switch is on and to the category
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
-        guard let id = selectedMailboxID, id != Self.tasksMailboxID else { return nil }
+        guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -321,6 +321,8 @@ final class AppModel {
     let routines: RoutinesStore
     /// The task list (spec §14.8).
     let tasks: TaskListStore
+    /// The writing guide (spec §14.9).
+    let guide: GuideStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -350,6 +352,7 @@ final class AppModel {
         fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
         tasks = TaskListStore(core: core)
+        guide = GuideStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -563,6 +566,12 @@ final class AppModel {
     private(set) var guideRevision = 0
     /// The learning run's progress and the decisions waiting (spec §14.9).
     var guideProgress: GuideProgress?
+    /// A sheet of the Writing Guide section, while open.
+    var guideSheet: GuideSheet?
+    /// Why the last guide action failed, shown in the section.
+    var guideError: String?
+    /// Opens Settings on the Agents tab (set by the window).
+    @ObservationIgnored var openAgentSettings: (() -> Void)?
 
     // MARK: Agent
 
@@ -1186,6 +1195,7 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
+        if isGuide { Task { await guide.load() } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1287,8 +1297,14 @@ final class AppModel {
             routinesRevision += 1
         case .guideChanged:
             guideRevision += 1
+            await guide.load()
         case let .guideProgress(progress):
+            let finished = guideProgress?.run?.status == .running && progress.run?.status == .done
             guideProgress = progress
+            if finished {
+                await guide.load()
+                notifier.announceGuide(decisions: Int(progress.decisionsTotal) - Int(progress.decisionsDone))
+            }
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

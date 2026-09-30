@@ -26,6 +26,10 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
+///                                       fake agent on the demo mailbox, accept
+///                                       some proposals, and show the Writing
+///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -112,6 +116,26 @@ enum Snapshot {
                 model.openSyncDebugger?()
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
+            }
+            if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
+                await model.agent.loadProviders()
+                _ = try? await core.startGuideRun(GuideRunRequest(kind: .latest, count: 40,
+                                                                  filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
+                                                                  focus: nil, agent: model.agent.providerID))
+                for _ in 0..<100 where (try? await core.guideProgress())?.run?.status != .done {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                let decisions = (try? await core.guideDecisions()) ?? []
+                if guide != "decisions" {
+                    for entry in decisions.prefix(2) {
+                        _ = try? await core.applyGuideEdits([.decide(id: entry.id, status: .accepted)], reason: "snapshot")
+                    }
+                }
+                model.selectedMailboxID = AppModel.guideMailboxID
+                model.guideProgress = try? await core.guideProgress()
+                await model.guide.load()
+                if guide == "decisions" { model.showGuideDecisions() } else { model.showGuideCategory("A1") }
+                try? await Task.sleep(for: .milliseconds(800))
             }
             if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()

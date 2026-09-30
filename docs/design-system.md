@@ -361,3 +361,4 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Undo notice, light](design/undo-light.png) | |
 | ![Composer replying, light](design/compose-light.png) | ![Composer replying, dark](design/compose-dark.png) |
 | ![Task dialog, light](design/task-light.png) | ![Task dialog, dark](design/task-dark.png) |
+| ![Writing Guide, light](design/guide-light.png) | ![Writing Guide, dark](design/guide-dark.png) |

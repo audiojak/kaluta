@@ -57,6 +57,21 @@ final class NewMailNotifier: NSObject {
         }
     }
 
+    /// A learning run finished (spec §14.9): its decisions are waiting.
+    /// Only when the app is not in front, like new mail.
+    func announceGuide(decisions: Int) {
+        guard decisions > 0, !isAppActive() else { return }
+        post(Self.guideRequest(decisions: decisions))
+    }
+
+    static func guideRequest(decisions: Int) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = "Writing guide analysis finished"
+        content.body = decisions == 1 ? "1 decision is waiting for you." : "\(decisions) decisions are waiting for you."
+        content.threadIdentifier = "writing-guide"
+        return UNNotificationRequest(identifier: "writing-guide-\(UUID().uuidString)", content: content, trigger: nil)
+    }
+
     /// One notification per message, or one summary for a burst. Pure.
     static func requests(for mail: [CoreClientEvent.NewMail], account: AccountTag? = nil) -> [UNNotificationRequest] {
         requests(untagged: mail).map { request in
