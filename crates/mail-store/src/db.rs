@@ -26,6 +26,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_undo.sql"),
     include_str!("../migrations/0008_server_drafts.sql"),
     include_str!("../migrations/0009_tasks.sql"),
+    include_str!("../migrations/0010_writing_guide.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;

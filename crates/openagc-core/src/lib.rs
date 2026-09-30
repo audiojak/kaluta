@@ -14,6 +14,7 @@ mod compose;
 mod error;
 mod events;
 pub mod ffi;
+mod guide;
 mod logging;
 mod mail;
 mod mutations;

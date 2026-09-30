@@ -483,6 +483,63 @@ final class CoreClient: Sendable {
         try await call { try await core.parseTaskSuggestions(text: text, threadIds: threadIDs) }
     }
 
+    // MARK: Writing guide (spec §14.9)
+
+    func guideCategories() async throws(CoreClientError) -> [GuideCategoryInfo] {
+        try await call { try await core.guideCategories() }
+    }
+
+    /// Entries with any of `statuses`, or every entry when empty.
+    func guideEntries(_ statuses: [GuideStatus] = []) async throws(CoreClientError) -> [GuideEntry] {
+        try await call { try await core.listGuideEntries(statuses: statuses) }
+    }
+
+    func guideEntry(_ id: Int64) async throws(CoreClientError) -> GuideEntry? {
+        try await call { try await core.guideEntry(id: id) }
+    }
+
+    /// Edits applied as one change; its id undoes and redoes it.
+    func applyGuideEdits(_ edits: [GuideEdit], reason: String) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.applyGuideEdits(edits: edits, reason: reason) }
+    }
+
+    func undoGuideChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoGuideChange(changeId: id) }
+    }
+
+    func redoGuideChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoGuideChange(changeId: id) }
+    }
+
+    func guideVersion() async throws(CoreClientError) -> Int64 {
+        try await call { try await core.guideVersion() }
+    }
+
+    func audienceGroups() async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.listAudienceGroups() }
+    }
+
+    func saveAudienceGroup(_ group: AudienceGroup) async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.saveAudienceGroup(group: group) }
+    }
+
+    func deleteAudienceGroup(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.deleteAudienceGroup(id: id) }
+    }
+
+    /// Markdown to read or share, or JSON to import or merge elsewhere.
+    func exportGuide(json: Bool, withEvidence: Bool = false) async throws(CoreClientError) -> String {
+        try await call { try await core.exportGuide(json: json, withEvidence: withEvidence) }
+    }
+
+    func readGuideExport(_ json: String) throws(CoreClientError) -> GuideImport {
+        do { return try core.readGuideExport(json: json) } catch let error as CoreError {
+            throw CoreClientError(error)
+        } catch {
+            throw CoreClientError(kind: .internalError, message: String(describing: error))
+        }
+    }
+
     // MARK: Agents
 
     func agentProviders(refresh: Bool = false) async -> [AgentProviderInfo] {
@@ -867,6 +924,21 @@ typealias NewTask = OpenAGCCore.NewTask
 typealias TaskEdit = OpenAGCCore.TaskEdit
 typealias TaskAction = OpenAGCCore.TaskAction
 typealias TaskSuggestion = OpenAGCCore.TaskSuggestion
+typealias GuideCategoryInfo = OpenAGCCore.GuideCategoryInfo
+typealias GuideEntry = OpenAGCCore.GuideEntry
+typealias GuideEntryFields = OpenAGCCore.GuideEntryFields
+typealias GuideEdit = OpenAGCCore.GuideEdit
+typealias GuideChange = OpenAGCCore.GuideChange
+typealias GuideKind = OpenAGCCore.GuideKind
+typealias GuideStatus = OpenAGCCore.GuideStatus
+typealias GuideSource = OpenAGCCore.GuideSource
+typealias GuideScope = OpenAGCCore.GuideScope
+typealias GuideCheck = OpenAGCCore.GuideCheck
+typealias GuideCheckKind = OpenAGCCore.GuideCheckKind
+typealias GuideQuote = OpenAGCCore.GuideQuote
+typealias GuideImport = OpenAGCCore.GuideImport
+typealias AudienceGroup = OpenAGCCore.AudienceGroup
+typealias AudienceStatus = OpenAGCCore.AudienceStatus
 
 // MARK: - Events
 
@@ -904,6 +976,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
     case tasksChanged
+    case guideChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -985,6 +1058,8 @@ private extension CoreClientEvent {
             self = .routinesChanged
         case .tasksChanged:
             self = .tasksChanged
+        case .guideChanged:
+            self = .guideChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

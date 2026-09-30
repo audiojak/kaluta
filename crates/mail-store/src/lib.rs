@@ -9,6 +9,7 @@ mod db;
 pub mod demo;
 pub mod drafts;
 mod error;
+pub mod guide;
 pub mod outbox;
 pub mod queue;
 pub mod read;

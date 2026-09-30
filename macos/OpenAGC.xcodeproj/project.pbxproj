@@ -69,6 +69,7 @@
 		79D089313B823566456CDFBD /* LabelTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCCFF907D89AAA9F8298A38B /* LabelTree.swift */; };
 		7ADB97840B40A1C13F3A9D87 /* ComposerAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 118671237C043C8CFF6F33F0 /* ComposerAssistantTests.swift */; };
 		7E970B4006C6E0C0A357D7F9 /* Surfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */; };
+		85A5FF7E4C75ADA9A10AF03E /* GuideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1AC3BAB2B7AD0F84B139D5 /* GuideTests.swift */; };
 		8AE4FC81B09805EFF46AE738 /* ActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACA440AC1C73AD0A9E18E993 /* ActionTests.swift */; };
 		8BCA879DA87A93071503AFD8 /* OpenAGCCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24AC691869E94971A95182AF /* OpenAGCCore.framework */; };
 		91D20775BFA386637A3B30D4 /* LabelTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C8A5AC940824CF40F0B058F /* LabelTreeTests.swift */; };
@@ -217,6 +218,7 @@
 		948C111ADD342515B7C70DDB /* OpenAGCTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenAGCTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		99F36E7595DF6E9B290AE189 /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
 		9B2ED3B92D6E529688C7C31B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9F1AC3BAB2B7AD0F84B139D5 /* GuideTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideTests.swift; sourceTree = "<group>"; };
 		9FCBE0C4FC7F267DC74AB18D /* ImportMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportMailbox.swift; sourceTree = "<group>"; };
 		A0EC7D80ED73FC741D5DBAEA /* TaskDoneDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDoneDialog.swift; sourceTree = "<group>"; };
 		A1FA403B0E890A2F61D2E8BC /* DesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTests.swift; sourceTree = "<group>"; };
@@ -454,6 +456,7 @@
 				6EA889A74036D5319EED2E94 /* CoreClientTests.swift */,
 				FE0EEA46B16CBE10362B13CC /* CoreEventTests.swift */,
 				A1FA403B0E890A2F61D2E8BC /* DesignTests.swift */,
+				9F1AC3BAB2B7AD0F84B139D5 /* GuideTests.swift */,
 				700730FD7CE20073EC4E05F4 /* KeychainTests.swift */,
 				BD60D05E2A25A84E52603E5F /* LabelPickerTests.swift */,
 				0C8A5AC940824CF40F0B058F /* LabelTreeTests.swift */,
@@ -808,6 +811,7 @@
 				1970C5710634017B9B3E926B /* CoreClientTests.swift in Sources */,
 				F55DCE790C44258F12C510F2 /* CoreEventTests.swift in Sources */,
 				086E815909ECAC5832721F96 /* DesignTests.swift in Sources */,
+				85A5FF7E4C75ADA9A10AF03E /* GuideTests.swift in Sources */,
 				9CC3AECF8DB746BF967161B7 /* KeychainTests.swift in Sources */,
 				366FA0C92B6526C208B62372 /* LabelPickerTests.swift in Sources */,
 				91D20775BFA386637A3B30D4 /* LabelTreeTests.swift in Sources */,

@@ -555,6 +555,8 @@ final class AppModel {
     private(set) var routinesRevision = 0
     /// Bumped when a task was added, changed or removed (spec §14.8).
     private(set) var tasksRevision = 0
+    /// Bumped when the writing guide changed (spec §14.9).
+    private(set) var guideRevision = 0
 
     // MARK: Agent
 
@@ -1277,6 +1279,8 @@ final class AppModel {
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:
             routinesRevision += 1
+        case .guideChanged:
+            guideRevision += 1
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()
