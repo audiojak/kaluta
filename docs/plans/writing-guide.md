@@ -336,28 +336,61 @@ so before it starts, with the number of messages. Sessions are read-only;
 mail in prompts is fenced. The guide and its evidence stay in the
 account's store on this Mac.
 
-## Issues, in order
+## Issues, in order (epic oagc-c3q)
 
-1. Spec §14.9 and ADR 0011: the taxonomy, entry schema and precedence.
-2. Store and core API (migration, CRUD, versions, render, export/import).
-3. Gather and prepare: sample selection, own-text extraction, signature
-   detection.
-4. The processing function: prompt, parser, quote verification, merge of
-   proposals; the fake agent's answers.
-5. The background run: job, persistence, pause/resume, progress events,
-   the no-agent message.
-6. Writing Guide section with the two progress bars.
-7. Decisions: review by category, resumable, arriving proposals,
-   contradictions.
-8. Audience groups: inferred, confirmed, filled to five.
-9. The interview for what mail cannot show.
-10. Following the guide: system prompt, draft tools, routines, composer.
-11. Checks on AI drafts and the rewrite loop.
-12. Drafting with an audience: the audience menu and per-audience drafts.
-13. Changing the guide by prompt, with questions and answers.
-14. Merging a guide: from an account or a file; high-level decisions.
-15. Further analysis: newer mail, further back, improve a category or
-    audience, re-check the guide.
+| # | Issue | Depends on |
+| --- | --- | --- |
+| 1 | oagc-c3q.1 Spec §14.9 and ADR 0011: taxonomy, entry schema, precedence | |
+| 2 | oagc-c3q.2 Store and core API | 1 |
+| 3 | oagc-c3q.3 Gather and prepare sent mail | 2 |
+| 4 | oagc-c3q.4 The processing function: prompt, parser, merge; fake agent | 3 |
+| 5 | oagc-c3q.5 The background run: job, pause/resume, progress, no-agent path | 4 |
+| 6 | oagc-c3q.6 Writing Guide section with the two progress bars | 2 |
+| 7 | oagc-c3q.7 Decisions review, resumable | 5, 6 |
+| 8 | oagc-c3q.8 Audience groups: inferred, confirmed, filled to five | 4 |
+| 9 | oagc-c3q.9 The interview for what mail cannot show | 6 |
+| 10 | oagc-c3q.10 Following the guide everywhere an AI composes | 2 |
+| 11 | oagc-c3q.11 Checks on AI drafts and the rewrite loop | 10 |
+| 12 | oagc-c3q.12 Drafting with an audience | 8, 10 |
+| 13 | oagc-c3q.13 Changing the guide by prompt | 6 |
+| 14 | oagc-c3q.14 Merging a guide | 6 |
+| 15 | oagc-c3q.15 Further analysis on demand | 5 |
+
+## Running it overnight
+
+Branch `writing-guide` (already holds this plan). Commit and push after
+every closed issue; open a draft PR to `main` at the start so CI checks
+each push; never push to `main`. Checks before closing an issue:
+`scripts/gate.sh` (never piped) and `scripts/test-macos.sh test`; snapshots
+in light and dark for new surfaces; spec amendments for any decision that
+changes. Run a review agent over `main..writing-guide` before the handoff
+and fix what it confirms.
+
+Guardrails, in addition to CLAUDE.md:
+
+- The maintainer's app may be running against the real account. Never
+  launch the app against the real account or start sync outside the
+  fakes; snapshots only via `scripts/snapshot.sh` with `-OpenAGCFakeAgents
+  YES`; scratch runs only with `-OpenAGCDataDirectory` and `-OpenAGCDemo
+  YES`. Leave a running OpenAGC alone.
+- **No real agent runs, ever, in tests or snapshots**: the learning run,
+  the change-by-prompt and merge flows and the audience drafts are tested
+  only with the fake agent. The processing function must never be pointed
+  at the maintainer's sent mail by automation.
+- Nothing connects to Gmail, IMAP, Google identity endpoints or any real
+  account; tests use `FakeProvider` and `provider_gmail::imap_fake`. No
+  Claude cloud routines.
+- Never read `~/.claude/.credentials.json`, `~/.codex/auth.json`, or the
+  Keychain items under service `ai.actual.openagc`.
+- Do not delete anything under `~/Library/Application Support/OpenAGC`.
+- After the run, compare mtimes of the real `accounts/index.json`,
+  `~/Library/Logs/OpenAGC/core.log` and
+  `~/Library/Preferences/ai.actual.openagc.plist` against the start.
+- Watch disk space (`df -h /System/Volumes/Data`).
+
+Morning handoff: PR to `main`, closed issues, spec amendments, decisions,
+anything half-done with its `bd` notes, CI status, guardrail check
+results.
 
 ## Notes
 
