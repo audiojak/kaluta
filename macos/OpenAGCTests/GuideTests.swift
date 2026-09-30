@@ -210,3 +210,36 @@ struct GuideFollowingTests {
         #expect(try await core.draftGuideVersion(store.draftID) != nil, "the draft records the version")
     }
 }
+
+@MainActor
+struct GuideCheckTests {
+    @Test func aDraftThatBreaksACheckIsRewrittenOnceThenFlagged() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        // The fake agent echoes its prompt, and the writing-help prompt says
+        // "Answer with only the text": a banned "answer" fails every draft.
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "C8", kind: .rule, statement: "Never write 'answer'", scope: .always,
+                                          check: GuideCheck(kind: .bannedPhrase, value: "answer")),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: try #require(detail.messages.last).id, all: false))
+        let before = store.body.string
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        #expect(store.body.string.hasPrefix("You said: Your draft breaks the user's writing guide"), "rewritten once")
+        #expect(assistant.checkFailures == ["Uses “answer”, which your rules ban"], "then flagged")
+        assistant.undo()
+        #expect(store.body.string == before, "the user's own text is never checked or lost")
+        #expect(try await core.checkGuideDraft("Thanks, see you then.", recipients: [], messageType: "reply",
+                                               audiences: nil).isEmpty)
+    }
+}

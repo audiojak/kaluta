@@ -253,6 +253,12 @@ struct ComposerView: View {
                         .hoverHelp("Put back the message as it was before")
                 }
                 .font(TypeRole.caption)
+                if !assistant.checkFailures.isEmpty {
+                    Label(assistant.checkFailures.joined(separator: "; "), systemImage: "exclamationmark.triangle")
+                        .font(TypeRole.caption)
+                        .foregroundStyle(Tone.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             case let .failed(message):
                 Text(message).font(TypeRole.caption).foregroundStyle(Tone.failure)
             default:

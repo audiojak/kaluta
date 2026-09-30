@@ -570,6 +570,14 @@ final class CoreClient: Sendable {
         try await call { try await core.guideForMessage(recipients: recipients, messageType: messageType, audiences: audiences) }
     }
 
+    /// Check an AI draft's own text against the guide for its message.
+    func checkGuideDraft(_ text: String, recipients: [String], messageType: String?,
+                         audiences: [String]?) async throws(CoreClientError) -> [GuideCheckFailure] {
+        try await call {
+            try await core.checkGuideDraft(text: text, recipients: recipients, messageType: messageType, audiences: audiences)
+        }
+    }
+
     func setDraftGuideVersion(_ draftID: Int64, _ version: Int64) async throws(CoreClientError) {
         try await call { try await core.setDraftGuideVersion(draftId: draftID, version: version) }
     }
@@ -1017,6 +1025,7 @@ typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
 typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
 typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
 typealias GuideRendered = OpenAGCCore.GuideRendered
+typealias GuideCheckFailure = OpenAGCCore.GuideCheckFailure
 
 // MARK: - Events
 

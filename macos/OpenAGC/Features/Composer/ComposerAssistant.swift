@@ -22,6 +22,10 @@ final class ComposerAssistant {
     /// The writing guide the last draft followed (spec §14.9), if any.
     private(set) var guide: GuideRendered?
 
+    /// What the last draft still breaks in the guide, after one rewrite.
+    private(set) var checkFailures: [String] = []
+    @ObservationIgnored private var rewrote = false
+
     /// The last draft followed a writing guide with something in it.
     var followsGuide: Bool { !(guide?.text.isEmpty ?? true) }
 
@@ -44,6 +48,8 @@ final class ComposerAssistant {
         self.model = model
         state = .working
         reply = ""
+        rewrote = false
+        checkFailures = []
         do {
             // The account's writing guide for these recipients and this kind
             // of message (spec §14.9); the user's own draft stays part of
@@ -88,7 +94,7 @@ final class ComposerAssistant {
                 // Writing help changes no mail: refuse anything that would.
                 try? model?.core?.resolveAgentAction(actionID, approve: false)
             case .turnCompleted:
-                apply()
+                await apply()
             case let .turnFailed(message):
                 fail(message)
             default:
@@ -97,10 +103,25 @@ final class ComposerAssistant {
         }
     }
 
-    private func apply() {
+    private func apply() async {
         let text = Self.cleaned(reply)
         guard state == .working, let store else { return }
         guard !text.isEmpty else { return fail("The agent did not write anything. Try asking another way.") }
+        // Checks run on what the agent wrote, never on what the user typed
+        // (spec §14.9). A failing draft goes back once for a rewrite.
+        var failures: [String] = []
+        if followsGuide, let core = model?.core {
+            failures = ((try? await core.checkGuideDraft(text, recipients: (store.to + store.cc).map(\.email),
+                                                         messageType: Self.messageType(store), audiences: guide?.audiences))
+                ?? []).map(\.message)
+            if !failures.isEmpty, !rewrote, let sessionID {
+                rewrote = true
+                reply = ""
+                let again = Self.rewritePrompt(draft: text, failures: failures)
+                if (try? await core.sendAgentPrompt(sessionID, again)) != nil { return }
+            }
+        }
+        checkFailures = failures
         previousBody = store.body
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])
         instruction = ""
@@ -136,6 +157,21 @@ final class ComposerAssistant {
         let subject = store.subject.trimmingCharacters(in: .whitespaces).lowercased()
         if subject.hasPrefix("fwd:") || subject.hasPrefix("fw:") { return "forward" }
         return store.inReplyTo == nil ? "new" : "reply"
+    }
+
+    /// Asked once when a draft breaks the guide's checks.
+    static func rewritePrompt(draft: String, failures: [String]) -> String {
+        """
+        Your draft breaks the user's writing guide:
+        \(failures.map { "- \($0)" }.joined(separator: "\n"))
+        Rewrite it so it follows the guide, changing as little else as you can. Answer with only the text of \
+        the message body.
+
+        Your draft:
+        <<<
+        \(draft)
+        >>>
+        """
     }
 
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,

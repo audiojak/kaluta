@@ -199,8 +199,10 @@ async fn prepare(core: &Arc<Core>, session: &str, tool: Tool, arguments: &Value)
             if d.to.is_empty() && d.cc.is_empty() && d.bcc.is_empty() {
                 return Err(Outcome::error("invalid_arguments", "the draft has no recipients"));
             }
+            let warning = guide_warning(core, &d).await;
             Ok(Proposal {
-                summary: format!("Send “{}” to {}", d.subject, recipients(&d)), draft_id: Some(draft_id)
+                summary: format!("Send “{}” to {}{warning}", d.subject, recipients(&d)),
+                draft_id: Some(draft_id),
             })
         }
         Tool::Forward => {
@@ -232,8 +234,10 @@ async fn prepare(core: &Arc<Core>, session: &str, tool: Tool, arguments: &Value)
             draft.body_html = a.note_markdown.as_deref().map(mail_mime::markdown_to_html).unwrap_or_default();
             let id = core.save_draft(draft.clone()).await.map_err(failed)?;
             core.agents.with_session(session, |s| s.guard.allow_draft(id));
+            let warning = guide_warning(core, &draft).await;
             Ok(Proposal {
-                summary: format!("Forward “{}” to {}", m.subject, recipients(&draft)), draft_id: Some(id)
+                summary: format!("Forward “{}” to {}{warning}", m.subject, recipients(&draft)),
+                draft_id: Some(id),
             })
         }
         Tool::Delete => {
@@ -568,12 +572,9 @@ fn addresses(list: Option<Vec<String>>) -> Result<Option<Vec<crate::ffi::Address
     list.map(|l| l.iter().map(|a| parse_address(a)).collect()).transpose()
 }
 
-/// A draft tool's result with the writing guide for the draft's
-/// recipients and type (spec §14.9), so a long conversation keeps it; the
-/// draft records the guide version it was written under.
-async fn draft_with_guide(core: &Arc<Core>, d: &crate::DraftInfo) -> Value {
-    let mut value = draft_json(d);
-    let recipients: Vec<String> = d.to.iter().chain(&d.cc).map(|a| a.email.clone()).collect();
+/// The draft's own text (not the quoted original), its type and its
+/// recipients, as the writing guide's checks see it.
+fn draft_target(d: &crate::DraftInfo) -> (crate::guide_render::Target, String) {
     let subject = d.subject.trim().to_lowercase();
     let kind = if subject.starts_with("fwd:") || subject.starts_with("fw:") {
         "forward"
@@ -582,10 +583,42 @@ async fn draft_with_guide(core: &Arc<Core>, d: &crate::DraftInfo) -> Value {
     } else {
         "new"
     };
-    if let Ok(guide) = core.guide_for_message(recipients, Some(kind.into()), None).await
+    let target = crate::guide_render::Target {
+        recipients: d.to.iter().chain(&d.cc).map(|a| a.email.clone()).collect(),
+        message_type: Some(kind.into()),
+        audiences: None,
+    };
+    (target, mail_mime::html_to_text(&d.body_html))
+}
+
+/// " · Breaks your writing guide: …" for an approval, or nothing.
+async fn guide_warning(core: &Arc<Core>, d: &crate::DraftInfo) -> String {
+    let (target, text) = draft_target(d);
+    match core.check_against_guide(target, &text).await {
+        Ok(failures) if !failures.is_empty() => format!(
+            " · Breaks your writing guide: {}",
+            failures.iter().map(|f| f.message.clone()).collect::<Vec<_>>().join("; ")
+        ),
+        _ => String::new(),
+    }
+}
+
+/// A draft tool's result with the writing guide for the draft's
+/// recipients and type (spec §14.9), so a long conversation keeps it; the
+/// draft records the guide version it was written under.
+async fn draft_with_guide(core: &Arc<Core>, d: &crate::DraftInfo) -> Value {
+    let mut value = draft_json(d);
+    let (target, text) = draft_target(d);
+    if let Ok(guide) = core.render_guide(Some(target.clone())).await
         && !guide.text.is_empty()
     {
         value["writing_guide"] = json!(guide.text);
+        // What the draft breaks, so the agent can fix it before asking to send.
+        if let Ok(failures) = core.check_against_guide(target, &text).await
+            && !failures.is_empty()
+        {
+            value["guide_check"] = json!(failures.iter().map(|f| f.message.clone()).collect::<Vec<_>>());
+        }
         if let Err(e) = core.record_draft_guide(d.id, guide.version).await {
             tracing::warn!(error = %e, "draft guide version not recorded");
         }

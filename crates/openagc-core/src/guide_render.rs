@@ -171,7 +171,79 @@ impl Core {
     }
 }
 
+/// A check an AI draft failed (spec §14.9).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct GuideCheckFailure {
+    pub entry_id: i64,
+    pub statement: String,
+    /// What is wrong, in a line: "Uses “circle back”, which your rules ban".
+    pub message: String,
+}
+
+/// Whether `phrase` occurs in `text` as words (any case): "circle back"
+/// matches "Let's circle back." but not "encircle backs".
+fn contains_phrase(text: &str, phrase: &str) -> bool {
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric() && c != '\'')
+            .filter(|w| !w.is_empty())
+            .map(|w| w.to_lowercase())
+            .collect()
+    };
+    let (t, p) = (words(text), words(phrase));
+    !p.is_empty() && t.windows(p.len()).any(|w| w == p.as_slice())
+}
+
+/// Run the checks of the entries that apply to this message on an AI
+/// draft's own text (never on text the user typed; spec §14.9).
+pub(crate) fn check(
+    entries: &[GuideEntry],
+    groups: &[AudienceGroup],
+    target: &Target,
+    text: &str,
+) -> Vec<GuideCheckFailure> {
+    let audiences = target.audiences.clone().unwrap_or_else(|| audiences_of(&target.recipients, groups));
+    let words = text.split_whitespace().count();
+    entries
+        .iter()
+        .filter(|e| e.status == GuideStatus::Accepted && applies(&e.scope, target, &audiences))
+        .filter_map(|e| {
+            let c = e.check.as_ref()?;
+            let message = match c.kind {
+                crate::guide::GuideCheckKind::BannedPhrase if contains_phrase(text, &c.value) => {
+                    format!("Uses “{}”, which your rules ban", c.value)
+                }
+                crate::guide::GuideCheckKind::RequiredPhrase if !contains_phrase(text, &c.value) => {
+                    format!("Leaves out “{}”, which your rules require", c.value)
+                }
+                crate::guide::GuideCheckKind::MaxWords => {
+                    let limit: usize = c.value.parse().ok()?;
+                    if words <= limit {
+                        return None;
+                    }
+                    format!("Is {words} words; your guide says at most {limit}")
+                }
+                _ => return None,
+            };
+            Some(GuideCheckFailure { entry_id: e.id, statement: e.statement.clone(), message })
+        })
+        .collect()
+}
+
 impl Core {
+    /// Check an AI draft's own text against the guide for its message.
+    pub(crate) async fn check_against_guide(
+        &self,
+        target: Target,
+        text: &str,
+    ) -> Result<Vec<GuideCheckFailure>, CoreError> {
+        let entries = self.list_guide_entries(vec![GuideStatus::Accepted]).await?;
+        if entries.iter().all(|e| e.check.is_none()) {
+            return Ok(vec![]);
+        }
+        let groups = self.list_audience_groups().await?;
+        Ok(check(&entries, &groups, &target, text))
+    }
+
     /// Record the guide version a draft was written under.
     pub(crate) async fn record_draft_guide(&self, draft_id: i64, version: i64) -> Result<(), CoreError> {
         let db = self.db()?;
@@ -196,6 +268,18 @@ impl Core {
     /// Writing help wrote this draft's body under guide `version`.
     pub async fn set_draft_guide_version(&self, draft_id: i64, version: i64) -> Result<(), CoreError> {
         self.record_draft_guide(draft_id, version).await
+    }
+
+    /// Check a draft an AI wrote (its own text, without the quoted
+    /// original) against the guide for its recipients and type.
+    pub async fn check_guide_draft(
+        &self,
+        text: String,
+        recipients: Vec<String>,
+        message_type: Option<String>,
+        audiences: Option<Vec<String>>,
+    ) -> Result<Vec<GuideCheckFailure>, CoreError> {
+        self.check_against_guide(Target { recipients, message_type, audiences }, &text).await
     }
 
     /// The guide for a message being drafted (spec §14.9): its recipients
@@ -300,6 +384,31 @@ mod tests {
     }
 
     #[test]
+    fn checks_catch_banned_and_missing_phrases_and_length_where_they_apply() {
+        use crate::guide::{GuideCheck, GuideCheckKind};
+        let with = |id, kind, value: &str, scope| GuideEntry {
+            check: Some(GuideCheck { kind, value: value.into() }),
+            ..entry(id, GuideKind::Rule, "rule", scope)
+        };
+        let customers = GuideScope { groups: vec!["Customers".into()], ..Default::default() };
+        let entries = vec![
+            with(1, GuideCheckKind::BannedPhrase, "circle back", GuideScope::default()),
+            with(2, GuideCheckKind::RequiredPhrase, "support@acme.com", customers),
+            with(3, GuideCheckKind::MaxWords, "8", GuideScope::default()),
+        ];
+        let to_customer =
+            Target { recipients: vec!["ann@acme.com".into()], message_type: Some("reply".into()), audiences: None };
+        let failures = check(&entries, &groups(), &to_customer, "Let's Circle back next week about the plan, Ann.");
+        let ids: Vec<i64> = failures.iter().map(|f| f.entry_id).collect();
+        assert_eq!(ids, [1, 2, 3]);
+        assert_eq!(failures[0].message, "Uses “circle back”, which your rules ban");
+        assert!(failures[2].message.starts_with("Is 9 words"));
+        let to_colleague = Target { recipients: vec!["bob@actual.ai".into()], ..to_customer.clone() };
+        assert!(check(&entries, &groups(), &to_colleague, "Sounds good.").is_empty(), "scoped checks stay in scope");
+        assert!(check(&entries, &groups(), &to_colleague, "The encircle backstory").is_empty(), "whole words only");
+    }
+
+    #[test]
     fn a_session_gets_every_entry_with_its_scope_and_no_guide_means_nothing() {
         let (text, _) = render(&guide(), &groups(), None, &[], 3);
         assert!(text.contains("Be formal (for Customers)") && text.contains("Answer in the first line (in reply)"));
@@ -325,7 +434,10 @@ mod tests {
                     kind: GuideKind::Rule,
                     statement: "Sign off with 'John'".into(),
                     scope: GuideScope::default(),
-                    check: None,
+                    check: Some(crate::guide::GuideCheck {
+                        kind: crate::guide::GuideCheckKind::BannedPhrase,
+                        value: "circle back".into(),
+                    }),
                 },
                 status: GuideStatus::Accepted,
                 source: GuideSource::You,
@@ -344,10 +456,11 @@ mod tests {
             core,
             &session,
             permissions::Tool::CreateDraft,
-            serde_json::json!({"to": ["ann@example.com"], "subject": "Plan", "body_markdown": "Hi Ann"}),
+            serde_json::json!({"to": ["ann@example.com"], "subject": "Plan", "body_markdown": "Hi Ann, let's circle back."}),
         ));
         let agent_mcp::Outcome::Ok { structured: Some(value), .. } = out else { panic!("draft not created: {out:?}") };
         assert!(value["writing_guide"].as_str().unwrap().contains("Sign off with 'John'"));
+        assert_eq!(value["guide_check"][0], "Uses “circle back”, which your rules ban");
         let draft = value["draft_id"].as_i64().unwrap();
         assert_eq!(block_on(core.draft_guide_version(draft)).unwrap(), Some(1));
         let _ = block_on(core.clone().close_agent_session(session));
