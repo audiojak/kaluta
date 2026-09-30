@@ -125,6 +125,7 @@
 		F65AA400F8604C8278AAF409 /* GuideDecisionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C1A1D559658C07CBA5E7BD /* GuideDecisionsView.swift */; };
 		F79978E7E6CDFE26B5F9C6D8 /* MessageToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A39D166713933009D25A50F /* MessageToolbar.swift */; };
 		F9BBF95D9CBEC5F60BC4CD61 /* agent-system-prompt.md in Resources */ = {isa = PBXBuildFile; fileRef = 6D322E3E16D6E19FF3D99CBF /* agent-system-prompt.md */; };
+		FCED07E1E5873247C4857005 /* ChangeGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 821CE82268E95C47F9C2419D /* ChangeGuideSheet.swift */; };
 		FD569EAFC3413B0FA5121710 /* ListFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 053AED4EA96D02AB9F26511F /* ListFilter.swift */; };
 /* End PBXBuildFile section */
 
@@ -223,6 +224,7 @@
 		7DFBC630572AC27DA6ED8285 /* AgentSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSettings.swift; sourceTree = "<group>"; };
 		7F31887B3B0CDC339E3EB92E /* AppModel+Guide.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Guide.swift"; sourceTree = "<group>"; };
 		813AFF04D4AA06CBAF57266A /* ArchiveAccountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArchiveAccountTests.swift; sourceTree = "<group>"; };
+		821CE82268E95C47F9C2419D /* ChangeGuideSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeGuideSheet.swift; sourceTree = "<group>"; };
 		83C030F70A3EC9DE875D6F6C /* AppModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModelTests.swift; sourceTree = "<group>"; };
 		88FDA6A53B22BE15E4B5B603 /* OpenAGCApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenAGCApp.swift; sourceTree = "<group>"; };
 		8ABFBCC58A855BB41D27E0B4 /* RecipientField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipientField.swift; sourceTree = "<group>"; };
@@ -585,6 +587,7 @@
 			isa = PBXGroup;
 			children = (
 				7F31887B3B0CDC339E3EB92E /* AppModel+Guide.swift */,
+				821CE82268E95C47F9C2419D /* ChangeGuideSheet.swift */,
 				79E355DC34494451275B9699 /* GuideAudiences.swift */,
 				49C1A1D559658C07CBA5E7BD /* GuideDecisionsView.swift */,
 				CA37C6A95F6AA5461FD7B016 /* GuideDetailView.swift */,
@@ -889,6 +892,7 @@
 				5983A19ACD9796ACFA5E19D5 /* AppModel.swift in Sources */,
 				A64492AC04FB122343BA17D2 /* AttachmentStrip.swift in Sources */,
 				DF53A7536F3E679277D3C187 /* BulkTaskSheet.swift in Sources */,
+				FCED07E1E5873247C4857005 /* ChangeGuideSheet.swift in Sources */,
 				403EB3F17C39C0781B552172 /* Components.swift in Sources */,
 				16A834C86559A500A03CD574 /* ComposerAssistant.swift in Sources */,
 				19B0A731E8F5C40EA437828C /* ComposerHTML.swift in Sources */,

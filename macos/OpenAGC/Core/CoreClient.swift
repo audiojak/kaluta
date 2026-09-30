@@ -586,6 +586,12 @@ final class CoreClient: Sendable {
         try await call { try await core.draftGuideVersion(draftId: draftID) }
     }
 
+    /// Ask the agent how to change the guide; nothing changes until the
+    /// user answers the questions.
+    func proposeGuideChange(_ request: String, agent: String) async throws(CoreClientError) -> [GuideChangeQuestion] {
+        try await call { try await core.proposeGuideChange(request: request, agent: agent) }
+    }
+
     /// The signature block the analysis found in sent mail, if any.
     func guideSignature() async throws(CoreClientError) -> String? {
         try await call { try await core.guideSignature() }
@@ -1026,6 +1032,7 @@ typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
 typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
 typealias GuideRendered = OpenAGCCore.GuideRendered
 typealias GuideCheckFailure = OpenAGCCore.GuideCheckFailure
+typealias GuideChangeQuestion = OpenAGCCore.GuideChangeQuestion
 
 // MARK: - Events
 

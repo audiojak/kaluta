@@ -231,7 +231,7 @@ impl Core {
     }
 
     /// Whether `agent` can do the work now; the message to show if not.
-    async fn agent_ready(self: &Arc<Self>, agent: &str) -> Result<Option<String>, CoreError> {
+    pub(crate) async fn agent_not_ready(self: &Arc<Self>, agent: &str) -> Result<Option<String>, CoreError> {
         let id = provider(agent)?;
         let core = self.clone();
         let statuses =
@@ -258,15 +258,21 @@ impl Core {
             .await;
         let result = match sent {
             Err(e) => Err(e),
-            Ok(()) => match tokio::time::timeout(TURN_TIMEOUT, answer).await {
-                Ok(Ok(Ok(text))) => Ok(text),
-                Ok(Ok(Err(message))) => Err(CoreError::new(ErrorKind::Agent, message)),
-                Ok(Err(_)) => Err(CoreError::new(ErrorKind::Agent, "the agent session ended")),
-                Err(_) => {
-                    let _ = self.clone().cancel_agent_turn(session.clone()).await;
-                    Err(CoreError::new(ErrorKind::Agent, "the agent took too long"))
+            // On the core's runtime: callers may come from the app's own
+            // executor, where tokio's timer is not available.
+            Ok(()) => {
+                match runtime::run(async move { Ok::<_, CoreError>(tokio::time::timeout(TURN_TIMEOUT, answer).await) })
+                    .await?
+                {
+                    Ok(Ok(Ok(text))) => Ok(text),
+                    Ok(Ok(Err(message))) => Err(CoreError::new(ErrorKind::Agent, message)),
+                    Ok(Err(_)) => Err(CoreError::new(ErrorKind::Agent, "the agent session ended")),
+                    Err(_) => {
+                        let _ = self.clone().cancel_agent_turn(session.clone()).await;
+                        Err(CoreError::new(ErrorKind::Agent, "the agent took too long"))
+                    }
                 }
-            },
+            }
         };
         let _ = self.clone().close_agent_session(session).await;
         result
@@ -343,7 +349,7 @@ impl Core {
                 self.emit_progress();
                 return Ok(());
             };
-            if let Some(why) = self.agent_ready(&agent).await? {
+            if let Some(why) = self.agent_not_ready(&agent).await? {
                 self.set_status(run, "paused", Some(why)).await?;
                 self.emit_progress();
                 return Ok(());
@@ -393,7 +399,7 @@ impl Core {
         if request.kind == GuideRunKind::Improve && request.focus.as_deref().is_none_or(|f| f.trim().is_empty()) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "choose a category or audience to improve"));
         }
-        if let Some(why) = self.agent_ready(&request.agent).await? {
+        if let Some(why) = self.agent_not_ready(&request.agent).await? {
             return Err(CoreError::new(ErrorKind::Agent, why));
         }
         let db = self.db()?;
@@ -449,7 +455,7 @@ impl Core {
             return Ok(None);
         };
         let agent = run.agent.clone().unwrap_or_else(|| "claude-code".into());
-        if let Some(why) = self.agent_ready(&agent).await? {
+        if let Some(why) = self.agent_not_ready(&agent).await? {
             self.set_status(run.id, "paused", Some(why.clone())).await?;
             self.emit_progress();
             return Err(CoreError::new(ErrorKind::Agent, why));

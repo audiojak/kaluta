@@ -286,3 +286,30 @@ struct AudienceDraftTests {
         #expect(store.body.string == "My own words")
     }
 }
+
+@MainActor
+struct ChangeGuideTests {
+    @Test func aRequestBecomesQuestionsAndOnlyTheYesesApply() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "C1", kind: .rule, statement: "Use US spelling", scope: .always, check: nil),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let questions = try await core.proposeGuideChange("Use British spelling", agent: model.agent.providerID)
+        #expect(questions.count == 2)
+        #expect(ChangeGuideSheet.statement(questions[0].edits[0]) == "Use British spelling")
+        #expect(try await core.guideEntries([.accepted]).count == 1, "nothing changed yet")
+        // Yes to the first only.
+        _ = await model.applyGuideEdits(questions[0].edits, reason: "change by prompt", actionName: "Change Guide",
+                                        notice: "Changed")
+        let now = try await core.guideEntries([.accepted]).map(\.statement)
+        #expect(Set(now) == ["Use US spelling", "Use British spelling"])
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where try await core.guideEntries([.accepted]).count > 1 { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await core.guideEntries([.accepted]).map(\.statement) == ["Use US spelling"])
+    }
+}

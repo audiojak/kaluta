@@ -16,6 +16,7 @@ mod events;
 pub mod ffi;
 mod guide;
 mod guide_ai;
+mod guide_change;
 mod guide_learn;
 mod guide_render;
 mod guide_run;

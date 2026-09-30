@@ -8,11 +8,13 @@ enum GuideSheet: Identifiable {
     case edit(GuideEntry?, category: String)
     /// The interview; `only` asks one category's question again.
     case interview(only: String?)
+    case change
 
     var id: String {
         switch self {
         case .learn: "learn"
         case let .interview(only): "interview-\(only ?? "all")"
+        case .change: "change"
         case let .edit(entry, category): "edit-\(entry?.id ?? 0)-\(category)"
         }
     }
@@ -67,6 +69,7 @@ struct GuideHeader: View {
                 }
                 Spacer(minLength: 0)
                 Menu {
+                    Button("Ask \(model.agent.providerName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
                     Button("Answer Questions…") { model.guideSheet = .interview(only: nil) } // no-help: menu
                     Divider() // menu
                     Button("Export as Markdown…") { model.exportGuide(json: false) } // no-help: menu

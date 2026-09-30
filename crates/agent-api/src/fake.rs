@@ -145,6 +145,26 @@ pub fn guide_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"proposals": [{}], "audiences": [{audiences}]}}"#, proposals.join(", ")))
 }
 
+/// The fake's answer to an OpenAGC writing-guide change prompt: one
+/// question adding the request as a guideline, and one removing the first
+/// entry in the guide, if there is one.
+pub fn change_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC writing guide change") {
+        return None;
+    }
+    let request = prompt.split("<<<\n").nth(1)?.split("\n>>>").next()?.trim().replace(['"', '\\'], "");
+    let mut questions = vec![format!(
+        r#"{{"question": "Add “{request}” to your guide?", "before": "nothing", "after": "{request}", "edits": [{{"op": "add", "category": "C1", "kind": "rule", "statement": "{request}"}}]}}"#
+    )];
+    let first = prompt.lines().find_map(|l| l.strip_prefix('#')?.split(' ').next()?.parse::<i64>().ok());
+    if let Some(id) = first {
+        questions.push(format!(
+            r#"{{"question": "Remove the entry it replaces?", "before": "entry {id}", "after": "nothing", "edits": [{{"op": "remove", "id": {id}}}]}}"#
+        ));
+    }
+    Some(format!(r#"{{"questions": [{}]}}"#, questions.join(", ")))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -156,6 +176,7 @@ impl AgentSession for FakeSession {
         self.sink.emit(AgentEvent::TurnStarted);
         let text = task_answer(&turn.prompt)
             .or_else(|| guide_answer(&turn.prompt))
+            .or_else(|| change_answer(&turn.prompt))
             .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {
