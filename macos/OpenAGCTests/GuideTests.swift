@@ -243,3 +243,46 @@ struct GuideCheckTests {
                                                audiences: nil).isEmpty)
     }
 }
+
+@MainActor
+struct AudienceDraftTests {
+    @Test func switchingAudienceWritesANewDraftAndSwitchingBackIsImmediate() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.saveAudienceGroup(AudienceGroup(id: 0, name: "Investors", status: .confirmed,
+                                                           description: "", members: ["@fund.com"]))
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "D1", kind: .guideline, statement: "Lead with the numbers",
+                                          scope: GuideScope(groups: ["Investors"], people: [], messageTypes: [], languages: []),
+                                          check: nil), status: .accepted, source: .you, origin: nil),
+            .add(fields: GuideEntryFields(category: "A1", kind: .guideline, statement: "Be warm", scope: .always, check: nil),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: try #require(detail.messages.last).id, all: false))
+        store.body = NSAttributedString(string: "My own words", attributes: [.font: ComposerHTML.bodyFont])
+        let assistant = ComposerAssistant()
+        await assistant.loadAudiences(core)
+        #expect(assistant.audienceChoices == ["Investors"])
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        let first = store.body.string
+        #expect(!first.contains("Lead with the numbers") && assistant.writtenFor.isEmpty)
+
+        await assistant.switchAudience(to: ["Investors"], store: store, model: model)
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(store.body.string.contains("Lead with the numbers"), "the investors' guideline reached the prompt")
+        #expect(store.body.string.contains("My own words"), "from the user's own text, not the first draft")
+        #expect(assistant.writtenFor == ["Investors"])
+
+        await assistant.switchAudience(to: nil, store: store, model: model)
+        #expect(assistant.state == .done && store.body.string == first, "switching back is immediate")
+        assistant.undo()
+        #expect(store.body.string == "My own words")
+    }
+}

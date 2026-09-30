@@ -24,6 +24,19 @@ final class ComposerAssistant {
 
     /// What the last draft still breaks in the guide, after one rewrite.
     private(set) var checkFailures: [String] = []
+    /// The audiences the last draft was written for (spec §14.9); empty
+    /// when the recipients are in none.
+    private(set) var writtenFor: [String] = []
+    /// Audiences the user can switch the draft to: the confirmed groups.
+    private(set) var audienceChoices: [String] = []
+    /// Drafts written this session, by audience key, for switching back.
+    @ObservationIgnored private var draftsByAudience: [String: String] = [:]
+    /// The request the drafts answer, and the user's own text they started
+    /// from: a new audience gets a new draft from the same two.
+    @ObservationIgnored private var lastInstruction: String?
+    @ObservationIgnored private var original = ""
+    /// The audiences asked for on this run (nil: the recipients' own).
+    @ObservationIgnored private var requestedAudiences: [String]?
     @ObservationIgnored private var rewrote = false
 
     /// The last draft followed a writing guide with something in it.
@@ -43,25 +56,66 @@ final class ComposerAssistant {
 
     func run(store: ComposerStore, model: AppModel, original: String) async {
         let text = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, state != .working, let core = model.core else { return }
+        guard !text.isEmpty, state != .working else { return }
+        // A new request starts over: its drafts are its own.
+        draftsByAudience = [:]
+        lastInstruction = text
+        self.original = original
+        await write(text, store: store, model: model, audiences: nil)
+    }
+
+    /// Write a new draft of the same request for other audiences, from the
+    /// user's own text (spec §14.9, drafting with an audience); `nil` is the
+    /// recipients' own. A draft already written for them comes back at
+    /// once. A draft the agent wrote on its own (review) is rewritten for
+    /// the audience.
+    func switchAudience(to audiences: [String]?, store: ComposerStore, model: AppModel) async {
+        guard state != .working else { return }
+        let key = Self.key(audiences)
+        if let cached = draftsByAudience[key] {
+            if previousBody == nil { previousBody = store.body }
+            store.body = NSAttributedString(string: cached, attributes: [.font: ComposerHTML.bodyFont])
+            writtenFor = audiences ?? guide?.audiences ?? []
+            return
+        }
+        let request = lastInstruction ?? "Rewrite this message for \((audiences ?? []).joined(separator: ", ")), keeping what it says"
+        await write(request, store: store, model: model, audiences: audiences)
+    }
+
+    /// The audiences a draft can be switched to (the confirmed groups).
+    func loadAudiences(_ core: CoreClient?) async {
+        guard let core, audienceChoices.isEmpty else { return }
+        audienceChoices = ((try? await core.audienceGroups()) ?? []).filter { $0.status == .confirmed }.map(\.name)
+    }
+
+    static func key(_ audiences: [String]?) -> String { audiences.map { $0.sorted().joined(separator: "|") } ?? "" }
+
+    private func write(_ text: String, store: ComposerStore, model: AppModel, audiences: [String]?) async {
+        guard let core = model.core else { return }
         self.store = store
         self.model = model
+        requestedAudiences = audiences
         state = .working
         reply = ""
         rewrote = false
         checkFailures = []
+        if audienceChoices.isEmpty {
+            audienceChoices = ((try? await core.audienceGroups()) ?? []).filter { $0.status == .confirmed }.map(\.name)
+        }
+        // Every draft starts from the user's own text, not an earlier draft.
+        let base = previousBody?.string ?? store.body.string
         do {
             // The account's writing guide for these recipients and this kind
             // of message (spec §14.9); the user's own draft stays part of
             // the prompt.
             guide = try? await core.guideForMessage(recipients: (store.to + store.cc).map(\.email),
-                                                    messageType: Self.messageType(store), audiences: nil)
+                                                    messageType: Self.messageType(store), audiences: audiences)
             let session = try await core.startReadOnlyAgentSession(provider: model.agent.providerID,
                                                                    selection: store.threadID.map { [$0] } ?? [])
             sessionID = session
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
             let prompt = Self.prompt(instruction: text, from: store.from, to: store.to.map(\.email),
-                                     subject: store.subject, draft: store.body.string, original: original,
+                                     subject: store.subject, draft: base, original: original,
                                      guide: guide?.text ?? "")
             try await core.sendAgentPrompt(session, prompt)
         } catch let error as CoreClientError {
@@ -78,10 +132,13 @@ final class ComposerAssistant {
         state = .idle
     }
 
+    /// Back to the user's own text, whichever audience's draft is showing.
     func undo() {
         guard let previousBody, let store else { return }
         store.body = previousBody
         self.previousBody = nil
+        draftsByAudience = [:]
+        writtenFor = []
         state = .idle
     }
 
@@ -122,7 +179,9 @@ final class ComposerAssistant {
             }
         }
         checkFailures = failures
-        previousBody = store.body
+        if previousBody == nil { previousBody = store.body }
+        draftsByAudience[Self.key(requestedAudiences)] = text
+        writtenFor = requestedAudiences ?? guide?.audiences ?? []
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])
         instruction = ""
         state = .done

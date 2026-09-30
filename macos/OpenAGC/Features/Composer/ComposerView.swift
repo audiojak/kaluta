@@ -38,6 +38,7 @@ struct ComposerView: View {
             self.store = store
             await store.load(request)
             if model.agent.providers.isEmpty { await model.agent.loadProviders() }
+            await assistant.loadAudiences(model.core)
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
@@ -248,6 +249,7 @@ struct ComposerView: View {
                     Text(assistant.followsGuide
                          ? "Written by \(name), following your writing guide. Read it before sending."
                          : "Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    audienceMenu(store)
                     Button("Undo") { assistant.undo() }
                         .buttonStyle(.link)
                         .hoverHelp("Put back the message as it was before")
@@ -262,13 +264,39 @@ struct ComposerView: View {
             case let .failed(message):
                 Text(message).font(TypeRole.caption).foregroundStyle(Tone.failure)
             default:
-                EmptyView()
+                // An agent's draft under review can be rewritten for an audience.
+                if request.agentName != nil {
+                    audienceMenu(store).font(TypeRole.caption)
+                }
             }
         }
         .controlSize(.small)
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.s)
         .overlay(alignment: .top) { InsetRule() }
+    }
+
+    /// "Written for Customers": another audience writes a new draft under
+    /// its guidelines (spec §14.9).
+    @ViewBuilder private func audienceMenu(_ store: ComposerStore) -> some View {
+        if !assistant.audienceChoices.isEmpty {
+            let current = assistant.writtenFor
+            Menu(current.isEmpty ? "Written for everyone" : "Written for \(current.joined(separator: ", "))") {
+                Button("The Recipients' Own") { switchAudience(nil, store) } // no-help: menu
+                Divider() // menu
+                ForEach(assistant.audienceChoices, id: \.self) { name in
+                    Button(name) { switchAudience([name], store) } // no-help: menu
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(assistant.state == .working)
+            .hoverHelp("Write it for another audience, following that audience's guidelines")
+        }
+    }
+
+    private func switchAudience(_ audiences: [String]?, _ store: ComposerStore) {
+        Task { await assistant.switchAudience(to: audiences, store: store, model: model) }
     }
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {
