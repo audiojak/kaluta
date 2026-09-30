@@ -162,9 +162,9 @@ times. A rejected proposal is remembered so it is not proposed again.
 
 ## The process
 
-1. **Gather.** "Learn from Sent Mail…" picks a sample from the account's
-   sent mail: the user chooses how far back and how many (default the
-   latest 200), and may exclude people or labels. The sample is spread
+1. **Gather.** "Learn from Sent Mail…" asks how many of the latest sent
+   messages to use (default **1,000**; the dialog shows how many the
+   account has) and lets the user exclude people or labels. The sample is spread
    across audiences and message types (new, reply, forward) so every
    category has material. Skipped: automatic replies, calendar responses,
    messages with no text of the user's own. Header-only messages download
@@ -173,7 +173,7 @@ times. A rejected proposal is remembered so it is not proposed again.
    signature removed and kept once for B7), with what kind of message it
    is, who it went to (by audience group once known), length, and whether
    it answered someone.
-3. **Process** (the processing function): batches of about 20 messages go
+3. **Process** (the processing function): batches of **20** messages go
    to Claude in a read-only session (ADR 0007) with the whole category
    list and the guide so far. Claude answers in JSON, per category: a new
    entry, more evidence for an entry, a contradiction of an entry, or
@@ -198,17 +198,19 @@ times. A rejected proposal is remembered so it is not proposed again.
   while the user works in mail. Quitting pauses it; it resumes at the next
   launch. It can be paused, resumed and cancelled (what was analysed is
   kept).
-- **Deciding does not wait for analysis.** Proposals can be decided as soon
-  as the first batch is in, and the user can leave and come back at any
-  point: every decision is saved as it is made. While analysis continues:
-  more evidence for an undecided proposal updates it in place; more
-  evidence for an accepted entry is added quietly; a rejected proposal is
-  not raised again; mail that contradicts an accepted entry raises a new
-  decision.
+- **No questions until every batch is processed** (maintainer,
+  2026-09-29): proposals are merged across the whole sample first, so each
+  arrives once, with all its evidence, and the user is not asked about a
+  rule the next batch would change. Deciding then opens, and the user can
+  leave and come back at any point: every decision is saved as it is made.
+  A later run on newer mail works the same way: its proposals wait until
+  it finishes, then join the decisions (more evidence for an accepted entry
+  is added quietly; a rejected proposal is not raised again; a
+  contradiction of an accepted entry is a new decision).
 - **Two progress bars**, in the Writing Guide section and, compactly, in
-  the sidebar's footer while a run is active: *Analysis* ("120 of 200
-  messages") and *Decisions* ("34 of 51 decided"; the total grows while
-  analysis runs, and says so). A notification when analysis finishes and
+  the sidebar's footer while a run is active: *Analysis* ("620 of 1,000
+  messages, batch 31 of 50") and *Decisions* ("34 of 51 decided", from
+  when analysis finishes; before that, "waiting for analysis"). A notification when analysis finishes and
   when decisions are waiting.
 
 ### Agents
@@ -340,6 +342,9 @@ account's store on this Mac.
 14. Merging a guide: from an account or a file; high-level decisions.
 15. Re-learning from newer mail.
 
-## Open questions
+## Notes
 
-- The default sample: latest 200 sent messages in batches of 20?
+- 1,000 messages is 50 agent turns; each turn takes as long as the user's
+  CLI takes to answer, so a full run is expected to take a while. That is
+  why it runs in the background, is resumable, and reports progress by
+  batch.
