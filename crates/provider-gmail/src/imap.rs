@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::task::{Context, Poll};
 
@@ -55,6 +55,8 @@ pub struct ImapConfig {
     pub daily_budget_bytes: u64,
     /// UIDs per body fetch.
     pub batch: usize,
+    /// How long a refused login keeps IMAP off before it is tried again.
+    pub refusal_lasts: std::time::Duration,
 }
 
 impl ImapConfig {
@@ -65,6 +67,7 @@ impl ImapConfig {
             max_message_bytes: 2 * 1024 * 1024,
             daily_budget_bytes: 2_000 * 1024 * 1024,
             batch: 200,
+            refusal_lasts: std::time::Duration::from_secs(60 * 60),
         }
     }
 }
@@ -271,9 +274,10 @@ pub struct ImapBackfill {
     /// A connection of its own for IDLE, so waiting for mail never holds
     /// up fetching.
     idle: Mutex<Option<Session>>,
-    /// Google refused the login (IMAP disabled, or the token lacks the
-    /// scope): REST only from here on.
-    refused: AtomicBool,
+    /// When Google refused the login (IMAP disabled, or the token lacks
+    /// the scope), in Unix milliseconds; 0 when it has not. REST only until
+    /// `refusal_lasts` has passed, then IMAP is tried again.
+    refused_at: AtomicI64,
     /// Day number (UTC) and bytes fetched on it; atomics so status never
     /// waits on a fetch in progress.
     day: std::sync::atomic::AtomicI64,
@@ -295,7 +299,7 @@ impl ImapBackfill {
             state: Mutex::new(State::default()),
             idle: Mutex::new(None),
             capabilities: Default::default(),
-            refused: AtomicBool::new(false),
+            refused_at: AtomicI64::new(0),
             day: Default::default(),
             bytes_today: Default::default(),
         }
@@ -303,7 +307,8 @@ impl ImapBackfill {
 
     /// Whether IMAP was refused and everything now goes through REST.
     pub fn is_refused(&self) -> bool {
-        self.refused.load(Ordering::Relaxed)
+        let at = self.refused_at.load(Ordering::Relaxed);
+        at != 0 && now_millis().saturating_sub(at) < self.config.refusal_lasts.as_millis() as i64
     }
 
     /// The server's capabilities at the last login; empty before one.
@@ -339,7 +344,8 @@ impl ImapBackfill {
         }
     }
 
-    async fn connect_inner(&self) -> ProviderResult<Session> {
+    /// A connection to the server, greeted and ready to log in.
+    async fn open_client(&self) -> ProviderResult<async_imap::Client<ImapStream>> {
         let stream = match &self.config.endpoint {
             ImapEndpoint::Plain(addr) => ImapStream::Plain(TcpStream::connect(addr).await.map_err(net)?),
             ImapEndpoint::Tls { host, port } => {
@@ -355,16 +361,33 @@ impl ImapBackfill {
         };
         let mut client = async_imap::Client::new(stream);
         client.read_response().await.map_err(net)?.ok_or_else(|| ProviderError::Network("no IMAP greeting".into()))?;
-        let token = self.tokens.access_token().await?;
-        let auth = XOAuth2(format!("user={}\u{1}auth=Bearer {}\u{1}\u{1}", self.config.email, token.expose()));
-        let mut session = match client.authenticate("XOAUTH2", auth).await {
-            Ok(session) => session,
-            Err((e, _)) => {
-                self.refused.store(true, Ordering::Relaxed);
-                tracing::warn!(error = %e, "Gmail refused the IMAP login; backfill continues over the API");
-                return Err(ProviderError::Forbidden("IMAP login refused".into()));
+        Ok(client)
+    }
+
+    /// Log in with the cached token; when Google says it is invalid (it may
+    /// have expired while the Mac slept), once more with a fresh one. Only
+    /// a second refusal turns IMAP off for a while.
+    async fn connect_inner(&self) -> ProviderResult<Session> {
+        let mut attempt = 0;
+        let mut session = loop {
+            attempt += 1;
+            let client = self.open_client().await?;
+            let token = self.tokens.access_token().await?;
+            let auth = XOAuth2(format!("user={}\u{1}auth=Bearer {}\u{1}\u{1}", self.config.email, token.expose()));
+            match client.authenticate("XOAUTH2", auth).await {
+                Ok(session) => break session,
+                Err((e, _)) if attempt == 1 => {
+                    tracing::info!(error = %e, "Gmail refused the IMAP login; trying again with a fresh token");
+                    self.tokens.invalidate(&token).await;
+                }
+                Err((e, _)) => {
+                    self.refused_at.store(now_millis().max(1), Ordering::Relaxed);
+                    tracing::warn!(error = %e, "Gmail refused the IMAP login; backfill continues over the API");
+                    return Err(ProviderError::Forbidden("IMAP login refused".into()));
+                }
             }
         };
+        self.refused_at.store(0, Ordering::Relaxed);
         if let Ok(caps) = session.capabilities().await {
             let mut names: Vec<String> = caps
                 .iter()
@@ -910,6 +933,10 @@ impl AsyncWrite for ImapStream {
             Self::Plain(s) => Pin::new(s).poll_shutdown(cx),
         }
     }
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 #[cfg(test)]

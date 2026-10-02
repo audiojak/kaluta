@@ -888,7 +888,10 @@ get the data, or when IMAP fails.
 *Fallback.* Each operation falls back to the API on its own. Three IMAP
 failures in a row open a breaker for 15 minutes (then one try); a refresh
 closes it. A refused login or the day's bandwidth budget (2,000 MB) makes
-IMAP unavailable without counting as failures. IDLE failures back off and
+IMAP unavailable without counting as failures. A refused login is first
+tried again once with a fresh token (an access token can expire while the
+Mac sleeps; token expiry is kept by the wall clock), and a refusal lasts
+an hour before IMAP is tried again (amended 2026-10-02). IDLE failures back off and
 never open the breaker. When the API is serving for one of these reasons,
 the sidebar's sync footer says so in a quiet note ("Using the Gmail API ·
 IMAP was refused for this account").
