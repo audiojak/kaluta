@@ -369,3 +369,20 @@ struct FurtherAnalysisTests {
         #expect(model.guideProgress?.run?.kind == .improve && model.guideProgress?.run?.focus == "E2")
     }
 }
+
+struct GuideTimeLeftTests {
+    private func run(_ status: GuideRunStatus, left: UInt32?) -> GuideRunInfo {
+        GuideRunInfo(id: 1, kind: .latest, focus: nil, status: status, total: 100, done: 40, batches: 5, batchesDone: 2,
+                     agent: nil, error: nil, startedAt: 0, finishedAt: nil, secondsLeft: left)
+    }
+
+    @Test func theTimeLeftReadsNaturally() {
+        #expect(GuideProgressBars.timeLeft(run(.running, left: nil)) == "Estimating the time left after the first batch…")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 20)) == "Less than a minute left")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 70)) == "About a minute left")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 12 * 60)) == "About 12 minutes left")
+        #expect(GuideProgressBars.timeLeft(run(.paused, left: 12 * 60)) == "About 12 minutes left once resumed")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 150 * 60)) == "About 2.5 hours left")
+        #expect(GuideProgressBars.timeLeft(run(.done, left: nil)) == nil)
+    }
+}

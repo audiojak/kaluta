@@ -104,6 +104,9 @@ pub struct GuideRunInfo {
     pub error: Option<String>,
     pub started_at: i64,
     pub finished_at: Option<i64>,
+    /// About how many seconds are left, from the batches timed so far; nil
+    /// before the first batch is done or once the run has ended.
+    pub seconds_left: Option<u32>,
 }
 
 /// The two progress bars (spec §14.9).
@@ -116,8 +119,21 @@ pub struct GuideProgress {
     pub decisions_done: u32,
 }
 
+/// The time left: the mean time of the batches done, for each one left.
+fn seconds_left(r: &RunRow, batches: u32, batches_done: u32) -> Option<u32> {
+    if r.timed_batches <= 0 || !matches!(r.status.as_str(), "running" | "paused") {
+        return None;
+    }
+    let mean_ms = r.timed_ms / r.timed_batches;
+    let left = i64::from(batches.saturating_sub(batches_done));
+    Some(((mean_ms * left) / 1000) as u32)
+}
+
 fn info(r: RunRow) -> GuideRunInfo {
     let size = r.batch_size.max(1) as u32;
+    let batches = (r.total.max(0) as u32).div_ceil(size);
+    let batches_done = (r.done.max(0) as u32).div_ceil(size);
+    let left = seconds_left(&r, batches, batches_done);
     GuideRunInfo {
         id: r.id,
         kind: GuideRunKind::parse(&r.kind),
@@ -125,12 +141,13 @@ fn info(r: RunRow) -> GuideRunInfo {
         status: GuideRunStatus::parse(&r.status),
         total: r.total.max(0) as u32,
         done: r.done.max(0) as u32,
-        batches: (r.total.max(0) as u32).div_ceil(size),
-        batches_done: (r.done.max(0) as u32).div_ceil(size),
+        batches,
+        batches_done,
         agent: r.agent,
         error: r.error,
         started_at: r.started_at,
         finished_at: r.finished_at,
+        seconds_left: left,
     }
 }
 
@@ -367,6 +384,7 @@ impl Core {
                 return Ok(());
             }
             let recheck = row.kind == "recheck";
+            let started = std::time::Instant::now();
             let (batch, prompt, known) = self.guide_batch_prompt(ids, row.focus.clone(), recheck).await?;
             if !batch.is_empty() {
                 let mut attempts = 0;
@@ -398,8 +416,11 @@ impl Core {
                     }
                 }
             }
+            // Timed only when the agent was asked (the estimate's basis).
+            let elapsed = (!batch.is_empty()).then(|| started.elapsed().as_millis() as i64);
             let db = self.db()?;
-            runtime::run(async move { Ok(db.write(move |tx| store::finish_batch(tx, run, batch_no)).await?) }).await?;
+            runtime::run(async move { Ok(db.write(move |tx| store::finish_batch(tx, run, batch_no, elapsed)).await?) })
+                .await?;
             self.emit_progress();
         }
     }
@@ -585,6 +606,10 @@ mod tests {
         let progress = block_on(core.guide_progress()).unwrap();
         let run = progress.run.unwrap();
         assert_eq!((run.done, run.batches_done), (run.total, run.batches));
+        assert_eq!(run.seconds_left, None, "no estimate once done");
+        let id = run.id;
+        let row = core.db().unwrap().read_blocking(move |c| store::get_run(c, id)).unwrap().unwrap();
+        assert_eq!(row.timed_batches, i64::from(run.batches), "every batch was timed");
         let decisions = block_on(core.guide_decisions()).unwrap();
         assert!(!decisions.is_empty(), "the fake agent's proposals are waiting");
         assert_eq!(progress.decisions_total as usize, decisions.len());
@@ -655,6 +680,24 @@ mod tests {
         block_on(core.run_job(old)).unwrap();
         let run = block_on(core.guide_progress()).unwrap().run.unwrap();
         assert_eq!((run.id, run.status), (new, GuideRunStatus::Done), "the new run was not left stalled");
+    }
+
+    #[test]
+    fn the_time_left_comes_from_the_batches_timed() {
+        let row = |status: &str, timed_batches, timed_ms| RunRow {
+            status: status.into(),
+            batch_size: 20,
+            total: 100,
+            done: 40,
+            timed_batches,
+            timed_ms,
+            ..Default::default()
+        };
+        let left = |r: RunRow| info(r).seconds_left;
+        assert_eq!(left(row("running", 0, 0)), None, "nothing to go on before the first batch");
+        assert_eq!(left(row("running", 2, 60_000)), Some(90), "30 seconds a batch, three batches left");
+        assert_eq!(left(row("paused", 2, 60_000)), Some(90));
+        assert_eq!(left(row("done", 5, 150_000)), None);
     }
 
     #[test]

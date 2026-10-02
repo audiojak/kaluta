@@ -329,9 +329,13 @@ pub struct RunRow {
     pub error: Option<String>,
     pub started_at: Millis,
     pub finished_at: Option<Millis>,
+    /// Batches timed so far and their total milliseconds (the estimate).
+    pub timed_batches: i64,
+    pub timed_ms: i64,
 }
 
-const RUN_COLUMNS: &str = "id, kind, focus, status, batch_size, total, done, agent, error, started_at, finished_at";
+const RUN_COLUMNS: &str =
+    "id, kind, focus, status, batch_size, total, done, agent, error, started_at, finished_at, timed_batches, timed_ms";
 
 fn run(r: &Row<'_>) -> rusqlite::Result<RunRow> {
     Ok(RunRow {
@@ -346,6 +350,8 @@ fn run(r: &Row<'_>) -> rusqlite::Result<RunRow> {
         error: r.get(8)?,
         started_at: r.get(9)?,
         finished_at: r.get(10)?,
+        timed_batches: r.get(11)?,
+        timed_ms: r.get(12)?,
     })
 }
 
@@ -413,7 +419,15 @@ pub fn next_batch(conn: &Connection, run_id: i64) -> StoreResult<Option<(i64, Ve
 }
 
 /// Mark a batch analysed and count it in the run's progress.
-pub fn finish_batch(tx: &Transaction<'_>, run_id: i64, batch: i64) -> StoreResult<()> {
+/// Mark a batch analysed; `elapsed_ms` is how long it took, when it was
+/// timed (a batch with nothing to send is not).
+pub fn finish_batch(tx: &Transaction<'_>, run_id: i64, batch: i64, elapsed_ms: Option<i64>) -> StoreResult<()> {
+    if let Some(ms) = elapsed_ms {
+        tx.prepare_cached(
+            "UPDATE guide_runs SET timed_batches = timed_batches + 1, timed_ms = timed_ms + ?2 WHERE id = ?1",
+        )?
+        .execute(params![run_id, ms.max(0)])?;
+    }
     tx.prepare_cached("UPDATE guide_run_messages SET done = 1 WHERE run_id = ?1 AND batch = ?2")?
         .execute(params![run_id, batch])?;
     tx.prepare_cached(
@@ -784,7 +798,7 @@ mod tests {
         let mut batches = vec![];
         while let Some((n, msgs)) = s.1.read_blocking(move |c| next_batch(c, run_id)).unwrap() {
             batches.push(msgs.len());
-            s.1.write_blocking(move |tx| finish_batch(tx, run_id, n)).unwrap();
+            s.1.write_blocking(move |tx| finish_batch(tx, run_id, n, Some(1000))).unwrap();
         }
         assert_eq!(batches, [20, 20, 5]);
         let r = s.1.read_blocking(move |c| get_run(c, run_id)).unwrap().unwrap();

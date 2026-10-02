@@ -108,6 +108,11 @@ struct GuideProgressBars: View {
                 bar(title: run.status == .paused ? "Analysis paused" : "Analysis",
                     detail: "\(run.done.formatted()) of \(run.total.formatted()) messages, batch \(min(run.batchesDone + 1, run.batches)) of \(run.batches)",
                     value: run.total == 0 ? 0 : Double(run.done) / Double(run.total))
+                if let left = Self.timeLeft(run) {
+                    Text(left)
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let error = run.error, run.status == .paused {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(TypeRole.caption)
@@ -136,6 +141,25 @@ struct GuideProgressBars: View {
                     detail: "\(progress.decisionsDone.formatted()) of \(progress.decisionsTotal.formatted()) decided",
                     value: progress.decisionsTotal == 0 ? 0 : Double(progress.decisionsDone) / Double(progress.decisionsTotal))
             }
+        }
+    }
+
+    /// "About 12 minutes left", from the batches timed so far; while the
+    /// first batch runs there is nothing to go on yet.
+    static func timeLeft(_ run: GuideRunInfo) -> String? {
+        guard run.status == .running || run.status == .paused else { return nil }
+        guard let seconds = run.secondsLeft else {
+            return run.status == .running ? "Estimating the time left after the first batch…" : nil
+        }
+        let minutes = Int((Double(seconds) / 60).rounded())
+        let paused = run.status == .paused ? " once resumed" : ""
+        switch minutes {
+        case ..<1: return "Less than a minute left\(paused)"
+        case 1: return "About a minute left\(paused)"
+        case ..<90: return "About \(minutes) minutes left\(paused)"
+        default:
+            let hours = Double(minutes) / 60
+            return "About \(hours.formatted(.number.precision(.fractionLength(0...1)))) hours left\(paused)"
         }
     }
 
@@ -200,6 +224,11 @@ struct GuideRunFooter: View {
                 Text("\(run.done.formatted()) of \(run.total.formatted()) messages")
                     .font(TypeRole.caption)
                     .foregroundStyle(.secondary)
+                if let seconds = run.secondsLeft, run.status == .running {
+                    Text(seconds < 60 ? "under a minute left" : "about \(Int((Double(seconds) / 60).rounded())) min left")
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .lineLimit(1)
             .frame(maxWidth: .infinity)

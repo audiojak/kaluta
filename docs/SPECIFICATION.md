@@ -2286,8 +2286,9 @@ store: it survives the dialog and window closing, pauses when the app
 quits and resumes at the next launch, and can be paused, resumed or
 cancelled (what was analysed is kept). Two progress bars, in the Writing
 Guide section and compactly in the sidebar's footer: *Analysis* (messages
-and batches done) and *Decisions* (decided of total, or "waiting for
-analysis"); a notification when analysis finishes. **Further analysis**,
+and batches done, with the time left estimated from how long the batches
+so far took, once the first is done) and *Decisions* (decided of total, or
+"waiting for analysis"); a notification when analysis finishes. **Further analysis**,
 any time: newer mail since the last run; further back; improve one
 category or audience (the unanalysed messages most likely to show it,
 with that category asked for in particular); re-check the guide against a
