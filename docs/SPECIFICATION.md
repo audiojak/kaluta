@@ -1897,6 +1897,14 @@ sender" stored in settings; loading them re-renders with `img-src https:`.
 Dark mode: a base stylesheet sets `color-scheme: light dark` and inverts
 only when the email declares no background color.
 
+Quoted history: a thread already shows every earlier message, so the copy
+a reply carries below it ("On … wrote:" and the quote, or Outlook's
+"From: … Sent: …" block, in HTML or plain text) is folded behind a "•••"
+toggle (a `<details>`, so it works without script). It is found at display
+time, by structure and wording, since the stored HTML has lost the
+senders' class names. A message that answers between quotes, or is
+nothing but a quote (a forward), is shown whole (amended 2026-10-02).
+
 ### 14.5 Composer
 
 Rich text via `NSTextView` in an `NSViewRepresentable`, `NSAttributedString`

@@ -4,6 +4,7 @@
 mod build;
 pub mod mbox;
 mod parse;
+mod quotes;
 mod sanitize;
 mod text;
 
@@ -14,5 +15,6 @@ pub use build::{
 pub use parse::{
     ParseError, ParsedAttachment, ParsedHeaders, ParsedMessage, decode_text_part, html_to_text, parse, parse_headers,
 };
+pub use quotes::{fold_quoted_html, split_quoted_text, text_to_reader_html};
 pub use sanitize::{CID_SCHEME, REMOTE_SCHEME, SANITIZER_VERSION, Sanitized, sanitize_html, text_to_html};
 pub use text::{ExtractError, extract_attachment_text, is_pdf, markdown_to_html, strip_quoted, truncate_chars};

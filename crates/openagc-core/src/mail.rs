@@ -169,7 +169,13 @@ impl Core {
             // Plain-text mail renders through the same reader as HTML.
             Ok(body.map(|b| RenderedBody {
                 message_id,
-                html: b.html_sanitized.or_else(|| b.text_plain.as_deref().map(mail_mime::text_to_html)),
+                // Earlier messages show in the thread already: their copy
+                // under a reply is folded (spec §14.4).
+                html: b
+                    .html_sanitized
+                    .as_deref()
+                    .map(mail_mime::fold_quoted_html)
+                    .or_else(|| b.text_plain.as_deref().map(mail_mime::text_to_reader_html)),
                 text: b.text_plain,
                 has_remote_images: b.has_remote_images,
             }))

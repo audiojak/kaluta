@@ -190,6 +190,9 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
             "CATEGORY_PERSONAL"
         };
 
+        // The message before, for the quote a reply carries (as Gmail
+        // writes it, once sanitized): who wrote it, its text and HTML.
+        let mut previous: Option<(String, String, String)> = None;
         for i in 0..message_count {
             let from_me = !automated && i % 2 == 1;
             let at = thread_at - i64::from(message_count - 1 - i) * (3_600_000 + rng.below(20) as i64 * 600_000);
@@ -216,9 +219,18 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
                 labels.push(LabelId::new(l));
             }
             let text = (0..2 + rng.below(4)).map(|_| *rng.pick(SENTENCES)).collect::<Vec<_>>().join(" ");
-            let body_text = format!("Hi,\n\n{text}\n\nBest,\n{}", if from_me { "Me" } else { sender.display() });
-            let body_html =
-                format!("<p>Hi,</p><p>{}</p><p>Best,<br>{}</p>", text, if from_me { "Me" } else { sender.display() });
+            let author = if from_me { "Me".to_owned() } else { sender.display().to_string() };
+            let mut body_text = format!("Hi,\n\n{text}\n\nBest,\n{author}");
+            let mut body_html = format!("<p>Hi,</p><p>{text}</p><p>Best,<br>{author}</p>");
+            let own = (author.clone(), body_text.clone(), body_html.clone());
+            if let Some((who, before_text, before_html)) = previous.take() {
+                let quoted: String = before_text.lines().map(|l| format!("> {l}\n")).collect();
+                body_text.push_str(&format!("\n\nOn an earlier day, {who} wrote:\n{quoted}"));
+                body_html.push_str(&format!(
+                    "<div><div dir=\"ltr\">On an earlier day, {who} wrote:<br></div><blockquote style=\"margin:0px 0px 0px 0.8ex;padding-left:1ex\">{before_html}</blockquote></div>"
+                ));
+            }
+            previous = Some(own);
             let attachments = if rng.chance(12) {
                 let pdf = one_page_pdf(&capitalize(&topic));
                 vec![IncomingAttachment {
