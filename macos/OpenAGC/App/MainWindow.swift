@@ -36,6 +36,9 @@ struct MainWindow: View {
             case .merge: MergeGuideSheet()
             }
         }
+        .sheet(item: Binding(get: { model.guidePrompt }, set: { model.guidePrompt = $0 })) { prompt in
+            GuidePromptSheet(prompt: prompt)
+        }
         .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in
             BulkTaskSheet(draft: draft)
         }
@@ -193,6 +196,9 @@ struct MainWindow: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .padding(Space.m)
+                }
+                if model.showsGuideBanner, model.isGuide || model.selectedMailboxID == "INBOX" {
+                    GuideInviteBanner()
                 }
                 if model.isGuide {
                     GuideView()

@@ -95,6 +95,7 @@
 		AB0A75C26EE77D8683A01474 /* SearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D8587064562266E1C5E1DC /* SearchTests.swift */; };
 		AC828BE403824E10996A8DC8 /* RoutineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E9589E376D0608FB13DD219 /* RoutineModel.swift */; };
 		ACA4618DFA7FBAF468B9AF9C /* OpenAGCCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24AC691869E94971A95182AF /* OpenAGCCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		AD27EE50163E92CA36ED0A73 /* GuidePrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = 090449905496D5304469D855 /* GuidePrompt.swift */; };
 		AD2C4E55FC6F0A17CCD71C7C /* TaskSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */; };
 		B0F9127F48B25962A0D3E324 /* AgentFFITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE6FF06BED85F5FE72CF32A5 /* AgentFFITests.swift */; };
 		B2F035E69CB0D6421F8A763E /* AgentPanelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90CE9D77767388614457FBCE /* AgentPanelTests.swift */; };
@@ -172,6 +173,7 @@
 		04F1A33FDE9F24E15210C90A /* AccountSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSwitchTests.swift; sourceTree = "<group>"; };
 		053AED4EA96D02AB9F26511F /* ListFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListFilter.swift; sourceTree = "<group>"; };
 		0853C589261B9BC5E99D0106 /* ComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTests.swift; sourceTree = "<group>"; };
+		090449905496D5304469D855 /* GuidePrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuidePrompt.swift; sourceTree = "<group>"; };
 		0C8A5AC940824CF40F0B058F /* LabelTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelTreeTests.swift; sourceTree = "<group>"; };
 		0ECC21C8EFCB7A1F70BD6BF9 /* AccountMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountMenu.swift; sourceTree = "<group>"; };
 		0F2806227B342184B9664E7D /* LinkSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkSafety.swift; sourceTree = "<group>"; };
@@ -601,6 +603,7 @@
 				CA37C6A95F6AA5461FD7B016 /* GuideDetailView.swift */,
 				93C7A6A37E38A82DB0A1B08D /* GuideEntryEditor.swift */,
 				D5EB793CBF311E2EE4B99110 /* GuideInterview.swift */,
+				090449905496D5304469D855 /* GuidePrompt.swift */,
 				F948B54558F221088FD3447F /* GuideStore.swift */,
 				18F0249A501C89A849A51705 /* GuideView.swift */,
 				50741EBE28CA752FB58116F8 /* InterviewSheet.swift */,
@@ -918,6 +921,7 @@
 				E991FF75DB10C51B9C0451D9 /* GuideDetailView.swift in Sources */,
 				DC0A64AF7A98D3161548C79D /* GuideEntryEditor.swift in Sources */,
 				3B95337114DDC3417F4D4D5D /* GuideInterview.swift in Sources */,
+				AD27EE50163E92CA36ED0A73 /* GuidePrompt.swift in Sources */,
 				811777EA688C118B1FB1A60D /* GuideStore.swift in Sources */,
 				9FFC9C25E00FF8B822E44CB9 /* GuideView.swift in Sources */,
 				6FD0B155169950868B0E2D83 /* ImportMailbox.swift in Sources */,

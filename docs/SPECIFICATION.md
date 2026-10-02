@@ -2288,7 +2288,12 @@ cancelled (what was analysed is kept). Two progress bars, in the Writing
 Guide section and compactly in the sidebar's footer: *Analysis* (messages
 and batches done, with the time left estimated from how long the batches
 so far took, once the first is done) and *Decisions* (decided of total, or
-"waiting for analysis"); a notification when analysis finishes. **Further analysis**,
+"waiting for analysis"). When analysis finishes with decisions waiting, a
+sheet in the main window offers *Review Now* or *Later*, and a
+notification (when the app is not in front) opens the decisions. An
+account with sent mail that has never learned is invited once, by a sheet
+after its sync; put off, a banner above the Inbox and in the Writing Guide
+stays until a run starts or it is dismissed (amended 2026-10-02). **Further analysis**,
 any time: newer mail since the last run; further back; improve one
 category or audience (the unanalysed messages most likely to show it,
 with that category asked for in particular); re-check the guide against a

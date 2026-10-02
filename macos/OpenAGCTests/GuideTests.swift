@@ -386,3 +386,55 @@ struct GuideTimeLeftTests {
         #expect(GuideProgressBars.timeLeft(run(.done, left: nil)) == nil)
     }
 }
+
+@MainActor
+struct GuidePromptTests {
+    private func model() throws -> AppModel {
+        AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                 defaults: try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")))
+    }
+
+    @Test func anAccountThatNeverLearnedIsInvitedOnceThenReminded() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        #expect(model.guidePrompt == .firstRun, "asked when the account opens")
+        model.answerGuideInvite(start: false)
+        #expect(model.showsGuideBanner, "put off: a reminder stays")
+
+        // Asked before: the banner, never the sheet again.
+        model.guideBannerAccount = nil
+        model.guideInviteChecked = []
+        await model.checkGuideInvite()
+        #expect(model.guidePrompt == nil && model.showsGuideBanner)
+        model.dismissGuideBanner()
+        model.guideInviteChecked = []
+        await model.checkGuideInvite()
+        #expect(model.guidePrompt == nil && !model.showsGuideBanner, "dismissed for good")
+    }
+
+    @Test func startingFromTheInvitationOpensTheLearnDialog() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        model.answerGuideInvite(start: true)
+        #expect(model.isGuide && model.guideSheet?.id == "learn" && !model.showsGuideBanner)
+    }
+
+    @Test func aFinishedRunAsksToReviewItsDecisions() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        model.guidePrompt = nil
+        let none = GuideSampleFilter(excludePeople: [], excludeLabels: [])
+        _ = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 20, filter: none, focus: nil,
+                                                         agent: model.agent.providerID))
+        for _ in 0..<250 where model.guidePrompt == nil { try await Task.sleep(for: .milliseconds(20)) }
+        guard case let .finished(decisions) = model.guidePrompt else {
+            Issue.record("no prompt: \(String(describing: model.guidePrompt))")
+            return
+        }
+        #expect(decisions > 0)
+        model.openGuideDecisionsNow()
+        #expect(model.isGuide && model.guide.showsDecisions && model.guidePrompt == nil)
+    }
+}

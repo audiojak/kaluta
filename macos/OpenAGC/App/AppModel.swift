@@ -376,6 +376,13 @@ final class AppModel {
             guard let self else { return }
             Task { await self.reveal(threadID: thread, in: account) }
         }
+        notifier.openGuideDecisions = { [weak self] account in
+            guard let self else { return }
+            Task {
+                if let account, account != self.openAccountID { await self.switchAccount(to: account) }
+                self.openGuideDecisionsNow()
+            }
+        }
         notifier.install()
         if openDemo {
             await openDemoMailbox()
@@ -510,6 +517,7 @@ final class AppModel {
             // (spec §14.9); a paused one waits for the user.
             guideProgress = try? await core.guideProgress()
             if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
+            await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -572,6 +580,12 @@ final class AppModel {
     var guideSheet: GuideSheet?
     /// Why the last guide action failed, shown in the section.
     var guideError: String?
+    /// The invitation to a first run, or decisions waiting after one.
+    var guidePrompt: GuidePrompt?
+    /// The account whose invitation was put off: its banner shows until a
+    /// run starts or it is dismissed.
+    var guideBannerAccount: String?
+    @ObservationIgnored var guideInviteChecked: Set<String> = []
     /// Opens Settings on the Agents tab (set by the window).
     @ObservationIgnored var openAgentSettings: (() -> Void)?
 
@@ -1297,7 +1311,9 @@ final class AppModel {
         case let .syncStatus(state, pending, headers):
             refreshTransport()
             switch state {
-            case .idle: syncDisplay = .idle
+            case .idle:
+                syncDisplay = .idle
+                await checkGuideInvite()
             case .bootstrapping, .syncing:
                 syncDisplay = pending + headers > 0 || state == .bootstrapping
                     ? .syncing(pending: pending, headers: headers) : .idle
@@ -1320,7 +1336,11 @@ final class AppModel {
             guideProgress = progress
             if finished {
                 await guide.load()
-                notifier.announceGuide(decisions: Int(progress.decisionsTotal) - Int(progress.decisionsDone))
+                let waiting = Int(progress.decisionsTotal) - Int(progress.decisionsDone)
+                notifier.announceGuide(decisions: waiting, accountID: tagged.accountID)
+                if waiting > 0, guideSheet == nil, !(isGuide && guide.showsDecisions) {
+                    guidePrompt = .finished(decisions: waiting)
+                }
             }
         case .tasksChanged:
             tasksRevision += 1
