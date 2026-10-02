@@ -26,6 +26,9 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0007_undo.sql"),
     include_str!("../migrations/0008_server_drafts.sql"),
     include_str!("../migrations/0009_tasks.sql"),
+    include_str!("../migrations/0010_writing_guide.sql"),
+    include_str!("../migrations/0011_draft_guide_version.sql"),
+    include_str!("../migrations/0012_guide_batch_timing.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -55,9 +58,7 @@ impl Db {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
-        let mut writer = Connection::open(path)?;
-        configure(&writer, true)?;
-        migrate(&mut writer)?;
+        let writer = open_writer(path)?;
 
         let mut readers = Vec::with_capacity(READER_COUNT);
         for _ in 0..READER_COUNT {
@@ -88,6 +89,11 @@ impl Db {
                 permits: Semaphore::new(READER_COUNT),
             }),
         })
+    }
+
+    /// Whether both handles are the same open store.
+    pub fn same_store(&self, other: &Db) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     pub fn path(&self) -> &Path {
@@ -180,6 +186,31 @@ fn with_reader<T>(inner: &Inner, f: impl FnOnce(&Connection) -> StoreResult<T>) 
     result
 }
 
+/// The writer connection, configured and migrated. Another opener setting
+/// up the same store (switching it to WAL, migrating) can answer "busy"
+/// without waiting; try again for a few seconds.
+fn open_writer(path: &Path) -> StoreResult<Connection> {
+    let busy = |e: &StoreError| {
+        matches!(e, StoreError::Sqlite(rusqlite::Error::SqliteFailure(f, _))
+            if matches!(f.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+    };
+    let mut attempt = 0;
+    loop {
+        let result = Connection::open(path).map_err(StoreError::from).and_then(|mut conn| {
+            configure(&conn, true)?;
+            migrate(&mut conn)?;
+            Ok(conn)
+        });
+        match result {
+            Err(e) if busy(&e) && attempt < 50 => {
+                attempt += 1;
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn configure(conn: &Connection, writer: bool) -> StoreResult<()> {
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     if writer {
@@ -206,7 +237,14 @@ fn migrate(conn: &mut Connection) -> StoreResult<()> {
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let version = i as u32 + 1;
-        let txn = conn.transaction()?;
+        // The write lock first, then the version again: two openers of the
+        // same store at launch both read the old version, and the second
+        // then failed on what the first had just added.
+        let txn = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now: u32 = txn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if now >= version {
+            continue;
+        }
         txn.execute_batch(sql).map_err(|e| StoreError::Migration(format!("v{version}: {e}")))?;
         // user_version cannot be bound as a parameter.
         txn.execute_batch(&format!("PRAGMA user_version = {version}"))?;
@@ -224,6 +262,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openagc-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("mail.sqlite")
+    }
+
+    #[test]
+    fn two_openers_at_once_both_migrate_cleanly() {
+        let dir = std::env::temp_dir().join(format!("openagc-store-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("mail.sqlite");
+        for _ in 0..5 {
+            let _ = std::fs::remove_dir_all(&dir);
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = path.clone();
+                    std::thread::spawn(move || Db::open(&path).map(|_| ()))
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap().unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

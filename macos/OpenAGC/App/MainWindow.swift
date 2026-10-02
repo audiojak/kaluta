@@ -4,6 +4,7 @@ import SwiftUI
 struct MainWindow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,6 +27,18 @@ struct MainWindow: View {
                              set: { if $0 == nil, model.taskDoneQuestion != nil { Task { await model.answerTaskDone(false) } } })) {
             TaskDoneDialog(question: $0)
         }
+        .sheet(item: Binding(get: { model.guideSheet }, set: { model.guideSheet = $0 })) { sheet in
+            switch sheet {
+            case .learn: LearnSheet()
+            case let .edit(entry, category): GuideEntryEditor(entry: entry, category: category)
+            case let .interview(only): InterviewSheet(only: only)
+            case .change: ChangeGuideSheet()
+            case .merge: MergeGuideSheet()
+            }
+        }
+        .sheet(item: Binding(get: { model.guidePrompt }, set: { model.guidePrompt = $0 })) { prompt in
+            GuidePromptSheet(prompt: prompt)
+        }
         .sheet(item: Binding(get: { model.bulkTasks }, set: { if $0 == nil { model.closeBulkTasks() } })) { draft in
             BulkTaskSheet(draft: draft)
         }
@@ -39,8 +52,13 @@ struct MainWindow: View {
         .task { if model.accountState == .starting { await model.start() } }
         .onAppear {
             model.openComposer = { openWindow(id: "compose", value: $0) }
+            model.openThreadWindow = { openWindow(id: "thread", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
             model.openSyncDebugger = { openWindow(id: "sync-debugger") }
+            model.openAgentSettings = {
+                model.settingsTab = .agents
+                openSettings()
+            }
             ToolbarToolTips.install(model: model)
         }
     }
@@ -109,6 +127,7 @@ struct MainWindow: View {
     private var listTitle: String {
         if model.threads.searchQuery != nil { return "Search Results" }
         if model.isTaskList { return "Tasks" }
+        if model.isGuide { return "Writing Guide" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
     }
 
@@ -116,6 +135,13 @@ struct MainWindow: View {
     /// the sidebar's footer.
     private var listSubtitle: String {
         var parts: [String] = []
+        if model.isGuide {
+            let accepted = model.guide.acceptedCount
+            parts.append(accepted == 1 ? "1 entry" : "\(accepted.formatted()) entries")
+            let waiting = model.guideDecisionsWaiting
+            if waiting > 0 { parts.append(waiting == 1 ? "1 decision waiting" : "\(waiting) decisions waiting") }
+            return parts.joined(separator: " · ")
+        }
         if model.isTaskList {
             if model.tasks.showsDone { return "Done" }
             if model.tasks.openCount > 0 { parts.append("\(model.tasks.openCount.formatted()) open") }
@@ -171,7 +197,12 @@ struct MainWindow: View {
                     .foregroundStyle(.secondary)
                     .padding(Space.m)
                 }
-                if model.isTaskList {
+                if model.showsGuideBanner, model.isGuide || model.selectedMailboxID == "INBOX" {
+                    GuideInviteBanner()
+                }
+                if model.isGuide {
+                    GuideView()
+                } else if model.isTaskList {
                     TaskListView()
                 } else if model.threads.rows.isEmpty {
                     if model.threads.searchQuery != nil {
@@ -201,6 +232,7 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             categoryTabs
             taskTabs
+            if model.isGuide { GuideHeader() }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,
@@ -240,7 +272,9 @@ struct MainWindow: View {
     }
 
     @ViewBuilder private var detail: some View {
-        if model.selectedThreadID != nil {
+        if model.isGuide {
+            GuideDetailView()
+        } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {
             ContentUnavailableView("No Message Selected", systemImage: "envelope.open")

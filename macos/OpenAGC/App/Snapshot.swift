@@ -26,6 +26,12 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
+///                                       fake agent on the demo mailbox, accept
+///                                       some proposals, and show the Writing
+///                                       Guide (a category, or the decisions)
+///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
+///                                       invitation banner, or a prompt sheet
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -37,6 +43,9 @@ import os
 @MainActor
 enum Snapshot {
     private static let logger = Logger(subsystem: "ai.actual.openagc", category: "snapshot")
+
+    /// A snapshot run: no prompts that would cover what is captured.
+    static var isRequested: Bool { UserDefaults.standard.string(forKey: "OpenAGCSnapshot") != nil }
 
     static func scheduleIfRequested(delegate: AppDelegate) {
         let defaults = UserDefaults.standard
@@ -113,6 +122,38 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
             }
+            if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
+                await model.agent.loadProviders()
+                _ = try? await core.startGuideRun(GuideRunRequest(kind: .latest, count: 40,
+                                                                  filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
+                                                                  focus: nil, agent: model.agent.providerID))
+                for _ in 0..<100 where (try? await core.guideProgress())?.run?.status != .done {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                let decisions = (try? await core.guideDecisions()) ?? []
+                if guide != "decisions" {
+                    for entry in decisions.prefix(2) {
+                        _ = try? await core.applyGuideEdits([.decide(id: entry.id, status: .accepted)], reason: "snapshot")
+                    }
+                }
+                model.selectedMailboxID = AppModel.guideMailboxID
+                model.guideProgress = try? await core.guideProgress()
+                await model.guide.load()
+                if guide == "decisions" { model.showGuideDecisions() } else { model.showGuideCategory("A1") }
+                try? await Task.sleep(for: .milliseconds(800))
+            }
+            // The writing guide's own prompts (spec §14.9): banner, invite, ready.
+            if let prompt = defaults.string(forKey: "OpenAGCSnapshotGuidePrompt"), let model = delegate.model {
+                switch prompt {
+                case "banner": model.guideBannerAccount = model.openAccountID
+                case "invite": model.guidePrompt = .firstRun
+                default: model.guidePrompt = .finished(decisions: 12)
+                }
+                try? await Task.sleep(for: .milliseconds(800))
+                if prompt != "banner", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                    window = sheet
+                }
+            }
             if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID
@@ -157,6 +198,7 @@ enum Snapshot {
             capture(window, to: URL(filePath: path))
             // A sheet left open keeps the app from quitting.
             delegate.model?.closeTaskDialog()
+            delegate.model?.guidePrompt = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)

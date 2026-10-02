@@ -24,6 +24,12 @@ struct SidebarView: View {
                     .badge(model.tasks.dueCount)
                     .tag(AppModel.tasksMailboxID)
                     .hoverHelp("Tasks you made from email, by when they are due")
+                // The writing guide AI drafts follow (spec §14.9); the badge
+                // counts decisions waiting.
+                Label("Writing Guide", systemImage: "text.book.closed")
+                    .badge(model.guideDecisionsWaiting)
+                    .tag(AppModel.guideMailboxID)
+                    .hoverHelp("The rules and style your AI drafts follow")
             }
             Section(model.accountSectionTitle) {
                 ForEach(model.mailboxes.accountMailboxes, id: \.id) { mailbox in
@@ -65,7 +71,12 @@ struct SidebarView: View {
         .task(id: model.openAccountID) { expansion.load(account: model.openAccountID) }
         .onChange(of: model.routinesRevision) { Task { await model.routines.load() } }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom, spacing: 0) { SyncStatusView() }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                GuideRunFooter()
+                SyncStatusView()
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 AccountMenuButton()

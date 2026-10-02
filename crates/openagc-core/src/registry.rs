@@ -269,14 +269,20 @@ impl Core {
         if !crate::mail::valid_account_id(account_id) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "account id must be 1-64 of [A-Za-z0-9-]"));
         }
-        {
+        let lookup = || -> Option<Result<Db, CoreError>> {
             let open = self.open_accounts.read().unwrap_or_else(|e| e.into_inner());
             if open.removed.contains(account_id) {
-                return Err(CoreError::new(ErrorKind::NotFound, "that account was removed"));
+                return Some(Err(CoreError::new(ErrorKind::NotFound, "that account was removed")));
             }
-            if let Some(db) = open.stores.get(account_id) {
-                return Ok(db.clone());
-            }
+            open.stores.get(account_id).map(|db| Ok(db.clone()))
+        };
+        if let Some(found) = lookup() {
+            return found;
+        }
+        // One opener at a time; whoever waited finds the store open.
+        let _opening = self.store_open_lock.lock().await;
+        if let Some(found) = lookup() {
+            return found;
         }
         let path = self.account_db_path(account_id);
         let db = runtime::run(async move {
@@ -286,6 +292,7 @@ impl Core {
                 .map_err(CoreError::from)
         })
         .await?;
+        self.store_opens.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         tracing::info!(account = %account_id, "account opened");
         let mut open = self.open_accounts.write().unwrap_or_else(|e| e.into_inner());
         if open.removed.contains(account_id) {
@@ -557,6 +564,23 @@ mod tests {
             db.write_blocking(move |tx| mail_store::read::set_sync_state(tx, "account_email", &email)).unwrap();
         }
         db.close();
+    }
+
+    #[test]
+    fn callers_at_once_share_one_open_store() {
+        let s = crate::guide::tests::demo("open-once");
+        let core = s.1.clone();
+        let before = core.store_opens.load(std::sync::atomic::Ordering::Relaxed);
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let core = core.clone();
+                std::thread::spawn(move || futures::executor::block_on(core.store_for("fresh-account")).unwrap())
+            })
+            .collect();
+        let stores: Vec<Db> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let opens = core.store_opens.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(opens - before <= 1, "the store was opened {} times", opens - before);
+        assert!(stores.windows(2).all(|w| w[0].same_store(&w[1])), "opened once, shared by every caller");
     }
 
     #[test]

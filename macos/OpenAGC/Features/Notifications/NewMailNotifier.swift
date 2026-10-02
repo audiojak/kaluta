@@ -21,6 +21,8 @@ final class NewMailNotifier: NSObject {
     /// Opens a thread (in an account, if the notification named one) when
     /// a notification is clicked.
     var openThread: ((String, String?) -> Void)?
+    /// Opens the writing guide's decisions, in this account (or the open one).
+    var openGuideDecisions: ((String?) -> Void)?
 
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "notifications")
@@ -55,6 +57,23 @@ final class NewMailNotifier: NSObject {
         for request in Self.requests(for: mail, account: account) {
             post(request)
         }
+    }
+
+    /// A learning run finished (spec §14.9): its decisions are waiting.
+    /// Only when the app is not in front, like new mail.
+    func announceGuide(decisions: Int, accountID: String? = nil) {
+        guard decisions > 0, !isAppActive() else { return }
+        post(Self.guideRequest(decisions: decisions, accountID: accountID))
+    }
+
+    static func guideRequest(decisions: Int, accountID: String? = nil) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = "Writing guide analysis finished"
+        content.body = decisions == 1 ? "1 decision is waiting for you." : "\(decisions) decisions are waiting for you."
+        content.threadIdentifier = "writing-guide"
+        // Clicking it opens the decisions (`openGuideDecisions`).
+        content.userInfo = ["guide": true, "accountID": accountID ?? ""]
+        return UNNotificationRequest(identifier: "writing-guide-\(UUID().uuidString)", content: content, trigger: nil)
     }
 
     /// One notification per message, or one summary for a burst. Pure.
@@ -130,8 +149,10 @@ extension NewMailNotifier: UNUserNotificationCenterDelegate {
         let info = response.notification.request.content.userInfo
         let threadID = info["threadID"] as? String
         let accountID = info["accountID"] as? String
+        let guide = info["guide"] as? Bool ?? false
         await MainActor.run {
             NSApp.activate()
+            if guide { openGuideDecisions?(accountID.flatMap { $0.isEmpty ? nil : $0 }) }
             if let threadID, !threadID.isEmpty { openThread?(threadID, accountID) }
         }
     }

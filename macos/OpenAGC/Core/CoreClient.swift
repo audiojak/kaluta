@@ -483,6 +483,158 @@ final class CoreClient: Sendable {
         try await call { try await core.parseTaskSuggestions(text: text, threadIds: threadIDs) }
     }
 
+    // MARK: Writing guide (spec §14.9)
+
+    func guideCategories() async throws(CoreClientError) -> [GuideCategoryInfo] {
+        try await call { try await core.guideCategories() }
+    }
+
+    /// Entries with any of `statuses`, or every entry when empty.
+    func guideEntries(_ statuses: [GuideStatus] = []) async throws(CoreClientError) -> [GuideEntry] {
+        try await call { try await core.listGuideEntries(statuses: statuses) }
+    }
+
+    func guideEntry(_ id: Int64) async throws(CoreClientError) -> GuideEntry? {
+        try await call { try await core.guideEntry(id: id) }
+    }
+
+    /// Edits applied as one change; its id undoes and redoes it.
+    func applyGuideEdits(_ edits: [GuideEdit], reason: String) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.applyGuideEdits(edits: edits, reason: reason) }
+    }
+
+    func undoGuideChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoGuideChange(changeId: id) }
+    }
+
+    func redoGuideChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoGuideChange(changeId: id) }
+    }
+
+    func guideVersion() async throws(CoreClientError) -> Int64 {
+        try await call { try await core.guideVersion() }
+    }
+
+    func audienceGroups() async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.listAudienceGroups() }
+    }
+
+    func saveAudienceGroup(_ group: AudienceGroup) async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.saveAudienceGroup(group: group) }
+    }
+
+    func renameAudienceGroup(_ id: Int64, to name: String) async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.renameAudienceGroup(id: id, name: name) }
+    }
+
+    /// Returns the change that re-scoped entries, if any, for Undo.
+    func mergeAudienceGroups(into: Int64, from: Int64) async throws(CoreClientError) -> Int64? {
+        try await call { try await core.mergeAudienceGroups(into: into, from: from) }
+    }
+
+    /// Suggest groups for the obvious gaps until there are five.
+    func fillAudienceGroups() async throws(CoreClientError) -> [AudienceGroup] {
+        try await call { try await core.fillAudienceGroups() }
+    }
+
+    /// The confirmed groups these recipients belong to.
+    func audienceFor(_ addresses: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.audienceFor(addresses: addresses) }
+    }
+
+    func deleteAudienceGroup(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.deleteAudienceGroup(id: id) }
+    }
+
+    /// Markdown to read or share, or JSON to import or merge elsewhere.
+    func exportGuide(json: Bool, withEvidence: Bool = false) async throws(CoreClientError) -> String {
+        try await call { try await core.exportGuide(json: json, withEvidence: withEvidence) }
+    }
+
+    func readGuideExport(_ json: String) throws(CoreClientError) -> GuideImport {
+        do { return try core.readGuideExport(json: json) } catch let error as CoreError {
+            throw CoreClientError(error)
+        } catch {
+            throw CoreClientError(kind: .internalError, message: String(describing: error))
+        }
+    }
+
+    /// For the learning dialog: sent mail, analysed before, and what a run
+    /// of `count` would analyse.
+    func guideSampleInfo(count: UInt32, filter: GuideSampleFilter) async throws(CoreClientError) -> GuideSampleInfo {
+        try await call { try await core.guideSampleInfo(count: count, filter: filter) }
+    }
+
+    /// The writing guide for a message being drafted (spec §14.9).
+    func guideForMessage(recipients: [String], messageType: String?,
+                         audiences: [String]?) async throws(CoreClientError) -> GuideRendered {
+        try await call { try await core.guideForMessage(recipients: recipients, messageType: messageType, audiences: audiences) }
+    }
+
+    /// Check an AI draft's own text against the guide for its message.
+    func checkGuideDraft(_ text: String, recipients: [String], messageType: String?,
+                         audiences: [String]?) async throws(CoreClientError) -> [GuideCheckFailure] {
+        try await call {
+            try await core.checkGuideDraft(text: text, recipients: recipients, messageType: messageType, audiences: audiences)
+        }
+    }
+
+    func setDraftGuideVersion(_ draftID: Int64, _ version: Int64) async throws(CoreClientError) {
+        try await call { try await core.setDraftGuideVersion(draftId: draftID, version: version) }
+    }
+
+    func draftGuideVersion(_ draftID: Int64) async throws(CoreClientError) -> Int64? {
+        try await call { try await core.draftGuideVersion(draftId: draftID) }
+    }
+
+    /// Ask the agent how to change the guide; nothing changes until the
+    /// user answers the questions.
+    func proposeGuideChange(_ request: String, agent: String) async throws(CoreClientError) -> [GuideChangeQuestion] {
+        try await call { try await core.proposeGuideChange(request: request, agent: agent) }
+    }
+
+    /// What merging a guide from another account or a file would do.
+    func planGuideMerge(fromAccount: String?, json: String?, agent: String) async throws(CoreClientError) -> GuideMergePlan {
+        try await call { try await core.planGuideMerge(fromAccount: fromAccount, json: json, agent: agent) }
+    }
+
+    /// The signature block the analysis found in sent mail, if any.
+    func guideSignature() async throws(CoreClientError) -> String? {
+        try await call { try await core.guideSignature() }
+    }
+
+    /// How many messages a run of this request would analyse.
+    func guideRunPreview(_ request: GuideRunRequest) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.guideRunPreview(request: request) }
+    }
+
+    func startGuideRun(_ request: GuideRunRequest) async throws(CoreClientError) -> GuideRunInfo {
+        try await call { try await core.startGuideRun(request: request) }
+    }
+
+    func pauseGuideRun() async throws(CoreClientError) {
+        try await call { try await core.pauseGuideRun() }
+    }
+
+    /// Resume a paused run, or one the app quit in the middle of.
+    @discardableResult
+    func resumeGuideRun() async throws(CoreClientError) -> GuideRunInfo? {
+        try await call { try await core.resumeGuideRun() }
+    }
+
+    func cancelGuideRun() async throws(CoreClientError) {
+        try await call { try await core.cancelGuideRun() }
+    }
+
+    func guideProgress() async throws(CoreClientError) -> GuideProgress {
+        try await call { try await core.guideProgress() }
+    }
+
+    /// Proposals ready to decide (from finished runs only).
+    func guideDecisions() async throws(CoreClientError) -> [GuideEntry] {
+        try await call { try await core.guideDecisions() }
+    }
+
     // MARK: Agents
 
     func agentProviders(refresh: Bool = false) async -> [AgentProviderInfo] {
@@ -867,6 +1019,33 @@ typealias NewTask = OpenAGCCore.NewTask
 typealias TaskEdit = OpenAGCCore.TaskEdit
 typealias TaskAction = OpenAGCCore.TaskAction
 typealias TaskSuggestion = OpenAGCCore.TaskSuggestion
+typealias GuideCategoryInfo = OpenAGCCore.GuideCategoryInfo
+typealias GuideEntry = OpenAGCCore.GuideEntry
+typealias GuideEntryFields = OpenAGCCore.GuideEntryFields
+typealias GuideEdit = OpenAGCCore.GuideEdit
+typealias GuideChange = OpenAGCCore.GuideChange
+typealias GuideKind = OpenAGCCore.GuideKind
+typealias GuideStatus = OpenAGCCore.GuideStatus
+typealias GuideSource = OpenAGCCore.GuideSource
+typealias GuideScope = OpenAGCCore.GuideScope
+typealias GuideCheck = OpenAGCCore.GuideCheck
+typealias GuideCheckKind = OpenAGCCore.GuideCheckKind
+typealias GuideQuote = OpenAGCCore.GuideQuote
+typealias GuideImport = OpenAGCCore.GuideImport
+typealias AudienceGroup = OpenAGCCore.AudienceGroup
+typealias AudienceStatus = OpenAGCCore.AudienceStatus
+typealias GuideProgress = OpenAGCCore.GuideProgress
+typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
+typealias GuideRunKind = OpenAGCCore.GuideRunKind
+typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
+typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
+typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
+typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
+typealias GuideRendered = OpenAGCCore.GuideRendered
+typealias GuideCheckFailure = OpenAGCCore.GuideCheckFailure
+typealias GuideChangeQuestion = OpenAGCCore.GuideChangeQuestion
+typealias GuideMergePlan = OpenAGCCore.GuideMergePlan
+typealias GuideMergeDecision = OpenAGCCore.GuideMergeDecision
 
 // MARK: - Events
 
@@ -904,6 +1083,8 @@ enum CoreClientEvent: Sendable, Equatable {
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
     case tasksChanged
+    case guideChanged
+    case guideProgress(GuideProgress)
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -985,6 +1166,10 @@ private extension CoreClientEvent {
             self = .routinesChanged
         case .tasksChanged:
             self = .tasksChanged
+        case .guideChanged:
+            self = .guideChanged
+        case let .guideProgress(progress):
+            self = .guideProgress(progress)
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

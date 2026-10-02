@@ -8,7 +8,7 @@
 //! non-sensitive. Gmail's profile call still supplies the address.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -337,7 +337,10 @@ pub struct GoogleTokenSource {
     token_url: String,
     client: OAuthClient,
     refresh_token: Redacted<String>,
-    cache: Mutex<Option<(AccessToken, Instant)>>,
+    /// The token and when it expires, by the wall clock: a monotonic
+    /// `Instant` stops while the Mac sleeps, so a token would look fresh
+    /// hours after it expired.
+    cache: Mutex<Option<(AccessToken, SystemTime)>>,
 }
 
 impl GoogleTokenSource {
@@ -357,7 +360,7 @@ impl GoogleTokenSource {
 
     /// Seed the cache with a token obtained during sign-in.
     pub async fn prime(&self, access_token: String, expires_in: Option<u64>) {
-        let expires = Instant::now() + Duration::from_secs(expires_in.unwrap_or(3600));
+        let expires = SystemTime::now() + Duration::from_secs(expires_in.unwrap_or(3600));
         *self.cache.lock().await = Some((Redacted::new(access_token), expires));
     }
 }
@@ -367,12 +370,12 @@ impl TokenSource for GoogleTokenSource {
     async fn access_token(&self) -> ProviderResult<AccessToken> {
         let mut cache = self.cache.lock().await;
         if let Some((token, expires)) = cache.as_ref()
-            && Instant::now() + EXPIRY_MARGIN < *expires
+            && SystemTime::now() + EXPIRY_MARGIN < *expires
         {
             return Ok(token.clone());
         }
         let fresh = refresh(&self.http, &self.token_url, &self.client, &self.refresh_token).await?;
-        let expires = Instant::now() + Duration::from_secs(fresh.expires_in.unwrap_or(3600));
+        let expires = SystemTime::now() + Duration::from_secs(fresh.expires_in.unwrap_or(3600));
         let token = Redacted::new(fresh.access_token);
         *cache = Some((token.clone(), expires));
         Ok(token)

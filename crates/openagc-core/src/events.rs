@@ -146,6 +146,12 @@ pub enum CoreEvent {
     RoutinesChanged,
     /// A task was added, changed or removed (spec §14.8); re-read them.
     TasksChanged,
+    /// The writing guide changed (entries, groups, examples); re-read it.
+    GuideChanged,
+    /// A learning run moved on, paused or finished (spec §14.9).
+    GuideProgress {
+        progress: crate::guide_run::GuideProgress,
+    },
     /// One agent session's events from one 16 ms frame (spec §9.5).
     AgentEvents {
         session_id: String,

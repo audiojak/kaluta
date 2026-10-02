@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use mail_domain::{LabelId, MessageId, ThreadId};
 use mail_mime::mbox::fixture::FixtureMessage;
@@ -69,6 +70,7 @@ async fn setup(token_accepted: &str) -> (FakeImapServer, Arc<FakeProvider>, Imap
         max_message_bytes: 2 * 1024 * 1024,
         daily_budget_bytes: 1 << 30,
         batch: 200,
+        refusal_lasts: Duration::from_secs(3600),
     };
     let source = ImapBackfill::new(config, Arc::new(StaticToken(token_accepted.into())), rest.clone(), labels);
     (server, rest, source)
@@ -114,6 +116,57 @@ async fn big_and_unknown_messages_go_over_the_api() {
     assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
+/// Hands out a stale token until told it is invalid, as the token cache
+/// does after the Mac slept past the token's expiry.
+struct StaleThenFresh(std::sync::atomic::AtomicBool);
+
+#[async_trait::async_trait]
+impl provider_api::TokenSource for StaleThenFresh {
+    async fn access_token(&self) -> provider_api::ProviderResult<provider_api::AccessToken> {
+        let fresh = self.0.load(std::sync::atomic::Ordering::SeqCst);
+        Ok(mail_domain::Redacted::new(if fresh { "good-token" } else { "expired-token" }.into()))
+    }
+    async fn invalidate(&self, _token: &provider_api::AccessToken) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tokio::test]
+async fn an_expired_token_is_refreshed_and_the_login_tried_again() {
+    let (server, rest, _) = setup("good-token").await;
+    let config = ImapConfig {
+        email: "me@example.com".into(),
+        endpoint: ImapEndpoint::Plain(server.addr),
+        max_message_bytes: 2 * 1024 * 1024,
+        daily_budget_bytes: 1 << 30,
+        batch: 200,
+        refusal_lasts: Duration::from_secs(3600),
+    };
+    let tokens = Arc::new(StaleThenFresh(Default::default()));
+    let source = ImapBackfill::new(config, tokens, rest, Arc::new(RwLock::new(HashMap::new())));
+    assert_eq!(source.fetch(&[hex(MSG_A)]).await.unwrap().len(), 1);
+    assert!(!source.is_refused());
+    assert_eq!(source.name(), "imap");
+}
+
+#[tokio::test]
+async fn a_refusal_wears_off() {
+    let (server, rest, _) = setup("good-token").await;
+    let config = ImapConfig {
+        email: "me@example.com".into(),
+        endpoint: ImapEndpoint::Plain(server.addr),
+        max_message_bytes: 2 * 1024 * 1024,
+        daily_budget_bytes: 1 << 30,
+        batch: 200,
+        refusal_lasts: Duration::from_millis(50),
+    };
+    let source = ImapBackfill::new(config, Arc::new(StaticToken("wrong-token".into())), rest, Default::default());
+    assert!(source.fetch(&[hex(MSG_A)]).await.is_err());
+    assert!(source.is_refused());
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert!(!source.is_refused(), "IMAP is tried again after a while");
+}
+
 #[tokio::test]
 async fn a_refused_login_means_the_api_from_then_on() {
     // The source says so; the engine's transport serves the batch over the
@@ -139,6 +192,7 @@ async fn the_daily_budget_hands_over_to_the_api() {
             max_message_bytes: 2 * 1024 * 1024,
             daily_budget_bytes: 10, // spent by the first message
             batch: 200,
+            refusal_lasts: Duration::from_secs(3600),
         };
         let source = ImapBackfill::new(config, Arc::new(StaticToken("good-token".into())), rest.clone(), labels);
         (server, rest, source)
@@ -332,7 +386,6 @@ async fn spam_trash_and_drafts_come_from_their_folders_with_their_labels() {
 
 #[tokio::test]
 async fn idle_reports_new_mail_at_once_and_times_out_quietly() {
-    use std::time::Duration;
     let (server, _rest, source) = setup("good-token").await;
     assert_eq!(source.watch(Duration::from_millis(100)).await.unwrap(), Some(false), "nothing new: the wait runs out");
 

@@ -37,6 +37,9 @@ pub(crate) struct ToolSession {
     pub draft_quotes: HashMap<i64, String>,
     /// A routine preview: only read tools (spec §11.5 dry run).
     pub read_only: bool,
+    /// Work the core does with the agent (writing-guide analysis): its
+    /// transcript is not stored, so it stays out of the agent's history.
+    pub hidden: bool,
     /// Where `mail_present_threads` shows results; set by the agent manager.
     pub sink: Option<EventSink>,
 }
@@ -59,9 +62,19 @@ pub(crate) struct AgentHub {
     /// Where cloud routine calls look for `claude`; tests point it at a
     /// fake. `None` means the user's real CLI.
     pub(crate) cloud_locator: Mutex<Option<agent_api::process::Locator>>,
+    /// The writing guide's learning job, per account (spec §14.9).
+    pub(crate) guide_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Turns the core itself waits on (`watch_turn`), by session.
+    turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript
     /// and events stay on that account whatever the window shows (§7.7).
     session_accounts: Mutex<HashMap<String, String>>,
+}
+
+/// A turn the core waits on: the text so far and who to tell.
+struct TurnWaiter {
+    text: String,
+    done: Option<tokio::sync::oneshot::Sender<Result<String, String>>>,
 }
 
 /// The real agent adapters (spec §9.3, §9.4).
@@ -71,8 +84,13 @@ pub(crate) fn adapters() -> Vec<Arc<dyn AgentProvider>> {
 
 impl AgentHub {
     pub(crate) fn register(&self, session: &str, scope: Scope, sink: Option<EventSink>) {
-        let state =
-            ToolSession { guard: SessionGuard::new(scope), draft_quotes: HashMap::new(), read_only: false, sink };
+        let state = ToolSession {
+            guard: SessionGuard::new(scope),
+            draft_quotes: HashMap::new(),
+            read_only: false,
+            hidden: false,
+            sink,
+        };
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(session.to_owned(), state);
     }
 
@@ -93,6 +111,46 @@ impl AgentHub {
 
     pub(crate) fn with_session<T>(&self, session: &str, f: impl FnOnce(&mut ToolSession) -> T) -> Option<T> {
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).get_mut(session).map(f)
+    }
+
+    /// Wait for the session's next turn: the answer's text when it
+    /// completes, or why it failed. Register before sending the prompt.
+    pub(crate) fn watch_turn(&self, session: &str) -> tokio::sync::oneshot::Receiver<Result<String, String>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.turn_waiters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session.to_owned(), TurnWaiter { text: String::new(), done: Some(tx) });
+        rx
+    }
+
+    /// Feed a session's events to its waiter, if the core is waiting.
+    pub(crate) fn feed_turn(&self, session: &str, events: &[agent_api::AgentEvent]) {
+        let mut waiters = self.turn_waiters.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(w) = waiters.get_mut(session) else { return };
+        for e in events {
+            match e {
+                agent_api::AgentEvent::TextDelta { text } => w.text.push_str(text),
+                agent_api::AgentEvent::TurnCompleted { .. } => {
+                    if let Some(done) = w.done.take() {
+                        let _ = done.send(Ok(std::mem::take(&mut w.text)));
+                    }
+                }
+                agent_api::AgentEvent::TurnFailed { message } => {
+                    if let Some(done) = w.done.take() {
+                        let _ = done.send(Err(message.clone()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if w.done.is_none() {
+            waiters.remove(session);
+        }
+    }
+
+    pub(crate) fn is_hidden(&self, session: &str) -> bool {
+        self.with_session(session, |s| s.hidden).unwrap_or(false)
     }
 
     pub(crate) fn has(&self, session: &str) -> bool {

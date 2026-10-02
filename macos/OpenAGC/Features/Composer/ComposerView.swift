@@ -14,6 +14,8 @@ struct ComposerView: View {
     @State private var importing = false
     @State private var assistant = ComposerAssistant()
     @FocusState private var assistantFocused: Bool
+    @State private var factAnswers: [String: String] = [:]
+    @State private var saveFacts = true
 
     var body: some View {
         Group {
@@ -38,6 +40,7 @@ struct ComposerView: View {
             self.store = store
             await store.load(request)
             if model.agent.providers.isEmpty { await model.agent.loadProviders() }
+            await assistant.loadAudiences(model.core)
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
@@ -245,22 +248,101 @@ struct ComposerView: View {
             switch assistant.state {
             case .done:
                 HStack(spacing: Space.m) {
-                    Text("Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    Text(assistant.followsGuide
+                         ? "Written by \(name), following your writing guide. Read it before sending."
+                         : "Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    audienceMenu(store)
                     Button("Undo") { assistant.undo() }
                         .buttonStyle(.link)
                         .hoverHelp("Put back the message as it was before")
                 }
                 .font(TypeRole.caption)
+                if !assistant.checkFailures.isEmpty {
+                    Label(assistant.checkFailures.joined(separator: "; "), systemImage: "exclamationmark.triangle")
+                        .font(TypeRole.caption)
+                        .foregroundStyle(Tone.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            case let .asking(questions):
+                factQuestions(questions)
             case let .failed(message):
                 Text(message).font(TypeRole.caption).foregroundStyle(Tone.failure)
             default:
-                EmptyView()
+                // An agent's draft under review can be rewritten for an audience.
+                if request.agentName != nil {
+                    audienceMenu(store).font(TypeRole.caption)
+                }
             }
         }
         .controlSize(.small)
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.s)
         .overlay(alignment: .top) { InsetRule() }
+    }
+
+    /// The facts the agent needs before it drafts: a field for each, and
+    /// whether to keep the answers in the writing guide.
+    private func factQuestions(_ questions: [ComposerAssistant.FactQuestion]) -> some View {
+        let name = model.agent.providerName
+        return VStack(alignment: .leading, spacing: Space.s) {
+            Text("\(name) needs a few facts before it writes this. Answer what you can.")
+                .font(TypeRole.caption)
+                .foregroundStyle(.secondary)
+            ForEach(questions) { q in
+                VStack(alignment: .leading, spacing: Space.hair) {
+                    Text(q.question).font(TypeRole.caption.weight(.medium))
+                    TextField(q.fact, text: Binding(get: { factAnswers[q.id] ?? "" }, set: { factAnswers[q.id] = $0 }),
+                              axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+                        .accessibilityLabel(q.question)
+                }
+            }
+            HStack(spacing: Space.m) {
+                Toggle("Keep these facts in my writing guide", isOn: $saveFacts)
+                    .toggleStyle(.checkbox)
+                    .hoverHelp("Later drafts use them without asking; each can be changed or removed in the Writing Guide")
+                Spacer(minLength: Space.m)
+                CancelButton(help: "Stop; the message stays as it is (Esc)") {
+                    assistant.cancel()
+                    factAnswers = [:]
+                }
+                Button("Skip") { answerFacts([:]) }
+                    .hoverHelp("Write it now, leaving [brackets] for what is not known")
+                Button("Write") { answerFacts(factAnswers) }
+                    .keyboardShortcut(.defaultAction)
+                    .hoverHelp("Write the message with these answers")
+            }
+        }
+    }
+
+    private func answerFacts(_ answers: [String: String]) {
+        let save = saveFacts
+        factAnswers = [:]
+        Task { await assistant.answer(answers, save: save) }
+    }
+
+    /// "Written for Customers": another audience writes a new draft under
+    /// its guidelines (spec §14.9).
+    @ViewBuilder private func audienceMenu(_ store: ComposerStore) -> some View {
+        if !assistant.audienceChoices.isEmpty {
+            let current = assistant.writtenFor
+            Menu(current.isEmpty ? "Written for everyone" : "Written for \(current.joined(separator: ", "))") {
+                Button("The Recipients' Own") { switchAudience(nil, store) } // no-help: menu
+                Divider() // menu
+                ForEach(assistant.audienceChoices, id: \.self) { name in
+                    Button(name) { switchAudience([name], store) } // no-help: menu
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(assistant.state == .working)
+            .hoverHelp("Write it for another audience, following that audience's guidelines")
+        }
+    }
+
+    private func switchAudience(_ audiences: [String]?, _ store: ComposerStore) {
+        Task { await assistant.switchAudience(to: audiences, store: store, model: model) }
     }
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {

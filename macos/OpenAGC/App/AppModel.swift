@@ -165,7 +165,7 @@ final class AppModel {
     /// narrowed to Important when that switch is on and to the category
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
-        guard let id = selectedMailboxID, id != Self.tasksMailboxID else { return nil }
+        guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -287,6 +287,8 @@ final class AppModel {
     /// Opens a composer window; set by the main window, which has SwiftUI's
     /// `openWindow` action.
     @ObservationIgnored var openComposer: ((ComposeRequest) -> Void)?
+    /// Opens a thread in a window of its own; set by the main window.
+    @ObservationIgnored var openThreadWindow: ((ThreadWindowRequest) -> Void)?
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
     @ObservationIgnored var openSyncDebugger: (() -> Void)?
@@ -321,6 +323,8 @@ final class AppModel {
     let routines: RoutinesStore
     /// The task list (spec §14.8).
     let tasks: TaskListStore
+    /// The writing guide (spec §14.9).
+    let guide: GuideStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -350,6 +354,7 @@ final class AppModel {
         fallbackAgent = AgentStore(core: core, defaults: defaults)
         routines = RoutinesStore(core: core)
         tasks = TaskListStore(core: core)
+        guide = GuideStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -370,6 +375,13 @@ final class AppModel {
         notifier.openThread = { [weak self] thread, account in
             guard let self else { return }
             Task { await self.reveal(threadID: thread, in: account) }
+        }
+        notifier.openGuideDecisions = { [weak self] account in
+            guard let self else { return }
+            Task {
+                if let account, account != self.openAccountID { await self.switchAccount(to: account) }
+                self.openGuideDecisionsNow()
+            }
         }
         notifier.install()
         if openDemo {
@@ -501,6 +513,11 @@ final class AppModel {
             reader.ownAddresses = ownAddresses
             await threads.show(mailboxID: listMailboxID ?? "INBOX")
             await tasks.load()
+            // A learning run the app quit in the middle of carries on
+            // (spec §14.9); a paused one waits for the user.
+            guideProgress = try? await core.guideProgress()
+            if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
+            await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
                 defaults.set(summary.email, forKey: "accountEmail")
@@ -555,6 +572,22 @@ final class AppModel {
     private(set) var routinesRevision = 0
     /// Bumped when a task was added, changed or removed (spec §14.8).
     private(set) var tasksRevision = 0
+    /// Bumped when the writing guide changed (spec §14.9).
+    private(set) var guideRevision = 0
+    /// The learning run's progress and the decisions waiting (spec §14.9).
+    var guideProgress: GuideProgress?
+    /// A sheet of the Writing Guide section, while open.
+    var guideSheet: GuideSheet?
+    /// Why the last guide action failed, shown in the section.
+    var guideError: String?
+    /// The invitation to a first run, or decisions waiting after one.
+    var guidePrompt: GuidePrompt?
+    /// The account whose invitation was put off: its banner shows until a
+    /// run starts or it is dismissed.
+    var guideBannerAccount: String?
+    @ObservationIgnored var guideInviteChecked: Set<String> = []
+    /// Opens Settings on the Agents tab (set by the window).
+    @ObservationIgnored var openAgentSettings: (() -> Void)?
 
     // MARK: Agent
 
@@ -948,6 +981,21 @@ final class AppModel {
     /// Draft, a double-click or Return). A draft written elsewhere becomes
     /// a local draft the first time, attachments included; saving it
     /// updates the same draft on Gmail.
+    /// Open threads in windows of their own (Return or double-click in the
+    /// list); a draft opens in the composer instead. At most ten at once.
+    func openThreads(_ ids: [String]? = nil) {
+        guard let account = openAccountID else { return }
+        let chosen = ids ?? (selectedThreadIDs.isEmpty ? selectedThreadID.map { [$0] } ?? [] : Array(selectedThreadIDs))
+        let drafts = Set(threads.rows.filter { $0.labelIds.contains("DRAFT") }.map(\.id))
+        for id in chosen.prefix(10) {
+            if drafts.contains(id) || selectedMailboxID == "DRAFT" {
+                editDraft(threadID: id)
+            } else {
+                openThreadWindow?(ThreadWindowRequest(accountID: account, threadID: id))
+            }
+        }
+    }
+
     func editDraft(threadID: String? = nil) {
         guard let core, let threadID = threadID ?? selectedThreadID, let account = openAccountID else { return }
         Task {
@@ -1178,6 +1226,7 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
+        if isGuide { Task { await guide.load() } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1262,7 +1311,9 @@ final class AppModel {
         case let .syncStatus(state, pending, headers):
             refreshTransport()
             switch state {
-            case .idle: syncDisplay = .idle
+            case .idle:
+                syncDisplay = .idle
+                await checkGuideInvite()
             case .bootstrapping, .syncing:
                 syncDisplay = pending + headers > 0 || state == .bootstrapping
                     ? .syncing(pending: pending, headers: headers) : .idle
@@ -1277,6 +1328,20 @@ final class AppModel {
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:
             routinesRevision += 1
+        case .guideChanged:
+            guideRevision += 1
+            await guide.load()
+        case let .guideProgress(progress):
+            let finished = guideProgress?.run?.status == .running && progress.run?.status == .done
+            guideProgress = progress
+            if finished {
+                await guide.load()
+                let waiting = Int(progress.decisionsTotal) - Int(progress.decisionsDone)
+                notifier.announceGuide(decisions: waiting, accountID: tagged.accountID)
+                if waiting > 0, guideSheet == nil, !(isGuide && guide.showsDecisions) {
+                    guidePrompt = .finished(decisions: waiting)
+                }
+            }
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

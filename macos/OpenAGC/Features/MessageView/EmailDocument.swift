@@ -177,5 +177,11 @@ enum EmailDocument {
     @media (prefers-color-scheme: dark) { .badge { color: #FFB45C; } }
     blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }
     a { color: LinkText; }
+    .body details.openagc-quote { margin: 10px 0 0; }
+    .body details.openagc-quote > summary { display: inline-block; padding: 0 9px; border-radius: 8px; cursor: pointer; \
+    font: 700 12px/16px -apple-system, system-ui; letter-spacing: 1px; color: GrayText; \
+    background: color-mix(in srgb, CanvasText 9%, transparent); }
+    .body details.openagc-quote > summary:hover { background: color-mix(in srgb, CanvasText 16%, transparent); }
+    .body details.openagc-quote[open] > summary { margin-bottom: 8px; }
     """
 }

@@ -9,6 +9,7 @@ mod db;
 pub mod demo;
 pub mod drafts;
 mod error;
+pub mod guide;
 pub mod outbox;
 pub mod queue;
 pub mod read;
@@ -21,6 +22,8 @@ mod write;
 pub use db::{Db, READER_COUNT, schema_version};
 pub use error::{StoreError, StoreResult};
 pub use read::ThreadPage;
+/// The writer's transaction, for callers that compose store functions in one.
+pub use rusqlite::Transaction;
 pub use write::{
     ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, ThreadChanges,
 };
