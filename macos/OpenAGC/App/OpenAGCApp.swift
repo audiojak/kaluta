@@ -26,6 +26,9 @@ struct OpenAGCApp: App {
         // the user's own OpenAGC: a scratch run that closed its window made
         // the next launch open with none. They neither save nor restore it.
         .restorationBehavior(Self.isolated ? .disabled : .automatic)
+        // Restored state with no mail window (it was closed before quitting,
+        // or only a message window was open) launched the app windowless.
+        .defaultLaunchBehavior(.presented)
         .commands {
             MailCommands(model: model)
             CommandGroup(after: .appInfo) {
