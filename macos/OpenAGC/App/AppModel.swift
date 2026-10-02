@@ -287,6 +287,8 @@ final class AppModel {
     /// Opens a composer window; set by the main window, which has SwiftUI's
     /// `openWindow` action.
     @ObservationIgnored var openComposer: ((ComposeRequest) -> Void)?
+    /// Opens a thread in a window of its own; set by the main window.
+    @ObservationIgnored var openThreadWindow: ((ThreadWindowRequest) -> Void)?
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
     @ObservationIgnored var openSyncDebugger: (() -> Void)?
@@ -965,6 +967,21 @@ final class AppModel {
     /// Draft, a double-click or Return). A draft written elsewhere becomes
     /// a local draft the first time, attachments included; saving it
     /// updates the same draft on Gmail.
+    /// Open threads in windows of their own (Return or double-click in the
+    /// list); a draft opens in the composer instead. At most ten at once.
+    func openThreads(_ ids: [String]? = nil) {
+        guard let account = openAccountID else { return }
+        let chosen = ids ?? (selectedThreadIDs.isEmpty ? selectedThreadID.map { [$0] } ?? [] : Array(selectedThreadIDs))
+        let drafts = Set(threads.rows.filter { $0.labelIds.contains("DRAFT") }.map(\.id))
+        for id in chosen.prefix(10) {
+            if drafts.contains(id) || selectedMailboxID == "DRAFT" {
+                editDraft(threadID: id)
+            } else {
+                openThreadWindow?(ThreadWindowRequest(accountID: account, threadID: id))
+            }
+        }
+    }
+
     func editDraft(threadID: String? = nil) {
         guard let core, let threadID = threadID ?? selectedThreadID, let account = openAccountID else { return }
         Task {

@@ -1,13 +1,20 @@
 import SwiftUI
 
 /// The reader pane: subject, a remote-images banner when needed, and the
-/// thread rendered in one locked-down web view.
+/// thread rendered in one locked-down web view. In the main window it shows
+/// the selection; a thread window passes its own store and thread.
 struct ThreadReaderView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
+    /// A window of its own: its store and thread (nil: the selection).
+    var store: ReaderStore?
+    var threadID: String?
+
+    private var reader: ReaderStore { store ?? model.reader }
+    private var shownID: String? { store == nil ? model.selectedThreadID : threadID }
 
     var body: some View {
-        let reader = model.reader
+        let reader = reader
         VStack(spacing: 0) {
             if let detail = reader.detail {
                 header(detail)
@@ -25,7 +32,7 @@ struct ThreadReaderView: View {
                 Color.clear
             }
         }
-        .task(id: model.selectedThreadID) { await reader.show(threadID: model.selectedThreadID) }
+        .task(id: shownID) { await reader.show(threadID: shownID) }
     }
 
     private func header(_ detail: ThreadDetail) -> some View {
@@ -39,7 +46,7 @@ struct ThreadReaderView: View {
                 Button("Edit Draft", systemImage: "pencil") { model.editDraft(threadID: detail.thread.id) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .hoverHelp("Open this draft to edit and send it (Return in Drafts)")
+                    .hoverHelp("Open this draft to edit and send it (Return or double-click in Drafts)")
             }
             if detail.messages.count > 1 {
                 Text("\(detail.messages.count) messages")
@@ -55,9 +62,9 @@ struct ThreadReaderView: View {
     private var remoteImagesBanner: some View {
         Banner("Remote images are hidden to protect your privacy.", systemImage: "photo.badge.exclamationmark",
                intent: .neutral, inset: Space.xxl) {
-            Button("Load Images") { model.reader.loadRemoteImagesForThread() }
+            Button("Load Images") { reader.loadRemoteImagesForThread() }
                 .hoverHelp("Show remote images in this conversation only (⇧⌘I)")
-            Button("Always from Sender") { model.reader.alwaysLoadRemoteImagesFromSenders() }
+            Button("Always from Sender") { reader.alwaysLoadRemoteImagesFromSenders() }
                 .hoverHelp("Always show remote images from these senders (change in Settings › Privacy)")
         }
     }

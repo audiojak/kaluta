@@ -1916,7 +1916,9 @@ since Gmail's change history leaves drafts out and the sync window
 (one month by default) would miss older ones: every draft's message is
 stored in full whatever the window, draft messages whose draft is gone
 (sent or discarded elsewhere) are removed, and `server_drafts` records
-which Gmail draft holds which message. A draft in the Drafts mailbox opens
+which Gmail draft holds which message. Any other conversation opens in a
+window of its own from a double-click or Return in the list, as in Apple
+Mail (up to ten selected at once; amended 2026-10-02). A draft opens
 in a composer from *Edit Draft* in the reader, a double-click or Return:
 the local draft already mirroring it is reused; a draft written elsewhere
 becomes a local draft on first open (recipients, subject, body, and its

@@ -87,11 +87,12 @@ struct ThreadListView: NSViewRepresentable {
             applyingSelection = false
         }
 
-        /// A double-click on a draft opens it in a composer.
+        /// A double-click opens the thread in its own window, or a draft in
+        /// a composer.
         @objc func openClicked(_ sender: NSTableView) {
             let row = sender.clickedRow
-            guard rows.indices.contains(row), rows[row].labelIds.contains("DRAFT") else { return }
-            model.editDraft(threadID: rows[row].id)
+            guard rows.indices.contains(row) else { return }
+            model.openThreads([rows[row].id])
         }
 
         func numberOfRows(in tableView: NSTableView) -> Int {
@@ -225,8 +226,8 @@ final class ThreadTableView: NSTableView {
         case "k": moveSelection(by: -1)
         case "/": model.focusSearch()
         default:
-            if event.keyCode == 36 || event.keyCode == 76, model.selectedMailboxID == "DRAFT" { // return, enter
-                model.editDraft()
+            if event.keyCode == 36 || event.keyCode == 76 { // return, enter: open, as in Apple Mail
+                model.openThreads()
             } else if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
                 model.trashSelection()
             } else {
