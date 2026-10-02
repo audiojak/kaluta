@@ -14,6 +14,8 @@ struct ComposerView: View {
     @State private var importing = false
     @State private var assistant = ComposerAssistant()
     @FocusState private var assistantFocused: Bool
+    @State private var factAnswers: [String: String] = [:]
+    @State private var saveFacts = true
 
     var body: some View {
         Group {
@@ -261,6 +263,8 @@ struct ComposerView: View {
                         .foregroundStyle(Tone.caution)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            case let .asking(questions):
+                factQuestions(questions)
             case let .failed(message):
                 Text(message).font(TypeRole.caption).foregroundStyle(Tone.failure)
             default:
@@ -274,6 +278,48 @@ struct ComposerView: View {
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.s)
         .overlay(alignment: .top) { InsetRule() }
+    }
+
+    /// The facts the agent needs before it drafts: a field for each, and
+    /// whether to keep the answers in the writing guide.
+    private func factQuestions(_ questions: [ComposerAssistant.FactQuestion]) -> some View {
+        let name = model.agent.providerName
+        return VStack(alignment: .leading, spacing: Space.s) {
+            Text("\(name) needs a few facts before it writes this. Answer what you can.")
+                .font(TypeRole.caption)
+                .foregroundStyle(.secondary)
+            ForEach(questions) { q in
+                VStack(alignment: .leading, spacing: Space.hair) {
+                    Text(q.question).font(TypeRole.caption.weight(.medium))
+                    TextField(q.fact, text: Binding(get: { factAnswers[q.id] ?? "" }, set: { factAnswers[q.id] = $0 }),
+                              axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+                        .accessibilityLabel(q.question)
+                }
+            }
+            HStack(spacing: Space.m) {
+                Toggle("Keep these facts in my writing guide", isOn: $saveFacts)
+                    .toggleStyle(.checkbox)
+                    .hoverHelp("Later drafts use them without asking; each can be changed or removed in the Writing Guide")
+                Spacer(minLength: Space.m)
+                CancelButton(help: "Stop; the message stays as it is (Esc)") {
+                    assistant.cancel()
+                    factAnswers = [:]
+                }
+                Button("Skip") { answerFacts([:]) }
+                    .hoverHelp("Write it now, leaving [brackets] for what is not known")
+                Button("Write") { answerFacts(factAnswers) }
+                    .keyboardShortcut(.defaultAction)
+                    .hoverHelp("Write the message with these answers")
+            }
+        }
+    }
+
+    private func answerFacts(_ answers: [String: String]) {
+        let save = saveFacts
+        factAnswers = [:]
+        Task { await assistant.answer(answers, save: save) }
     }
 
     /// "Written for Customers": another audience writes a new draft under

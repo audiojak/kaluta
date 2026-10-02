@@ -13,6 +13,16 @@ import Observation
 final class ComposerAssistant {
     enum State: Equatable {
         case idle, working, done, failed(String)
+        /// The agent needs facts it does not have before it drafts.
+        case asking([FactQuestion])
+    }
+
+    /// A fact the agent asked for: the question, and a short name for the
+    /// fact when it is kept in the writing guide ("What my company does").
+    struct FactQuestion: Equatable, Identifiable {
+        let question: String
+        let fact: String
+        var id: String { question }
     }
 
     private(set) var state: State = .idle
@@ -44,6 +54,10 @@ final class ComposerAssistant {
     /// The audiences asked for on this run (nil: the recipients' own).
     @ObservationIgnored private var requestedAudiences: [String]?
     @ObservationIgnored private var rewrote = false
+    /// The agent may still ask for facts on this turn (the first of a
+    /// request); facts the user gave for this request, for later drafts.
+    @ObservationIgnored private var mayAsk = false
+    @ObservationIgnored private var givenFacts: [String] = []
 
     /// The last draft followed a writing guide with something in it.
     var followsGuide: Bool { !(guide?.text.isEmpty ?? true) }
@@ -69,6 +83,7 @@ final class ComposerAssistant {
         self.original = original
         startText = store.body.string
         shownKey = nil
+        givenFacts = []
         await write(text, base: startText, store: store, model: model, audiences: nil)
     }
 
@@ -115,6 +130,7 @@ final class ComposerAssistant {
         state = .working
         reply = ""
         rewrote = false
+        mayAsk = true
         checkFailures = []
         if audienceChoices.isEmpty {
             audienceChoices = ((try? await core.audienceGroups()) ?? []).filter { $0.status == .confirmed }.map(\.name)
@@ -131,7 +147,7 @@ final class ComposerAssistant {
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
             let prompt = Self.prompt(instruction: text, from: store.from, to: store.to.map(\.email),
                                      subject: store.subject, draft: base, original: original,
-                                     guide: guide?.text ?? "")
+                                     guide: guide?.text ?? "", facts: givenFacts)
             try await core.sendAgentPrompt(session, prompt)
         } catch let error as CoreClientError {
             fail(error.message)
@@ -141,6 +157,11 @@ final class ComposerAssistant {
     }
 
     func cancel() {
+        if case .asking = state {
+            finish()
+            state = .idle
+            return
+        }
         guard state == .working else { return }
         if let core = model?.core, let sessionID { Task { try? await core.cancelAgentTurn(sessionID) } }
         finish()
@@ -179,6 +200,13 @@ final class ComposerAssistant {
     private func apply() async {
         let text = Self.cleaned(reply)
         guard state == .working, let store else { return }
+        // Facts it needs first: ask the user, keeping the session for the answers.
+        if mayAsk, let questions = Self.questions(in: text), !questions.isEmpty {
+            mayAsk = false
+            state = .asking(questions)
+            return
+        }
+        mayAsk = false
         guard !text.isEmpty else { return fail("The agent did not write anything. Try asking another way.") }
         let rewriting = sessionID
         // Checks run on what the agent wrote, never on what the user typed
@@ -215,6 +243,67 @@ final class ComposerAssistant {
             }
         }
         finish()
+    }
+
+    /// The user's answers to the agent's questions (empty: skipped), sent
+    /// in the same session; with `save`, each answer is kept as a fact in the
+    /// writing guide (undoable) so later drafts have it.
+    func answer(_ answers: [String: String], save: Bool) async {
+        guard case let .asking(questions) = state, let sessionID, let core = model?.core else { return }
+        let given = questions.compactMap { q -> (FactQuestion, String)? in
+            let a = (answers[q.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return a.isEmpty ? nil : (q, a)
+        }
+        if save, !given.isEmpty, let model {
+            let edits: [GuideEdit] = given.map { q, a in
+                .add(fields: GuideEntryFields(category: "F3", kind: .fact, statement: "\(q.fact): \(a)", scope: .always,
+                                              check: nil), status: .accepted, source: .you, origin: nil)
+            }
+            await model.applyGuideEdits(edits, reason: "facts from writing help",
+                                        actionName: given.count == 1 ? "Add Fact" : "Add Facts",
+                                        notice: given.count == 1 ? "Added a fact to your writing guide"
+                                            : "Added \(given.count) facts to your writing guide")
+        }
+        givenFacts += given.map { "\($0.0.fact): \($0.1)" }
+        state = .working
+        reply = ""
+        do {
+            try await core.sendAgentPrompt(sessionID, Self.answersPrompt(given.map { ($0.0.question, $0.1) }))
+        } catch let error as CoreClientError {
+            fail(error.message)
+        } catch {
+            fail(error.localizedDescription)
+        }
+    }
+
+    /// The agent's questions, when its answer is them rather than a draft:
+    /// a JSON object with a list of questions. Pure.
+    static func questions(in text: String) -> [FactQuestion]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = object["questions"] as? [Any] else { return nil }
+        let questions = list.prefix(5).compactMap { item -> FactQuestion? in
+            guard let item = item as? [String: Any],
+                  let question = (item["question"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !question.isEmpty else { return nil }
+            let fact = (item["fact"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return FactQuestion(question: question, fact: fact.isEmpty ? question : fact)
+        }
+        return questions
+    }
+
+    /// The second turn: the answers, then the draft.
+    static func answersPrompt(_ answers: [(question: String, answer: String)]) -> String {
+        let given = answers.isEmpty ? "The user chose not to answer." : answers.map { "- \($0.question) \($0.answer)" }
+            .joined(separator: "\n")
+        return """
+        The user's answers:
+        \(given)
+
+        Now write the message. Use only facts the user gave, the thread or the writing guide; leave a [bracket] \
+        for anything still not known. Answer with only the text of the message body.
+        """
     }
 
     private func fail(_ message: String) {
@@ -255,7 +344,7 @@ final class ComposerAssistant {
     }
 
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,
-                       original: String, guide: String = "") -> String {
+                       original: String, guide: String = "", facts: [String] = []) -> String {
         var parts = [
             "You are helping write an email in OpenAGC's composer. The user asks: \(instruction)",
             """
@@ -263,9 +352,17 @@ final class ComposerAssistant {
             what you did, no Markdown, and do not repeat the quoted original. Do not create, change, send \
             or delete any mail, drafts or labels; you may read the thread for context.
             """,
+            """
+            Never invent facts. If the request needs facts you do not have (about the user, their company, \
+            figures, dates, names) and they are not in the thread, the writing guide or below, do not write \
+            the message yet: answer with only a JSON object, {"questions": [{"question": "What does your \
+            company do?", "fact": "What my company does"}]}, with at most five questions. The user answers, \
+            then you write it.
+            """,
             "From: \(from)\nTo: \(to.isEmpty ? "(nobody yet)" : to.joined(separator: ", "))\nSubject: \(subject)",
             "The message so far:\n<<<\n\(draft.trimmingCharacters(in: .whitespacesAndNewlines))\n>>>",
         ]
+        if !facts.isEmpty { parts.append("Facts the user gave for this message:\n" + facts.map { "- \($0)" }.joined(separator: "\n")) }
         if !guide.isEmpty { parts.append(guide) }
         let original = original.trimmingCharacters(in: .whitespacesAndNewlines)
         if !original.isEmpty {

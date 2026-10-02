@@ -198,6 +198,21 @@ pub fn merge_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"decisions": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to the composer's writing help when the request asks
+/// for "facts about me": the questions for facts it does not have (the
+/// first turn only; the answers come in a turn of their own).
+pub fn writing_help_answer(prompt: &str) -> Option<String> {
+    let first = prompt.lines().next()?;
+    if !first.starts_with("You are helping write an email in OpenAGC's composer.") || !first.contains("facts about me")
+    {
+        return None;
+    }
+    Some(
+        r#"{"questions": [{"question": "What is your role?", "fact": "My role"}, {"question": "What does your company do?", "fact": "What my company does"}]}"#
+            .into(),
+    )
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -211,6 +226,7 @@ impl AgentSession for FakeSession {
             .or_else(|| guide_answer(&turn.prompt))
             .or_else(|| change_answer(&turn.prompt))
             .or_else(|| merge_answer(&turn.prompt))
+            .or_else(|| writing_help_answer(&turn.prompt))
             .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {

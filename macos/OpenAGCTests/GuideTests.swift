@@ -438,3 +438,40 @@ struct GuidePromptTests {
         #expect(model.isGuide && model.guide.showsDecisions && model.guidePrompt == nil)
     }
 }
+
+@MainActor
+struct MissingFactsTests {
+    @Test func questionsAreReadOnlyFromAJSONAnswer() {
+        let qs = ComposerAssistant.questions(in: #"{"questions": [{"question": "What is your role?", "fact": "My role"}, {"question": " "}]}"#)
+        #expect(qs == [.init(question: "What is your role?", fact: "My role")])
+        #expect(ComposerAssistant.questions(in: "Hi Ann, {\"questions\": []} is fine") == nil, "a draft is a draft")
+    }
+
+    @Test func theAgentAsksForFactsThenWritesWithTheAnswersAndKeepsThem() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.new(to: nil))
+        let before = store.body.string
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write to an investor with facts about me and my company"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        guard case let .asking(questions) = assistant.state else {
+            Issue.record("expected questions, got \(assistant.state)")
+            return
+        }
+        #expect(questions.map(\.fact) == ["My role", "What my company does"])
+        #expect(store.body.string == before, "nothing written yet")
+
+        await assistant.answer([questions[0].id: "CEO of Actual AI"], save: true)
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        #expect(store.body.string.contains("CEO of Actual AI"), "the answers reached the agent")
+        let facts = try await core.guideEntries([.accepted]).filter { $0.category == "F3" }
+        #expect(facts.map(\.statement) == ["My role: CEO of Actual AI"], "kept in the guide; the unanswered one is not")
+    }
+}

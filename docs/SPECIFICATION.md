@@ -2334,6 +2334,15 @@ user typed. In writing help a failing draft is sent back once for a
 rewrite, then shown with the failure ("Uses 'circle back', which your
 rules ban"); on an agent's draft the result shows on its approval card.
 
+**Missing facts.** Writing help never invents facts. When a request needs
+facts the agent does not have (about the user, their company, figures,
+dates, names) and they are not in the thread or the guide, it asks first:
+the composer shows its questions (at most five) as fields, and the agent
+writes once they are answered or skipped, leaving a [bracket] for anything
+still unknown. Answers are kept as facts (F3) in the guide unless the user
+unticks *Keep these facts in my writing guide*; adding them is undoable
+(amended 2026-10-02).
+
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
 audience writes a new draft under that audience's guidelines from the same
