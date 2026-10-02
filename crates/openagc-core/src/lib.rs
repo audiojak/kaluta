@@ -68,6 +68,11 @@ pub struct Core {
     open_accounts: RwLock<registry::OpenAccounts>,
     /// Serializes changes to `accounts/index.json`.
     index_lock: tokio::sync::Mutex<()>,
+    /// Held while an account's store is opened, so two callers at launch
+    /// do not both open (and migrate) the same store.
+    store_open_lock: tokio::sync::Mutex<()>,
+    /// How many times a store was opened (tests check it is once each).
+    store_opens: std::sync::atomic::AtomicUsize,
     imports: archive::Imports,
     accounts: account::AccountState,
     agents: agents::AgentHub,
@@ -96,6 +101,8 @@ impl Core {
             secrets,
             open_accounts: RwLock::new(registry::OpenAccounts::default()),
             index_lock: tokio::sync::Mutex::new(()),
+            store_open_lock: tokio::sync::Mutex::new(()),
+            store_opens: Default::default(),
             imports: Default::default(),
             accounts: Default::default(),
             agents: Default::default(),

@@ -58,9 +58,7 @@ impl Db {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
-        let mut writer = Connection::open(path)?;
-        configure(&writer, true)?;
-        migrate(&mut writer)?;
+        let writer = open_writer(path)?;
 
         let mut readers = Vec::with_capacity(READER_COUNT);
         for _ in 0..READER_COUNT {
@@ -91,6 +89,11 @@ impl Db {
                 permits: Semaphore::new(READER_COUNT),
             }),
         })
+    }
+
+    /// Whether both handles are the same open store.
+    pub fn same_store(&self, other: &Db) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     pub fn path(&self) -> &Path {
@@ -181,6 +184,31 @@ fn with_reader<T>(inner: &Inner, f: impl FnOnce(&Connection) -> StoreResult<T>) 
     let result = f(&conn);
     inner.readers.lock().unwrap_or_else(|e| e.into_inner()).push(conn);
     result
+}
+
+/// The writer connection, configured and migrated. Another opener setting
+/// up the same store (switching it to WAL, migrating) can answer "busy"
+/// without waiting; try again for a few seconds.
+fn open_writer(path: &Path) -> StoreResult<Connection> {
+    let busy = |e: &StoreError| {
+        matches!(e, StoreError::Sqlite(rusqlite::Error::SqliteFailure(f, _))
+            if matches!(f.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+    };
+    let mut attempt = 0;
+    loop {
+        let result = Connection::open(path).map_err(StoreError::from).and_then(|mut conn| {
+            configure(&conn, true)?;
+            migrate(&mut conn)?;
+            Ok(conn)
+        });
+        match result {
+            Err(e) if busy(&e) && attempt < 50 => {
+                attempt += 1;
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            other => return other,
+        }
+    }
 }
 
 fn configure(conn: &Connection, writer: bool) -> StoreResult<()> {
