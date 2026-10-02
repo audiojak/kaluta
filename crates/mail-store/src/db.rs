@@ -209,7 +209,14 @@ fn migrate(conn: &mut Connection) -> StoreResult<()> {
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let version = i as u32 + 1;
-        let txn = conn.transaction()?;
+        // The write lock first, then the version again: two openers of the
+        // same store at launch both read the old version, and the second
+        // then failed on what the first had just added.
+        let txn = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let now: u32 = txn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if now >= version {
+            continue;
+        }
         txn.execute_batch(sql).map_err(|e| StoreError::Migration(format!("v{version}: {e}")))?;
         // user_version cannot be bound as a parameter.
         txn.execute_batch(&format!("PRAGMA user_version = {version}"))?;
@@ -227,6 +234,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("openagc-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("mail.sqlite")
+    }
+
+    #[test]
+    fn two_openers_at_once_both_migrate_cleanly() {
+        let dir = std::env::temp_dir().join(format!("openagc-store-race-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("mail.sqlite");
+        for _ in 0..5 {
+            let _ = std::fs::remove_dir_all(&dir);
+            let handles: Vec<_> = (0..4)
+                .map(|_| {
+                    let path = path.clone();
+                    std::thread::spawn(move || Db::open(&path).map(|_| ()))
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap().unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
