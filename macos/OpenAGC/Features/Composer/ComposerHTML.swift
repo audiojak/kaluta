@@ -2,7 +2,8 @@ import AppKit
 
 /// Converts between the composer's attributed text and the small HTML
 /// subset we send (spec §14.5): paragraphs, line breaks, bold, italic,
-/// underline, strikethrough, links and bulleted or numbered lists. Fonts,
+/// underline, strikethrough, links, bulleted or numbered lists and quotes
+/// (indented paragraphs, sent as a blockquote). Fonts,
 /// colors and sizes are deliberately dropped so every message looks like
 /// ordinary mail in the recipient's client. Pure, so it is unit-tested.
 enum ComposerHTML {
@@ -15,6 +16,7 @@ enum ComposerHTML {
         let string = text.string as NSString
         var out = ""
         var openList: (tag: String, list: NSTextList)?
+        var inQuote = false
         var location = 0
         while location <= string.length {
             let range = string.paragraphRange(for: NSRange(location: location, length: 0))
@@ -27,9 +29,14 @@ enum ComposerHTML {
                 ? text.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
                 : nil
             let list = style?.textLists.last
+            let quoted = list == nil && isQuote(style)
             if let current = openList, list !== current.list {
                 out += "</\(current.tag)>"
                 openList = nil
+            }
+            if inQuote != quoted {
+                out += quoted ? "<blockquote>" : "</blockquote>"
+                inQuote = quoted
             }
             if let list, openList == nil {
                 let tag = isOrdered(list) ? "ol" : "ul"
@@ -49,8 +56,14 @@ enum ComposerHTML {
             location = NSMaxRange(range)
         }
         if let current = openList { out += "</\(current.tag)>" }
+        if inQuote { out += "</blockquote>" }
         // An empty document serializes to nothing, not an empty paragraph.
         return out == "<p><br></p>" ? "" : out
+    }
+
+    /// A quoted paragraph: indented, not a list item.
+    static func isQuote(_ style: NSParagraphStyle?) -> Bool {
+        (style?.headIndent ?? 0) >= 20 && (style?.firstLineHeadIndent ?? 0) >= 20
     }
 
     private static func isOrdered(_ list: NSTextList) -> Bool {
@@ -125,13 +138,52 @@ enum ComposerHTML {
     /// the Rust sanitizer for quoted text), never from a remote page.
     @MainActor
     static func attributedString(fromHTML html: String) -> NSAttributedString {
-        guard !html.isEmpty,
-              let parsed = try? NSMutableAttributedString(
-                  data: Data(html.utf8),
-                  options: [.documentType: NSAttributedString.DocumentType.html,
-                            .characterEncoding: String.Encoding.utf8.rawValue],
-                  documentAttributes: nil)
-        else { return NSAttributedString(string: "", attributes: [.font: bodyFont]) }
+        guard !html.isEmpty else { return NSAttributedString(string: "", attributes: [.font: bodyFont]) }
+        // AppKit's HTML import drops blockquotes (and margins), so the
+        // top-level quotes `html(from:)` writes are imported on their own
+        // and indented as the editor quotes.
+        let out = NSMutableAttributedString()
+        for (part, quoted) in quoteParts(html) {
+            guard let parsed = importHTML(part) else { continue }
+            if quoted {
+                let quote = NSMutableParagraphStyle()
+                quote.headIndent = RichTextCommands.quoteIndent
+                quote.firstLineHeadIndent = RichTextCommands.quoteIndent
+                parsed.addAttribute(.paragraphStyle, value: quote, range: NSRange(location: 0, length: parsed.length))
+            }
+            out.append(parsed)
+        }
+        // HTML import ends with a newline for the last block; drop it.
+        while out.string.hasSuffix("\n") {
+            out.deleteCharacters(in: NSRange(location: out.length - 1, length: 1))
+        }
+        return out.length == 0 ? NSAttributedString(string: "", attributes: [.font: bodyFont]) : out
+    }
+
+    /// The HTML split at its top-level blockquotes: each part, and whether
+    /// it was quoted. Pure.
+    static func quoteParts(_ html: String) -> [(String, Bool)] {
+        var parts: [(String, Bool)] = []
+        var rest = Substring(html)
+        while let open = rest.range(of: "<blockquote>"), let close = rest.range(of: "</blockquote>", range: open.upperBound..<rest.endIndex) {
+            let before = rest[..<open.lowerBound]
+            if !before.isEmpty { parts.append((String(before), false)) }
+            parts.append((String(rest[open.upperBound..<close.lowerBound]), true))
+            rest = rest[close.upperBound...]
+        }
+        if !rest.isEmpty { parts.append((String(rest), false)) }
+        return parts
+    }
+
+    /// One piece of HTML in the editor's font, without colors.
+    @MainActor
+    private static func importHTML(_ html: String) -> NSMutableAttributedString? {
+        guard let parsed = try? NSMutableAttributedString(
+            data: Data(html.utf8),
+            options: [.documentType: NSAttributedString.DocumentType.html,
+                      .characterEncoding: String.Encoding.utf8.rawValue],
+            documentAttributes: nil)
+        else { return nil }
         let full = NSRange(location: 0, length: parsed.length)
         parsed.enumerateAttribute(.font, in: full) { value, range, _ in
             let traits = (value as? NSFont)?.fontDescriptor.symbolicTraits ?? []
@@ -140,9 +192,10 @@ enum ComposerHTML {
         }
         parsed.removeAttribute(.foregroundColor, range: full)
         parsed.removeAttribute(.backgroundColor, range: full)
-        // HTML import ends with a newline for the last block; drop it.
-        while parsed.string.hasSuffix("\n") {
-            parsed.deleteCharacters(in: NSRange(location: parsed.length - 1, length: 1))
+        // Each part ends its last block with a newline; the next part
+        // starts a new paragraph.
+        if !parsed.string.hasSuffix("\n") {
+            parsed.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont]))
         }
         return parsed
     }

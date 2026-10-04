@@ -363,6 +363,7 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Task dialog, light](design/task-light.png) | ![Task dialog, dark](design/task-dark.png) |
 | ![Writing Guide, light](design/guide-light.png) | ![Writing Guide, dark](design/guide-dark.png) |
 | ![Reply with the conversation above, light](design/composer-reply-light.png) | ![Reply with the conversation above, dark](design/composer-reply-dark.png) |
+| ![New message with the formatting bar, light](design/composer-new-light.png) | ![New message with the formatting bar, dark](design/composer-new-dark.png) |
 | ![Invitation to learn, light](design/guide-invite-light.png) | ![Invitation to learn, dark](design/guide-invite-dark.png) |
 | ![Invitation banner, light](design/guide-banner-light.png) | ![Invitation banner, dark](design/guide-banner-dark.png) |
 | ![Reader with quoted history folded, light](design/reader-quote-light.png) | ![Reader with quoted history folded, dark](design/reader-quote-dark.png) |

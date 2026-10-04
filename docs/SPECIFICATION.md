@@ -1924,7 +1924,12 @@ be resized or hidden: the latest message open, earlier ones as rows that
 open when clicked, as in the reader (drafts left out). A forward keeps the
 original under the draft. Writing help's field is as large as the main
 window's prompt and grows with what is typed (⌥Return for a new line).
-Tab in the body goes to writing help. In the main window, Tab from a
+Tab in the body goes to writing help. The body sits in a frame of its own
+with a formatting bar under it, as in Gmail, in every composer: bold,
+italic, underline, strikethrough, bulleted and numbered lists, quote (sent
+as a `blockquote`), link and clear formatting, each lit while it is on at
+the cursor and each one undoable. Fonts, sizes and colors stay out, so
+mail looks ordinary in the recipient's client. In the main window, Tab from a
 mailbox in the sidebar puts the keyboard in its thread list, so the arrows
 move between messages (nothing is opened until one is chosen).
 

@@ -9,6 +9,8 @@ struct RichTextEditor: NSViewRepresentable {
     var focusOnAppear = false
     /// Tab leaves the body for this, instead of typing a tab.
     var onTab: (() -> Void)?
+    /// The formatting bar's commands act on this editor.
+    var commands: RichTextCommands?
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -36,6 +38,8 @@ struct RichTextEditor: NSViewRepresentable {
         textView.textStorage?.setAttributedString(Self.display(text))
         context.coordinator.lastText = text
         context.coordinator.onTab = onTab
+        context.coordinator.commands = commands
+        commands?.textView = textView
         if focusOnAppear {
             DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
         }
@@ -64,6 +68,11 @@ struct RichTextEditor: NSViewRepresentable {
         var text: Binding<NSAttributedString>
         var lastText: NSAttributedString?
         var onTab: (() -> Void)?
+        weak var commands: RichTextCommands?
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            commands?.refresh()
+        }
 
         init(text: Binding<NSAttributedString>) {
             self.text = text

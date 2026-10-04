@@ -13,6 +13,7 @@ struct ComposerView: View {
     @State private var showsQuote = true
     @State private var importing = false
     @State private var assistant = ComposerAssistant()
+    @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
     @State private var factAnswers: [String: String] = [:]
     @State private var saveFacts = true
@@ -88,7 +89,7 @@ struct ComposerView: View {
                         .frame(minHeight: 160, idealHeight: 360, maxHeight: .infinity)
                         .layoutPriority(1)
                         bodyEditor(store)
-                            .frame(minHeight: 120, idealHeight: 180, maxHeight: .infinity)
+                            .frame(minHeight: 180, idealHeight: 260, maxHeight: .infinity)
                     }
                 } else {
                     conversationToggle
@@ -181,9 +182,20 @@ struct ComposerView: View {
 
     /// The message body; Tab goes to writing help, as Return goes to a new
     /// line (spec §14.5).
+    /// In a frame of its own, with the formatting bar under it as in Gmail,
+    /// so it reads as the place to type.
     private func bodyEditor(_ store: ComposerStore) -> some View {
         @Bindable var store = store
-        return RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty, onTab: { assistantFocused = true })
+        return VStack(alignment: .leading, spacing: 0) {
+            RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty, onTab: { assistantFocused = true },
+                           commands: formatting)
+            FormattingBar(commands: formatting)
+                .padding(Space.m)
+        }
+        .background(.background, in: .rect(cornerRadius: Radius.panel))
+        .overlay(RoundedRectangle(cornerRadius: Radius.panel).strokeBorder(.separator))
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.m)
     }
 
     /// Shows or hides the conversation above a reply.
