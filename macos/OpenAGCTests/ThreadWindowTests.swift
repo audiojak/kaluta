@@ -33,3 +33,28 @@ struct ThreadWindowTests {
         #expect(store.detail?.thread.id == rows[1].id)
     }
 }
+
+@MainActor
+struct ReadOnShowTests {
+    @Test func aThreadLookedAtForAMomentIsMarkedReadAndPassingOverItIsNot() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        model.readDelay = .milliseconds(100)
+        let core = try #require(model.core)
+        let unread = model.threads.rows.filter { $0.unreadCount > 0 }
+        #expect(unread.count >= 2)
+        let (passed, looked) = (unread[0].id, unread[1].id)
+
+        // Passed over: another thread is chosen before the delay is up.
+        model.selectedThreadID = passed
+        model.threadShown(passed, hasUnread: true, inMainWindow: true)
+        model.selectedThreadID = looked
+        model.threadShown(looked, hasUnread: true, inMainWindow: true)
+        try await Task.sleep(for: .milliseconds(400))
+
+        let detail = { (id: String) in try await core.thread(id)?.messages.contains { !$0.isRead } }
+        #expect(try await detail(looked) == false, "the thread looked at is read")
+        #expect(try await detail(passed) == true, "the one passed over stays unread")
+        #expect(model.threads.rows.first { $0.id == looked }?.unreadCount == 0)
+    }
+}

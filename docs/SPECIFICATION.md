@@ -1894,6 +1894,13 @@ injected into every document, `isInspectable = false` in release. Remote
 images: blocked by default, "Load images" per message, "Always for this
 sender" stored in settings; loading them re-renders with `img-src https:`.
 
+Read on view: a thread with unread mail is marked read (a normal change,
+so Gmail sees it too) once it has been shown for 0.8 s and is still the
+selection, so moving through the list with j/k or the arrows does not
+mark every thread passed over; a thread opened in its own window is read
+as it opens. There is no undo notice; *u* marks it unread again
+(amended 2026-10-04).
+
 Dark mode: a base stylesheet sets `color-scheme: light dark` and inverts
 only when the email declares no background color.
 
@@ -1928,7 +1935,9 @@ Tab in the body goes to writing help. The body sits in a frame of its own
 with a formatting bar under it, as in Gmail, in every composer: bold,
 italic, underline, strikethrough, bulleted and numbered lists, quote (sent
 as a `blockquote`), link and clear formatting, each lit while it is on at
-the cursor and each one undoable. Fonts, sizes and colors stay out, so
+the cursor and each one undoable. The usual shortcuts work: ⌘B, ⌘I, ⌘U,
+⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⌘K link (in
+a composer; in the mail window ⌘K asks the agent) and ⌘\ clear. Fonts, sizes and colors stay out, so
 mail looks ordinary in the recipient's client. In the main window, Tab from a
 mailbox in the sidebar puts the keyboard in its thread list, so the arrows
 move between messages (nothing is opened until one is chosen).

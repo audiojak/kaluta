@@ -61,9 +61,12 @@ enum KeyboardShortcutGuide {
             .init(keys: "⇧⌘D  or  ⌘↩", action: "Send", inThreadList: false),
             .init(keys: "⇧⌘A", action: "Attach files", inThreadList: false),
             .init(keys: "⌘B  ⌘I  ⌘U", action: "Bold, italic, underline", inThreadList: false),
+            .init(keys: "⇧⌘X  ⇧⌘8  ⇧⌘7  ⇧⌘9", action: "Strikethrough, bulleted list, numbered list, quote",
+                  inThreadList: false),
+            .init(keys: "⌘\\", action: "Clear formatting", inThreadList: false),
         ]),
         Group(title: "Agents and routines", shortcuts: [
-            .init(keys: "⌘K", action: "Ask the agent", inThreadList: false),
+            .init(keys: "⌘K", action: "Ask the agent; in a message you write, add a link", inThreadList: false),
             .init(keys: "⌥⌘I", action: "Show or hide the agent panel", inThreadList: false),
             .init(keys: "⌥⌘R", action: "Routines", inThreadList: false),
             .init(keys: "↑ ↓  Tab  ↩  esc", action: "In the prompt: choose a suggestion, or hide them", inThreadList: false),

@@ -10,32 +10,36 @@ struct FormattingBar: View {
     var body: some View {
         let state = commands.state
         HStack(spacing: Space.xs) {
-            button("Bold", "bold", on: state.bold, help: "Bold (⌘B)", action: commands.toggleBold)
-            button("Italic", "italic", on: state.italic, help: "Italic (⌘I)", action: commands.toggleItalic)
-            button("Underline", "underline", on: state.underline, help: "Underline (⌘U)", action: commands.toggleUnderline)
-            button("Strikethrough", "strikethrough", on: state.strikethrough, help: "Strikethrough",
-                   action: commands.toggleStrikethrough)
+            button("Bold", "bold", on: state.bold, help: "Bold (⌘B)", key: "b", action: commands.toggleBold)
+            button("Italic", "italic", on: state.italic, help: "Italic (⌘I)", key: "i", action: commands.toggleItalic)
+            button("Underline", "underline", on: state.underline, help: "Underline (⌘U)", key: "u",
+                   action: commands.toggleUnderline)
+            button("Strikethrough", "strikethrough", on: state.strikethrough, help: "Strikethrough (⇧⌘X)",
+                   key: "x", shift: true, action: commands.toggleStrikethrough)
             separator
-            button("Bulleted List", "list.bullet", on: state.bulleted, help: "Bulleted list",
+            button("Bulleted List", "list.bullet", on: state.bulleted, help: "Bulleted list (⇧⌘8)", key: "8", shift: true,
                    action: commands.toggleBulleted)
-            button("Numbered List", "list.number", on: state.numbered, help: "Numbered list",
+            button("Numbered List", "list.number", on: state.numbered, help: "Numbered list (⇧⌘7)", key: "7", shift: true,
                    action: commands.toggleNumbered)
-            button("Quote", "text.quote", on: state.quoted, help: "Quote: an indented block, sent as a quotation",
-                   action: commands.toggleQuote)
+            button("Quote", "text.quote", on: state.quoted, help: "Quote: an indented block, sent as a quotation (⇧⌘9)",
+                   key: "9", shift: true, action: commands.toggleQuote)
             separator
-            button("Link", "link", on: false, help: "Make the selection a link", action: askForLink)
+            button("Link", "link", on: false, help: "Make the selection a link (⌘K)", key: "k", action: askForLink)
             button("Clear Formatting", "eraser", on: false,
-                   help: "Clear bold, italic, underline, strikethrough and links from the selection",
-                   action: commands.clearFormatting)
+                   help: "Clear bold, italic, underline, strikethrough and links from the selection (⌘\\)",
+                   key: "\\", action: commands.clearFormatting)
         }
         .padding(.horizontal, Space.s)
         .padding(.vertical, Space.xs)
         .background(.quaternary.opacity(0.5), in: .capsule)
     }
 
-    private func button(_ title: String, _ symbol: String, on: Bool, help: String,
-                        action: @escaping () -> Void) -> some View {
+    /// The shortcuts are the usual ones (Mail, Gmail): they work while the
+    /// composer is the key window.
+    private func button(_ title: String, _ symbol: String, on: Bool, help: String, key: Character,
+                        shift: Bool = false, action: @escaping () -> Void) -> some View {
         Button(title, systemImage: symbol, action: action)
+            .keyboardShortcut(KeyEquivalent(key), modifiers: shift ? [.command, .shift] : .command)
             .labelStyle(.iconOnly)
             .buttonStyle(.borderless)
             .frame(width: 26, height: 22)

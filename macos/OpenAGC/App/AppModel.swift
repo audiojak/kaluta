@@ -594,6 +594,11 @@ final class AppModel {
     /// run starts or it is dismissed.
     var guideBannerAccount: String?
     @ObservationIgnored var guideInviteChecked: Set<String> = []
+    /// How long a thread shows before it is marked read, so passing over
+    /// threads with j/k or the arrows does not mark each one (tests shorten
+    /// it).
+    @ObservationIgnored var readDelay: Duration = .milliseconds(800)
+    @ObservationIgnored private var readOnShow: Task<Void, Never>?
     /// Opens Settings on the Agents tab (set by the window).
     @ObservationIgnored var openAgentSettings: (() -> Void)?
 
@@ -931,6 +936,26 @@ final class AppModel {
         guard let core, !ids.isEmpty else { return }
         if selectedMailboxID != "INBOX" { dropFromList(ids) }
         Task { await perform(UndoableAction(kind: .moveToInbox, count: ids.count)) { try await core.moveToInbox(ids) } }
+    }
+
+    /// A thread was shown (spec §14.4): with unread mail in it, it is marked
+    /// read, in Gmail too, once it has been in view for `readDelay`. In the
+    /// main window it must still be the selection then; a thread window is
+    /// looked at as it opens. No undo notice: "u" marks it unread again.
+    func threadShown(_ threadID: String, hasUnread: Bool, inMainWindow: Bool) {
+        if inMainWindow { readOnShow?.cancel() }
+        guard hasUnread, let core else { return }
+        let delay = readDelay
+        let task = Task { [weak self] in
+            if inMainWindow {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self, self.selectedThreadID == threadID, self.selectedThreadIDs.count <= 1
+                else { return }
+            }
+            self?.threads.optimisticallyUpdate([threadID]) { $0.unreadCount = 0 }
+            _ = try? await core.setRead([threadID], true)
+        }
+        if inMainWindow { readOnShow = task }
     }
 
     /// Toggle read: if any target is unread, mark all read; else all unread.
