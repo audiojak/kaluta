@@ -101,6 +101,7 @@ final class ComposerAssistant {
             store.body = NSAttributedString(string: cached, attributes: [.font: ComposerHTML.bodyFont])
             writtenFor = audiences ?? guide?.audiences ?? []
             shownKey = key
+            record(cached, store: store)
             return
         }
         let request = lastInstruction ?? "Rewrite this message for \((audiences ?? []).joined(separator: ", ")), keeping what it says"
@@ -234,15 +235,25 @@ final class ComposerAssistant {
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])
         instruction = ""
         state = .done
-        // The draft records the guide version it was written under.
-        if let version = guide?.version, !(guide?.text.isEmpty ?? true), let core = model?.core {
-            Task { [weak store] in
-                guard let store else { return }
-                await store.save()
-                if store.draftID != 0 { try? await core.setDraftGuideVersion(store.draftID, version) }
-            }
-        }
+        record(text, store: store)
         finish()
+    }
+
+    /// Save the draft with the agent's text and keep what it wrote (spec
+    /// §14.10); the draft records the guide version it was written under.
+    private func record(_ text: String, store: ComposerStore) {
+        guard let core = model?.core, let agent = model?.agent.providerID else { return }
+        let version = followsGuide ? guide?.version : nil
+        let instruction = lastInstruction ?? ""
+        let audiences = writtenFor
+        Task { [weak store] in
+            guard let store else { return }
+            await store.save()
+            guard store.draftID != 0 else { return }
+            if let version { try? await core.setDraftGuideVersion(store.draftID, version) }
+            try? await core.recordWritingHelp(draftID: store.draftID, agent: agent, instruction: instruction,
+                                              text: text, guideVersion: version, audiences: audiences)
+        }
     }
 
     /// The user's answers to the agent's questions (empty: skipped), sent

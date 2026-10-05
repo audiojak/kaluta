@@ -167,10 +167,15 @@ pub fn delete(tx: &Transaction<'_>, id: i64) -> StoreResult<()> {
     Ok(())
 }
 
-/// Delete a draft, queueing deletion of its server copy if it has one.
+/// Delete a draft, queueing deletion of its server copy if it has one. A
+/// draft being sent has gone out; any other was discarded, which its AI
+/// composition record notes (spec §14.10).
 pub fn discard(tx: &Transaction<'_>, id: i64, now: Millis) -> StoreResult<()> {
-    let gmail_id: Option<String> =
-        tx.query_row("SELECT gmail_draft_id FROM drafts WHERE id = ?1", [id], |r| r.get(0)).optional()?.flatten();
+    let row: Option<(Option<String>, String)> = tx
+        .query_row("SELECT gmail_draft_id, state FROM drafts WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let Some((gmail_id, state)) = row else { return Ok(()) };
+    crate::compositions::draft_gone(tx, id, state == "sending", now)?;
     delete(tx, id)?;
     if let Some(gmail_draft_id) = gmail_id {
         crate::outbox::enqueue(tx, &crate::outbox::OutboxOp::DeleteDraft { gmail_draft_id }, now)?;
@@ -199,9 +204,11 @@ pub fn set_state(tx: &Transaction<'_>, id: i64, state: DraftState, error: Option
     Ok(())
 }
 
+/// The Message-ID a draft is sent with; its AI composition record keeps
+/// it, so the sent copy can be found once the draft has gone.
 pub fn set_rfc822_id(tx: &Transaction<'_>, id: i64, message_id: &str) -> StoreResult<()> {
     tx.execute("UPDATE drafts SET rfc822_message_id = ?2 WHERE id = ?1", params![id, message_id])?;
-    Ok(())
+    crate::compositions::draft_sent(tx, id, message_id)
 }
 
 /// Replace the record of the server's drafts with `drafts` (draft id,

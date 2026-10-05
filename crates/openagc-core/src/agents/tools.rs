@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::{Core, CoreError};
+use mail_store::compositions::Source;
 use mail_sync::LocalChange;
 
 fn ids(thread_ids: Vec<String>) -> Vec<ThreadId> {
@@ -626,6 +627,27 @@ async fn draft_with_guide(core: &Arc<Core>, d: &crate::DraftInfo) -> Value {
     value
 }
 
+/// Keep what the agent wrote into a draft (spec §14.10): its own text, not
+/// the quoted original, with the prompt it was answering.
+async fn record_body(core: &Arc<Core>, session: &str, draft_id: i64, html: &str) {
+    let routine = core.agents.routine_sessions.lock().unwrap_or_else(|e| e.into_inner()).contains_key(session);
+    let (agent, prompt) =
+        core.agents.with_session(session, |s| (s.agent.clone(), s.last_prompt.clone())).unwrap_or_default();
+    let version = core.draft_guide_version(draft_id).await.ok().flatten();
+    let ai = crate::compositions::AiText {
+        source: if routine { Source::Routine } else { Source::Agent },
+        agent,
+        instruction: prompt,
+        text: mail_mime::html_to_text(html).trim().to_owned(),
+        html: Some(html.to_owned()),
+        guide_version: version,
+        audiences: vec![],
+    };
+    if let Err(e) = core.record_composition(draft_id, ai).await {
+        tracing::warn!(error = %e, "AI composition not recorded");
+    }
+}
+
 fn draft_json(d: &crate::DraftInfo) -> Value {
     json!({
         "draft_id": d.id,
@@ -698,7 +720,9 @@ async fn create_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Resu
         s.guard.allow_draft(id);
         s.draft_quotes.insert(id, quote);
     });
-    Ok(Outcome::json(draft_with_guide(core, &draft).await))
+    let value = draft_with_guide(core, &draft).await;
+    record_body(core, session, id, &draft.body_html).await;
+    Ok(Outcome::json(value))
 }
 
 #[derive(Deserialize)]
@@ -738,13 +762,22 @@ async fn update_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Resu
     if let Some(subject) = a.subject {
         draft.subject = subject;
     }
-    if let Some(body) = a.body_markdown {
+    if let Some(body) = &a.body_markdown {
         // The stored body includes the quote; rebuild it around the new text.
-        draft.body_html = mail_mime::markdown_to_html(&body);
+        draft.body_html = mail_mime::markdown_to_html(body);
         draft.quoted_html = quote;
     }
     core.save_draft(draft.clone()).await.map_err(failed)?;
-    Ok(Outcome::json(draft_with_guide(core, &draft).await))
+    let value = draft_with_guide(core, &draft).await;
+    match &a.body_markdown {
+        Some(_) => record_body(core, session, a.draft_id, &draft.body_html).await,
+        None => {
+            if let Err(e) = core.composition_readdressed(a.draft_id).await {
+                tracing::warn!(error = %e, "AI composition not updated");
+            }
+        }
+    }
+    Ok(Outcome::json(value))
 }
 
 #[derive(Deserialize)]

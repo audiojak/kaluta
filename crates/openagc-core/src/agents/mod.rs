@@ -42,6 +42,10 @@ pub(crate) struct ToolSession {
     pub hidden: bool,
     /// Where `mail_present_threads` shows results; set by the agent manager.
     pub sink: Option<EventSink>,
+    /// The agent behind the session (`claude-code`, `codex`), and the last
+    /// prompt sent to it: what an AI composition records (spec §14.10).
+    pub agent: Option<String>,
+    pub last_prompt: String,
 }
 
 #[derive(Default)]
@@ -90,6 +94,8 @@ impl AgentHub {
             read_only: false,
             hidden: false,
             sink,
+            agent: None,
+            last_prompt: String::new(),
         };
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(session.to_owned(), state);
     }

@@ -592,6 +592,20 @@ final class CoreClient: Sendable {
         try await call { try await core.draftGuideVersion(draftId: draftID) }
     }
 
+    /// Keep what writing help wrote into a draft (spec §14.10); nothing is
+    /// kept before the account's first finished learning run.
+    func recordWritingHelp(draftID: Int64, agent: String, instruction: String, text: String, guideVersion: Int64?,
+                           audiences: [String]) async throws(CoreClientError) {
+        try await call {
+            try await core.recordWritingHelp(draftId: draftID, agent: agent, instruction: instruction, aiText: text,
+                                             guideVersion: guideVersion, audiences: audiences)
+        }
+    }
+
+    func aiCompositions(limit: UInt32 = 50) async throws(CoreClientError) -> [AiCompositionInfo] {
+        try await call { try await core.aiCompositions(limit: limit) }
+    }
+
     /// Ask the agent how to change the guide; nothing changes until the
     /// user answers the questions.
     func proposeGuideChange(_ request: String, agent: String) async throws(CoreClientError) -> [GuideChangeQuestion] {
@@ -984,6 +998,7 @@ private extension CoreClientError.Kind {
 // into the core still go through CoreClient.
 typealias AddressInfo = OpenAGCCore.AddressInfo
 typealias AgentActionInfo = OpenAGCCore.AgentActionInfo
+typealias AiCompositionInfo = OpenAGCCore.AiCompositionInfo
 typealias AgentEventInfo = OpenAGCCore.AgentEventInfo
 typealias AgentProviderInfo = OpenAGCCore.AgentProviderInfo
 typealias AgentSessionInfo = OpenAGCCore.AgentSessionInfo

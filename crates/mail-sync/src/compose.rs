@@ -279,6 +279,9 @@ pub async fn send_draft(
                 let not_before = (hold_ms > 0).then_some(now + hold_ms);
                 outbox::enqueue_held(tx, &op, now, not_before)?;
             } else {
+                // Sent at once (no provider): gone as a sent draft.
+                drafts::set_rfc822_id(tx, draft_id, &rfc822_id)?;
+                drafts::set_state(tx, draft_id, DraftState::Sending, None)?;
                 drafts::discard(tx, draft_id, now)?;
             }
             Ok(changes)

@@ -125,6 +125,41 @@ struct GuideDecisionTests {
         #expect(try await core.guideEntry(mine[0].id)?.status == .rejected)
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Replace Entry")
     }
+
+    /// Once the account has learned, what writing help writes is kept for
+    /// the daily review (spec §14.10), and the user's edits do not change it.
+    @Test func writingHelpKeepsWhatItWroteOnceTheAccountHasLearned() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let page = try await core.threads(in: "INBOX")
+        let row = try #require(page.rows.first)
+        let detail = try await core.thread(row.id)
+        let message = try #require(detail?.messages.last)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        let written = store.body.string
+        var records: [AiCompositionInfo] = []
+        for _ in 0..<100 where records.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+            records = try await core.aiCompositions()
+        }
+        let record = try #require(records.first)
+        #expect(record.source == "writing_help" && record.kind == "reply")
+        #expect(record.instruction == "Write a reply")
+        #expect(record.draftId == store.draftID)
+        #expect(record.aiText == written)
+
+        store.body = NSAttributedString(string: written + "\nThanks, John")
+        await store.save()
+        let after = try await core.aiCompositions()
+        #expect(after.first?.aiText == written)
+    }
 }
 
 @MainActor

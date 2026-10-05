@@ -11,6 +11,7 @@ mod archive;
 mod attachments;
 mod cloud_routines;
 mod compose;
+mod compositions;
 mod error;
 mod events;
 pub mod ffi;
