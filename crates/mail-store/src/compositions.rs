@@ -341,6 +341,92 @@ pub fn list(conn: &Connection, status: Status, limit: u32) -> StoreResult<Vec<Co
         .collect::<Result<_, _>>()?)
 }
 
+/// A message the user sent, as matching needs it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SentCandidate {
+    pub message_id: String,
+    pub thread_id: String,
+    pub rfc822_message_id: Option<String>,
+    pub at: Millis,
+    /// Lowercased To and Cc addresses.
+    pub to: Vec<String>,
+    pub cc: Vec<String>,
+}
+
+/// Messages the user sent at or after `since`, oldest first. Optimistic
+/// copies of sends not yet confirmed are left out: the real copy, with the
+/// same Message-ID, replaces them.
+pub fn sent_since(conn: &Connection, since: Millis) -> StoreResult<Vec<SentCandidate>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT m.id, m.gmail_id, t.gmail_id, m.rfc822_message_id, m.internal_date
+         FROM messages m JOIN threads t ON t.id = m.thread_id
+         WHERE m.is_sent_by_me AND NOT m.is_draft AND m.internal_date >= ?1
+         ORDER BY m.internal_date, m.id",
+    )?;
+    let mut people = conn.prepare_cached(
+        "SELECT role, email FROM participants WHERE message_id = ?1 AND role IN ('to', 'cc') ORDER BY role, position",
+    )?;
+    let mut out = Vec::new();
+    let mut rows = stmt.query([since])?;
+    while let Some(r) = rows.next()? {
+        let message_id: String = r.get(1)?;
+        if message_id.starts_with(crate::LOCAL_PREFIX) {
+            continue;
+        }
+        let local: i64 = r.get(0)?;
+        let mut c = SentCandidate {
+            message_id,
+            thread_id: r.get(2)?,
+            rfc822_message_id: r.get(3)?,
+            at: r.get(4)?,
+            ..Default::default()
+        };
+        for p in people.query_map([local], |p| Ok((p.get::<_, String>(0)?, p.get::<_, String>(1)?)))? {
+            let (role, email) = p?;
+            if role == "to" { c.to.push(email.to_lowercase()) } else { c.cc.push(email.to_lowercase()) }
+        }
+        out.push(c);
+    }
+    Ok(out)
+}
+
+/// Sent messages already matched to a record: each matches at most one.
+pub fn matched_messages(conn: &Connection) -> StoreResult<std::collections::BTreeSet<String>> {
+    Ok(conn
+        .prepare_cached("SELECT matched_message_id FROM ai_compositions WHERE matched_message_id IS NOT NULL")?
+        .query_map([], |r| r.get(0))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// The record became `message_id` (spec §14.10): the user's own text and
+/// how far it is from the AI's.
+pub fn set_matched(
+    tx: &Transaction<'_>,
+    id: i64,
+    message_id: &str,
+    method: &str,
+    sent_text: &str,
+    distance: f64,
+    now: Millis,
+) -> StoreResult<()> {
+    tx.prepare_cached(
+        "UPDATE ai_compositions SET status = 'matched', matched_message_id = ?2, match_method = ?3, sent_text = ?4,
+           distance = ?5, updated_at = ?6
+         WHERE id = ?1 AND status = 'waiting'",
+    )?
+    .execute(params![id, message_id, method, sent_text, distance, now])?;
+    Ok(())
+}
+
+pub fn set_status(tx: &Transaction<'_>, id: i64, status: Status, now: Millis) -> StoreResult<()> {
+    tx.prepare_cached("UPDATE ai_compositions SET status = ?2, updated_at = ?3 WHERE id = ?1")?.execute(params![
+        id,
+        status.as_str(),
+        now
+    ])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

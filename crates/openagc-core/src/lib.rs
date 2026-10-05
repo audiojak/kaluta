@@ -7,6 +7,9 @@ uniffi::setup_scaffolding!();
 
 mod account;
 mod agents;
+// Used by the daily review (oagc-259.4).
+#[allow(dead_code)]
+mod analysis_match;
 mod archive;
 mod attachments;
 mod cloud_routines;
