@@ -1,6 +1,7 @@
 # Plan: Analysis — learning from what you change in AI drafts, and Facts
 
-Status: planning (2026-10-05). Not started. Branch `analysis-plan`.
+Status: in progress (2026-10-05), epic oagc-259, branch `analysis`.
+Spec §14.10 (Analysis) and §14.11 (Facts); ADRs 0012 and 0013.
 Builds on the writing guide (spec §14.9, ADR 0011, plan `writing-guide.md`).
 
 ## Goal
@@ -370,7 +371,9 @@ doesn't have to sit in every prompt.
   It needs **ADR 0012**, amending ADR 0004's "nothing is merged across
   accounts" for this one, explicit, user-chosen case. Undo across the two
   stores (*Make Global* moves a row) is one change recorded in the
-  account's store, with both sides in its snapshot.
+  account's store, with both sides in its snapshot. Edits made in
+  Settings › Facts, with no account in view, are recorded in the global
+  store and undone there.
 - **Categories:** custom categories in a `fact_categories` table beside
   `facts` (name, description, order, hidden built-ins), in whichever store
   they belong to.
@@ -450,7 +453,7 @@ doesn't have to sit in every prompt.
   compare", "OpenAGC facts glean"), so the whole flow is tested without
   real agents.
 
-## Issues, in order (epic to be created)
+## Issues, in order (epic oagc-259)
 
 | # | Issue | Notes |
 |---|---|---|
