@@ -32,7 +32,13 @@ struct ThreadReaderView: View {
                 Color.clear
             }
         }
-        .task(id: shownID) { await reader.show(threadID: shownID) }
+        .task(id: shownID) {
+            await reader.show(threadID: shownID)
+            // Looking at it marks it read (spec §14.4).
+            if let id = shownID, let detail = reader.detail, detail.thread.id == id {
+                model.threadShown(id, hasUnread: detail.messages.contains { !$0.isRead }, inMainWindow: store == nil)
+            }
+        }
     }
 
     private func header(_ detail: ThreadDetail) -> some View {

@@ -1899,6 +1899,13 @@ injected into every document, `isInspectable = false` in release. Remote
 images: blocked by default, "Load images" per message, "Always for this
 sender" stored in settings; loading them re-renders with `img-src https:`.
 
+Read on view: a thread with unread mail is marked read (a normal change,
+so Gmail sees it too) once it has been shown for 0.8 s and is still the
+selection, so moving through the list with j/k or the arrows does not
+mark every thread passed over; a thread opened in its own window is read
+as it opens. There is no undo notice; *u* marks it unread again
+(amended 2026-10-04).
+
 Dark mode: a base stylesheet sets `color-scheme: light dark` and inverts
 only when the email declares no background color.
 
@@ -1922,6 +1929,23 @@ generated in Rust from the HTML. Reply quoting inserts the sanitized parent
 HTML inside `<blockquote>` with a "On <date>, <name> wrote:" line.
 Autosave to `drafts` every 2 s of idleness; Gmail draft sync through the
 outbox every 30 s or on close.
+
+**Amendment (2026-10-02): answering with the conversation in view.** A
+reply's window shows the conversation above the draft, in a pane that can
+be resized or hidden: the latest message open, earlier ones as rows that
+open when clicked, as in the reader (drafts left out). A forward keeps the
+original under the draft. Writing help's field is as large as the main
+window's prompt and grows with what is typed (⌥Return for a new line).
+Tab in the body goes to writing help. The body sits in a frame of its own
+with a formatting bar under it, as in Gmail, in every composer: bold,
+italic, underline, strikethrough, bulleted and numbered lists, quote (sent
+as a `blockquote`), link and clear formatting, each lit while it is on at
+the cursor and each one undoable. The usual shortcuts work: ⌘B, ⌘I, ⌘U,
+⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⌘K link (in
+a composer; in the mail window ⌘K asks the agent) and ⌘\ clear. Fonts, sizes and colors stay out, so
+mail looks ordinary in the recipient's client. In the main window, Tab from a
+mailbox in the sidebar puts the keyboard in its thread list, so the arrows
+move between messages (nothing is opened until one is chosen).
 
 **Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
 through Gmail's drafts list (`drafts.list`) on every incremental round,
