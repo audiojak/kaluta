@@ -5,6 +5,8 @@ import SwiftUI
 struct GuideEntryEditor: View {
     @Environment(AppModel.self) private var model
     let entry: GuideEntry?
+    /// An Analysis proposal being edited before it is accepted (spec §14.10).
+    var proposal: AnalysisProposalInfo?
     @State var category: String
     @State private var kind: GuideKind = .guideline
     @State private var statement = ""
@@ -30,8 +32,22 @@ struct GuideEntryEditor: View {
         _checkValue = State(initialValue: entry?.check?.value ?? "")
     }
 
+    /// Edit a proposal from Analysis; saving accepts it as edited.
+    init(proposal: AnalysisProposalInfo, check: GuideCheck?) {
+        self.init(entry: nil, category: proposal.category)
+        self.proposal = proposal
+        _kind = State(initialValue: proposal.kind)
+        _statement = State(initialValue: proposal.statement)
+        _groups = State(initialValue: Set(proposal.scope.groups))
+        _people = State(initialValue: proposal.scope.people.joined(separator: ", "))
+        _types = State(initialValue: Set(proposal.scope.messageTypes))
+        _languages = State(initialValue: proposal.scope.languages.joined(separator: ", "))
+        _checkKind = State(initialValue: check?.kind)
+        _checkValue = State(initialValue: check?.value ?? "")
+    }
+
     var body: some View {
-        Dialog(title: entry == nil ? "New Entry" : "Edit Entry",
+        Dialog(title: proposal != nil ? "Edit Proposal" : entry == nil ? "New Entry" : "Edit Entry",
                message: "Write it as an instruction to someone drafting for you.") {
             Picker("Category", selection: $category) {
                 ForEach(model.guide.categories, id: \.id) { c in Text("\(c.id) \(c.name)").tag(c.id) }
@@ -118,6 +134,12 @@ struct GuideEntryEditor: View {
                                    .filter { !$0.isEmpty })
         let check = checkKind.map { GuideCheck(kind: $0, value: checkValue) }
         let fields = GuideEntryFields(category: category, kind: kind, statement: statement, scope: scope, check: check)
+        if let proposal {
+            model.analysisError = nil
+            await model.acceptAnalysis(proposal, as: fields)
+            if let failure = model.analysisError { error = failure } else { model.guideSheet = nil }
+            return
+        }
         var edits: [GuideEdit] = [entry.map { .update(id: $0.id, fields: fields) }
             ?? .add(fields: fields, status: .accepted, source: .you, origin: nil)]
         // Editing a proposal (from the decisions) accepts it as edited.

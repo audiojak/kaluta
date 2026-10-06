@@ -98,6 +98,8 @@ the user's accent colour follow without extra work.
 | `chipFill(hex:)` | label colour at 28 % | label chips; labels without a colour use tertiary label |
 | `highlight` | tint at 25 % | the keyboard-highlighted item inside glass |
 | `controlFill` | quaternary at 60 % | small filled controls (attachments) |
+| `newItems` | system red | the dot on a sidebar entry with something new since the user looked (Analysis), as app badges are red |
+| `changedText` | accent at 22 % | the user's own words beside an AI draft (Analysis); the AI's replaced words are struck through in secondary instead |
 | `Intent.attention` | yellow at 14 %, outlined in cards | needs the user: sign in again, approve a send |
 | `Intent.info` | tint at 10 % | worth knowing: created by an agent, your own prompt |
 | `Intent.caution` | orange at 10 % | a consequence: a draft could not be saved |
@@ -112,7 +114,8 @@ Status text takes its colour from `Tone`, never a literal:
 | `approved` | system green | an approved agent action |
 | `category(_:)` | a system colour per category | a task category's chip: one each for the starting set, others by name (never red, orange, yellow or pink) |
 
-Red is only for failure (a failed tool call, an attachment error). Green
+Red is only for failure (a failed tool call, an attachment error) and the
+new-items dot, which is a badge, not text. Green
 is only for "approved". Orange is text or a band's fill, never an error.
 
 ## Surfaces
@@ -148,6 +151,9 @@ is only for "approved". Orange is text or a band's fill, never an error.
   "Not Now"). An info card under the Inbox's header, one tip at a time
   (`Tip`: Categories, Important Only, the agent); any button puts it away
   for good.
+- **`NewDot`**: the small red dot after a sidebar entry with something
+  new since the user last looked (Analysis, spec §14.10). It clears when
+  the user opens the section; it is not a count (the badge counts).
 - **Empty states**: `ContentUnavailableView`, with a title, an SF Symbol
   and at most one sentence.
 - **Menus** keep `Divider()` as their separator; mark the line `// menu`.
@@ -367,3 +373,5 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Invitation to learn, light](design/guide-invite-light.png) | ![Invitation to learn, dark](design/guide-invite-dark.png) |
 | ![Invitation banner, light](design/guide-banner-light.png) | ![Invitation banner, dark](design/guide-banner-dark.png) |
 | ![Reader with quoted history folded, light](design/reader-quote-light.png) | ![Reader with quoted history folded, dark](design/reader-quote-dark.png) |
+| ![Analysis, light](design/analysis-light.png) | ![Analysis, dark](design/analysis-dark.png) |
+| ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |

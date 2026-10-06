@@ -246,7 +246,7 @@ impl Core {
             let now = mail_sync::now_millis();
             let changes = db.write(move |tx| mail_store::outbox::cancel_send(tx, draft_id, now)).await?;
             let Some(changes) = changes else { return Ok(false) };
-            mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events }, &changes);
+            mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events, settled: None }, &changes);
             if let Some(service) = service {
                 service.outbox_changed();
             }
@@ -360,7 +360,7 @@ impl Core {
                 }
                 other => other.into(),
             })?;
-            mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events }, &changes);
+            mail_sync::SyncObserver::threads_changed(&crate::sync::EventObserver { events, settled: None }, &changes);
             if let Some(service) = service {
                 service.outbox_changed();
             }

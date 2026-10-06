@@ -54,7 +54,7 @@ pub(crate) fn fenced(s: &str) -> String {
 }
 
 /// Lower case, spaces collapsed: how quotes are compared with the mail.
-fn loose(s: &str) -> String {
+pub(crate) fn loose(s: &str) -> String {
     s.split_whitespace().map(str::to_lowercase).collect::<Vec<_>>().join(" ")
 }
 

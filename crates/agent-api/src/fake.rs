@@ -198,6 +198,90 @@ pub fn merge_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"decisions": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to an OpenAGC analysis comparison prompt: for each
+/// pair whose sent text ends on a shorter line than the AI's (fewer
+/// characters), "Sign off
+/// with the first name only" (a guideline); for each pair whose AI text
+/// says "I hope this finds you well" and whose sent text does not, a rule
+/// banning it.
+pub fn compare_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC analysis compare") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"'], "");
+    let block = |text: &str, tag: &str| -> String {
+        text.split(&format!("<{tag}>\n"))
+            .nth(1)
+            .and_then(|r| r.split(&format!("\n</{tag}>")).next())
+            .unwrap_or("")
+            .to_owned()
+    };
+    let mut signoff = Vec::new();
+    let mut hope = Vec::new();
+    for pair in prompt.split("<pair id=\"").skip(1) {
+        let Some((id, rest)) = pair.split_once('"') else { continue };
+        let (ai, sent) = (block(rest, "ai"), block(rest, "sent"));
+        let last = |t: &str| t.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim().to_owned();
+        let (ai_last, sent_last) = (last(&ai), last(&sent));
+        if !sent_last.is_empty() && sent_last != ai_last && sent_last.chars().count() < ai_last.chars().count() {
+            signoff.push(format!(r#"{{"pair": {id}, "sent": "{}", "ai": "{}"}}"#, esc(&sent_last), esc(&ai_last)));
+        }
+        let phrase = "I hope this finds you well";
+        if ai.contains(phrase) && !sent.contains(phrase) {
+            hope.push(format!(r#"{{"pair": {id}, "ai": "{phrase}"}}"#));
+        }
+    }
+    let mut proposals = Vec::new();
+    if !signoff.is_empty() {
+        proposals.push(format!(
+            r#"{{"op": "add", "category": "B6", "kind": "guideline", "statement": "Sign off with the first name only", "evidence": [{}]}}"#,
+            signoff.join(", ")
+        ));
+    }
+    if !hope.is_empty() {
+        proposals.push(format!(
+            r#"{{"op": "add", "category": "C8", "kind": "rule", "statement": "Never write 'I hope this finds you well'", "evidence": [{}]}}"#,
+            hope.join(", ")
+        ));
+    }
+    Some(format!(r#"{{"proposals": [{}]}}"#, proposals.join(", ")))
+}
+
+/// The fake's answer to an OpenAGC fact-gleaning prompt: for each message
+/// with a line "I'm <role> at <organisation>.", that role as Work ›
+/// Occupation or role, quoting the line; and any line naming a password,
+/// so tests see it dropped.
+pub fn glean_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC facts glean") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"'], "");
+    let mut facts = Vec::new();
+    for block in prompt.split("<message id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let body = rest.split("</message>").next().unwrap_or("");
+        for line in body.lines().map(str::trim) {
+            if let Some(role) = line.strip_prefix("I'm ").and_then(|l| l.split(" at ").next())
+                && line.contains(" at ")
+            {
+                facts.push(format!(
+                    r#"{{"op": "add", "category": "work", "label": "Occupation or role", "value": "{}", "evidence": {{"message_id": "{id}", "quote": "{}"}}}}"#,
+                    esc(role),
+                    esc(line)
+                ));
+            }
+            if line.to_lowercase().contains("password") {
+                facts.push(format!(
+                    r#"{{"op": "add", "category": "other", "label": "Wi-Fi password", "value": "{}", "evidence": {{"message_id": "{id}", "quote": "{}"}}}}"#,
+                    esc(line),
+                    esc(line)
+                ));
+            }
+        }
+    }
+    Some(format!(r#"{{"facts": [{}], "categories": [], "starter_set": null}}"#, facts.join(", ")))
+}
+
 /// The fake's answer to the composer's writing help when the request asks
 /// for "facts about me": the questions for facts it does not have (the
 /// first turn only; the answers come in a turn of their own).
@@ -208,7 +292,7 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
         return None;
     }
     Some(
-        r#"{"questions": [{"question": "What is your role?", "fact": "My role"}, {"question": "What does your company do?", "fact": "What my company does"}]}"#
+        r#"{"questions": [{"question": "What is your role?", "category": "work", "label": "Occupation or role"}, {"question": "What does your company do?", "category": "work", "label": "What the company does"}]}"#
             .into(),
     )
 }
@@ -226,6 +310,8 @@ impl AgentSession for FakeSession {
             .or_else(|| guide_answer(&turn.prompt))
             .or_else(|| change_answer(&turn.prompt))
             .or_else(|| merge_answer(&turn.prompt))
+            .or_else(|| compare_answer(&turn.prompt))
+            .or_else(|| glean_answer(&turn.prompt))
             .or_else(|| writing_help_answer(&turn.prompt))
             .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });

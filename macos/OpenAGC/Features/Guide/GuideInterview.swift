@@ -13,8 +13,9 @@ struct GuideQuestion: Identifiable, Equatable {
         case list(template: String, kind: GuideKind, check: GuideCheckKind?)
         /// Free text, used as the statement itself.
         case text(kind: GuideKind)
-        /// Several labelled fields, each a fact when filled.
-        case facts([(label: String, template: String)])
+        /// Several labelled fields, each a fact when filled (spec §14.11):
+        /// its category key and label in Facts.
+        case facts([(label: String, category: String, fact: String)])
 
         static func == (a: Answer, b: Answer) -> Bool {
             switch (a, b) {
@@ -62,13 +63,13 @@ enum GuideInterview {
                           detail: "Topics, projects or figures, one per line or separated by commas.",
                           answer: .list(template: "Never mention %@", kind: .rule, check: nil)),
             GuideQuestion(id: "F3", category: "F3", prompt: "Facts a draft may use about you",
-                          detail: "Only what you fill in is used.", answer: .facts([
-                              ("Role and company", "My role: %@"),
-                              ("Calendar link", "My calendar link for booking time: %@"),
-                              ("Time zone", "My time zone: %@"),
-                              ("Working hours", "My working hours: %@"),
-                              ("Phone", "My phone number: %@"),
-                              ("Pronouns", "My pronouns: %@"),
+                          detail: "Only what you fill in is used. They are kept in Analysis › Facts.", answer: .facts([
+                              ("Role and company", "work", "Occupation or role"),
+                              ("Calendar link", "availability", "Calendar link"),
+                              ("Time zone", "availability", "Time zone"),
+                              ("Working hours", "availability", "Usual hours"),
+                              ("Phone", "contact", "Phone"),
+                              ("Pronouns", "identity", "Pronouns"),
                           ]), suggestion: signature),
             GuideQuestion(id: "F5", category: "F5", prompt: "Should a message say an AI helped write it?",
                           detail: "", answer: .choice([
@@ -139,11 +140,20 @@ enum GuideInterview {
         case let .text(kind):
             let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? [] : [make(t, kind, nil)]
-        case let .facts(labels):
-            return zip(labels, fields).compactMap { label, value in
-                let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                return v.isEmpty ? nil : make(String(format: label.template, v), .fact, nil)
-            }
+        case .facts:
+            // Facts have their own store: see `facts(for:fields:)`.
+            return []
+        }
+    }
+
+    /// The facts a facts question's filled fields make (spec §14.11).
+    static func facts(for q: GuideQuestion, fields: [String]) -> [FactEdit] {
+        guard case let .facts(labels) = q.answer else { return [] }
+        return zip(labels, fields).compactMap { label, value in
+            let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return v.isEmpty ? nil : .add(fields: FactFields(category: label.category, label: label.fact, value: v,
+                                                             use: .free, asOf: nil),
+                                          status: .accepted, source: .you)
         }
     }
 

@@ -2246,7 +2246,9 @@ accounts except through an explicit merge, and evidence never does.
 - *Guideline*: how the user usually writes; followed unless the message
   calls for something else.
 - *Fact*: something true about the user the agent may use (role, calendar
-  link, time zone); never inferred silently, always confirmed.
+  link, time zone); never inferred silently, always confirmed. Facts now
+  live in Facts (§14.11, amended 2026-10-05): the guide's F3 category is a
+  pointer there, and existing F3 entries were moved.
 
 An entry has a category, kind, statement, **scope** (any of: audience
 groups, people or domains, message types (new, reply, forward), languages;
@@ -2274,7 +2276,7 @@ seen in mail and come from the interview.
 | C Language | C1 spelling variant; C2 punctuation; C3 capitalisation; C4 contractions; C5 numbers, dates, times, money; C6 abbreviations and jargon; C7 favoured words and phrases; C8 things never done (banned words, clichés, formatting, AI habits; also asked); C9 sentence style; C10 languages |
 | D Audience | D1 audience groups (also asked); D2 particular people and domains; D3 forms of address; D4 first contact vs established; D5 seniority (also asked) |
 | E Message types | E1 replies; E2 forwards; E3 introductions; E4 scheduling (also asked); E5 follow-ups; E6 declines; E7 requests and delegating; E8 status updates and hand-offs; E9 thanks; E10 recipients (reply all, Cc, Bcc); E11 attachments and links; E12 disagreeing and negotiating |
-| F Content rules (asked) | F1 commitments; F2 confidentiality; F3 facts about the user; F4 never invent (on by default); F5 AI disclosure; F6 required wording |
+| F Content rules (asked) | F1 commitments; F2 confidentiality; F3 facts about the user (in Facts, §14.11); F4 never invent (on by default); F5 AI disclosure; F6 required wording |
 | G Format | G1 plain or rich text; G2 quoting |
 | H When unsure (asked) | H1 missing information; H2 conflicts and precedence (fixed, as above, shown to the user); H3 model examples (chosen by the user); H4 draft, send or stay silent |
 
@@ -2310,7 +2312,10 @@ undoable.
    Deciding then opens; every decision is saved as it is made, and the
    user can leave and come back.
 5. *Decisions*: proposals by category with quotes and counts; accept, edit
-   (statement, kind, scope, check) or reject. Mail that contradicts an
+   (statement, kind, scope, check) or reject. Decisions wait in Analysis
+   (§14.10) under *From learning*; the Writing Guide links there ("12
+   decisions waiting in Analysis") and keeps no queue of its own (amended
+   2026-10-05). Mail that contradicts an
    accepted entry is a decision: narrow it, change it, or keep it.
 6. *Interview*: short questions for the asked categories and for any
    category left without evidence; answers become entries with source
@@ -2327,7 +2332,8 @@ and batches done, with the time left estimated from how long the batches
 so far took, once the first is done) and *Decisions* (decided of total, or
 "waiting for analysis"). When analysis finishes with decisions waiting, a
 sheet in the main window offers *Review Now* or *Later*, and a
-notification (when the app is not in front) opens the decisions. An
+notification (when the app is not in front) opens the decisions; both
+open Analysis. An
 account with sent mail that has never learned is invited once, by a sheet
 after its sync; put off, a banner above the Inbox and in the Writing Guide
 stays until a run starts or it is dismissed (amended 2026-10-02). **Further analysis**,
@@ -2376,9 +2382,9 @@ facts the agent does not have (about the user, their company, figures,
 dates, names) and they are not in the thread or the guide, it asks first:
 the composer shows its questions (at most five) as fields, and the agent
 writes once they are answered or skipped, leaving a [bracket] for anything
-still unknown. Answers are kept as facts (F3) in the guide unless the user
-unticks *Keep these facts in my writing guide*; adding them is undoable
-(amended 2026-10-02).
+still unknown. Answers are kept as facts (§14.11, source *Writing help*) unless the
+user unticks *Keep these facts*; each question carries a category and a
+label, and adding them is undoable (amended 2026-10-02, 2026-10-05).
 
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
@@ -2398,6 +2404,242 @@ CLI, as the agent column does with mail it reads; the dialog says so, with
 the number of messages, before it starts. The guide and its evidence stay
 in the account's store on this Mac. Export writes Markdown (readable) and
 JSON (for import and merge) without evidence quotes unless the user asks.
+
+### 14.10 Analysis **(Amendment 2026-10-05)**
+
+The writing guide keeps learning after onboarding. Once a day, while the
+app is open, a background review compares what an AI wrote with what the
+user actually sent, and proposes changes to the guide where the user's
+edits show it is wrong or missing something; an optional second review
+gleans facts (§14.11) from mail the user sends. Every proposed change to
+the guide or to facts waits in one queue, **Analysis**. Decisions: ADR
+0013 (recording), ADR 0012 (global facts); plan `docs/plans/analysis.md`.
+
+**When it shows.** Nothing records, runs or shows until the account has
+finished its first writing-guide learning run (§14.9). Archived-mailbox
+accounts (§7.7) never record or review.
+
+**Recording.** Every AI composition leaves a record in the account's
+store with its full text: writing help (each text the agent writes into
+the composer; a rewrite for the guide's checks or for another audience
+updates the same record), the agent column's draft tools (`create_draft`,
+`update_draft`, replies) and routines (the same tools, source *routine*).
+The record keeps the source, agent, message type (new, reply, forward),
+draft, thread, recipients (To and Cc, normalised), subject, the user's
+instruction or the agent's prompt, the AI text (plain and HTML), the guide
+version and audience it was written under. On send it copies the draft's
+rfc822 Message-ID before the draft row goes; a discarded draft marks its
+record *discarded* (counted in the metrics, not compared). Records are
+*waiting*, *matched*, *unmatched*, *discarded* or *reviewed*.
+
+**Matching**, at the start of each review, for records still waiting,
+strongest first:
+
+1. *Sent from the draft*: the sent message whose Message-ID is the
+   record's. Exact.
+2. *Reply* (and forwards, first): the first message the user sends in the
+   record's thread after the record was made.
+3. *New message* (or forward): the first message the user sends after the
+   record was made to any of its recipients (To before Cc), whatever the
+   subject.
+
+A sent message matches at most one record; the most recent record wins.
+Matches by 2 or 3 with under 15% word overlap with the AI text are
+dropped (a "Thanks!" after a long AI draft is a different message). A
+record not matched within 14 days becomes *unmatched*. The sent text is
+the user's own text, prepared as learning prepares it (quotes, forwarded
+originals and signature stripped), and each pair records its distance
+(normalised word edit distance, 0–1).
+
+**The daily review**, per account:
+
+- *When*: the first chance each calendar day, once the day's first sync
+  goes idle after the app opens; the core's scheduler checks open accounts
+  hourly. *Run Now* in Analysis runs it on demand.
+- *Gate*: a finished learning run and a connected agent. With no agent the
+  review waits and Analysis says why ("Connect Claude Code or Codex in
+  Settings › Agents").
+- *How*: a background job in hidden read-only sessions (ADR 0007), in
+  batches, recorded batch by batch so it pauses and resumes like a
+  learning run; the same two progress bars and time-left estimate.
+- *Compare*: pairs with distance above 0.05, ten to a batch. The prompt
+  gives each pair's AI text and sent text (fenced), the instruction, the
+  message type and audience, and the guide entries that applied (rendered
+  for that message). The agent answers with proposals (add, edit, rescope,
+  remove), each with evidence: the pair, a quote from the sent text and
+  what it replaced. Quotes that do not occur in the cited text are
+  dropped. Changes of substance (a different date, a new paragraph) are
+  not style: they go to fact gleaning, never to guide proposals.
+- *Unchanged drafts count*: a draft sent as written (distance ≤ 0.05)
+  supports the entries that applied to it; an entry the user's edits go
+  against in three pairs is proposed for removal, with those pairs as
+  its evidence. Content rules (group F) are not compared: they are not
+  style.
+- *Merge*: the same proposal in the same category across pairs and days
+  becomes one proposal whose evidence grows. A rejected proposal is not
+  raised again; one that contradicts an accepted entry is marked so.
+- *Thresholds*: a guideline needs evidence from two pairs, a rule three,
+  before it is shown. Weaker proposals wait under *Watching*, collecting
+  evidence.
+- *Cost cap*: at most 50 pairs a day (Settings); the rest wait for the
+  next day, oldest first.
+
+**The Analysis section.** A sidebar entry under Favorites, after Tasks and
+before Writing Guide, shown from the end of the account's first learning
+run. A red dot shows while there are proposals created since the user
+last opened Analysis, and clears when they open it (an unseen signal, not
+a count; the number badge that the Writing Guide showed moves here). The
+list has four groups:
+
+- *From learning*: decisions from learning runs, as §14.9 describes them,
+  moved here with their contradiction cards and keys.
+- *Writing guide*: proposed changes from daily reviews, each with the
+  change (before → after, *new* or *remove*), its category and strength
+  ("seen in 4 replies").
+- *Facts*: proposed new, changed or removed facts (§14.11).
+- *Watching*: proposals short of the threshold, collapsed.
+
+The detail shows a guide proposal's change and its evidence as side by
+side snippets of what the AI wrote and what the user sent, with the
+differing words marked (*Why?*); a fact proposal shows the value and the
+quote it came from. Return accepts, ⌫ rejects, e edits; *Accept All in
+Group* takes a group at once. Each is one change on the account's undo
+stack (§14.6a), recorded with the guide's own change so one Undo puts the
+guide and the proposal back, and accepted guide changes make a new guide
+version. A rejected proposal is never raised again (rejecting is *Don't
+Suggest This Again*); any pair offers *Ignore Edits to This Message*,
+which takes it out of every open proposal. The learning runs' decisions
+are one row, *From learning*, whose detail is the decisions flow of
+§14.9. The sidebar entry's badge counts what waits; the Writing Guide's
+badge is gone. A *Facts* tab sits beside the proposals (§14.11).
+
+The header says when the review last ran, what it examined (pairs
+matched, unmatched), the next run, *Run Now* and *Pause*, and the progress
+bars while it runs. At the top, small: how much AI drafts get changed (the
+median distance over four weeks) and how many were sent as written. The
+Writing Guide shows each entry's health: how often drafts that applied it
+were sent unchanged or overridden.
+
+**Settings** (the section's header and Settings › Analysis; per account,
+except the notification, which is app-wide):
+*Daily review* on or off; *Learn facts from*: *Off* · *Mail written with
+AI* · *All mail I send* (default *Mail written with AI*; received mail is
+never used); *Pairs a day* (default 50); *Keep AI drafts for* 7, 30 or 90
+days (default 30); an opt-in notification, "3 new proposals in Analysis",
+once a day and only when the app is not in front (off by default). The
+account menu shows a small dot on accounts with unseen proposals.
+
+**Privacy.** Recording is local. The review sends matched pairs, and with
+*All mail I send* the day's sent mail, to the user's own agent CLI, the
+same disclosure as learning; Analysis says so before the first review.
+The full AI and sent texts are kept for the retention period after the
+record is reviewed; after that only the distance, status and proposal
+links remain. Nothing changes the guide or facts without the user
+accepting, and every change is undoable and versioned. Reviews cannot
+draft, send or change mail.
+
+### 14.11 Facts **(Amendment 2026-10-05)**
+
+Facts about the user, their work and the people they mention have a place
+of their own, used by every AI that composes for the user. They replace
+the writing guide's category F3; accepted F3 entries were moved into
+Facts, with a guide version noting it. Decisions: ADR 0012; plan
+`docs/plans/analysis.md`.
+
+**A fact** has:
+
+| Field | What |
+| --- | --- |
+| category | a built-in or custom category |
+| label | short, unique within its category ("Title", "Calendar link") |
+| value | the fact itself |
+| scope | *account* (this account) or *global* (every account) |
+| use | *Use freely*, *Ask before using* or *Never share*; default *Use freely* (People and the sensitive starter categories default to *Ask before using*) |
+| as of | when it was true; facts that age (travel dates, a headcount) are flagged for review when old |
+| source | *You*, *Learned* (with evidence quotes) or *Writing help* (an answer to its question) |
+| status | *proposed*, *accepted* or *rejected* |
+
+**Built-in categories**, the few that fit any account, personal or for
+work. They can be hidden but not renamed or deleted:
+
+| Key | Category | Labels it suggests |
+| --- | --- | --- |
+| `identity` | Identity | Full name, Preferred name, Pronouns, Name pronunciation |
+| `contact` | Contact | Phone, Other email addresses, Mailing address, Website or profiles |
+| `availability` | Availability | Time zone, Usual hours, Calendar link, Where I usually am, Away or travel dates |
+| `people` | People | Who people the user mentions are to them and how to refer to them; default *Ask before using* |
+| `work` | Work | Occupation or role, Organisation, Team; not shown while empty |
+| `preferences` | Preferences | How the user likes to be reached or to meet, things to keep in mind when making plans |
+| `other` | Other | Anything that fits nowhere else, until it is moved |
+
+**Custom categories** have a name and a one-line description ("Properties
+I'm currently selling"); the description tells the gleaning prompt and
+the drafting agent what belongs there. They can be renamed, reordered and
+deleted (their facts move to Other, undoably). A new name close to an
+existing category offers that category instead. A category belongs where
+it was made, an account or global; making a fact global makes its custom
+category global too.
+
+**Starter sets** add a few custom categories at once, then edited like any
+other:
+
+| Set | Categories |
+| --- | --- |
+| Business | Company; Products and services; Customers and markets; Pricing and terms (*Ask*); Funding and investors (*Ask*); Policies and support; Approved wording (ties to F6); Links and resources |
+| Freelance or consulting | Services and rates (*Ask*); Portfolio and references; Availability for new work |
+| Household | Home; Family logistics (*Ask*); Health providers (names only, *Ask*) |
+| Job search | Experience and skills; Roles I'm looking for; References (*Ask*) |
+
+Analysis proposes a new custom category when three or more facts in Other
+look alike, and a starter set when gleaning keeps finding facts that fit
+one.
+
+**Never stored**, even when found: passwords; card and bank numbers;
+government ids; health details about others; anything about third parties
+beyond their name, role and how the user knows them. Gleaning drops these
+by pattern before a proposal is made, and its prompt says so.
+
+**Where facts come from**: the user (the Facts editor, and the
+interview, whose F3 questions become fact questions in Identity, Contact,
+Availability and Work); writing help's questions (§14.9, *Missing
+facts*); and *gleaning* in the daily review (§14.10), when *Learn facts
+from* is not *Off*: from each day's AI-matched sent mail, or all mail sent
+that day, the agent extracts facts about the user and their work, each
+with a quote verified against the message. A value that differs from an
+accepted fact becomes a proposal to change it; a fact contradicted by
+recent mail can be proposed for removal. Every gleaned fact is a proposal
+in Analysis, shown at once (one message stating a fact is enough, unlike a
+habit); a starter set is proposed once three reviews find facts that fit
+it. With *All mail I send*, a review reads up to 30 messages sent since
+the last one read.
+
+**Scope.** Facts are per account by default. *Make Global* moves a fact
+into the global store (ADR 0012), where every account reads it; *Make This
+Account's Only* moves it back. An account fact with the same category and
+label as a global one overrides it for that account. Settings › Facts
+lists the global facts with the same editing.
+
+**In prompts.** Facts render into the guide's "Facts about the user you
+may use" section: *Use freely* facts as facts, *Ask before using* ones
+marked "ask the user before using", *Never share* ones left out. Global
+facts merge under account ones. Agents can also read them through a
+read-only `facts_lookup` tool (by category or words; never-share facts
+left out), so a long list need not sit in every prompt; tool names allow
+no dots.
+
+**The Facts tab** (in Analysis, beside *Proposals*; fact proposals wait in
+the proposals' *Facts* group): facts by category, with a globe on
+global ones, custom categories after the built-in ones in the user's
+order; proposed changes at the top; *Add Fact*, *Add Category…* and *Add
+Categories › From a Starter Set…*; edit, delete, change *use*, *Make
+Global* and *Make This Account's Only*. Each is one undoable change
+(§14.6a). The list exports to Markdown and JSON with its custom
+categories, and merges into another account's facts, creating categories
+that are missing. The Writing Guide's F3 category says "Facts now live in
+Analysis › Facts." The interview's fact questions and writing help's
+kept answers (each question carrying a category and label) write facts.
+Settings › Facts lists the global facts with the same editing; its
+changes go on the open account's undo stack.
 
 ---
 

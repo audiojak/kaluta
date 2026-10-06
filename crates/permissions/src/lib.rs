@@ -42,6 +42,7 @@ pub enum Tool {
     GetThread,
     GetMessage,
     ListLabels,
+    FactsLookup,
     GetAttachmentText,
     PresentThreads,
     CreateDraft,
@@ -58,11 +59,12 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 17] = [
+    pub const ALL: [Tool; 18] = [
         Tool::Search,
         Tool::GetThread,
         Tool::GetMessage,
         Tool::ListLabels,
+        Tool::FactsLookup,
         Tool::GetAttachmentText,
         Tool::PresentThreads,
         Tool::CreateDraft,
@@ -86,6 +88,7 @@ impl Tool {
             Tool::GetThread => "mail_get_thread",
             Tool::GetMessage => "mail_get_message",
             Tool::ListLabels => "mail_list_labels",
+            Tool::FactsLookup => "facts_lookup",
             Tool::GetAttachmentText => "mail_get_attachment_text",
             Tool::PresentThreads => "mail_present_threads",
             Tool::CreateDraft => "mail_create_draft",
@@ -112,6 +115,7 @@ impl Tool {
             | Tool::GetThread
             | Tool::GetMessage
             | Tool::ListLabels
+            | Tool::FactsLookup
             | Tool::GetAttachmentText
             | Tool::PresentThreads => Risk::ReadOnly,
             Tool::CreateDraft

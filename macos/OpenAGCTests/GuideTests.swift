@@ -125,6 +125,56 @@ struct GuideDecisionTests {
         #expect(try await core.guideEntry(mine[0].id)?.status == .rejected)
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Replace Entry")
     }
+
+    /// Run Now starts the daily review once the account has learned (spec
+    /// §14.10); its progress arrives as events.
+    @Test func runNowReviewsAndReportsProgress() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let run = try await core.startAnalysisRun()
+        #expect(!run.daily)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while model.analysisProgress?.run?.status != .done, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let progress = try #require(model.analysisProgress, "progress arrives as events")
+        #expect(progress.available && progress.run?.id == run.id && progress.run?.status == .done)
+    }
+
+    /// Once the account has learned, what writing help writes is kept for
+    /// the daily review (spec §14.10), and the user's edits do not change it.
+    @Test func writingHelpKeepsWhatItWroteOnceTheAccountHasLearned() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let page = try await core.threads(in: "INBOX")
+        let row = try #require(page.rows.first)
+        let detail = try await core.thread(row.id)
+        let message = try #require(detail?.messages.last)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        let written = store.body.string
+        var records: [AiCompositionInfo] = []
+        for _ in 0..<100 where records.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+            records = try await core.aiCompositions()
+        }
+        let record = try #require(records.first)
+        #expect(record.source == "writing_help" && record.kind == "reply")
+        #expect(record.instruction == "Write a reply")
+        #expect(record.draftId == store.draftID)
+        #expect(record.aiText == written)
+
+        store.body = NSAttributedString(string: written + "\nThanks, John")
+        await store.save()
+        let after = try await core.aiCompositions()
+        #expect(after.first?.aiText == written)
+    }
 }
 
 @MainActor
@@ -170,9 +220,11 @@ struct GuideInterviewTests {
         #expect(banned.allSatisfy { $0.kind == .rule && $0.check?.kind == .bannedPhrase })
         #expect(banned[1].check?.value == "per my last email")
         let facts = try #require(qs.first { $0.id == "F3" })
-        let made = GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO, Actual AI", "", "Pacific"])
-        #expect(made.map(\.statement) == ["My role: CEO, Actual AI", "My time zone: Pacific"])
-        #expect(made.allSatisfy { $0.kind == .fact && $0.category == "F3" })
+        #expect(GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO"]).isEmpty, "facts are not guide entries")
+        let made = GuideInterview.facts(for: facts, fields: ["CEO, Actual AI", "", "Pacific"])
+        let fields = made.compactMap { edit -> FactFields? in if case let .add(f, _, _) = edit { f } else { nil } }
+        #expect(fields.map { "\($0.category)/\($0.label): \($0.value)" }
+                == ["work/Occupation or role: CEO, Actual AI", "availability/Time zone: Pacific"])
         let invent = try #require(qs.first { $0.id == "F4" })
         #expect(GuideInterview.entries(for: invent, choice: 0, text: "", fields: []).first?.kind == .rule)
         #expect(GuideInterview.entries(for: invent, choice: nil, text: "", fields: []).isEmpty)
@@ -435,7 +487,8 @@ struct GuidePromptTests {
         }
         #expect(decisions > 0)
         model.openGuideDecisionsNow()
-        #expect(model.isGuide && model.guide.showsDecisions && model.guidePrompt == nil)
+        // The decisions wait in Analysis (spec §14.10).
+        #expect(model.isAnalysis && model.analysis.selection == AnalysisStore.learningTag && model.guidePrompt == nil)
     }
 }
 
@@ -464,14 +517,17 @@ struct MissingFactsTests {
             Issue.record("expected questions, got \(assistant.state)")
             return
         }
-        #expect(questions.map(\.fact) == ["My role", "What my company does"])
+        #expect(questions.map(\.fact) == ["Occupation or role", "What the company does"])
+        #expect(questions.map(\.category) == ["work", "work"])
         #expect(store.body.string == before, "nothing written yet")
 
         await assistant.answer([questions[0].id: "CEO of Actual AI"], save: true)
         for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
         #expect(assistant.state == .done)
         #expect(store.body.string.contains("CEO of Actual AI"), "the answers reached the agent")
-        let facts = try await core.guideEntries([.accepted]).filter { $0.category == "F3" }
-        #expect(facts.map(\.statement) == ["My role: CEO of Actual AI"], "kept in the guide; the unanswered one is not")
+        let facts = try await core.facts()
+        #expect(facts.map { "\($0.category)/\($0.label): \($0.value)" } == ["work/Occupation or role: CEO of Actual AI"],
+                "kept in Facts; the unanswered one is not")
+        #expect(facts.first?.source == .writingHelp)
     }
 }

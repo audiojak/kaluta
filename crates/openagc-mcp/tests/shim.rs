@@ -100,7 +100,7 @@ async fn the_shim_lists_the_catalog_and_forwards_calls_with_its_session() {
 
     let list = mcp.request(2, "tools/list", json!({})).await;
     let tools = list["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 17);
+    assert_eq!(tools.len(), 18);
     let search = tools.iter().find(|t| t["name"] == "mail_search").unwrap();
     assert_eq!(search["inputSchema"]["required"], json!(["query"]));
     assert_eq!(search["annotations"]["readOnlyHint"], true);

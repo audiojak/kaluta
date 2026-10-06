@@ -3,7 +3,7 @@ import SwiftUI
 /// The Settings window's tabs; `AppModel.settingsTab` picks one before
 /// the window opens (the agent column's Agent Settings…).
 enum SettingsTab: String, Hashable {
-    case general, accounts, agents, permissions, tasks, routines, privacy
+    case general, accounts, agents, permissions, tasks, analysis, facts, routines, privacy
 }
 
 struct SettingsView: View {
@@ -26,6 +26,12 @@ struct SettingsView: View {
             }
             Tab("Tasks", systemImage: "checklist", value: SettingsTab.tasks) {
                 TaskSettings()
+            }
+            Tab("Analysis", systemImage: "sparkle.magnifyingglass", value: SettingsTab.analysis) {
+                AnalysisSettingsView()
+            }
+            Tab("Facts", systemImage: "globe", value: SettingsTab.facts) {
+                FactsSettings()
             }
             Tab("Routines", systemImage: "clock.arrow.2.circlepath", value: SettingsTab.routines) {
                 RoutineSettings()

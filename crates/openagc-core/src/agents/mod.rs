@@ -42,6 +42,10 @@ pub(crate) struct ToolSession {
     pub hidden: bool,
     /// Where `mail_present_threads` shows results; set by the agent manager.
     pub sink: Option<EventSink>,
+    /// The agent behind the session (`claude-code`, `codex`), and the last
+    /// prompt sent to it: what an AI composition records (spec §14.10).
+    pub agent: Option<String>,
+    pub last_prompt: String,
 }
 
 #[derive(Default)]
@@ -64,6 +68,18 @@ pub(crate) struct AgentHub {
     pub(crate) cloud_locator: Mutex<Option<agent_api::process::Locator>>,
     /// The writing guide's learning job, per account (spec §14.9).
     pub(crate) guide_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// The daily review's job, per account (spec §14.10); when the
+    /// scheduler last tried to start one, and why it could not.
+    pub(crate) analysis_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    pub(crate) analysis_attempts: Mutex<HashMap<String, i64>>,
+    pub(crate) analysis_waiting: Mutex<HashMap<String, String>>,
+    /// Starting a review, one at a time (the scheduler and Run Now race).
+    pub(crate) analysis_start: tokio::sync::Mutex<()>,
+    /// With "All mail I send": the newest message a glean in progress read,
+    /// saved once it succeeds.
+    pub(crate) glean_until: Mutex<HashMap<String, i64>>,
+    /// When each account's old AI drafts were last purged.
+    pub(crate) analysis_purged: Mutex<HashMap<String, i64>>,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript
@@ -90,6 +106,8 @@ impl AgentHub {
             read_only: false,
             hidden: false,
             sink,
+            agent: None,
+            last_prompt: String::new(),
         };
         self.sessions.lock().unwrap_or_else(|e| e.into_inner()).insert(session.to_owned(), state);
     }

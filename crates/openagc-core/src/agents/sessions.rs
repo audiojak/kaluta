@@ -442,7 +442,10 @@ impl Core {
                 },
             };
             // A new prompt from the user resets the session's bulk count.
-            self.agents.with_session(&session_id, |s| s.guard.new_user_prompt());
+            self.agents.with_session(&session_id, |s| {
+                s.guard.new_user_prompt();
+                s.last_prompt = turn.prompt.clone();
+            });
             if let Ok(db) = self.db()
                 && !self.agents.is_hidden(&session_id)
             {
@@ -516,6 +519,7 @@ impl Core {
             self.agents.bind_account(id.as_str(), account);
         }
         self.agents.register(id.as_str(), scope, Some(EventSink::new(id.clone(), rt.tx.clone())));
+        self.agents.with_session(id.as_str(), |s| s.agent = Some(provider.as_str().to_owned()));
         let (uuid, name, now) = (id.0.clone(), provider.as_str().to_owned(), mail_sync::now_millis());
         runtime::run(async move {
             Ok::<_, CoreError>(db.write(move |tx| mail_store::agents::start_session(tx, &uuid, &name, now)).await?)

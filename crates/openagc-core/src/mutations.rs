@@ -57,7 +57,7 @@ impl Core {
                 // No provider (the demo mailbox): local only.
                 None => {
                     let (changes, action) = mail_sync::apply_local_change_recorded(&db, change, false, record).await?;
-                    mail_sync::SyncObserver::threads_changed(&EventObserver { events }, &changes);
+                    mail_sync::SyncObserver::threads_changed(&EventObserver { events, settled: None }, &changes);
                     action
                 }
             };

@@ -35,6 +35,9 @@ const HEADERS_BATCH: usize = 1_000;
 /// Turns engine output into UI events.
 pub(crate) struct EventObserver {
     pub events: EventBus,
+    /// Set once sync first goes idle: the daily review waits for it (spec
+    /// §14.10).
+    pub settled: Option<Arc<AtomicBool>>,
 }
 
 impl SyncObserver for EventObserver {
@@ -58,6 +61,11 @@ impl SyncObserver for EventObserver {
             SyncPhase::Backfilling | SyncPhase::Incremental => SyncState::Syncing,
             SyncPhase::Idle => SyncState::Idle,
         };
+        if state == SyncState::Idle
+            && let Some(settled) = &self.settled
+        {
+            settled.store(true, Ordering::SeqCst);
+        }
         self.events.emit(CoreEvent::SyncStatus {
             state,
             pending: progress.queued.min(u32::MAX as u64) as u32,
@@ -80,6 +88,7 @@ pub(crate) struct SyncService {
     categories_wake: Notify,
     external: Option<ExternalChanges>,
     tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
+    settled: Arc<AtomicBool>,
 }
 
 impl SyncService {
@@ -88,6 +97,7 @@ impl SyncService {
         events: EventBus,
         handle: &tokio::runtime::Handle,
         external: Option<ExternalChanges>,
+        settled: Arc<AtomicBool>,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
             engine,
@@ -100,6 +110,7 @@ impl SyncService {
             categories_wake: Notify::new(),
             external,
             tasks: std::sync::Mutex::new(Vec::new()),
+            settled,
         });
         let main = handle.spawn(service.clone().run());
         service.tasks.lock().unwrap_or_else(|e| e.into_inner()).push(main);
@@ -111,6 +122,11 @@ impl SyncService {
         if active && !was {
             self.poll_now.notify_one();
         }
+    }
+
+    /// Whether sync has gone idle at least once since it started.
+    pub fn settled(&self) -> bool {
+        self.settled.load(Ordering::SeqCst)
     }
 
     pub fn engine(&self) -> &SyncEngine {
@@ -346,6 +362,10 @@ impl SyncService {
             match self.engine.sync_incremental().await {
                 Ok(report) => {
                     backoff = Duration::from_secs(5);
+                    // The day's mail is in: the daily review may start (spec
+                    // §14.10). A synced account with nothing to download
+                    // never reports Idle, so this marks it too.
+                    self.settled.store(true, Ordering::SeqCst);
                     if !report.external_label_changes.is_empty()
                         && let Some(notify) = &self.external
                     {

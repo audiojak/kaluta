@@ -4,11 +4,14 @@
 //! search index in the same transaction.
 
 pub mod agents;
+pub mod analysis;
+pub mod compositions;
 pub mod consistency;
 mod db;
 pub mod demo;
 pub mod drafts;
 mod error;
+pub mod facts;
 pub mod guide;
 pub mod outbox;
 pub mod queue;

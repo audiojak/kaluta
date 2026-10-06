@@ -592,6 +592,20 @@ final class CoreClient: Sendable {
         try await call { try await core.draftGuideVersion(draftId: draftID) }
     }
 
+    /// Keep what writing help wrote into a draft (spec §14.10); nothing is
+    /// kept before the account's first finished learning run.
+    func recordWritingHelp(draftID: Int64, agent: String, instruction: String, text: String, guideVersion: Int64?,
+                           audiences: [String]) async throws(CoreClientError) {
+        try await call {
+            try await core.recordWritingHelp(draftId: draftID, agent: agent, instruction: instruction, aiText: text,
+                                             guideVersion: guideVersion, audiences: audiences)
+        }
+    }
+
+    func aiCompositions(limit: UInt32 = 50) async throws(CoreClientError) -> [AiCompositionInfo] {
+        try await call { try await core.aiCompositions(limit: limit) }
+    }
+
     /// Ask the agent how to change the guide; nothing changes until the
     /// user answers the questions.
     func proposeGuideChange(_ request: String, agent: String) async throws(CoreClientError) -> [GuideChangeQuestion] {
@@ -633,6 +647,176 @@ final class CoreClient: Sendable {
 
     func guideProgress() async throws(CoreClientError) -> GuideProgress {
         try await call { try await core.guideProgress() }
+    }
+
+    // MARK: Analysis (spec §14.10)
+
+    /// Run Now: the day's review on demand.
+    func startAnalysisRun(agent: String? = nil) async throws(CoreClientError) -> AnalysisRunInfo {
+        try await call { try await core.startAnalysisRun(agent: agent) }
+    }
+
+    func pauseAnalysisRun() async throws(CoreClientError) {
+        try await call { try await core.pauseAnalysisRun() }
+    }
+
+    func resumeAnalysisRun() async throws(CoreClientError) -> AnalysisRunInfo? {
+        try await call { try await core.resumeAnalysisRun() }
+    }
+
+    func cancelAnalysisRun() async throws(CoreClientError) {
+        try await call { try await core.cancelAnalysisRun() }
+    }
+
+    func analysisProgress() async throws(CoreClientError) -> AnalysisProgress {
+        try await call { try await core.analysisProgress() }
+    }
+
+    func analysisQueue() async throws(CoreClientError) -> AnalysisQueue {
+        try await call { try await core.analysisQueue() }
+    }
+
+    /// The user opened Analysis: its dot clears.
+    func analysisSeen() async throws(CoreClientError) {
+        try await call { try await core.analysisSeen() }
+    }
+
+    func analysisPairs(_ proposalID: Int64) async throws(CoreClientError) -> [AnalysisPairInfo] {
+        try await call { try await core.analysisPairs(proposalId: proposalID) }
+    }
+
+    /// Accept or reject proposals as one change; undone with `undoGuideChange`.
+    func decideAnalysisProposals(_ ids: [Int64], accept: Bool) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.decideAnalysisProposals(ids: ids, accept: accept) }
+    }
+
+    func acceptAnalysisProposal(_ id: Int64, as fields: GuideEntryFields) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.acceptAnalysisProposalEdited(id: id, fields: fields) }
+    }
+
+    func ignoreAnalysisPair(_ compositionID: Int64) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.ignoreAnalysisPair(compositionId: compositionID) }
+    }
+
+    /// Accept or reject fact proposals; undone with `undoFactChange`.
+    func decideFactProposals(_ ids: [Int64], accept: Bool) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.decideFactAnalysisProposals(ids: ids, accept: accept) }
+    }
+
+    func analysisFactsFrom() async throws(CoreClientError) -> FactsFrom {
+        try await call { try await core.analysisFactsFrom() }
+    }
+
+    func setAnalysisFactsFrom(_ from: FactsFrom) async throws(CoreClientError) {
+        try await call { try await core.setAnalysisFactsFrom(from: from) }
+    }
+
+    func analysisSettings() async throws(CoreClientError) -> AnalysisSettings {
+        try await call { try await core.analysisSettings() }
+    }
+
+    func setAnalysisSettings(_ settings: AnalysisSettings) async throws(CoreClientError) {
+        try await call { try await core.setAnalysisSettings(settings: settings) }
+    }
+
+    /// Accounts with Analysis proposals the user has not seen (menu dots).
+    func accountsWithUnseenAnalysis() async -> [String] {
+        await core.accountsWithUnseenAnalysis()
+    }
+
+    func analysisMetrics() async throws(CoreClientError) -> AnalysisMetrics {
+        try await call { try await core.analysisMetrics() }
+    }
+
+    // MARK: Facts (spec §14.11)
+
+    func facts(_ statuses: [FactStatus] = [.accepted]) async throws(CoreClientError) -> [FactInfo] {
+        try await call { try await core.listFacts(statuses: statuses) }
+    }
+
+    func factCategories() async throws(CoreClientError) -> [FactCategoryInfo] {
+        try await call { try await core.factCategories() }
+    }
+
+    func factStarterSets() -> [StarterSetInfo] { core.factStarterSets() }
+
+    func similarFactCategory(_ name: String) async throws(CoreClientError) -> FactCategoryInfo? {
+        try await call { try await core.similarFactCategory(name: name) }
+    }
+
+    /// Change facts as one change; undone with `undoFactChange`.
+    func applyFactEdits(_ edits: [FactEdit], reason: String) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.applyFactEdits(edits: edits, reason: reason) }
+    }
+
+    func editFactCategories(_ edits: [CategoryEdit]) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.editFactCategories(edits: edits) }
+    }
+
+    func addFactStarterSet(_ set: StarterSet) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.addFactStarterSet(set: set) }
+    }
+
+    func undoFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoFactChange(changeId: id) }
+    }
+
+    func redoFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoFactChange(changeId: id) }
+    }
+
+    /// Markdown to read or share, or JSON to merge into another account.
+    func exportFacts(json: Bool) async throws(CoreClientError) -> String {
+        try await call { try await core.exportFacts(json: json) }
+    }
+
+    func mergeFacts(_ json: String) async throws(CoreClientError) -> FactMergeResult {
+        try await call { try await core.mergeFacts(json: json) }
+    }
+
+    // Global facts (ADR 0012)
+
+    func globalFacts(_ statuses: [FactStatus] = [.accepted]) async throws(CoreClientError) -> [FactInfo] {
+        try await call { try await core.listGlobalFacts(statuses: statuses) }
+    }
+
+    func globalFactCategories() async throws(CoreClientError) -> [FactCategoryInfo] {
+        try await call { try await core.globalFactCategories() }
+    }
+
+    func applyGlobalFactEdits(_ edits: [FactEdit], reason: String) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.applyGlobalFactEdits(edits: edits, reason: reason) }
+    }
+
+    func editGlobalFactCategories(_ edits: [CategoryEdit]) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.editGlobalFactCategories(edits: edits) }
+    }
+
+    func undoGlobalFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoGlobalFactChange(changeId: id) }
+    }
+
+    func redoGlobalFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoGlobalFactChange(changeId: id) }
+    }
+
+    /// Move a fact to every account, or back to this one; undone with
+    /// `undoFactChange` (the account's stack).
+    func makeFactGlobal(_ id: Int64) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.makeFactGlobal(id: id) }
+    }
+
+    func makeFactLocal(_ globalID: Int64) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.makeFactLocal(globalId: globalID) }
+    }
+
+    /// Snapshots: a few reviewed pairs and proposals on the demo account.
+    func debugSeedAnalysis() async throws(CoreClientError) {
+        try await call { try await core.debugSeedAnalysis() }
+    }
+
+    func guideEntryHealth() async throws(CoreClientError) -> [GuideEntryHealth] {
+        try await call { try await core.guideEntryHealth() }
     }
 
     /// Proposals ready to decide (from finished runs only).
@@ -984,6 +1168,7 @@ private extension CoreClientError.Kind {
 // into the core still go through CoreClient.
 typealias AddressInfo = OpenAGCCore.AddressInfo
 typealias AgentActionInfo = OpenAGCCore.AgentActionInfo
+typealias AiCompositionInfo = OpenAGCCore.AiCompositionInfo
 typealias AgentEventInfo = OpenAGCCore.AgentEventInfo
 typealias AgentProviderInfo = OpenAGCCore.AgentProviderInfo
 typealias AgentSessionInfo = OpenAGCCore.AgentSessionInfo
@@ -1041,6 +1226,30 @@ typealias AudienceGroup = OpenAGCCore.AudienceGroup
 typealias AudienceStatus = OpenAGCCore.AudienceStatus
 typealias GuideProgress = OpenAGCCore.GuideProgress
 typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
+typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
+typealias FactInfo = OpenAGCCore.FactInfo
+typealias FactScope = OpenAGCCore.FactScope
+typealias FactMergeResult = OpenAGCCore.FactMergeResult
+typealias FactFields = OpenAGCCore.FactFields
+typealias FactEdit = OpenAGCCore.FactEdit
+typealias FactUse = OpenAGCCore.FactUse
+typealias FactSource = OpenAGCCore.FactSource
+typealias FactStatus = OpenAGCCore.FactStatus
+typealias FactChange = OpenAGCCore.FactChange
+typealias FactCategoryInfo = OpenAGCCore.FactCategoryInfo
+typealias CategoryEdit = OpenAGCCore.CategoryEdit
+typealias StarterSet = OpenAGCCore.StarterSet
+typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
+typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
+typealias AnalysisFactProposalInfo = OpenAGCCore.AnalysisFactProposalInfo
+typealias FactsFrom = OpenAGCCore.FactsFrom
+typealias AnalysisSettings = OpenAGCCore.AnalysisSettings
+typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
+typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
+typealias AnalysisMetrics = OpenAGCCore.AnalysisMetrics
+typealias AnalysisOp = OpenAGCCore.AnalysisOp
+typealias GuideEntryHealth = OpenAGCCore.GuideEntryHealth
+typealias AnalysisRunInfo = OpenAGCCore.AnalysisRunInfo
 typealias GuideRunKind = OpenAGCCore.GuideRunKind
 typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
 typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
@@ -1090,6 +1299,9 @@ enum CoreClientEvent: Sendable, Equatable {
     case tasksChanged
     case guideChanged
     case guideProgress(GuideProgress)
+    case analysisProgress(AnalysisProgress)
+    case analysisChanged
+    case factsChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1175,6 +1387,12 @@ private extension CoreClientEvent {
             self = .guideChanged
         case let .guideProgress(progress):
             self = .guideProgress(progress)
+        case let .analysisProgress(progress):
+            self = .analysisProgress(progress)
+        case .analysisChanged:
+            self = .analysisChanged
+        case .factsChanged:
+            self = .factsChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

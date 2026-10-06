@@ -122,6 +122,24 @@ struct InterviewSheet: View {
 
     private func save() async {
         guard let q = current else { return }
+        await model.facts.load()
+        let facts = GuideInterview.facts(for: q, fields: fields).map { edit -> FactEdit in
+            // A fact by that label already: the answer replaces its value.
+            guard case let .add(f, _, _) = edit, let old = model.facts.facts.first(where: {
+                $0.scope == .account && $0.status == .accepted && $0.category == f.category
+                    && $0.label.lowercased() == f.label.lowercased()
+            }) else { return edit }
+            return .update(id: old.id, fields: FactFields(category: f.category, label: old.label, value: f.value,
+                                                          use: old.use, asOf: old.asOf))
+        }
+        if !facts.isEmpty {
+            if let failure = await model.applyFactEdits(facts, actionName: "Answer Question",
+                                                         notice: facts.count == 1 ? "Added a fact" : "Added \(facts.count) facts") {
+                error = failure.message
+                return
+            }
+            saved += facts.count
+        }
         let entries = GuideInterview.entries(for: q, choice: choice, text: text, fields: fields)
         if !entries.isEmpty {
             let result = await model.applyGuideEdits(entries.map { .add(fields: $0, status: .accepted, source: .you, origin: nil) },

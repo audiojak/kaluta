@@ -417,7 +417,8 @@ impl Core {
         // Everything this account's sync reports is tagged with it, so a
         // background account never updates the window's (spec §7.7).
         let events = self.account_events();
-        let observer = Arc::new(EventObserver { events: events.clone() });
+        let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observer = Arc::new(EventObserver { events: events.clone(), settled: Some(settled.clone()) });
         let engine = Arc::new(SyncEngine::new(provider, db, observer));
         if let Some(source) = backfill {
             engine.set_backfill_source(source);
@@ -434,7 +435,7 @@ impl Core {
         });
         let account =
             self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
-        let service = SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute));
+        let service = SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), settled);
         let old = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).insert(account, service);
         if let Some(old) = old {
             old.stop();

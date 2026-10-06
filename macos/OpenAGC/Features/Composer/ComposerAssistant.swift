@@ -21,7 +21,10 @@ final class ComposerAssistant {
     /// fact when it is kept in the writing guide ("What my company does").
     struct FactQuestion: Equatable, Identifiable {
         let question: String
+        /// The fact's label ("What the company does").
         let fact: String
+        /// Where it goes in Facts (spec §14.11): a category key.
+        var category = "other"
         var id: String { question }
     }
 
@@ -101,6 +104,7 @@ final class ComposerAssistant {
             store.body = NSAttributedString(string: cached, attributes: [.font: ComposerHTML.bodyFont])
             writtenFor = audiences ?? guide?.audiences ?? []
             shownKey = key
+            record(cached, store: store)
             return
         }
         let request = lastInstruction ?? "Rewrite this message for \((audiences ?? []).joined(separator: ", ")), keeping what it says"
@@ -234,15 +238,25 @@ final class ComposerAssistant {
         store.body = NSAttributedString(string: text, attributes: [.font: ComposerHTML.bodyFont])
         instruction = ""
         state = .done
-        // The draft records the guide version it was written under.
-        if let version = guide?.version, !(guide?.text.isEmpty ?? true), let core = model?.core {
-            Task { [weak store] in
-                guard let store else { return }
-                await store.save()
-                if store.draftID != 0 { try? await core.setDraftGuideVersion(store.draftID, version) }
-            }
-        }
+        record(text, store: store)
         finish()
+    }
+
+    /// Save the draft with the agent's text and keep what it wrote (spec
+    /// §14.10); the draft records the guide version it was written under.
+    private func record(_ text: String, store: ComposerStore) {
+        guard let core = model?.core, let agent = model?.agent.providerID else { return }
+        let version = followsGuide ? guide?.version : nil
+        let instruction = lastInstruction ?? ""
+        let audiences = writtenFor
+        Task { [weak store] in
+            guard let store else { return }
+            await store.save()
+            guard store.draftID != 0 else { return }
+            if let version { try? await core.setDraftGuideVersion(store.draftID, version) }
+            try? await core.recordWritingHelp(draftID: store.draftID, agent: agent, instruction: instruction,
+                                              text: text, guideVersion: version, audiences: audiences)
+        }
     }
 
     /// The user's answers to the agent's questions (empty: skipped), sent
@@ -255,14 +269,24 @@ final class ComposerAssistant {
             return a.isEmpty ? nil : (q, a)
         }
         if save, !given.isEmpty, let model {
-            let edits: [GuideEdit] = given.map { q, a in
-                .add(fields: GuideEntryFields(category: "F3", kind: .fact, statement: "\(q.fact): \(a)", scope: .always,
-                                              check: nil), status: .accepted, source: .you, origin: nil)
+            // Kept in Facts (spec §14.11), where later drafts find them.
+            await model.facts.load()
+            let known = Set(model.facts.categories.map(\.key))
+            let edits: [FactEdit] = given.map { q, a in
+                let category = known.contains(q.category) ? q.category : "other"
+                // A fact by that label already: the answer replaces its value.
+                if let old = model.facts.facts.first(where: {
+                    $0.scope == .account && $0.status == .accepted && $0.category == category
+                        && $0.label.lowercased() == q.fact.lowercased()
+                }) {
+                    return .update(id: old.id, fields: FactFields(category: category, label: old.label, value: a,
+                                                                  use: old.use, asOf: old.asOf))
+                }
+                return .add(fields: FactFields(category: category, label: q.fact, value: a, use: .free, asOf: nil),
+                            status: .accepted, source: .writingHelp)
             }
-            await model.applyGuideEdits(edits, reason: "facts from writing help",
-                                        actionName: given.count == 1 ? "Add Fact" : "Add Facts",
-                                        notice: given.count == 1 ? "Added a fact to your writing guide"
-                                            : "Added \(given.count) facts to your writing guide")
+            await model.applyFactEdits(edits, actionName: given.count == 1 ? "Add Fact" : "Add Facts",
+                                       notice: given.count == 1 ? "Added a fact" : "Added \(given.count) facts")
         }
         givenFacts += given.map { "\($0.0.fact): \($0.1)" }
         state = .working
@@ -287,8 +311,10 @@ final class ComposerAssistant {
             guard let item = item as? [String: Any],
                   let question = (item["question"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !question.isEmpty else { return nil }
-            let fact = (item["fact"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return FactQuestion(question: question, fact: fact.isEmpty ? question : fact)
+            let label = ((item["label"] ?? item["fact"]) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let category = (item["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return FactQuestion(question: question, fact: label.isEmpty ? question : label,
+                                category: category.isEmpty ? "other" : category)
         }
         return questions
     }
@@ -356,8 +382,9 @@ final class ComposerAssistant {
             Never invent facts. If the request needs facts you do not have (about the user, their company, \
             figures, dates, names) and they are not in the thread, the writing guide or below, do not write \
             the message yet: answer with only a JSON object, {"questions": [{"question": "What does your \
-            company do?", "fact": "What my company does"}]}, with at most five questions. The user answers, \
-            then you write it.
+            company do?", "category": "work", "label": "What the company does"}]}, with at most five \
+            questions; the category is one of identity, contact, availability, people, work, preferences \
+            or other. The user answers, then you write it.
             """,
             "From: \(from)\nTo: \(to.isEmpty ? "(nobody yet)" : to.joined(separator: ", "))\nSubject: \(subject)",
             "The message so far:\n<<<\n\(draft.trimmingCharacters(in: .whitespacesAndNewlines))\n>>>",

@@ -2,14 +2,12 @@ import SwiftUI
 
 /// The Writing Guide section's detail column: the chosen category's
 /// entries, read like a document, with their scope and the quotes from the
-/// user's mail behind them; or the decisions waiting.
+/// user's mail behind them. Decisions wait in Analysis (spec §14.10).
 struct GuideDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.guide.showsDecisions {
-            GuideDecisionsView()
-        } else if let category = model.guide.selected {
+        if let category = model.guide.selected {
             GuideCategoryDetail(category: category)
         } else {
             ContentUnavailableView("No Category Selected", systemImage: "text.book.closed")
@@ -33,6 +31,15 @@ private struct GuideCategoryDetail: View {
                 }
                 if category.id == "D1" {
                     GuideAudiences()
+                }
+                if category.id == "F3" {
+                    // Facts have a place of their own (spec §14.11).
+                    HStack(spacing: Space.m) {
+                        Text("Facts now live in Analysis › Facts.").foregroundStyle(.secondary)
+                        Button("Open Facts") { model.openFacts() }
+                            .hoverHelp("See and change the facts AI drafts may use")
+                    }
+                    .card(.info)
                 }
                 if entries.isEmpty {
                     Text(category.learned ? "Nothing yet. Learn from your sent mail, or add an entry yourself."
@@ -77,6 +84,14 @@ private struct GuideCategoryDetail: View {
 
 /// One entry as a card: its kind, statement, scope, check and evidence.
 struct GuideEntryCard: View {
+    /// "AI drafts that followed it: 4 sent as written, 1 changed against it".
+    static func healthLine(_ h: GuideEntryHealth) -> String {
+        var parts: [String] = []
+        if h.unchanged > 0 { parts.append("\(h.unchanged) sent as written") }
+        if h.overridden > 0 { parts.append("\(h.overridden) changed against it") }
+        return "AI drafts that followed it: " + parts.joined(separator: ", ")
+    }
+
     @Environment(AppModel.self) private var model
     let entry: GuideEntry
     @State private var showsAllQuotes = false
@@ -101,6 +116,11 @@ struct GuideEntryCard: View {
             }
             if entry.support > 0 || entry.contradict > 0 {
                 Text(evidenceLine).font(TypeRole.caption).foregroundStyle(.secondary)
+            }
+            if let health = model.guide.health[entry.id], health.unchanged + health.overridden > 0 {
+                Text(Self.healthLine(health))
+                    .font(TypeRole.caption)
+                    .foregroundStyle(health.overridden > health.unchanged ? Tone.caution : .secondary)
             }
             let quotes = entry.evidence.filter { !$0.contradicts }
             ForEach(Array(quotes.prefix(showsAllQuotes ? quotes.count : 2).enumerated()), id: \.offset) { _, quote in

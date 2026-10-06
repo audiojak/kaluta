@@ -34,6 +34,24 @@ struct MainWindow: View {
             case let .interview(only): InterviewSheet(only: only)
             case .change: ChangeGuideSheet()
             case .merge: MergeGuideSheet()
+            case let .fact(f, category):
+                FactEditor(fact: f, scope: f?.scope ?? .account, categories: model.facts.categories, category: category) {
+                    model.guideSheet = nil
+                }
+            case .newFactCategory:
+                NewFactCategorySheet(scope: .account) { model.guideSheet = nil }
+            case .factCategories:
+                FactCategoriesSheet(store: model.facts) { model.guideSheet = nil }
+            case .analysisSettings:
+                Dialog(title: "Analysis Settings") {
+                    AnalysisSettingsView().frame(width: 460, height: 320)
+                } buttons: {
+                    Button("Done") { model.guideSheet = nil }
+                        .keyboardShortcut(.defaultAction)
+                        .hoverHelp("Close (Return)")
+                }
+            case let .proposal(p):
+                GuideEntryEditor(proposal: p, check: p.entryId.flatMap { id in model.guide.entries.first { $0.id == id } }?.check)
             }
         }
         .sheet(item: Binding(get: { model.guidePrompt }, set: { model.guidePrompt = $0 })) { prompt in
@@ -128,6 +146,7 @@ struct MainWindow: View {
         if model.threads.searchQuery != nil { return "Search Results" }
         if model.isTaskList { return "Tasks" }
         if model.isGuide { return "Writing Guide" }
+        if model.isAnalysis { return "Analysis" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
     }
 
@@ -138,9 +157,11 @@ struct MainWindow: View {
         if model.isGuide {
             let accepted = model.guide.acceptedCount
             parts.append(accepted == 1 ? "1 entry" : "\(accepted.formatted()) entries")
-            let waiting = model.guideDecisionsWaiting
-            if waiting > 0 { parts.append(waiting == 1 ? "1 decision waiting" : "\(waiting) decisions waiting") }
             return parts.joined(separator: " · ")
+        }
+        if model.isAnalysis {
+            let waiting = model.analysis.waiting
+            return waiting == 0 ? "Nothing waiting" : waiting == 1 ? "1 waiting" : "\(waiting) waiting"
         }
         if model.isTaskList {
             if model.tasks.showsDone { return "Done" }
@@ -202,6 +223,8 @@ struct MainWindow: View {
                 }
                 if model.isGuide {
                     GuideView()
+                } else if model.isAnalysis {
+                    AnalysisView()
                 } else if model.isTaskList {
                     TaskListView()
                 } else if model.threads.rows.isEmpty {
@@ -233,6 +256,7 @@ struct MainWindow: View {
             categoryTabs
             taskTabs
             if model.isGuide { GuideHeader() }
+            if model.isAnalysis { AnalysisHeader() }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,
@@ -274,6 +298,8 @@ struct MainWindow: View {
     @ViewBuilder private var detail: some View {
         if model.isGuide {
             GuideDetailView()
+        } else if model.isAnalysis {
+            AnalysisDetailView()
         } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {

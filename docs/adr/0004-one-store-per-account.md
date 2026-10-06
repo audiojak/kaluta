@@ -5,6 +5,7 @@
 - Amends: spec §1.2 (multi-account was an MVP non-goal); ADR 0001
   register, **Storage** and **Core**
 - Spec: §7.7
+- Amended by: ADR 0012 (one global store for facts the user makes global)
 
 ## Context
 

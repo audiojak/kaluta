@@ -7,12 +7,21 @@ uniffi::setup_scaffolding!();
 
 mod account;
 mod agents;
+mod analysis_compare;
+mod analysis_glean;
+mod analysis_match;
+mod analysis_queue;
+mod analysis_run;
+mod analysis_settings;
 mod archive;
 mod attachments;
 mod cloud_routines;
 mod compose;
+mod compositions;
 mod error;
 mod events;
+mod facts;
+mod facts_io;
 pub mod ffi;
 mod guide;
 mod guide_ai;
@@ -71,6 +80,9 @@ pub struct Core {
     /// Held while an account's store is opened, so two callers at launch
     /// do not both open (and migrate) the same store.
     store_open_lock: tokio::sync::Mutex<()>,
+    /// The global facts store (ADR 0012), opened when first needed.
+    global_facts: std::sync::OnceLock<mail_store::Db>,
+    global_facts_lock: std::sync::Mutex<()>,
     /// How many times a store was opened (tests check it is once each).
     store_opens: std::sync::atomic::AtomicUsize,
     imports: archive::Imports,
@@ -102,6 +114,8 @@ impl Core {
             open_accounts: RwLock::new(registry::OpenAccounts::default()),
             index_lock: tokio::sync::Mutex::new(()),
             store_open_lock: tokio::sync::Mutex::new(()),
+            global_facts: std::sync::OnceLock::new(),
+            global_facts_lock: std::sync::Mutex::new(()),
             store_opens: Default::default(),
             imports: Default::default(),
             accounts: Default::default(),

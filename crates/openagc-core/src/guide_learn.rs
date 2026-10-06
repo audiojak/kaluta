@@ -105,9 +105,24 @@ pub(crate) fn message_type(subject: &str, in_reply_to: Option<&str>, body: &str)
     }
 }
 
+/// A sent message's text, and its text with any quoted history left out
+/// by the HTML's structure. Mail sent from OpenAGC carries its quote in
+/// the HTML only: its plain text part has no `>` marks to find it by.
+pub(crate) fn body_texts(body: mail_domain::Body) -> (String, String) {
+    let full = body
+        .text_plain
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| body.html_sanitized.as_deref().map(mail_mime::html_to_text))
+        .unwrap_or_default();
+    let own =
+        body.html_sanitized.as_deref().and_then(mail_mime::without_quoted_html).map(|h| mail_mime::html_to_text(&h));
+    let own = own.unwrap_or_else(|| full.clone());
+    (full, own)
+}
+
 /// The lines of the user's own text, without the quoted conversation, a
 /// `-- ` signature, or a "Sent from my …" line.
-fn own_lines(body: &str) -> Vec<String> {
+pub(crate) fn own_lines(body: &str) -> Vec<String> {
     let own = mail_mime::strip_quoted(body);
     let mut lines: Vec<String> = Vec::new();
     for line in own.lines() {
@@ -212,12 +227,7 @@ impl Core {
                     for row in sent.into_iter().filter(|r| wanted.contains(&r.message_id)) {
                         let body =
                             mail_store::read::get_body(c, &MessageId(row.message_id.clone()))?.unwrap_or_default();
-                        let text = body
-                            .text_plain
-                            .filter(|t| !t.trim().is_empty())
-                            .or_else(|| body.html_sanitized.map(|h| mail_mime::html_to_text(&h)))
-                            .unwrap_or_default();
-                        out.push((row, text));
+                        out.push((row, body_texts(body)));
                     }
                     let signature = store::meta(c, SIGNATURE_KEY)?;
                     Ok((out, signature))
@@ -226,7 +236,7 @@ impl Core {
         })
         .await?;
         let (rows, known) = rows;
-        let texts: Vec<Vec<String>> = rows.iter().map(|(_, text)| own_lines(text)).collect();
+        let texts: Vec<Vec<String>> = rows.iter().map(|(_, (_, own))| own_lines(own)).collect();
         let signature: Vec<String> = match known {
             Some(s) => s.lines().map(str::to_owned).collect(),
             None => {
@@ -245,7 +255,7 @@ impl Core {
         Ok(rows
             .into_iter()
             .zip(texts)
-            .filter_map(|((row, full), lines)| {
+            .filter_map(|((row, (full, _)), lines)| {
                 let lines = without_signature(&lines, &signature);
                 let text: String = lines.join("\n").trim().chars().take(TEXT_CAP).collect();
                 let words = text.split_whitespace().count();

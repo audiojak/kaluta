@@ -40,6 +40,38 @@ pub fn fold_quoted_html(html: &str) -> String {
     }
 }
 
+/// Sanitized HTML without its quoted history, if it has one: the user's
+/// own part of a reply, for reading what they wrote (spec §14.9, §14.10).
+pub fn without_quoted_html(html: &str) -> Option<String> {
+    let mut nodes = parse(html);
+    if !fold(&mut nodes) {
+        return None;
+    }
+    let mut out = String::with_capacity(html.len());
+    for n in &nodes {
+        write_unquoted(n, &mut out);
+    }
+    Some(out)
+}
+
+fn write_unquoted(node: &Node, out: &mut String) {
+    match node {
+        Node::Element { open, .. } if open == OPEN => {}
+        Node::Element { name, open, children, closed } => {
+            out.push_str(open);
+            for c in children {
+                write_unquoted(c, out);
+            }
+            if *closed && !VOID.contains(&name.as_str()) && !name.is_empty() {
+                out.push_str("</");
+                out.push_str(name);
+                out.push('>');
+            }
+        }
+        Node::Text(t) => out.push_str(t),
+    }
+}
+
 /// Plain text split at its quoted history: the reply, and the rest (from
 /// the attribution or header line on), if any.
 pub fn split_quoted_text(text: &str) -> (&str, Option<&str>) {
@@ -364,6 +396,14 @@ mod tests {
         );
         assert!(out.contains("wrote:<br></div><blockquote"), "{out}");
         assert!(out.ends_with("</blockquote></details></div>"), "{out}");
+    }
+
+    #[test]
+    fn the_quoted_history_can_be_left_out() {
+        let html =
+            r#"<p>Hi Ann, Friday works.</p><p>On 2026-09-21, Ann wrote:</p><blockquote><p>Friday?</p></blockquote>"#;
+        assert_eq!(without_quoted_html(html).as_deref(), Some("<p>Hi Ann, Friday works.</p>"));
+        assert_eq!(without_quoted_html("<p>No quote</p>"), None);
     }
 
     #[test]
