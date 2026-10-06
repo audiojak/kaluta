@@ -300,7 +300,7 @@ struct ProposedRulesView: View {
             if model.analysis.selection != current { model.analysis.selection = current }
         }
         .onKeyPress(.return) { act(.accept) }
-        .onKeyPress(.delete) { act(.reject) }
+        .onKeyPress(keys: KeyEquivalent.deleteKeys) { _ in act(.reject) }
         .onKeyPress(characters: .init(charactersIn: "ejk"), phases: .down) { press in
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
             switch press.characters {

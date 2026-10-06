@@ -138,7 +138,7 @@ struct ProposedFactsView: View {
             if model.facts.selection != current { model.facts.selection = current }
         }
         .onKeyPress(.return) { decide(accept: true) }
-        .onKeyPress(.delete) { decide(accept: false) }
+        .onKeyPress(keys: KeyEquivalent.deleteKeys) { _ in decide(accept: false) }
         .onKeyPress(characters: .init(charactersIn: "jk"), phases: .down) { press in
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
             let tags = model.analysis.factProposals.map(AnalysisStore.tag)

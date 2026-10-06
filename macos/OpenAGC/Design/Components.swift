@@ -346,6 +346,13 @@ struct AnswerButton: View {
     }
 }
 
+extension KeyEquivalent {
+    /// ⌫ as the keyboard sends it (DEL, U+007F; `.delete` is backspace,
+    /// U+0008, which macOS keyboards never send) and ⌦: for
+    /// `onKeyPress(keys:)`.
+    static let deleteKeys: Set<KeyEquivalent> = [.delete, .deleteForward, KeyEquivalent("\u{7F}")]
+}
+
 extension View {
     /// What Return does, drawn prominent while it is (the current card in
     /// a review flow); otherwise an ordinary button.

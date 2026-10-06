@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import OpenAGC
 
@@ -45,6 +47,33 @@ struct AnalysisTests {
         let first = try #require(model.guide.decisions.first)
         #expect(model.analysis.selection == AnalysisStore.tag(first), "the first learning decision is chosen")
         #expect(model.selectedDecision?.id == first.id)
+    }
+
+    /// The review flow's keys as the keyboard sends them: ⌫ is DEL
+    /// (U+007F), which `.onKeyPress(.delete)` never matched.
+    @Test func theDeleteKeyRejectsTheCurrentProposedRule() async throws {
+        let model = try await reviewed()
+        model.openProposedRules()
+        let first = try #require(model.guide.decisions.first)
+        model.analysis.selection = AnalysisStore.tag(first)
+        NSApp.activate()
+        let window = ReviewKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600), styleMask: [.titled],
+                                     backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ProposedRulesView().environment(model))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(300))
+        let delete = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                      context: nil, characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
+                                      isARepeat: false, keyCode: 51)!
+        NSApp.postEvent(delete, atStart: false)
+        for _ in 0..<100 where model.guide.decisions.contains(where: { $0.id == first.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!model.guide.decisions.contains { $0.id == first.id }, "⌫ rejected the current rule")
+        #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Reject Entry")
     }
 
     @Test func decidingAProposedRuleChoosesTheNext() async throws {
@@ -130,4 +159,9 @@ struct AnalysisTests {
         #expect(runs.sent.filter(\.1).map(\.0).joined().trimmingCharacters(in: .whitespaces) == "J")
         #expect(runs.ai.filter(\.1).map(\.0).joined().contains("regards"))
     }
+}
+
+/// A window the test host can make key without a user clicking it.
+private final class ReviewKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
 }
