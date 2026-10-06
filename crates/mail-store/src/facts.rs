@@ -57,6 +57,13 @@ pub struct FactEvidence {
 pub struct Snapshot {
     pub facts: Vec<(FactRow, Vec<FactEvidence>)>,
     pub categories: Vec<CategoryRow>,
+    /// The global store's side of a change that moved facts between it and
+    /// an account (ADR 0012): recorded in the account's store with both
+    /// sides, and put back with them.
+    #[serde(default)]
+    pub global_facts: Vec<(FactRow, Vec<FactEvidence>)>,
+    #[serde(default)]
+    pub global_categories: Vec<CategoryRow>,
 }
 
 const FACT_COLUMNS: &str = "id, category, label, value, use, as_of, source, status, created_at, updated_at";

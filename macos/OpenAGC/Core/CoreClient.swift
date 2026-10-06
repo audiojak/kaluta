@@ -739,6 +739,42 @@ final class CoreClient: Sendable {
         try await call { try await core.redoFactChange(changeId: id) }
     }
 
+    // Global facts (ADR 0012)
+
+    func globalFacts(_ statuses: [FactStatus] = [.accepted]) async throws(CoreClientError) -> [FactInfo] {
+        try await call { try await core.listGlobalFacts(statuses: statuses) }
+    }
+
+    func globalFactCategories() async throws(CoreClientError) -> [FactCategoryInfo] {
+        try await call { try await core.globalFactCategories() }
+    }
+
+    func applyGlobalFactEdits(_ edits: [FactEdit], reason: String) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.applyGlobalFactEdits(edits: edits, reason: reason) }
+    }
+
+    func editGlobalFactCategories(_ edits: [CategoryEdit]) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.editGlobalFactCategories(edits: edits) }
+    }
+
+    func undoGlobalFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoGlobalFactChange(changeId: id) }
+    }
+
+    func redoGlobalFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoGlobalFactChange(changeId: id) }
+    }
+
+    /// Move a fact to every account, or back to this one; undone with
+    /// `undoFactChange` (the account's stack).
+    func makeFactGlobal(_ id: Int64) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.makeFactGlobal(id: id) }
+    }
+
+    func makeFactLocal(_ globalID: Int64) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.makeFactLocal(globalId: globalID) }
+    }
+
     /// Snapshots: a few reviewed pairs and proposals on the demo account.
     func debugSeedAnalysis() async throws(CoreClientError) {
         try await call { try await core.debugSeedAnalysis() }
@@ -1157,6 +1193,7 @@ typealias GuideProgress = OpenAGCCore.GuideProgress
 typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
 typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
 typealias FactInfo = OpenAGCCore.FactInfo
+typealias FactScope = OpenAGCCore.FactScope
 typealias FactFields = OpenAGCCore.FactFields
 typealias FactEdit = OpenAGCCore.FactEdit
 typealias FactUse = OpenAGCCore.FactUse

@@ -29,9 +29,12 @@ mean "copied", and an edit on one account would not reach the others.
   account's mail. A global fact's evidence quotes stay in the store of the
   account they came from and are not shown on other accounts.
 - **The user chooses.** Facts are per account by default. *Make Global*
-  moves a fact (and its custom category, if any) into the global store;
-  *Make This Account's Only* moves it back to the account the user is on.
-  Nothing becomes global by inference or by an agent.
+  moves a fact into the global store; *Make This Account's Only* moves it
+  back to the account the user is on. A custom category goes with the
+  fact as a copy (other facts may still use it where it was), and only
+  when the other side has none by that key. Moving refuses when the other
+  side already has a fact with that category and label. Nothing becomes
+  global by inference or by an agent.
 - **Overrides:** an account fact with the same category key and label as a
   global fact wins for that account. Rendering merges global facts under
   account ones.

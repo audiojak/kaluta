@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use mail_store::facts::{self as store, CategoryRow, FactEvidence, FactRow};
+use mail_store::facts::{self as store, CategoryRow, FactEvidence, FactRow, Snapshot};
 
 use crate::{Core, CoreError, CoreEvent, ErrorKind, runtime};
 
@@ -35,6 +35,13 @@ impl FactUse {
             _ => Self::Free,
         }
     }
+}
+
+/// Where a fact lives (ADR 0012): this account, or every account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FactScope {
+    Account,
+    Global,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -108,6 +115,10 @@ pub struct FactInfo {
     pub evidence: Vec<FactQuote>,
     pub created_at: i64,
     pub updated_at: i64,
+    pub scope: FactScope,
+    /// A global fact this account has its own fact for (same category and
+    /// label): the account's wins.
+    pub overridden: bool,
 }
 
 /// What the user writes or changes on a fact.
@@ -167,6 +178,8 @@ pub struct FactCategoryInfo {
     /// Labels it suggests ("Time zone"), for built-ins.
     pub suggested_labels: Vec<String>,
     pub starter: Option<String>,
+    /// A custom category in the global store.
+    pub global: bool,
 }
 
 /// A change applied: its id for undo and redo, and what it touched.
@@ -341,6 +354,8 @@ pub(crate) fn info(f: FactRow, evidence: Vec<FactEvidence>) -> FactInfo {
         evidence: evidence.into_iter().map(|e| FactQuote { message_id: e.message_id, quote: e.quote }).collect(),
         created_at: f.created_at,
         updated_at: f.updated_at,
+        scope: FactScope::Account,
+        overridden: false,
     }
 }
 
@@ -357,6 +372,7 @@ pub(crate) fn categories_from(rows: &[CategoryRow]) -> Vec<FactCategoryInfo> {
             default_use: b.default_use,
             suggested_labels: b.labels.iter().map(|l| (*l).to_owned()).collect(),
             starter: None,
+            global: false,
         })
         .collect();
     out.extend(rows.iter().filter(|r| !r.builtin).map(|r| FactCategoryInfo {
@@ -368,6 +384,7 @@ pub(crate) fn categories_from(rows: &[CategoryRow]) -> Vec<FactCategoryInfo> {
         default_use: FactUse::parse(&r.default_use),
         suggested_labels: vec![],
         starter: r.starter.clone(),
+        global: false,
     }));
     out
 }
@@ -395,13 +412,77 @@ impl Core {
             .list_facts(vec![FactStatus::Accepted])
             .await?
             .iter()
+            .filter(|f| !f.overridden)
             .filter_map(|f| prompt_line(f, &name(&f.category)))
             .collect())
+    }
+
+    /// The store facts in `scope` live in.
+    pub(crate) fn facts_db(&self, scope: FactScope) -> Result<mail_store::Db, CoreError> {
+        match scope {
+            FactScope::Account => self.db(),
+            FactScope::Global => self.global_facts_db(),
+        }
+    }
+
+    /// The global facts store, opened the first time it is needed (ADR
+    /// 0012): `data_dir/global/facts.sqlite`, the account schema.
+    pub(crate) fn global_facts_db(&self) -> Result<mail_store::Db, CoreError> {
+        let _guard = self.global_facts_lock.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(db) = self.global_facts.get() {
+            return Ok(db.clone());
+        }
+        let dir = self.data_path().join("global");
+        std::fs::create_dir_all(&dir).map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))?;
+        let db = mail_store::Db::open(&dir.join("facts.sqlite"))?;
+        let _ = self.global_facts.set(db.clone());
+        Ok(db)
+    }
+
+    async fn facts_in(&self, scope: FactScope, statuses: &[FactStatus]) -> Result<Vec<FactInfo>, CoreError> {
+        let wanted: Vec<&'static str> = statuses.iter().map(|s| s.as_str()).collect();
+        let db = self.facts_db(scope)?;
+        runtime::run(async move {
+            Ok(db
+                .read(move |c| {
+                    let mut out = Vec::new();
+                    for f in store::list(c, &wanted)? {
+                        let e = store::evidence(c, f.id)?;
+                        out.push(FactInfo { scope, ..info(f, e) });
+                    }
+                    Ok(out)
+                })
+                .await?)
+        })
+        .await
+    }
+
+    async fn category_rows(&self, scope: FactScope) -> Result<Vec<CategoryRow>, CoreError> {
+        let db = self.facts_db(scope)?;
+        runtime::run(async move { Ok(db.read(store::categories).await?) }).await
+    }
+
+    /// The categories facts in `scope` can use: for an account, its own
+    /// and the global custom ones; for the global store, its own.
+    async fn categories_for(&self, scope: FactScope) -> Result<Vec<FactCategoryInfo>, CoreError> {
+        let global = self.category_rows(FactScope::Global).await?;
+        let mut out = match scope {
+            FactScope::Account => categories_from(&self.category_rows(FactScope::Account).await?),
+            FactScope::Global => categories_from(&global),
+        };
+        for c in categories_from(&global).into_iter().filter(|c| !c.builtin) {
+            match out.iter_mut().find(|o| o.key == c.key) {
+                Some(o) => o.global = true,
+                None => out.push(FactCategoryInfo { global: true, ..c }),
+            }
+        }
+        Ok(out)
     }
 
     /// Apply fact and category edits as one change, recorded for undo.
     async fn apply_facts(
         &self,
+        scope: FactScope,
         edits: Vec<FactEdit>,
         category_edits: Vec<CategoryEdit>,
         reason: String,
@@ -410,7 +491,7 @@ impl Core {
             return Err(invalid("nothing to change"));
         }
         // Validate before the store.
-        let known: Vec<FactCategoryInfo> = self.fact_categories().await?;
+        let known: Vec<FactCategoryInfo> = self.categories_for(scope).await?;
         for e in &edits {
             if let FactEdit::Add { fields, .. } | FactEdit::Update { fields, .. } = e {
                 if clean(&fields.label).is_empty() || fields.value.trim().is_empty() {
@@ -428,7 +509,7 @@ impl Core {
                 }
             }
         }
-        let db = self.db()?;
+        let db = self.facts_db(scope)?;
         let now = mail_sync::now_millis();
         let change = runtime::run(async move {
             Ok(db
@@ -610,7 +691,7 @@ impl Core {
                     let change_id = store::record_change(tx, &reason, &before, &after, now)?;
                     Ok(FactChange {
                         change_id,
-                        facts: after.facts.into_iter().map(|(f, e)| info(f, e)).collect(),
+                        facts: after.facts.into_iter().map(|(f, e)| FactInfo { scope, ..info(f, e) }).collect(),
                         categories: keys,
                     })
                 })
@@ -621,27 +702,149 @@ impl Core {
         Ok(change)
     }
 
-    async fn replay_facts(&self, change_id: i64, undo: bool) -> Result<(), CoreError> {
-        let db = self.db()?;
+    async fn replay_facts(&self, scope: FactScope, change_id: i64, undo: bool) -> Result<(), CoreError> {
+        let db = self.facts_db(scope)?;
         let now = mail_sync::now_millis();
-        runtime::run(async move {
+        let global_side = runtime::run(async move {
             Ok(db
                 .write(move |tx| {
                     let (_, before, after) = store::get_change(tx, change_id)?
                         .ok_or_else(|| mail_store::StoreError::Invalid("that change can no longer be undone".into()))?;
-                    let ids: BTreeSet<i64> = before.facts.iter().chain(&after.facts).map(|(f, _)| f.id).collect();
-                    let keys: BTreeSet<String> =
-                        before.categories.iter().chain(&after.categories).map(|c| c.key.clone()).collect();
-                    let ids: Vec<i64> = ids.into_iter().collect();
-                    let keys: Vec<String> = keys.into_iter().collect();
-                    store::restore(tx, &ids, &keys, if undo { &before } else { &after }, now)
+                    let (ids, keys) = touched(&before.facts, &after.facts, &before.categories, &after.categories);
+                    let to = if undo { &before } else { &after };
+                    store::restore(tx, &ids, &keys, to, now)?;
+                    // A move between stores: the global side goes back too.
+                    let (gids, gkeys) = touched(
+                        &before.global_facts,
+                        &after.global_facts,
+                        &before.global_categories,
+                        &after.global_categories,
+                    );
+                    let global = Snapshot {
+                        facts: to.global_facts.clone(),
+                        categories: to.global_categories.clone(),
+                        ..Default::default()
+                    };
+                    Ok((gids, gkeys, global))
                 })
                 .await?)
         })
         .await?;
+        let (gids, gkeys, global) = global_side;
+        if !gids.is_empty() || !gkeys.is_empty() {
+            let gdb = self.global_facts_db()?;
+            runtime::run(
+                async move { Ok(gdb.write(move |tx| store::restore(tx, &gids, &gkeys, &global, now)).await?) },
+            )
+            .await?;
+        }
         self.facts_changed();
         Ok(())
     }
+
+    /// Move a fact between this account and the global store: one change,
+    /// recorded in the account's store with both sides (ADR 0012). Its
+    /// custom category goes with it (copied, if the other side lacks it).
+    async fn move_fact(&self, id: i64, to: FactScope) -> Result<FactChange, CoreError> {
+        let from = if to == FactScope::Global { FactScope::Account } else { FactScope::Global };
+        let (src, dst) = (self.facts_db(from)?, self.facts_db(to)?);
+        let (fact, quotes, category) = runtime::run(async move {
+            Ok(src
+                .read(move |c| {
+                    let f = store::get(c, id)?
+                        .ok_or_else(|| mail_store::StoreError::Invalid("that fact is gone".into()))?;
+                    let e = store::evidence(c, id)?;
+                    let cat = if builtin(&f.category).is_none() { store::get_category(c, &f.category)? } else { None };
+                    Ok((f, e, cat))
+                })
+                .await?)
+        })
+        .await?;
+        let now = mail_sync::now_millis();
+        // The other side first: a failure after it leaves a copy, never a loss.
+        let (f2, q2, c2) = (fact.clone(), quotes.clone(), category.clone());
+        let (moved, cat_before, cat_after) = runtime::run(async move {
+            Ok(dst
+                .write(move |tx| {
+                    let dup = store::list(tx, &["accepted"])?.into_iter().any(|o| {
+                        o.category == f2.category && o.label.eq_ignore_ascii_case(&f2.label) && f2.status == "accepted"
+                    });
+                    if dup {
+                        return Err(mail_store::StoreError::Invalid(format!(
+                            "“{}” is there already; change or delete one first",
+                            f2.label
+                        )));
+                    }
+                    let cat_before = match &c2 {
+                        Some(c) => store::get_category(tx, &c.key)?,
+                        None => None,
+                    };
+                    if let Some(c) = &c2
+                        && cat_before.is_none()
+                    {
+                        store::put_category(tx, c)?;
+                    }
+                    let new_id = store::insert(tx, &FactRow { id: 0, updated_at: now, ..f2 })?;
+                    store::add_evidence(tx, new_id, &q2, now)?;
+                    let moved = (store::get(tx, new_id)?.unwrap_or_default(), store::evidence(tx, new_id)?);
+                    let cat_after = match &c2 {
+                        Some(c) => store::get_category(tx, &c.key)?,
+                        None => None,
+                    };
+                    Ok((moved, cat_before, cat_after))
+                })
+                .await?)
+        })
+        .await?;
+        let acc = self.db()?;
+        let reason = if to == FactScope::Global { "make global" } else { "make this account's only" };
+        let (fact2, quotes2, moved2) = (fact.clone(), quotes.clone(), moved.clone());
+        let change_id = runtime::run(async move {
+            Ok(acc
+                .write(move |tx| {
+                    // This account's side, and the global side, before and after.
+                    let (mut before, mut after) = (Snapshot::default(), Snapshot::default());
+                    let gone = (fact2, quotes2);
+                    if to == FactScope::Global {
+                        before.facts.push(gone.clone());
+                        store::delete(tx, gone.0.id)?;
+                        after.global_facts.push(moved2);
+                        before.global_categories.extend(cat_before);
+                        after.global_categories.extend(cat_after);
+                    } else {
+                        before.global_facts.push(gone);
+                        after.facts.push(moved2);
+                        before.categories.extend(cat_before);
+                        after.categories.extend(cat_after);
+                    }
+                    store::record_change(tx, reason, &before, &after, now)
+                })
+                .await?)
+        })
+        .await?;
+        if to == FactScope::Account {
+            let gdb = self.global_facts_db()?;
+            runtime::run(async move { Ok(gdb.write(move |tx| store::delete(tx, id)).await?) }).await?;
+        }
+        self.facts_changed();
+        Ok(FactChange {
+            change_id,
+            facts: vec![FactInfo { scope: to, ..info(moved.0, moved.1) }],
+            categories: category.map(|c| vec![c.key]).unwrap_or_default(),
+        })
+    }
+}
+
+/// The fact ids and category keys on both sides of a change.
+fn touched(
+    a: &[(FactRow, Vec<FactEvidence>)],
+    b: &[(FactRow, Vec<FactEvidence>)],
+    ca: &[CategoryRow],
+    cb: &[CategoryRow],
+) -> (Vec<i64>, Vec<String>) {
+    let ids: BTreeSet<i64> = a.iter().chain(b).map(|(f, _)| f.id).collect();
+    let keys: BTreeSet<String> = ca.iter().chain(cb).map(|c| c.key.clone()).collect();
+    (ids.into_iter().collect(), keys.into_iter().collect())
 }
 
 /// What a fact says to an agent's `facts_lookup` call.
@@ -655,7 +858,7 @@ pub(crate) fn lookup_json(
     let q = query.map(str::to_lowercase).filter(|q| !q.trim().is_empty());
     let rows: Vec<serde_json::Value> = facts
         .iter()
-        .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never)
+        .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never && !f.overridden)
         .filter_map(|f| {
             let c = categories.iter().find(|c| c.key == f.category);
             let name = c.map_or(f.category.clone(), |c| c.name.clone());
@@ -683,30 +886,67 @@ pub(crate) fn lookup_json(
 
 #[uniffi::export]
 impl Core {
-    /// Facts in any of `statuses`, by category and label, with evidence.
+    /// The account's facts in any of `statuses`, then the global ones
+    /// (ADR 0012), with evidence. A global fact the account has its own
+    /// fact for (same category and label) is marked overridden.
     pub async fn list_facts(&self, statuses: Vec<FactStatus>) -> Result<Vec<FactInfo>, CoreError> {
-        let wanted: Vec<&'static str> = statuses.iter().map(|s| s.as_str()).collect();
-        let db = self.db()?;
-        runtime::run(async move {
-            Ok(db
-                .read(move |c| {
-                    let mut out = Vec::new();
-                    for f in store::list(c, &wanted)? {
-                        let e = store::evidence(c, f.id)?;
-                        out.push(info(f, e));
-                    }
-                    Ok(out)
-                })
-                .await?)
-        })
-        .await
+        let mine = self.facts_in(FactScope::Account, &statuses).await?;
+        let mut global = self.facts_in(FactScope::Global, &statuses).await?;
+        for g in &mut global {
+            g.overridden = g.status == FactStatus::Accepted
+                && mine.iter().any(|m| {
+                    m.status == FactStatus::Accepted
+                        && m.category == g.category
+                        && m.label.eq_ignore_ascii_case(&g.label)
+                });
+        }
+        Ok(mine.into_iter().chain(global).collect())
     }
 
-    /// Every category: the built-ins, then the user's own in their order.
+    /// The global facts only (Settings › Facts).
+    pub async fn list_global_facts(&self, statuses: Vec<FactStatus>) -> Result<Vec<FactInfo>, CoreError> {
+        self.facts_in(FactScope::Global, &statuses).await
+    }
+
+    /// Every category: the built-ins, then the user's own in their order,
+    /// with the global custom ones.
     pub async fn fact_categories(&self) -> Result<Vec<FactCategoryInfo>, CoreError> {
-        let db = self.db()?;
-        let rows = runtime::run(async move { Ok(db.read(store::categories).await?) }).await?;
-        Ok(categories_from(&rows))
+        self.categories_for(FactScope::Account).await
+    }
+
+    /// The global store's categories (Settings › Facts).
+    pub async fn global_fact_categories(&self) -> Result<Vec<FactCategoryInfo>, CoreError> {
+        self.categories_for(FactScope::Global).await
+    }
+
+    /// Change global facts (Settings › Facts); one change, recorded in the
+    /// global store (`undo_global_fact_change`).
+    pub async fn apply_global_fact_edits(&self, edits: Vec<FactEdit>, reason: String) -> Result<FactChange, CoreError> {
+        self.apply_facts(FactScope::Global, edits, vec![], reason).await
+    }
+
+    pub async fn edit_global_fact_categories(&self, edits: Vec<CategoryEdit>) -> Result<FactChange, CoreError> {
+        self.apply_facts(FactScope::Global, vec![], edits, "categories".into()).await
+    }
+
+    pub async fn undo_global_fact_change(&self, change_id: i64) -> Result<(), CoreError> {
+        self.replay_facts(FactScope::Global, change_id, true).await
+    }
+
+    pub async fn redo_global_fact_change(&self, change_id: i64) -> Result<(), CoreError> {
+        self.replay_facts(FactScope::Global, change_id, false).await
+    }
+
+    /// Make an account fact global: every account uses it. Undoable on the
+    /// account's stack (`undo_fact_change`).
+    pub async fn make_fact_global(&self, id: i64) -> Result<FactChange, CoreError> {
+        self.move_fact(id, FactScope::Global).await
+    }
+
+    /// Make a global fact this account's only. Undoable on the account's
+    /// stack.
+    pub async fn make_fact_local(&self, global_id: i64) -> Result<FactChange, CoreError> {
+        self.move_fact(global_id, FactScope::Account).await
     }
 
     /// The starter sets and the categories each adds.
@@ -729,13 +969,13 @@ impl Core {
 
     /// Change facts; one change, undoable (`undo_fact_change`).
     pub async fn apply_fact_edits(&self, edits: Vec<FactEdit>, reason: String) -> Result<FactChange, CoreError> {
-        self.apply_facts(edits, vec![], reason).await
+        self.apply_facts(FactScope::Account, edits, vec![], reason).await
     }
 
     /// Change categories; one change, undoable. Deleting a custom
     /// category moves its facts to Other.
     pub async fn edit_fact_categories(&self, edits: Vec<CategoryEdit>) -> Result<FactChange, CoreError> {
-        self.apply_facts(vec![], edits, "categories".into()).await
+        self.apply_facts(FactScope::Account, vec![], edits, "categories".into()).await
     }
 
     /// Add a starter set's categories (those the account does not have
@@ -752,7 +992,7 @@ impl Core {
         if edits.is_empty() {
             return Err(invalid(format!("you already have the {name} categories")));
         }
-        let change = self.apply_facts(vec![], edits, format!("starter set {name}")).await?;
+        let change = self.apply_facts(FactScope::Account, vec![], edits, format!("starter set {name}")).await?;
         // Mark them as the set's, with its sensitive ones asking first.
         let db = self.db()?;
         let keys = change.categories.clone();
@@ -780,11 +1020,11 @@ impl Core {
     }
 
     pub async fn undo_fact_change(&self, change_id: i64) -> Result<(), CoreError> {
-        self.replay_facts(change_id, true).await
+        self.replay_facts(FactScope::Account, change_id, true).await
     }
 
     pub async fn redo_fact_change(&self, change_id: i64) -> Result<(), CoreError> {
-        self.replay_facts(change_id, false).await
+        self.replay_facts(FactScope::Account, change_id, false).await
     }
 }
 
@@ -911,5 +1151,69 @@ mod tests {
         let work = lookup_json(&facts, &cats, Some("Work"), None);
         assert_eq!(work["facts"][0]["value"], "CEO");
         assert_eq!(lookup_json(&facts, &cats, None, Some("assistant"))["facts"][0]["ask_before_using"], true);
+    }
+
+    #[test]
+    fn a_fact_made_global_moves_and_undo_brings_it_back() {
+        let s = crate::guide::tests::demo("facts-global");
+        let core = &s.1;
+        let made = block_on(core.edit_fact_categories(vec![CategoryEdit::Add {
+            name: "Company".into(),
+            description: "The company".into(),
+        }]))
+        .unwrap();
+        let key = made.categories[0].clone();
+        let id = add(core, fields(&key, "Name", "Actual AI", FactUse::Free)).facts[0].id;
+
+        let change = block_on(core.make_fact_global(id)).unwrap();
+        assert!(s.0.join("global").join("facts.sqlite").exists(), "the global store, in the data directory");
+        let all = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!((all[0].scope, all[0].value.as_str()), (FactScope::Global, "Actual AI"));
+        let gid = all[0].id;
+        let global_cats = block_on(core.global_fact_categories()).unwrap();
+        assert!(global_cats.iter().any(|c| c.key == key && c.global), "its custom category went with it");
+        assert_eq!(block_on(core.fact_lines()).unwrap(), vec!["- Company › Name: Actual AI"]);
+
+        block_on(core.undo_fact_change(change.change_id)).unwrap();
+        let all = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
+        assert_eq!(all.iter().map(|f| (f.id, f.scope)).collect::<Vec<_>>(), vec![(id, FactScope::Account)]);
+        assert!(block_on(core.list_global_facts(vec![FactStatus::Accepted])).unwrap().is_empty());
+        assert!(!block_on(core.global_fact_categories()).unwrap().iter().any(|c| c.key == key));
+        block_on(core.redo_fact_change(change.change_id)).unwrap();
+        assert_eq!(block_on(core.list_global_facts(vec![FactStatus::Accepted])).unwrap()[0].id, gid);
+
+        // And back to this account only.
+        let local = block_on(core.make_fact_local(gid)).unwrap();
+        assert_eq!(local.facts[0].scope, FactScope::Account);
+        assert!(block_on(core.list_global_facts(vec![FactStatus::Accepted])).unwrap().is_empty());
+        block_on(core.undo_fact_change(local.change_id)).unwrap();
+        assert_eq!(block_on(core.list_global_facts(vec![FactStatus::Accepted])).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_account_fact_overrides_the_global_one() {
+        let s = crate::guide::tests::demo("facts-override");
+        let core = &s.1;
+        block_on(core.apply_global_fact_edits(
+            vec![FactEdit::Add {
+                fields: fields("availability", "Time zone", "Pacific", FactUse::Free),
+                status: FactStatus::Accepted,
+                source: FactSource::You,
+            }],
+            "add".into(),
+        ))
+        .unwrap();
+        assert_eq!(block_on(core.fact_lines()).unwrap(), vec!["- Availability › Time zone: Pacific"]);
+        add(core, fields("availability", "time zone", "Eastern", FactUse::Free));
+        let all = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
+        let global = all.iter().find(|f| f.scope == FactScope::Global).unwrap();
+        assert!(global.overridden);
+        assert_eq!(block_on(core.fact_lines()).unwrap(), vec!["- Availability › time zone: Eastern"]);
+        let cats = block_on(core.fact_categories()).unwrap();
+        assert_eq!(lookup_json(&all, &cats, Some("availability"), None)["facts"].as_array().unwrap().len(), 1);
+        // Moving it up would make two: refused.
+        let mine = all.iter().find(|f| f.scope == FactScope::Account).unwrap().id;
+        assert!(block_on(core.make_fact_global(mine)).is_err());
     }
 }
