@@ -68,6 +68,11 @@ pub(crate) struct AgentHub {
     pub(crate) cloud_locator: Mutex<Option<agent_api::process::Locator>>,
     /// The writing guide's learning job, per account (spec §14.9).
     pub(crate) guide_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// The daily review's job, per account (spec §14.10); when the
+    /// scheduler last tried to start one, and why it could not.
+    pub(crate) analysis_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    pub(crate) analysis_attempts: Mutex<HashMap<String, i64>>,
+    pub(crate) analysis_waiting: Mutex<HashMap<String, String>>,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript

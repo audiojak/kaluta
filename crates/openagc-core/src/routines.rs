@@ -313,7 +313,13 @@ impl Core {
                 // screen (spec §7.7), each scoped to its own store.
                 for account in core.scheduled_accounts().await {
                     let checked = last_checked.entry(account.clone()).or_default();
-                    crate::registry::scoped(Some(account), core.scheduler_tick(checked, mail_sync::now_millis())).await;
+                    crate::registry::scoped(
+                        Some(account.clone()),
+                        core.scheduler_tick(checked, mail_sync::now_millis()),
+                    )
+                    .await;
+                    // The daily review (spec §14.10).
+                    crate::registry::scoped(Some(account), core.analysis_tick(mail_sync::now_millis())).await;
                 }
                 drop(core);
                 tokio::time::sleep(TICK).await;

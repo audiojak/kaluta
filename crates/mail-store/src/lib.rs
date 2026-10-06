@@ -4,6 +4,7 @@
 //! search index in the same transaction.
 
 pub mod agents;
+pub mod analysis;
 pub mod compositions;
 pub mod consistency;
 mod db;

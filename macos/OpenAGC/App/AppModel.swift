@@ -517,6 +517,7 @@ final class AppModel {
             // (spec §14.9); a paused one waits for the user.
             guideProgress = try? await core.guideProgress()
             if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
+            analysisProgress = try? await core.analysisProgress()
             await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -584,6 +585,8 @@ final class AppModel {
     private(set) var guideRevision = 0
     /// The learning run's progress and the decisions waiting (spec §14.9).
     var guideProgress: GuideProgress?
+    /// The daily review's state for the open account (spec §14.10).
+    var analysisProgress: AnalysisProgress?
     /// A sheet of the Writing Guide section, while open.
     var guideSheet: GuideSheet?
     /// Why the last guide action failed, shown in the section.
@@ -1376,6 +1379,8 @@ final class AppModel {
                     guidePrompt = .finished(decisions: waiting)
                 }
             }
+        case let .analysisProgress(progress):
+            analysisProgress = progress
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

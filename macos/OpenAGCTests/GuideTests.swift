@@ -126,6 +126,21 @@ struct GuideDecisionTests {
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Replace Entry")
     }
 
+    /// Run Now starts the daily review once the account has learned (spec
+    /// §14.10); its progress arrives as events.
+    @Test func runNowReviewsAndReportsProgress() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let run = try await core.startAnalysisRun()
+        #expect(!run.daily)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while model.analysisProgress?.run?.status != .done, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let progress = try #require(model.analysisProgress, "progress arrives as events")
+        #expect(progress.available && progress.run?.id == run.id && progress.run?.status == .done)
+    }
+
     /// Once the account has learned, what writing help writes is kept for
     /// the daily review (spec §14.10), and the user's edits do not change it.
     @Test func writingHelpKeepsWhatItWroteOnceTheAccountHasLearned() async throws {

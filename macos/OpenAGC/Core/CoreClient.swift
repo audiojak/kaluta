@@ -649,6 +649,29 @@ final class CoreClient: Sendable {
         try await call { try await core.guideProgress() }
     }
 
+    // MARK: Analysis (spec §14.10)
+
+    /// Run Now: the day's review on demand.
+    func startAnalysisRun(agent: String? = nil) async throws(CoreClientError) -> AnalysisRunInfo {
+        try await call { try await core.startAnalysisRun(agent: agent) }
+    }
+
+    func pauseAnalysisRun() async throws(CoreClientError) {
+        try await call { try await core.pauseAnalysisRun() }
+    }
+
+    func resumeAnalysisRun() async throws(CoreClientError) -> AnalysisRunInfo? {
+        try await call { try await core.resumeAnalysisRun() }
+    }
+
+    func cancelAnalysisRun() async throws(CoreClientError) {
+        try await call { try await core.cancelAnalysisRun() }
+    }
+
+    func analysisProgress() async throws(CoreClientError) -> AnalysisProgress {
+        try await call { try await core.analysisProgress() }
+    }
+
     /// Proposals ready to decide (from finished runs only).
     func guideDecisions() async throws(CoreClientError) -> [GuideEntry] {
         try await call { try await core.guideDecisions() }
@@ -1056,6 +1079,8 @@ typealias AudienceGroup = OpenAGCCore.AudienceGroup
 typealias AudienceStatus = OpenAGCCore.AudienceStatus
 typealias GuideProgress = OpenAGCCore.GuideProgress
 typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
+typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
+typealias AnalysisRunInfo = OpenAGCCore.AnalysisRunInfo
 typealias GuideRunKind = OpenAGCCore.GuideRunKind
 typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
 typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
@@ -1105,6 +1130,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case tasksChanged
     case guideChanged
     case guideProgress(GuideProgress)
+    case analysisProgress(AnalysisProgress)
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1190,6 +1216,8 @@ private extension CoreClientEvent {
             self = .guideChanged
         case let .guideProgress(progress):
             self = .guideProgress(progress)
+        case let .analysisProgress(progress):
+            self = .analysisProgress(progress)
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

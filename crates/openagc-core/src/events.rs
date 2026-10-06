@@ -152,6 +152,10 @@ pub enum CoreEvent {
     GuideProgress {
         progress: crate::guide_run::GuideProgress,
     },
+    /// The daily review moved on, paused or finished (spec §14.10).
+    AnalysisProgress {
+        progress: crate::analysis_run::AnalysisProgress,
+    },
     /// One agent session's events from one 16 ms frame (spec §9.5).
     AgentEvents {
         session_id: String,
