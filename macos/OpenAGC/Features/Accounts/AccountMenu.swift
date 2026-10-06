@@ -57,9 +57,12 @@ struct AccountMenuItems: View {
             Button { // no-help: menu item
                 Task { await model.switchAccount(to: account.id) }
             } label: {
+                let unseen = model.unseenAnalysisAccounts.contains(account.id)
                 Image(nsImage: AccountAvatar.menuImage(account, current: account.id == model.openAccountID,
-                                                       unseen: model.unseenAnalysisAccounts.contains(account.id)))
+                                                       unseen: unseen))
+                // The dot is in the picture; VoiceOver reads it from the title.
                 Text(AccountMenuItems.title(account))
+                    .accessibilityLabel(AccountMenuItems.title(account) + (unseen ? ", new in Analysis" : ""))
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }

@@ -29,7 +29,8 @@ extension AppModel {
     func analysisShown() async {
         guard let core else { return }
         await analysis.load()
-        if analysis.unseen {
+        // Seen when the proposals show, not the Facts tab.
+        if analysis.unseen, !analysis.showsFacts {
             try? await core.analysisSeen()
             await analysis.load()
             await refreshAnalysisDots()

@@ -2619,8 +2619,8 @@ Account's Only* moves it back. An account fact with the same category and
 label as a global one overrides it for that account. Settings › Facts
 lists the global facts with the same editing.
 
-**In prompts.** Facts render into the guide's "Facts about the user you
-may use" section: *Use freely* facts as facts, *Ask before using* ones
+**In prompts.** Facts in a hidden category are not used. Facts render
+into the guide's "Facts about the user you may use" section: *Use freely* facts as facts, *Ask before using* ones
 marked "ask the user before using", *Never share* ones left out. Global
 facts merge under account ones. Agents can also read them through a
 read-only `facts_lookup` tool (by category or words; never-share facts

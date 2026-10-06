@@ -429,6 +429,8 @@ impl Core {
             .await?
             .iter()
             .filter(|f| !f.overridden)
+            // A hidden category is one the user set aside: drafting does not use it.
+            .filter(|f| !categories.iter().any(|c| c.key == f.category && c.hidden))
             .filter_map(|f| prompt_line(f, &name(&f.category)))
             .collect())
     }
@@ -886,7 +888,18 @@ impl Core {
                 .write(move |tx| {
                     // This account's side, and the global side, before and after.
                     let (mut before, mut after) = (Snapshot::default(), Snapshot::default());
-                    let gone = (fact2, quotes2);
+                    // This account's row as it is now, not as first read.
+                    let gone = if to == FactScope::Global {
+                        match store::get(tx, fact2.id)? {
+                            Some(now) => {
+                                let quotes = store::evidence(tx, now.id)?;
+                                (now, quotes)
+                            }
+                            None => (fact2, quotes2),
+                        }
+                    } else {
+                        (fact2, quotes2)
+                    };
                     if to == FactScope::Global {
                         before.facts.push(gone.clone());
                         store::delete(tx, gone.0.id)?;
@@ -941,6 +954,7 @@ pub(crate) fn lookup_json(
     let rows: Vec<serde_json::Value> = facts
         .iter()
         .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never && !f.overridden)
+        .filter(|f| !categories.iter().any(|c| c.key == f.category && c.hidden))
         .filter_map(|f| {
             let c = categories.iter().find(|c| c.key == f.category);
             let name = c.map_or("Other".to_owned(), |c| c.name.clone());
@@ -1188,6 +1202,16 @@ mod tests {
         let pricing = cats.iter().find(|c| c.name == "Pricing and terms").unwrap();
         assert_eq!((pricing.default_use, pricing.starter.as_deref()), (FactUse::Ask, Some("Business")));
         assert!(block_on(core.add_fact_starter_set(StarterSet::Business)).is_err(), "nothing new to add");
+    }
+
+    #[test]
+    fn a_hidden_category_is_left_out_of_drafting() {
+        let s = crate::guide::tests::demo("facts-hidden");
+        let core = &s.1;
+        add(core, fields("work", "Team", "Mail", FactUse::Free));
+        add(core, fields("identity", "Pronouns", "they/them", FactUse::Free));
+        block_on(core.edit_fact_categories(vec![CategoryEdit::Hide { key: "work".into(), hidden: true }])).unwrap();
+        assert_eq!(block_on(core.fact_lines()).unwrap(), vec!["- Identity › Pronouns: they/them"]);
     }
 
     #[test]

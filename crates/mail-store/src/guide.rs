@@ -334,6 +334,18 @@ pub fn current_version(conn: &Connection) -> StoreResult<i64> {
 }
 
 /// Versions, newest first: number, reason, time, accepted entries then.
+/// The accepted entries as version `id` had them, if it is kept.
+pub fn version_entries(conn: &Connection, id: i64) -> StoreResult<Option<Vec<EntryRow>>> {
+    let json: Option<String> = conn
+        .prepare_cached("SELECT snapshot_json FROM guide_versions WHERE id = ?1")?
+        .query_row([id], |r| r.get(0))
+        .optional()?;
+    Ok(match json {
+        Some(j) => Some(serde_json::from_str(&j)?),
+        None => None,
+    })
+}
+
 pub fn versions(conn: &Connection, limit: u32) -> StoreResult<Vec<(i64, String, Millis, usize)>> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, reason, created_at, json_array_length(snapshot_json) FROM guide_versions ORDER BY id DESC LIMIT ?1",

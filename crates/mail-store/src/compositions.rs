@@ -306,8 +306,11 @@ pub fn draft_unsent(tx: &Transaction<'_>, draft_id: i64) -> StoreResult<()> {
 /// id, which SQLite may hand to a new draft.
 pub fn draft_gone(tx: &Transaction<'_>, draft_id: i64, sent: bool, now: Millis) -> StoreResult<()> {
     if !sent {
+        // A draft whose send failed (as far as we know) may have gone out:
+        // with a Message-ID it waits for that copy instead.
         tx.prepare_cached(
-            "UPDATE ai_compositions SET status = 'discarded', updated_at = ?2 WHERE draft_id = ?1 AND status = 'waiting'",
+            "UPDATE ai_compositions SET status = 'discarded', updated_at = ?2
+             WHERE draft_id = ?1 AND status = 'waiting' AND rfc822_message_id IS NULL",
         )?
         .execute(params![draft_id, now])?;
     }
@@ -544,6 +547,27 @@ mod tests {
             })
             .unwrap();
         assert_ne!(first, second);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_draft_whose_send_failed_keeps_waiting_when_discarded() {
+        let (db, dir) = db("failed-send");
+        let id = draft(&db);
+        let record_id = db
+            .write_blocking({
+                let c = composition(id, "Hello");
+                move |tx| record(tx, &c, 10)
+            })
+            .unwrap();
+        db.write_blocking(move |tx| {
+            drafts::set_rfc822_id(tx, id, "y.openagc@example.com")?;
+            drafts::set_state(tx, id, drafts::DraftState::Failed, Some("timed out"))?;
+            drafts::discard(tx, id, 20)
+        })
+        .unwrap();
+        let r = db.read_blocking(move |c| get(c, record_id)).unwrap().unwrap();
+        assert_eq!((r.status, r.rfc822_message_id.as_deref()), (Status::Waiting, Some("y.openagc@example.com")));
         let _ = std::fs::remove_dir_all(dir);
     }
 

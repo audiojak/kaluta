@@ -208,6 +208,18 @@ impl Core {
                 .await?)
         })
         .await?;
+        // Paused by the user on an earlier day: today's review replaces it,
+        // and the pairs it had not reached go to that review.
+        if let Some(old) = active.as_ref().filter(|r| r.status == "paused" && r.error.is_none() && r.day != day_of(now))
+            && daily
+            && !ran
+        {
+            let id = old.id;
+            self.set_analysis_status(id, "cancelled", None).await?;
+            let db = self.db()?;
+            runtime::run(async move { Ok(db.write(move |tx| store::release_pairs(tx, id)).await?) }).await?;
+            return Box::pin(self.analysis_tick_inner(now)).await;
+        }
         if let Some(run) = active {
             let job_alive = self
                 .agents
@@ -388,8 +400,9 @@ impl Core {
             .await?;
             let Some(row) = row else { return Ok(()) };
             if row.status != "running" {
+                // Another run, or this one resumed while the job was leaving.
                 match active {
-                    Some(a) if a.id != run && a.status == "running" => {
+                    Some(a) if a.status == "running" => {
                         run = a.id;
                         continue;
                     }
@@ -850,6 +863,39 @@ pub(crate) mod tests {
             assert!(started.elapsed() < std::time::Duration::from_secs(10), "the second run was left waiting");
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn a_review_paused_on_an_earlier_day_gives_way_to_todays() {
+        let s = crate::guide::tests::demo("analysis-stale-pause");
+        let core = &s.1;
+        core.debug_use_fake_agents();
+        learned(core);
+        let now = mail_sync::now_millis();
+        let left = pair(core, now - 3 * DAY, 0.3);
+        let db = core.db().unwrap();
+        let old = rt(db.write(move |tx| {
+            let new = NewRun {
+                day: &day_of(now - 2 * DAY),
+                trigger: "daily",
+                agent: Some("claude-code"),
+                matched: 1,
+                unmatched: 0,
+                unchanged: 0,
+                pairs: &[left],
+                batch_size: COMPARE_BATCH,
+            };
+            let id = store::create_run(tx, &new, now - 2 * DAY)?;
+            store::set_run_status(tx, id, "paused", None, now - 2 * DAY)?;
+            Ok(id)
+        }))
+        .unwrap();
+        settled(core);
+        rt(core.analysis_tick_inner(now)).unwrap();
+        let today = wait_done(core);
+        assert_ne!(today.id, old);
+        assert_eq!(today.total, 1, "the pair the paused run had not reached");
+        assert_eq!(rt(db.read(move |c| store::get_run(c, old))).unwrap().unwrap().status, "cancelled");
     }
 
     #[test]
