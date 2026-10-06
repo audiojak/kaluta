@@ -252,7 +252,7 @@ impl Core {
 
     /// Sent messages down to the user's own words, as learning prepares
     /// them, by message id. Messages with no body yet are left out.
-    async fn own_texts(&self, ids: Vec<String>) -> Result<BTreeMap<String, String>, CoreError> {
+    pub(crate) async fn own_texts(&self, ids: Vec<String>) -> Result<BTreeMap<String, String>, CoreError> {
         let db = self.db()?;
         runtime::run(async move {
             Ok(db

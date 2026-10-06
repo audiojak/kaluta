@@ -698,6 +698,19 @@ final class CoreClient: Sendable {
         try await call { try await core.ignoreAnalysisPair(compositionId: compositionID) }
     }
 
+    /// Accept or reject fact proposals; undone with `undoFactChange`.
+    func decideFactProposals(_ ids: [Int64], accept: Bool) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.decideFactAnalysisProposals(ids: ids, accept: accept) }
+    }
+
+    func analysisFactsFrom() async throws(CoreClientError) -> FactsFrom {
+        try await call { try await core.analysisFactsFrom() }
+    }
+
+    func setAnalysisFactsFrom(_ from: FactsFrom) async throws(CoreClientError) {
+        try await call { try await core.setAnalysisFactsFrom(from: from) }
+    }
+
     func analysisMetrics() async throws(CoreClientError) -> AnalysisMetrics {
         try await call { try await core.analysisMetrics() }
     }
@@ -1205,6 +1218,8 @@ typealias CategoryEdit = OpenAGCCore.CategoryEdit
 typealias StarterSet = OpenAGCCore.StarterSet
 typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
 typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
+typealias AnalysisFactProposalInfo = OpenAGCCore.AnalysisFactProposalInfo
+typealias FactsFrom = OpenAGCCore.FactsFrom
 typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
 typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
 typealias AnalysisMetrics = OpenAGCCore.AnalysisMetrics

@@ -379,6 +379,54 @@ pub fn upsert_proposal(
     Ok(Some(id))
 }
 
+/// Add a proposal without pair evidence, or count it once more (fact
+/// proposals: their quote is in the payload). A decided one is not raised
+/// again: `None`. It shows once its count reaches the threshold.
+pub fn upsert_counted(tx: &Transaction<'_>, p: &NewProposal, now: Millis) -> StoreResult<Option<i64>> {
+    let existing: Option<(i64, String)> = tx
+        .prepare_cached("SELECT id, status FROM analysis_proposals WHERE target = ?1 AND match_key = ?2")?
+        .query_row(params![p.target, p.match_key], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let id = match existing {
+        Some((_, status)) if status == "accepted" || status == "rejected" => return Ok(None),
+        Some((id, _)) => {
+            tx.prepare_cached(
+                "UPDATE analysis_proposals SET support = support + 1, updated_at = ?2,
+                   payload_json = COALESCE(?3, payload_json) WHERE id = ?1",
+            )?
+            .execute(params![id, now, p.payload_json])?;
+            id
+        }
+        None => {
+            tx.prepare_cached(
+                "INSERT INTO analysis_proposals (target, op, entry_id, category, kind, statement, scope_json, match_key,
+                   status, support, contradicts_entry_id, payload_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'watching', 1, ?9, ?10, ?11, ?11)",
+            )?
+            .execute(params![
+                p.target,
+                p.op,
+                p.entry_id,
+                p.category,
+                p.kind,
+                p.statement,
+                p.scope_json,
+                p.match_key,
+                p.contradicts_entry_id,
+                p.payload_json,
+                now
+            ])?;
+            tx.last_insert_rowid()
+        }
+    };
+    tx.prepare_cached(
+        "UPDATE analysis_proposals SET status = 'proposed', shown_at = ?3
+         WHERE id = ?1 AND status = 'watching' AND support >= ?2",
+    )?
+    .execute(params![id, p.threshold.max(1), now])?;
+    Ok(Some(id))
+}
+
 pub fn proposal(conn: &Connection, id: i64) -> StoreResult<Option<ProposalRow>> {
     Ok(conn
         .prepare_cached(&format!("SELECT {PROPOSAL_COLUMNS} FROM analysis_proposals WHERE id = ?1"))?

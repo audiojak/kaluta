@@ -2607,7 +2607,10 @@ that day, the agent extracts facts about the user and their work, each
 with a quote verified against the message. A value that differs from an
 accepted fact becomes a proposal to change it; a fact contradicted by
 recent mail can be proposed for removal. Every gleaned fact is a proposal
-in Analysis.
+in Analysis, shown at once (one message stating a fact is enough, unlike a
+habit); a starter set is proposed once three reviews find facts that fit
+it. With *All mail I send*, a review reads up to 30 messages sent since
+the last one read.
 
 **Scope.** Facts are per account by default. *Make Global* moves a fact
 into the global store (ADR 0012), where every account reads it; *Make This

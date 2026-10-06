@@ -367,6 +367,16 @@ impl Core {
             }
             let agent = row.agent.clone().unwrap_or_else(|| "claude-code".into());
             let Some((batch, ids)) = next else {
+                // Last, the facts in the day's sent mail (spec §14.11).
+                match self.glean_facts(run, &agent).await {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == ErrorKind::Agent => {
+                        self.set_analysis_status(run, "paused", Some(format!("The agent stopped: {e}"))).await?;
+                        self.emit_analysis_progress();
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e),
+                }
                 self.set_analysis_status(run, "done", None).await?;
                 let db = self.db()?;
                 let at = mail_sync::now_millis().to_string();

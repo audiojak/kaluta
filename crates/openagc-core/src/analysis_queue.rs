@@ -49,11 +49,43 @@ pub struct AnalysisProposalInfo {
     pub shown_at: Option<i64>,
 }
 
+/// A proposed fact, category or starter set (spec §14.11).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AnalysisFactProposalInfo {
+    pub id: i64,
+    /// `fact`, `category` or `starter`.
+    pub kind: String,
+    pub op: AnalysisOp,
+    pub category: String,
+    pub category_name: String,
+    pub label: String,
+    pub value: String,
+    /// The fact as it is now, for an alteration.
+    pub before_value: Option<String>,
+    pub fact_id: Option<i64>,
+    pub as_of: Option<i64>,
+    /// The words in the user's mail that state it.
+    pub quote: String,
+    pub message_id: String,
+    /// A new category: its name, description and how many facts it takes.
+    pub name: String,
+    pub description: String,
+    pub fact_count: u32,
+    /// A starter set's id.
+    pub starter: String,
+    pub support: u32,
+    pub watching: bool,
+    pub unseen: bool,
+    pub shown_at: Option<i64>,
+}
+
 /// Everything waiting in Analysis.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AnalysisQueue {
     /// Shown proposals for the writing guide, newest first.
     pub guide: Vec<AnalysisProposalInfo>,
+    /// Shown proposals for facts, newest first.
+    pub facts: Vec<AnalysisFactProposalInfo>,
     /// Proposals still short of their threshold.
     pub watching: Vec<AnalysisProposalInfo>,
     /// Learning runs' decisions waiting (spec §14.9, shown here).
@@ -146,6 +178,58 @@ fn edit_for(
 }
 
 impl Core {
+    async fn fact_proposals(
+        &self,
+        rows: &[ProposalRow],
+        viewed: i64,
+    ) -> Result<Vec<AnalysisFactProposalInfo>, CoreError> {
+        if rows.is_empty() {
+            return Ok(vec![]);
+        }
+        let categories = self.fact_categories().await?;
+        let facts = self.list_facts(vec![crate::facts::FactStatus::Accepted]).await?;
+        let mut out: Vec<AnalysisFactProposalInfo> = rows
+            .iter()
+            .filter_map(|r| {
+                let p: crate::analysis_glean::FactPayload = serde_json::from_str(r.payload_json.as_deref()?).ok()?;
+                let current = p
+                    .fact_id
+                    .and_then(|id| facts.iter().find(|f| f.id == id && f.scope == crate::facts::FactScope::Account));
+                // A change to a fact that has gone since is moot.
+                if p.fact_id.is_some() && current.is_none() {
+                    return None;
+                }
+                Some(AnalysisFactProposalInfo {
+                    id: r.id,
+                    op: op(&r.op),
+                    category_name: categories
+                        .iter()
+                        .find(|c| c.key == p.category)
+                        .map_or(p.category.clone(), |c| c.name.clone()),
+                    category: p.category,
+                    label: p.label,
+                    value: p.value,
+                    before_value: current.map(|f| f.value.clone()),
+                    fact_id: p.fact_id,
+                    as_of: p.as_of,
+                    quote: p.quote,
+                    message_id: p.message_id,
+                    name: p.name,
+                    description: p.description,
+                    fact_count: p.fact_ids.len() as u32,
+                    starter: p.starter,
+                    kind: p.kind,
+                    support: r.support.max(0) as u32,
+                    watching: r.status == "watching",
+                    unseen: r.shown_at.is_some_and(|at| at > viewed),
+                    shown_at: r.shown_at,
+                })
+            })
+            .collect();
+        out.sort_by_key(|p| std::cmp::Reverse((p.shown_at, p.id)));
+        Ok(out)
+    }
+
     pub(crate) fn analysis_changed(&self) {
         self.account_events().emit(CoreEvent::AnalysisChanged);
     }
@@ -194,6 +278,8 @@ impl Core {
         .await?;
         let mut guide = Vec::new();
         let mut watching = Vec::new();
+        let fact_rows: Vec<ProposalRow> =
+            rows.iter().filter(|p| p.target == "fact" && p.status == "proposed").cloned().collect();
         for p in rows.into_iter().filter(|p| p.target == "guide" && p.support > 0) {
             let entry = p.entry_id.and_then(|id| entries.get(&id));
             // A change to an entry that has gone since is moot.
@@ -220,8 +306,11 @@ impl Core {
         }
         guide.sort_by_key(|p| std::cmp::Reverse((p.shown_at, p.id)));
         watching.sort_by_key(|p| std::cmp::Reverse((p.support, p.id)));
-        let unseen = guide.iter().any(|p| p.unseen) || (learning > 0 && learned_at.is_some_and(|at| at > viewed));
-        Ok(AnalysisQueue { guide, watching, learning_decisions: learning, unseen })
+        let facts = self.fact_proposals(&fact_rows, viewed).await?;
+        let unseen = guide.iter().any(|p| p.unseen)
+            || facts.iter().any(|p| p.unseen)
+            || (learning > 0 && learned_at.is_some_and(|at| at > viewed));
+        Ok(AnalysisQueue { guide, facts, watching, learning_decisions: learning, unseen })
     }
 
     /// The user opened Analysis: the dot clears.
@@ -295,6 +384,21 @@ impl Core {
             .await?;
         self.analysis_changed();
         Ok(change)
+    }
+
+    /// Accept or reject fact proposals: one change on the account's facts
+    /// stack (`undo_fact_change`).
+    pub async fn decide_fact_analysis_proposals(
+        &self,
+        ids: Vec<i64>,
+        accept: bool,
+    ) -> Result<crate::facts::FactChange, CoreError> {
+        let rows: Vec<ProposalRow> =
+            self.proposal_rows(ids).await?.into_iter().filter(|r| r.target == "fact").collect();
+        if rows.is_empty() {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "nothing to decide"));
+        }
+        self.decide_fact_proposals(&rows, accept).await
     }
 
     /// Accept a proposal as the user edited it.

@@ -64,6 +64,10 @@ pub struct Snapshot {
     pub global_facts: Vec<(FactRow, Vec<FactEvidence>)>,
     #[serde(default)]
     pub global_categories: Vec<CategoryRow>,
+    /// Analysis proposals the change decided (spec §14.10), put back with
+    /// the facts.
+    #[serde(default)]
+    pub proposals: Vec<crate::analysis::ProposalSnapshot>,
 }
 
 const FACT_COLUMNS: &str = "id, category, label, value, use, as_of, source, status, created_at, updated_at";
@@ -261,6 +265,7 @@ pub fn restore(
             None => delete_category(tx, key)?,
         }
     }
+    crate::analysis::restore_proposals(tx, &to.proposals, now)?;
     Ok(())
 }
 

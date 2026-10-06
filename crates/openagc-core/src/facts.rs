@@ -119,7 +119,12 @@ pub struct FactInfo {
     /// A global fact this account has its own fact for (same category and
     /// label): the account's wins.
     pub overridden: bool,
+    /// Its `as_of` is old enough that it may no longer be true.
+    pub stale: bool,
 }
+
+/// A fact dated longer ago than this is flagged for review.
+pub const STALE_AFTER_MS: i64 = 180 * 24 * 60 * 60 * 1000;
 
 /// What the user writes or changes on a fact.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -356,6 +361,7 @@ pub(crate) fn info(f: FactRow, evidence: Vec<FactEvidence>) -> FactInfo {
         updated_at: f.updated_at,
         scope: FactScope::Account,
         overridden: false,
+        stale: f.as_of.is_some_and(|at| mail_sync::now_millis() - at > STALE_AFTER_MS),
     }
 }
 
@@ -487,7 +493,20 @@ impl Core {
         category_edits: Vec<CategoryEdit>,
         reason: String,
     ) -> Result<FactChange, CoreError> {
-        if edits.is_empty() && category_edits.is_empty() {
+        self.apply_facts_with(scope, edits, category_edits, reason, None).await
+    }
+
+    /// Apply fact and category edits, and decide Analysis proposals
+    /// (`decide`: ids and their new status), as one change.
+    pub(crate) async fn apply_facts_with(
+        &self,
+        scope: FactScope,
+        edits: Vec<FactEdit>,
+        category_edits: Vec<CategoryEdit>,
+        reason: String,
+        decide: Option<(Vec<i64>, &'static str)>,
+    ) -> Result<FactChange, CoreError> {
+        if edits.is_empty() && category_edits.is_empty() && decide.is_none() {
             return Err(invalid("nothing to change"));
         }
         // Validate before the store.
@@ -542,7 +561,20 @@ impl Core {
                             CategoryEdit::Add { .. } => {}
                         }
                     }
-                    let before = store::snapshot(tx, &fact_ids, &keys)?;
+                    let mut before = store::snapshot(tx, &fact_ids, &keys)?;
+                    let proposal_snapshots = |tx: &mail_store::Transaction<'_>| -> mail_store::StoreResult<_> {
+                        let mut out = Vec::new();
+                        for id in decide.iter().flat_map(|(ids, _)| ids) {
+                            out.extend(mail_store::analysis::snapshot_proposal(tx, *id)?);
+                        }
+                        Ok(out)
+                    };
+                    before.proposals = proposal_snapshots(tx)?;
+                    if let Some((ids, status)) = &decide {
+                        for id in ids {
+                            mail_store::analysis::set_proposal_status(tx, *id, status, now)?;
+                        }
+                    }
                     let invalid_store = |m: &str| mail_store::StoreError::Invalid(m.to_owned());
                     // Categories first: a fact may go into one made here
                     // (named by its name until it has a key).
@@ -687,7 +719,8 @@ impl Core {
                             return Err(invalid_store(&format!("you already have “{}” in that category", f.label)));
                         }
                     }
-                    let after = store::snapshot(tx, &fact_ids, &keys)?;
+                    let mut after = store::snapshot(tx, &fact_ids, &keys)?;
+                    after.proposals = proposal_snapshots(tx)?;
                     let change_id = store::record_change(tx, &reason, &before, &after, now)?;
                     Ok(FactChange {
                         change_id,

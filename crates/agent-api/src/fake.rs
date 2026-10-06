@@ -247,6 +247,41 @@ pub fn compare_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"proposals": [{}]}}"#, proposals.join(", ")))
 }
 
+/// The fake's answer to an OpenAGC fact-gleaning prompt: for each message
+/// with a line "I'm <role> at <organisation>.", that role as Work ›
+/// Occupation or role, quoting the line; and any line naming a password,
+/// so tests see it dropped.
+pub fn glean_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("OpenAGC facts glean") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"'], "");
+    let mut facts = Vec::new();
+    for block in prompt.split("<message id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let body = rest.split("</message>").next().unwrap_or("");
+        for line in body.lines().map(str::trim) {
+            if let Some(role) = line.strip_prefix("I'm ").and_then(|l| l.split(" at ").next())
+                && line.contains(" at ")
+            {
+                facts.push(format!(
+                    r#"{{"op": "add", "category": "work", "label": "Occupation or role", "value": "{}", "evidence": {{"message_id": "{id}", "quote": "{}"}}}}"#,
+                    esc(role),
+                    esc(line)
+                ));
+            }
+            if line.to_lowercase().contains("password") {
+                facts.push(format!(
+                    r#"{{"op": "add", "category": "other", "label": "Wi-Fi password", "value": "{}", "evidence": {{"message_id": "{id}", "quote": "{}"}}}}"#,
+                    esc(line),
+                    esc(line)
+                ));
+            }
+        }
+    }
+    Some(format!(r#"{{"facts": [{}], "categories": [], "starter_set": null}}"#, facts.join(", ")))
+}
+
 /// The fake's answer to the composer's writing help when the request asks
 /// for "facts about me": the questions for facts it does not have (the
 /// first turn only; the answers come in a turn of their own).
@@ -276,6 +311,7 @@ impl AgentSession for FakeSession {
             .or_else(|| change_answer(&turn.prompt))
             .or_else(|| merge_answer(&turn.prompt))
             .or_else(|| compare_answer(&turn.prompt))
+            .or_else(|| glean_answer(&turn.prompt))
             .or_else(|| writing_help_answer(&turn.prompt))
             .unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
