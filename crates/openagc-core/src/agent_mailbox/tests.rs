@@ -464,3 +464,29 @@ fn a_mailbox_stored_with_only_its_domain_is_repaired_when_sync_starts() {
     assert_eq!(block_on(core.account_address()).unwrap(), "jade@jade-emu.primitive.email", "the composer's From");
     core.stop_sync();
 }
+
+#[test]
+fn where_the_mailbox_may_send_follows_verification_and_domains() {
+    let (_t, core, _secrets) = core("rules");
+    core.debug_use_fake_agent_mail(true);
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "rules-1".into())).unwrap();
+    let id = agent.account_id.clone();
+    let kinds = |rules: Vec<AgentSendRule>| rules.into_iter().map(|r| (r.kind, r.value)).collect::<Vec<_>>();
+    assert_eq!(
+        kinds(block_on(core.agent_send_rules(id.clone())).unwrap()),
+        vec![("managed_zone".to_owned(), Some("primitive.email".to_owned()))]
+    );
+    block_on(core.start_agent_mailbox_verification(id.clone(), "me@example.com".into())).unwrap();
+    block_on(core.verify_agent_mailbox(id.clone(), "123456".into())).unwrap();
+    let added = block_on(core.add_agent_domain(id.clone(), "agents.example.com".into())).unwrap();
+    block_on(core.check_agent_domain(id.clone(), added.id)).unwrap();
+    assert_eq!(
+        kinds(block_on(core.agent_send_rules(id)).unwrap()),
+        vec![
+            ("managed_zone".to_owned(), Some("primitive.email".to_owned())),
+            ("your_domain".to_owned(), Some("agents.example.com".to_owned())),
+            ("address".to_owned(), Some("me@example.com".to_owned())),
+        ]
+    );
+}

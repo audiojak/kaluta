@@ -1153,7 +1153,10 @@ the key as a Bearer token).
   (`adopts_sent_copies`), since Primitive may give it a Message-ID of its
   own: the optimistic copy is never left beside the real one.
 - Push: the same feed long-polls (`wait=20`) in place of IMAP IDLE, so new
-  mail shows within a second or two while the app is open.
+  mail shows within a second or two while the app is open. Pages are at
+  most 100 (Primitive answers 400 above that).
+- A paused sync says why: the `SyncStatus` event carries the provider's
+  message, and the sidebar footer shows it after "Trying again shortly".
 - No drafts at the service: drafts stay on the Mac until sent. No server
   search: search is the local index (§8), which holds the whole mailbox.
 
@@ -1190,7 +1193,10 @@ prompt whose mailbox it is, the name it sends as, and the service's
 limits (one recipient per message).
 
 **Account settings.** Service, address, plan and verification state with
-*Verify…*, *When Agents Send*, *Copy API Key* (a confirmation says that
+*Verify…*, *Can write to* (the service's send rules, `GET
+/send-permissions`: anyone, addresses that wrote first, the user's own
+domains, other Primitive mailboxes; sending to anyone is an entitlement
+Primitive grants on request), *When Agents Send*, *Copy API Key* (a confirmation says that
 whoever holds the key can read and send the mailbox's mail), *Remove…*.
 Removing deletes the account and its key on the Mac; the service account
 stays (the sheet says so).

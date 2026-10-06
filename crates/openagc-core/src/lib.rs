@@ -44,7 +44,8 @@ mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
 pub use agent_mailbox::{
-    AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentService, AgentVerification,
+    AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentSendRule, AgentService,
+    AgentVerification,
 };
 pub use agents::{
     AgentActionInfo, AgentEventInfo, AgentProviderInfo, AgentSessionInfo, AgentStatusInfo, AgentTranscriptItem,

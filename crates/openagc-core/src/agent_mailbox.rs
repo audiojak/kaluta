@@ -15,7 +15,7 @@ use provider_api::fake::FakeProvider;
 use provider_api::token::StaticToken;
 use provider_api::{
     BackfillSource, DnsRecord, MailProvider, MailboxDomain, MailboxPlan, MailboxService, ProviderError, ProviderResult,
-    SignedUp, VerificationStarted,
+    SendRule, SignedUp, VerificationStarted,
 };
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +70,25 @@ impl From<MailboxPlan> for AgentMailboxPlan {
             send_per_hour: p.send_per_hour,
             send_per_day: p.send_per_day,
             email: p.email,
+        }
+    }
+}
+
+/// Where an agent mailbox may send (spec §7.9): `any_recipient`,
+/// `managed_zone` (a zone), `your_domain` (a domain) or `address` (one).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AgentSendRule {
+    pub kind: String,
+    pub value: Option<String>,
+}
+
+impl From<SendRule> for AgentSendRule {
+    fn from(r: SendRule) -> Self {
+        match r {
+            SendRule::AnyRecipient => Self { kind: "any_recipient".into(), value: None },
+            SendRule::ManagedZone(z) => Self { kind: "managed_zone".into(), value: Some(z) },
+            SendRule::YourDomain(d) => Self { kind: "your_domain".into(), value: Some(d) },
+            SendRule::Address(a) => Self { kind: "address".into(), value: Some(a) },
         }
     }
 }
@@ -556,6 +575,15 @@ impl Core {
         write_meta(&dir, &meta)
     }
 
+    /// Where this mailbox may send now, from the service, broadest first.
+    pub async fn agent_send_rules(&self, account_id: String) -> Result<Vec<AgentSendRule>, CoreError> {
+        let (client, key) = self.agent_client(&account_id)?;
+        runtime::run(async move {
+            Ok(client.send_rules(key.expose()).await.map_err(service_error)?.into_iter().map(Into::into).collect())
+        })
+        .await
+    }
+
     /// The user's own domains on this mailbox's account.
     pub async fn agent_domains(&self, account_id: String) -> Result<Vec<AgentDomain>, CoreError> {
         let (client, key) = self.agent_client(&account_id)?;
@@ -808,6 +836,16 @@ impl MailboxService for FakeMailboxService {
         }
         *plan = fake_plan(true, plan.email.clone());
         Ok(plan.clone())
+    }
+
+    async fn send_rules(&self, api_key: &str) -> ProviderResult<Vec<SendRule>> {
+        let plan = self.plan(api_key).await?;
+        let mut rules = vec![SendRule::ManagedZone("primitive.email".into())];
+        rules.extend(
+            self.domains(api_key).await?.into_iter().filter(|d| d.verified).map(|d| SendRule::YourDomain(d.domain)),
+        );
+        rules.extend(plan.email.filter(|_| plan.verified).map(SendRule::Address));
+        Ok(rules)
     }
 
     async fn domains(&self, api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {

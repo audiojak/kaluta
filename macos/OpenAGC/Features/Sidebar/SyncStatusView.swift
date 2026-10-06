@@ -54,8 +54,10 @@ struct SyncStatusView: View {
             return (how, detail)
         case .offline:
             return ("Offline", "Changes are sent when you reconnect")
-        case .error:
-            return ("Sync Paused", "Trying again shortly")
+        case let .error(message):
+            // The provider's words, so the pause can be understood and
+            // reported (an HTTP status and what was wrong).
+            return ("Sync Paused", message.map { "Trying again shortly · \($0)" } ?? "Trying again shortly")
         case .idle:
             if needsSignIn { return ("Not Syncing", "Sign in again in Settings › Accounts") }
             return note.map { ("Using the Gmail API", $0) }

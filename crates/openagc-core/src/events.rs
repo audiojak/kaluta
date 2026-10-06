@@ -128,6 +128,9 @@ pub enum CoreEvent {
         pending: u32,
         /// Messages waiting for headers only (tiered download, spec §7.4).
         pending_headers: u32,
+        /// Why sync paused or stopped (`Error`, `Offline`), in the
+        /// provider's words, so the footer can say.
+        message: Option<String>,
     },
     OutboxStatus {
         pending: u32,

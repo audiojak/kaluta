@@ -156,6 +156,7 @@ struct AccountRow: View {
     /// Copy API Key asks first: whoever holds the key can use the mailbox.
     @State private var confirmingCopy = false
     @State private var sendMode: AgentSendMode?
+    @State private var sendRules: [AgentSendRule]?
 
     /// Above this many messages, suggest IMAP to accounts without it.
     static let suggestIMAPAbove: UInt64 = 20_000
@@ -179,6 +180,19 @@ struct AccountRow: View {
     /// The name as it can be changed: an archive's is its listed name.
     static func editableName(_ account: AccountSummary) -> String {
         account.kind == .archive ? account.email : account.displayName ?? ""
+    }
+
+    /// Where an agent mailbox may send, in a line (spec §7.9).
+    static func sendRulesText(_ rules: [AgentSendRule]?) -> String {
+        guard let rules else { return "Checking…" }
+        if rules.contains(where: { $0.kind == "any_recipient" }) { return "Anyone" }
+        var parts: [String] = []
+        let addresses = rules.filter { $0.kind == "address" }.count
+        if addresses > 0 { parts.append(addresses == 1 ? "1 address that wrote to it" : "\(addresses) addresses that wrote to it") }
+        let domains = rules.filter { $0.kind == "your_domain" }.compactMap(\.value)
+        if !domains.isEmpty { parts.append("anyone at " + domains.joined(separator: ", ")) }
+        if rules.contains(where: { $0.kind == "managed_zone" }) { parts.append("other Primitive mailboxes") }
+        return parts.isEmpty ? "Nobody yet" : parts.joined(separator: " · ")
     }
 
     /// An agent mailbox's plan in a line.
@@ -259,6 +273,11 @@ struct AccountRow: View {
                 LabeledContent("Service") {
                     Text(Self.planText(model.agentPlans[account.id])).foregroundStyle(.secondary)
                 }
+                LabeledContent("Can write to") {
+                    Text(Self.sendRulesText(sendRules)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .hoverHelp("Whom Primitive lets this mailbox write to. Sending to anyone is something Primitive grants on request; ask them at support, naming the mailbox's address")
                 // Spec §7.9: agents may send from their own mailbox freely.
                 Picker("When agents send", selection: Binding(
                     get: { sendMode ?? .freely },
@@ -345,6 +364,7 @@ struct AccountRow: View {
             if account.kind == .agent {
                 sendMode = model.core?.agentSendMode(account.id)
                 await model.refreshAgentPlan(account.id)
+                sendRules = (try? await model.core?.agentSendRules(account.id)) ?? []
             }
             backfill = await model.core?.backfillStatus(account.id)
         }

@@ -70,6 +70,7 @@ impl SyncObserver for EventObserver {
             state,
             pending: progress.queued.min(u32::MAX as u64) as u32,
             pending_headers: progress.headers.min(u32::MAX as u64) as u32,
+            message: None,
         });
     }
 }
@@ -418,18 +419,28 @@ impl SyncService {
     }
 
     fn status(&self, state: SyncState, pending: u32) {
-        self.events.emit(CoreEvent::SyncStatus { state, pending, pending_headers: 0 });
+        self.events.emit(CoreEvent::SyncStatus { state, pending, pending_headers: 0, message: None });
     }
 
     fn offline_or_error(&self, e: &SyncError) {
         tracing::warn!(error = %e, "sync step failed; will retry");
         let offline = matches!(e, SyncError::Provider(ProviderError::Network(_)));
-        self.status(if offline { SyncState::Offline } else { SyncState::Error }, 0);
+        self.events.emit(CoreEvent::SyncStatus {
+            state: if offline { SyncState::Offline } else { SyncState::Error },
+            pending: 0,
+            pending_headers: 0,
+            message: Some(e.to_string()),
+        });
     }
 
     fn fail(&self, e: SyncError) {
         tracing::error!(error = %e, "sync stopped");
-        self.status(SyncState::Error, 0);
+        self.events.emit(CoreEvent::SyncStatus {
+            state: SyncState::Error,
+            pending: 0,
+            pending_headers: 0,
+            message: Some(e.to_string()),
+        });
         let kind = match &e {
             SyncError::Provider(ProviderError::Unauthorized) => ErrorKind::Auth,
             SyncError::Provider(ProviderError::Forbidden(_)) => ErrorKind::PermissionDenied,

@@ -223,3 +223,16 @@ pub struct DomainCheck {
     #[serde(default)]
     pub dns_records: Vec<DnsRecord>,
 }
+
+/// One rule of `GET /send-permissions`.
+#[derive(Debug, Deserialize)]
+pub struct SendPermission {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub zone: Option<String>,
+    #[serde(default)]
+    pub domain: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+}

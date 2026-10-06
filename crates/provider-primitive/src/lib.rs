@@ -20,7 +20,8 @@ use mail_domain::{EmailAddress, Label, LabelColor, LabelId, LabelKind, MessageId
 use provider_api::{
     BackfillSource, Change, ChangeSet, DnsRecord, FetchedAttachment, FetchedBody, FetchedMessage, HttpClient, IdPage,
     LabelOp, ListFilter, MailProvider, MailboxDomain, MailboxPlan, MailboxService, PageToken, Priority, Profile,
-    ProviderError, ProviderResult, RateLimiter, RetryPolicy, SignedUp, SyncCursor, TokenSource, VerificationStarted,
+    ProviderError, ProviderResult, RateLimiter, RetryPolicy, SendRule, SignedUp, SyncCursor, TokenSource,
+    VerificationStarted,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -590,7 +591,8 @@ impl MailProvider for PrimitiveProvider {
         let mut changes = Vec::new();
         loop {
             let page: wire::Envelope<wire::Changes> = self
-                .get("changes", &[("since", since.clone()), ("limit", "200".into())], Priority::Interactive)
+                // Primitive answers 400 to a limit above 100.
+                .get("changes", &[("since", since.clone()), ("limit", "100".into())], Priority::Interactive)
                 .await?;
             let page = page.data;
             for row in page.changes {
@@ -899,6 +901,21 @@ impl MailboxService for PrimitiveService {
             )
             .await?;
         Ok(plan_of(claimed.plan, claimed.email, &claimed.limits))
+    }
+
+    async fn send_rules(&self, api_key: &str) -> ProviderResult<Vec<SendRule>> {
+        let rules: Vec<wire::SendPermission> =
+            self.call(self.client.get(format!("{}/send-permissions", self.base)).bearer_auth(api_key)).await?;
+        Ok(rules
+            .into_iter()
+            .filter_map(|r| match r.kind.as_str() {
+                "any_recipient" => Some(SendRule::AnyRecipient),
+                "managed_zone" => r.zone.map(SendRule::ManagedZone),
+                "your_domain" => r.domain.map(SendRule::YourDomain),
+                "address" => r.address.map(SendRule::Address),
+                _ => None,
+            })
+            .collect())
     }
 
     async fn domains(&self, api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {

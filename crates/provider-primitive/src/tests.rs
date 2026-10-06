@@ -266,6 +266,7 @@ async fn changes_map_to_added_and_deleted_mail_across_pages() {
     };
     Mock::given(path("/changes"))
         .and(query_param("since", "c1"))
+        .and(query_param("limit", "100"))
         .respond_with(ok(json!({
             "changes": [row("email.visible", Some("i1"), None), row("thread.read_state_changed", None, None)],
             "next_cursor": "c2", "has_more": true, "baseline": false
@@ -497,4 +498,29 @@ async fn a_refused_recipient_is_said_in_plain_words() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+#[tokio::test]
+async fn where_the_mailbox_may_send_is_read_broadest_first() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/send-permissions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true, "data": [
+            { "type": "managed_zone", "zone": "primitive.email", "description": "..." },
+            { "type": "your_domain", "domain": "agents.example.com", "description": "..." },
+            { "type": "address", "address": "ada@example.com", "last_received_at": "2026-10-06T00:00:00Z",
+              "received_count": 2, "description": "..." },
+            { "type": "something_new", "description": "..." }
+        ], "meta": { "address_cap": 500, "truncated": false } })))
+        .mount(&server)
+        .await;
+    let rules = PrimitiveService::with_base(&server.uri()).unwrap().send_rules("k").await.unwrap();
+    assert_eq!(
+        rules,
+        vec![
+            SendRule::ManagedZone("primitive.email".into()),
+            SendRule::YourDomain("agents.example.com".into()),
+            SendRule::Address("ada@example.com".into()),
+        ]
+    );
 }

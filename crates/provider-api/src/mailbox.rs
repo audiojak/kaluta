@@ -69,6 +69,19 @@ pub struct MailboxDomain {
     pub records: Vec<DnsRecord>,
 }
 
+/// Where a mailbox may send (Primitive's send-permission rules).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendRule {
+    /// Anyone: the service lifted its recipient gates for this account.
+    AnyRecipient,
+    /// Any address in a zone the service manages (`primitive.email`).
+    ManagedZone(String),
+    /// Any address on one of the user's own verified domains.
+    YourDomain(String),
+    /// One address that wrote to the mailbox first.
+    Address(String),
+}
+
 /// One agent-mail service: everything about an account that is not mail.
 #[async_trait]
 pub trait MailboxService: Send + Sync {
@@ -90,6 +103,10 @@ pub trait MailboxService: Send + Sync {
     /// Confirm the code; the account's plan afterwards.
     async fn verify(&self, api_key: &str, code: &str) -> ProviderResult<MailboxPlan>;
 
+    /// Where the account may send now, broadest rule first.
+    async fn send_rules(&self, _api_key: &str) -> ProviderResult<Vec<SendRule>> {
+        Ok(vec![])
+    }
     /// The user's own domains on the account.
     async fn domains(&self, _api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {
         Ok(vec![])

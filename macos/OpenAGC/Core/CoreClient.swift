@@ -237,6 +237,12 @@ final class CoreClient: Sendable {
 
     func isAgent(_ accountID: String) -> Bool { core.accountIsAgent(accountId: accountID) }
 
+    /// Where an agent mailbox may send now (kind: any_recipient,
+    /// managed_zone, your_domain, address).
+    func agentSendRules(_ accountID: String) async throws(CoreClientError) -> [AgentSendRule] {
+        try await call { try await core.agentSendRules(accountId: accountID) }
+    }
+
     /// The user's own domains on an agent mailbox's account.
     func agentDomains(_ accountID: String) async throws(CoreClientError) -> [AgentDomain] {
         try await call { try await core.agentDomains(accountId: accountID) }
@@ -1299,6 +1305,7 @@ typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService
 typealias AgentSendMode = OpenAGCCore.AgentSendMode
 typealias AgentDomain = OpenAGCCore.AgentDomain
+typealias AgentSendRule = OpenAGCCore.AgentSendRule
 typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
 typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
 typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
@@ -1401,7 +1408,8 @@ enum CoreClientEvent: Sendable, Equatable {
     }
 
     case threadsChanged(mailboxID: String, hint: ThreadChangeHint)
-    case syncStatus(SyncState, pending: UInt32, headers: UInt32)
+    /// `message`: why sync paused or stopped, in the provider's words.
+    case syncStatus(SyncState, pending: UInt32, headers: UInt32, message: String?)
     case outboxStatus(pending: UInt32, failed: UInt32)
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
@@ -1483,8 +1491,8 @@ private extension CoreClientEvent {
             self = .threadsChanged(mailboxID: mailboxId, hint: ThreadChangeHint(
                 inserted: hint.inserted, updated: hint.updated,
                 removed: hint.removed, invalidate: hint.invalidate))
-        case let .syncStatus(state, pending, pendingHeaders):
-            self = .syncStatus(SyncState(state), pending: pending, headers: pendingHeaders)
+        case let .syncStatus(state, pending, pendingHeaders, message):
+            self = .syncStatus(SyncState(state), pending: pending, headers: pendingHeaders, message: message)
         case let .outboxStatus(pending, failed):
             self = .outboxStatus(pending: pending, failed: failed)
         case let .error(kind, message):

@@ -212,3 +212,26 @@ struct SidebarTabTests {
         #expect(!SidebarView.tabIntoList(try key(126), model: model), "arrows stay the sidebar's")
     }
 }
+
+@MainActor
+struct SendRulesTextTests {
+    private func rule(_ kind: String, _ value: String? = nil) -> AgentSendRule { AgentSendRule(kind: kind, value: value) }
+
+    @Test func whereTheMailboxMayWriteReadsAsOneLine() {
+        #expect(AccountRow.sendRulesText(nil) == "Checking…")
+        #expect(AccountRow.sendRulesText([rule("any_recipient"), rule("managed_zone", "primitive.email")]) == "Anyone")
+        #expect(AccountRow.sendRulesText([rule("managed_zone", "primitive.email")]) == "other Primitive mailboxes")
+        #expect(AccountRow.sendRulesText([
+            rule("managed_zone", "primitive.email"), rule("your_domain", "agents.example.com"),
+            rule("address", "a@example.com"), rule("address", "b@example.com"),
+        ]) == "2 addresses that wrote to it · anyone at agents.example.com · other Primitive mailboxes")
+        #expect(AccountRow.sendRulesText([]) == "Nobody yet")
+    }
+
+    @Test func thePauseSaysWhy() {
+        let paused = SyncStatusView.footer(.error(message: "HTTP 400: limit: Too big"), transport: nil, needsSignIn: false)
+        #expect(paused?.title == "Sync Paused")
+        #expect(paused?.detail == "Trying again shortly · HTTP 400: limit: Too big")
+        #expect(SyncStatusView.footer(.error(), transport: nil, needsSignIn: false)?.detail == "Trying again shortly")
+    }
+}

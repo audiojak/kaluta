@@ -37,7 +37,9 @@ final class AppModel {
 
     enum SyncDisplay: Equatable {
         /// `headers`: messages waiting for headers only (tiered download).
-        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline, error
+        /// `message`: why, in the provider's words, for the footer.
+        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline(message: String? = nil),
+             error(message: String? = nil)
     }
 
     static let demoAccountID = "demo"
@@ -1411,7 +1413,7 @@ final class AppModel {
                 needsReauthentication = true
                 reauthenticationReason = .googleRejected
             }
-        case let .syncStatus(state, pending, headers):
+        case let .syncStatus(state, pending, headers, message):
             refreshTransport()
             switch state {
             case .idle:
@@ -1420,8 +1422,8 @@ final class AppModel {
             case .bootstrapping, .syncing:
                 syncDisplay = pending + headers > 0 || state == .bootstrapping
                     ? .syncing(pending: pending, headers: headers) : .idle
-            case .offline: syncDisplay = .offline
-            case .error: syncDisplay = .error
+            case .offline: syncDisplay = .offline(message: message)
+            case .error: syncDisplay = .error(message: message)
             }
         case let .outboxStatus(_, failed):
             failedChanges = failed
