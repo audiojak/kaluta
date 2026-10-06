@@ -59,6 +59,8 @@ struct UndoNotice: Identifiable, Equatable {
     let id = UUID()
     let text: String
     let accountID: String
+    /// False for a notice that reports a failure: nothing to undo.
+    var offersUndo = true
 }
 
 /// Undo for the user's mail actions (spec §14.6a): one undo stack per
@@ -231,8 +233,9 @@ final class MailUndo {
 
     /// Show a notice, replacing any other; VoiceOver hears it without
     /// focus moving (WCAG 4.1.3).
-    func show(_ text: String, accountID: String, for duration: Duration = noticeDuration, pausable: Bool = true) {
-        notice = UndoNotice(text: text, accountID: accountID)
+    func show(_ text: String, accountID: String, for duration: Duration = noticeDuration, pausable: Bool = true,
+              offersUndo: Bool = true) {
+        notice = UndoNotice(text: text, accountID: accountID, offersUndo: offersUndo)
         remaining = duration
         noticePausable = pausable
         pauses.remove(.hover)

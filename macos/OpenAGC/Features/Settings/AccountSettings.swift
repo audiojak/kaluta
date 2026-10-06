@@ -7,6 +7,8 @@ struct AccountSettings: View {
     @Environment(AppModel.self) private var model
     @State private var removing: AccountSummary?
     @State private var orphans: [OrphanedStore] = []
+    /// Deleting leftover mail cannot be undone: asked first.
+    @State private var deleting: OrphanedStore?
 
     var body: some View {
         Form {
@@ -55,6 +57,19 @@ struct AccountSettings: View {
             }
 
             Section("Data on this Mac") {
+                EmptyView()
+                    .confirmationDialog("Delete the leftover mail?", isPresented: Binding(
+                        get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+                    ), presenting: deleting) { orphan in
+                        Button("Delete Mail Data", role: .destructive) { // no-help: dialog
+                            Task {
+                                try? await model.core?.removeOrphanedStore(orphan.id)
+                                orphans = (try? await model.core?.orphanedStores()) ?? []
+                            }
+                        }
+                    } message: { orphan in
+                        Text("The copy of \(orphan.email ?? "an old sign-in")'s mail on this Mac is deleted. Gmail is not affected. This cannot be undone.")
+                    }
                 ForEach(orphans, id: \.id) { orphan in
                     HStack {
                         VStack(alignment: .leading, spacing: Space.hair) {
@@ -63,12 +78,7 @@ struct AccountSettings: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Delete", role: .destructive) {
-                            Task {
-                                try? await model.core?.removeOrphanedStore(orphan.id)
-                                orphans = (try? await model.core?.orphanedStores()) ?? []
-                            }
-                        }
+                        Button("Delete", role: .destructive) { deleting = orphan }
                     }
                     .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected")
                 }

@@ -17,19 +17,21 @@ struct UndoNoticeView: View {
                     Text(notice.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Button {
-                        model.undoMailAction()
-                    } label: {
-                        HStack(spacing: Space.xs) {
-                            Text("Undo").fontWeight(.semibold)
-                            Text("⌘Z").foregroundStyle(.secondary)
+                    if notice.offersUndo {
+                        Button {
+                            model.undoMailAction()
+                        } label: {
+                            HStack(spacing: Space.xs) {
+                                Text("Undo").fontWeight(.semibold)
+                                Text("⌘Z").foregroundStyle(.secondary)
+                            }
                         }
+                        .hoverHelp("Undo this (⌘Z)")
+                        .buttonStyle(.plain)
+                        .focused($focused)
+                        .accessibilityLabel("Undo")
+                        .accessibilityHint("Or press Command Z")
                     }
-                    .hoverHelp("Undo this (⌘Z)")
-                    .buttonStyle(.plain)
-                    .focused($focused)
-                    .accessibilityLabel("Undo")
-                    .accessibilityHint("Or press Command Z")
                     Button {
                         undo.dismissNotice()
                     } label: {

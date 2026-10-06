@@ -12,6 +12,8 @@ struct ComposerView: View {
     @State private var store: ComposerStore?
     @State private var showsQuote = true
     @State private var importing = false
+    /// Discarding cannot be undone: asked first when the draft has anything in it.
+    @State private var confirmingDiscard = false
     @State private var assistant = ComposerAssistant()
     @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
@@ -118,6 +120,11 @@ struct ComposerView: View {
             }
         }
         .disabled(store.phase == .sending)
+        .confirmationDialog("Discard this draft?", isPresented: $confirmingDiscard) {
+            Button("Discard Draft", role: .destructive) { Task { await store.discard() } } // no-help: dialog
+        } message: {
+            Text("It is deleted here and in Gmail's drafts, with its attachments. This cannot be undone.")
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Attach", systemImage: "paperclip") { importing = true }
@@ -126,8 +133,10 @@ struct ComposerView: View {
                 // Reviewing an agent's draft: the decision is the approval
                 // card's, so sending here would go around it.
                 if request.agentName == nil {
-                    Button("Discard", systemImage: "trash") { Task { await store.discard() } }
-                        .help(ToolbarHelp.composer("Discard")) // toolbar
+                    Button("Discard", systemImage: "trash") {
+                        if store.hasContent { confirmingDiscard = true } else { Task { await store.discard() } }
+                    }
+                    .help(ToolbarHelp.composer("Discard")) // toolbar
                     Button("Send", systemImage: "paperplane.fill") { Task { await store.send() } }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                         .disabled(!store.canSend)

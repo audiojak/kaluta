@@ -211,3 +211,26 @@ struct RecipientCompletionTests {
         #expect(RecipientField.Coordinator.completions(for: " ", among: [dana]).isEmpty)
     }
 }
+
+@MainActor
+struct DiscardConfirmationTests {
+    /// Discarding is asked about only when something would be lost
+    /// (design system: confirm what cannot be undone).
+    @Test func anEmptyDraftIsDiscardedWithoutAsking() throws {
+        let store = ComposerStore(core: nil, attachmentsDirectory: CoreClient.testScratch())
+        #expect(!store.hasContent)
+        store.subject = "Plans"
+        #expect(store.hasContent)
+        store.subject = ""
+        store.body = NSAttributedString(string: "  \n")
+        #expect(!store.hasContent, "white space is nothing to lose")
+    }
+
+    @Test func aFailureNoticeOffersNoUndo() {
+        let undo = MailUndo(core: nil)
+        undo.show("Already sent", accountID: "a", offersUndo: false)
+        #expect(undo.notice?.offersUndo == false)
+        undo.show("Archived", accountID: "a")
+        #expect(undo.notice?.offersUndo == true)
+    }
+}

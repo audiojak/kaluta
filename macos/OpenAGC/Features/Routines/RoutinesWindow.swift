@@ -88,6 +88,8 @@ private struct RoutineList: View {
 private struct RoutineEditor: View {
     @Environment(AppModel.self) private var model
     @State private var editingPrompt = false
+    /// Deleting a routine cannot be undone: asked first.
+    @State private var confirmingDelete = false
     @State private var expanded: Set<String> = []
 
     var body: some View {
@@ -315,8 +317,13 @@ private struct RoutineEditor: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
-                Button("Delete", role: .destructive) { Task { await store.delete() } }
+                Button("Delete", role: .destructive) { confirmingDelete = true }
                     .hoverHelp("Delete this routine; mail it filed keeps its labels")
+                    .confirmationDialog("Delete this routine?", isPresented: $confirmingDelete) {
+                        Button("Delete Routine", role: .destructive) { Task { await store.delete() } } // no-help: dialog
+                    } message: {
+                        Text("Its schedule and history go. Mail it filed keeps its labels. This cannot be undone.")
+                    }
                 Spacer()
                 if let busy = store.busy {
                     ProgressView().controlSize(.small)
