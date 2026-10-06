@@ -785,7 +785,11 @@ impl Core {
                         store::put_category(tx, c)?;
                     }
                     let new_id = store::insert(tx, &FactRow { id: 0, updated_at: now, ..f2 })?;
-                    store::add_evidence(tx, new_id, &q2, now)?;
+                    // Quotes are from one account's mail: the global copy
+                    // has none (ADR 0012); the change record keeps them.
+                    if to == FactScope::Account {
+                        store::add_evidence(tx, new_id, &q2, now)?;
+                    }
                     let moved = (store::get(tx, new_id)?.unwrap_or_default(), store::evidence(tx, new_id)?);
                     let cat_after = match &c2 {
                         Some(c) => store::get_category(tx, &c.key)?,
@@ -1174,6 +1178,7 @@ mod tests {
         let global_cats = block_on(core.global_fact_categories()).unwrap();
         assert!(global_cats.iter().any(|c| c.key == key && c.global), "its custom category went with it");
         assert_eq!(block_on(core.fact_lines()).unwrap(), vec!["- Company › Name: Actual AI"]);
+        assert!(all[0].evidence.is_empty(), "no account's quotes in the global store");
 
         block_on(core.undo_fact_change(change.change_id)).unwrap();
         let all = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
