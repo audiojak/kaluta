@@ -74,7 +74,8 @@ pub fn build(m: &OutgoingMessage) -> Result<Vec<u8>, BuildError> {
 
 /// Like [`build`], but a draft may have no recipients yet.
 pub fn build_draft(m: &OutgoingMessage) -> Result<Vec<u8>, BuildError> {
-    let text = m.text.clone().unwrap_or_else(|| crate::html_to_text(&m.html));
+    // Quotes keep their "> " marks in the plain-text part.
+    let text = m.text.clone().unwrap_or_else(|| crate::html_to_quoted_text(&m.html));
     let mut b = MessageBuilder::new()
         .from(address(&m.from)?)
         .subject(m.subject.clone())
@@ -211,6 +212,19 @@ mod tests {
         assert_eq!(parsed.attachments.len(), 1);
         assert_eq!(parsed.attachments[0].filename, "notes.pdf");
         assert_eq!(parsed.attachments[0].data, b"%PDF-1.4 x");
+    }
+
+    #[test]
+    fn a_replys_plain_text_marks_the_quote() {
+        let reply = OutgoingMessage {
+            html: "<p>Thursday works.</p><p>On 2026-09-15, Alex wrote:</p><blockquote><p>When suits?</p></blockquote>"
+                .into(),
+            ..sample()
+        };
+        let parsed = crate::parse(&build(&reply).unwrap()).unwrap();
+        let text = parsed.text.unwrap().replace("\r\n", "\n");
+        assert!(text.contains("Alex wrote:\n> When suits?"), "{text:?}");
+        assert_eq!(crate::strip_quoted(&text).trim(), "Thursday works.", "the user's own words alone");
     }
 
     #[test]
