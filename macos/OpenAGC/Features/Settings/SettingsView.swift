@@ -27,7 +27,7 @@ struct SettingsView: View {
             Tab("Tasks", systemImage: "checklist", value: SettingsTab.tasks) {
                 TaskSettings()
             }
-            Tab("Analysis", systemImage: "sparkle.magnifyingglass", value: SettingsTab.analysis) {
+            Tab("Learning", systemImage: "sparkle.magnifyingglass", value: SettingsTab.analysis) {
                 AnalysisSettingsView()
             }
             Tab("Facts", systemImage: "globe", value: SettingsTab.facts) {

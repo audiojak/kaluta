@@ -58,6 +58,11 @@ enum Snapshot {
         default: break
         }
         Task { @MainActor in
+            // A slow start (a cold build, a busy machine): wait for the
+            // app's model rather than capture a window without one.
+            for _ in 0..<300 where !Self.isOpen(delegate.model?.accountState) {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
             // Some AppKit animations (split view items) only run in the
             // active app.
             NSApp.activate()
@@ -140,15 +145,16 @@ enum Snapshot {
                 model.guideProgress = try? await core.guideProgress()
                 await model.guide.load()
                 if guide == "decisions" {
-                    model.openAnalysis(learning: true)
+                    await model.analysis.load()
+                    model.openProposedRules(learning: true)
                 } else if guide == "analysis" {
                     // A day of reviews: proposals from edited AI drafts (spec §14.10).
                     try? await core.debugSeedAnalysis()
                     model.analysisProgress = try? await core.analysisProgress()
-                    model.openAnalysis()
                     await model.analysis.load()
+                    model.openProposedRules()
                     model.analysis.selection = model.analysis.proposals.first.map(AnalysisStore.tag)
-                } else if guide == "facts" {
+                } else if guide == "facts" || guide == "facts-proposed" {
                     // Facts (spec §14.11): a few of each kind, one global.
                     func fact(_ c: String, _ l: String, _ v: String, _ u: FactUse = .free) -> FactEdit {
                         .add(fields: FactFields(category: c, label: l, value: v, use: u, asOf: nil), status: .accepted,
@@ -165,9 +171,17 @@ enum Snapshot {
                         _ = try? await core.makeFactGlobal(id)
                     }
                     model.analysisProgress = try? await core.analysisProgress()
-                    model.openFacts()
-                    await model.facts.load()
-                    model.facts.selection = model.facts.facts.first { $0.label == "Calendar link" }.map(FactsStore.tag)
+                    if guide == "facts-proposed" {
+                        // Proposed facts, reviewed in the detail (spec §14.11).
+                        try? await core.debugSeedFactProposals()
+                        await model.analysis.load()
+                        model.openFacts(proposed: true)
+                        await model.facts.load()
+                    } else {
+                        model.openFacts()
+                        await model.facts.load()
+                        model.facts.selection = model.facts.facts.first { $0.label == "Calendar link" }.map(FactsStore.tag)
+                    }
                 } else {
                     model.showGuideCategory("A1")
                 }
@@ -227,6 +241,8 @@ enum Snapshot {
                 }
             }
             capture(window, to: URL(filePath: path))
+            // Left open to look at (a scratch demo run only, like every snapshot).
+            if defaults.bool(forKey: "OpenAGCSnapshotStay") { return }
             // A sheet left open keeps the app from quitting.
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
@@ -234,6 +250,11 @@ enum Snapshot {
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)
         }
+    }
+
+    private static func isOpen(_ state: AppModel.AccountState?) -> Bool {
+        if case .open = state { return true }
+        return false
     }
 
     /// Debugging layouts: the view tree with frames, to stderr.

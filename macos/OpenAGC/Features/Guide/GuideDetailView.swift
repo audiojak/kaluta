@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// The Writing Guide section's detail column: the chosen category's
-/// entries, read like a document, with their scope and the quotes from the
-/// user's mail behind them. Decisions wait in Analysis (spec §14.10).
+/// The Writing Guide section's detail column: the review flow of proposed
+/// rules, or the chosen category's entries, read like a document, with
+/// their scope and the quotes from the user's mail behind them.
 struct GuideDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let category = model.guide.selected {
+        if model.analysis.reviewingRules {
+            ProposedRulesView()
+        } else if let category = model.guide.selected {
             GuideCategoryDetail(category: category)
         } else {
             ContentUnavailableView("No Category Selected", systemImage: "text.book.closed")
@@ -35,7 +37,7 @@ private struct GuideCategoryDetail: View {
                 if category.id == "F3" {
                     // Facts have a place of their own (spec §14.11).
                     HStack(spacing: Space.m) {
-                        Text("Facts now live in Analysis › Facts.").foregroundStyle(.secondary)
+                        Text("Facts have a page of their own.").foregroundStyle(.secondary)
                         Button("Open Facts") { model.openFacts() }
                             .hoverHelp("See and change the facts AI drafts may use")
                     }

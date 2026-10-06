@@ -12,7 +12,19 @@ use crate::guide::{
 use crate::{Core, CoreError, CoreEvent, ErrorKind, runtime};
 
 /// `analysis_meta` key: when the user last opened Analysis.
+/// When the user last looked at each page's proposals; before pages had
+/// their own, one time for both (still read when a page has none).
 const LAST_VIEWED: &str = "last_viewed_at";
+const LAST_VIEWED_RULES: &str = "last_viewed_rules_at";
+const LAST_VIEWED_FACTS: &str = "last_viewed_facts_at";
+
+/// Where proposals are shown (spec §14.10): proposed rules in the Writing
+/// Guide, proposed facts in Facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ProposalPage {
+    Rules,
+    Facts,
+}
 /// The metrics' window: four weeks.
 const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
@@ -64,6 +76,9 @@ pub struct AnalysisFactProposalInfo {
     pub before_value: Option<String>,
     pub fact_id: Option<i64>,
     pub as_of: Option<i64>,
+    /// How freely drafts use it once accepted, unless the user picks
+    /// otherwise: the fact's own for an alteration, else its category's.
+    pub use_: crate::facts::FactUse,
     /// The words in the user's mail that state it.
     pub quote: String,
     pub message_id: String,
@@ -90,8 +105,11 @@ pub struct AnalysisQueue {
     pub watching: Vec<AnalysisProposalInfo>,
     /// Learning runs' decisions waiting (spec §14.9, shown here).
     pub learning_decisions: u32,
-    /// Something new since the user last opened Analysis: the sidebar dot.
+    /// Something new since the user last looked: the account's dot.
     pub unseen: bool,
+    /// New proposed rules (Writing Guide's dot) and facts (Facts' dot).
+    pub unseen_rules: bool,
+    pub unseen_facts: bool,
 }
 
 /// One pair behind a proposal: what the AI wrote and what the user sent.
@@ -199,6 +217,15 @@ impl Core {
                 if p.fact_id.is_some() && current.is_none() {
                     return None;
                 }
+                let use_ = current.map_or_else(
+                    || {
+                        categories
+                            .iter()
+                            .find(|c| c.key == p.category)
+                            .map_or(crate::facts::FactUse::Free, |c| c.default_use)
+                    },
+                    |f| f.use_,
+                );
                 Some(AnalysisFactProposalInfo {
                     id: r.id,
                     op: op(&r.op),
@@ -212,6 +239,7 @@ impl Core {
                     before_value: current.map(|f| f.value.clone()),
                     fact_id: p.fact_id,
                     as_of: p.as_of,
+                    use_,
                     quote: p.quote,
                     message_id: p.message_id,
                     name: p.name,
@@ -262,10 +290,14 @@ impl Core {
         let entries = self.accepted_entries().await?;
         let learning = self.guide_decisions().await?.len() as u32;
         let db = self.db()?;
-        let (rows, viewed, learned_at) = runtime::run(async move {
+        let (rows, (viewed, viewed_facts), learned_at) = runtime::run(async move {
             Ok(db
                 .read(|c| {
-                    let viewed = store::meta(c, LAST_VIEWED)?.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+                    let at = |key| -> Result<Option<i64>, mail_store::StoreError> {
+                        Ok(store::meta(c, key)?.and_then(|v| v.parse::<i64>().ok()))
+                    };
+                    let both = at(LAST_VIEWED)?.unwrap_or(0);
+                    let viewed = (at(LAST_VIEWED_RULES)?.unwrap_or(both), at(LAST_VIEWED_FACTS)?.unwrap_or(both));
                     let learned_at = mail_store::guide::runs(c, 1)?
                         .into_iter()
                         .next()
@@ -306,19 +338,30 @@ impl Core {
         }
         guide.sort_by_key(|p| std::cmp::Reverse((p.shown_at, p.id)));
         watching.sort_by_key(|p| std::cmp::Reverse((p.support, p.id)));
-        let facts = self.fact_proposals(&fact_rows, viewed).await?;
-        let unseen = guide.iter().any(|p| p.unseen)
-            || facts.iter().any(|p| p.unseen)
-            || (learning > 0 && learned_at.is_some_and(|at| at > viewed));
-        Ok(AnalysisQueue { guide, facts, watching, learning_decisions: learning, unseen })
+        let facts = self.fact_proposals(&fact_rows, viewed_facts).await?;
+        let unseen_rules = guide.iter().any(|p| p.unseen) || (learning > 0 && learned_at.is_some_and(|at| at > viewed));
+        let unseen_facts = facts.iter().any(|p| p.unseen);
+        Ok(AnalysisQueue {
+            guide,
+            facts,
+            watching,
+            learning_decisions: learning,
+            unseen: unseen_rules || unseen_facts,
+            unseen_rules,
+            unseen_facts,
+        })
     }
 
-    /// The user opened Analysis: the dot clears.
-    pub async fn analysis_seen(&self) -> Result<(), CoreError> {
+    /// The user looked at a page's proposals: its dot clears.
+    pub async fn analysis_seen(&self, page: ProposalPage) -> Result<(), CoreError> {
         let db = self.db()?;
         let now = mail_sync::now_millis().to_string();
+        let key = match page {
+            ProposalPage::Rules => LAST_VIEWED_RULES,
+            ProposalPage::Facts => LAST_VIEWED_FACTS,
+        };
         // No event: the app asks after it has re-read the queue.
-        runtime::run(async move { Ok(db.write(move |tx| store::set_meta(tx, LAST_VIEWED, &now)).await?) }).await
+        runtime::run(async move { Ok(db.write(move |tx| store::set_meta(tx, key, &now)).await?) }).await
     }
 
     /// The pairs behind a proposal, oldest first.
@@ -425,18 +468,20 @@ impl Core {
     }
 
     /// Accept or reject fact proposals: one change on the account's facts
-    /// stack (`undo_fact_change`).
+    /// stack (`undo_fact_change`). `uses` says, by proposal id, how freely
+    /// drafts may use an accepted fact; one not named keeps its default.
     pub async fn decide_fact_analysis_proposals(
         &self,
         ids: Vec<i64>,
         accept: bool,
+        uses: std::collections::HashMap<i64, crate::facts::FactUse>,
     ) -> Result<crate::facts::FactChange, CoreError> {
         let rows: Vec<ProposalRow> =
             self.proposal_rows(ids).await?.into_iter().filter(|r| r.target == "fact").collect();
         if rows.is_empty() {
             return Err(CoreError::new(ErrorKind::InvalidInput, "nothing to decide"));
         }
-        self.decide_fact_proposals(&rows, accept).await
+        self.decide_fact_proposals(&rows, accept, &uses).await
     }
 
     /// Accept a proposal as the user edited it.
@@ -507,6 +552,49 @@ impl Core {
             compared: rows.len() as u32,
             sent_as_written: unchanged,
         })
+    }
+
+    /// Snapshots and previews: proposed facts as a review would leave them
+    /// (a new fact, a changed one, a new category), for facts the account
+    /// already has ("Occupation or role" gets a new value when there is one).
+    pub async fn debug_seed_fact_proposals(&self) -> Result<(), CoreError> {
+        use crate::analysis_glean::{FactPayload, Found};
+        let facts = self.list_facts(vec![crate::facts::FactStatus::Accepted]).await?;
+        let quote = |q: &str| FactPayload { message_id: "demo".into(), quote: q.into(), ..Default::default() };
+        let mut found = vec![
+            Found::Add(FactPayload {
+                kind: "fact".into(),
+                category: "availability".into(),
+                label: "Working hours".into(),
+                value: "9 to 5 Pacific, weekdays".into(),
+                ..quote("I'm around 9 to 5 Pacific on weekdays if you want to talk.")
+            }),
+            Found::Add(FactPayload {
+                kind: "fact".into(),
+                category: "work".into(),
+                label: "Company".into(),
+                value: "Northwind Labs".into(),
+                ..quote("We started Northwind Labs two years ago.")
+            }),
+            Found::Category(FactPayload {
+                kind: "category".into(),
+                category: "other".into(),
+                name: "Speaking".into(),
+                description: "Talks the user gives and the topics they speak on".into(),
+                ..quote("Happy to give the talk on hiring again in March.")
+            }),
+        ];
+        if let Some(role) = facts.iter().find(|f| f.label == "Occupation or role") {
+            found.push(Found::Alter(FactPayload {
+                kind: "fact".into(),
+                category: role.category.clone(),
+                label: role.label.clone(),
+                value: "Founder and CEO".into(),
+                fact_id: Some(role.id),
+                ..quote("As founder and CEO, I can sign off on this.")
+            }));
+        }
+        self.merge_glean(found).await
     }
 
     /// Snapshots and previews: a few reviewed pairs and the proposals they
@@ -717,10 +805,13 @@ mod tests {
         let q = block_on(core.analysis_queue()).unwrap();
         assert_eq!(q.guide.iter().map(|p| p.id).collect::<Vec<_>>(), vec![shown]);
         assert_eq!(q.watching.iter().map(|p| p.id).collect::<Vec<_>>(), vec![quiet]);
-        assert!(q.unseen && q.guide[0].unseen);
-        block_on(core.analysis_seen()).unwrap();
+        assert!(q.unseen && q.unseen_rules && !q.unseen_facts && q.guide[0].unseen);
+        // Facts is another page: looking there leaves the rules' dot.
+        block_on(core.analysis_seen(ProposalPage::Facts)).unwrap();
+        assert!(block_on(core.analysis_queue()).unwrap().unseen_rules);
+        block_on(core.analysis_seen(ProposalPage::Rules)).unwrap();
         let q = block_on(core.analysis_queue()).unwrap();
-        assert!(!q.unseen && !q.guide[0].unseen, "opening Analysis clears the dot");
+        assert!(!q.unseen && !q.unseen_rules && !q.guide[0].unseen, "opening the Writing Guide clears the dot");
         let pairs = block_on(core.analysis_pairs(shown)).unwrap();
         assert_eq!(pairs.len(), 2);
         assert_eq!((pairs[0].sent_text.as_deref(), pairs[0].sent_quote.as_str()), (Some("Hi Ann,\nJ"), "J"));

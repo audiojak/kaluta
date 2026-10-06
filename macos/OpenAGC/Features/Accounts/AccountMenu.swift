@@ -62,7 +62,7 @@ struct AccountMenuItems: View {
                                                        unseen: unseen))
                 // The dot is in the picture; VoiceOver reads it from the title.
                 Text(AccountMenuItems.title(account))
-                    .accessibilityLabel(AccountMenuItems.title(account) + (unseen ? ", new in Analysis" : ""))
+                    .accessibilityLabel(AccountMenuItems.title(account) + (unseen ? ", new proposals" : ""))
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }

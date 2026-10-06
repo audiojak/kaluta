@@ -542,6 +542,7 @@ impl Core {
         &self,
         rows: &[ProposalRow],
         accept: bool,
+        uses: &std::collections::HashMap<i64, FactUse>,
     ) -> Result<crate::facts::FactChange, CoreError> {
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
         let status = if accept { "accepted" } else { "rejected" };
@@ -557,6 +558,7 @@ impl Core {
         for r in rows {
             let p: FactPayload =
                 r.payload_json.as_deref().and_then(|j| serde_json::from_str(j).ok()).unwrap_or_default();
+            let chosen_use = uses.get(&r.id).copied();
             let default_use = categories.iter().find(|c| c.key == p.category).map_or(FactUse::Free, |c| c.default_use);
             match (p.kind.as_str(), r.op.as_str()) {
                 ("fact", "add") => edits.push(FactEdit::Add {
@@ -564,7 +566,7 @@ impl Core {
                         category: p.category,
                         label: p.label,
                         value: p.value,
-                        use_: default_use,
+                        use_: chosen_use.unwrap_or(default_use),
                         as_of: p.as_of,
                     },
                     status: FactStatus::Accepted,
@@ -582,7 +584,7 @@ impl Core {
                             category: old.category.clone(),
                             label: old.label.clone(),
                             value: p.value,
-                            use_: old.use_,
+                            use_: chosen_use.unwrap_or(old.use_),
                             as_of: p.as_of.or(old.as_of),
                         },
                     });
@@ -838,16 +840,22 @@ mod tests {
         );
         assert_eq!((p.category_name.as_str(), p.quote.as_str()), ("Work", "I'm the CTO at Acme."));
         assert!(q.unseen);
+        assert_eq!(p.use_, FactUse::Free, "the category's default");
 
-        let change = block_on(core.decide_fact_analysis_proposals(vec![p.id], true)).unwrap();
+        // Accepted as "ask first": the user's choice, in the same change.
+        let change =
+            block_on(core.decide_fact_analysis_proposals(vec![p.id], true, [(p.id, FactUse::Ask)].into())).unwrap();
         let facts = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
-        assert_eq!((facts[0].value.as_str(), facts[0].source), ("the CTO", FactSource::Learned));
+        assert_eq!(
+            (facts[0].value.as_str(), facts[0].source, facts[0].use_),
+            ("the CTO", FactSource::Learned, FactUse::Ask)
+        );
         assert!(block_on(core.analysis_queue()).unwrap().facts.is_empty());
         block_on(core.undo_fact_change(change.change_id)).unwrap();
         assert!(block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap().is_empty());
         assert_eq!(block_on(core.analysis_queue()).unwrap().facts.len(), 1, "back in the queue");
         // Rejected: not proposed again.
-        block_on(core.decide_fact_analysis_proposals(vec![p.id], false)).unwrap();
+        block_on(core.decide_fact_analysis_proposals(vec![p.id], false, Default::default())).unwrap();
         pair(core, "Hi Bo,\nI'm the CTO at Acme.\nJ");
         rt(core.clone().start_analysis_run(None)).unwrap();
         wait_done(core);

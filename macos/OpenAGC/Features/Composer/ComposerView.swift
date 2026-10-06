@@ -377,7 +377,7 @@ struct ComposerView: View {
             HStack(spacing: Space.m) {
                 Toggle("Keep these facts", isOn: $saveFacts)
                     .toggleStyle(.checkbox)
-                    .hoverHelp("Later drafts use them without asking; each can be changed or removed in Analysis › Facts")
+                    .hoverHelp("Later drafts use them without asking; each can be changed or removed in Facts")
                 Spacer(minLength: Space.m)
                 CancelButton(help: "Stop; the message stays as it is (Esc)") {
                     assistant.cancel()

@@ -10,7 +10,7 @@ import UserNotifications
 @MainActor
 final class NewMailNotifier: NSObject {
     static let notifyKey = "notifyNewMail"
-    /// "N new proposals in Analysis", once a day (spec §14.10); off unless
+    /// "N new proposals from your mail", once a day (spec §14.10); off unless
     /// the user turns it on.
     static let analysisKey = "notifyAnalysis"
     static let badgeKey = "showDockBadge"
@@ -66,7 +66,7 @@ final class NewMailNotifier: NSObject {
 
     /// A learning run finished (spec §14.9): its decisions are waiting.
     /// Only when the app is not in front, like new mail.
-    /// New proposals in Analysis after a review: at most once a day per
+    /// New proposals after a review: at most once a day per
     /// account, only when the app is not in front, only if turned on.
     /// `proposals` nil: some, not counted (another account).
     func announceAnalysis(proposals: Int?, accountID: String?, today: String) {
@@ -75,11 +75,11 @@ final class NewMailNotifier: NSObject {
               defaults.string(forKey: key) != today else { return }
         defaults.set(today, forKey: key)
         let content = UNMutableNotificationContent()
-        content.title = "Analysis"
+        content.title = "Writing Guide and Facts"
         content.body = switch proposals {
-        case nil: "New proposals in Analysis"
-        case 1: "1 new proposal in Analysis"
-        case let n?: "\(n) new proposals in Analysis"
+        case nil: "New proposals from your mail"
+        case 1: "1 new proposal from your mail"
+        case let n?: "\(n) new proposals from your mail"
         }
         content.threadIdentifier = "analysis"
         content.userInfo = ["analysis": true, "accountID": accountID ?? ""]

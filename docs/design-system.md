@@ -11,7 +11,7 @@ The code lives in `macos/OpenAGC/Design/`:
 | --- | --- |
 | `Tokens.swift` | `Space`, `Radius`, `TypeRole`, `Tone` |
 | `Surfaces.swift` | `glassCapsule()`, `card(_:)`, `bandBackground(_:)`, `columnHeader { }` |
-| `Components.swift` | `ListHeaderBar`, `InsetRule`, `PaneDivider`, `Banner`, `LabelChip`, `CategoryChip`, `Dialog`, `CancelButton`, `TipCard`, `CapsuleTabs`, `hoverHelp` |
+| `Components.swift` | `ListHeaderBar`, `InsetRule`, `PaneDivider`, `Banner`, `LabelChip`, `CategoryChip`, `Dialog`, `CancelButton`, `TipCard`, `CapsuleTabs`, `AnswerButton`, `hoverHelp` |
 | `DueDay.swift` | how a task's due day reads and groups |
 
 `docs/design-inventory.md` lists every pattern in the app against this
@@ -104,8 +104,8 @@ the user's accent colour follow without extra work.
 | `chipFill(hex:)` | label colour at 28 % | label chips; labels without a colour use tertiary label |
 | `highlight` | tint at 25 % | the keyboard-highlighted item inside glass |
 | `controlFill` | quaternary at 60 % | small filled controls (attachments) |
-| `newItems` | system red | the dot on a sidebar entry with something new since the user looked (Analysis), as app badges are red |
-| `changedText` | accent at 22 % | the user's own words beside an AI draft (Analysis); the AI's replaced words are struck through in secondary instead |
+| `newItems` | system red | the dot on a sidebar entry with something new since the user looked (Writing Guide, Facts), as app badges are red |
+| `changedText` | accent at 22 % | the user's own words beside an AI draft (a proposed rule's evidence); the AI's replaced words are struck through in secondary instead |
 | `Intent.attention` | yellow at 14 %, outlined in cards | needs the user: sign in again, approve a send |
 | `Intent.info` | tint at 10 % | worth knowing: created by an agent, your own prompt |
 | `Intent.caution` | orange at 10 % | a consequence: a draft could not be saved |
@@ -157,8 +157,21 @@ is only for "approved". Orange is text or a band's fill, never an error.
   "Not Now"). An info card under the Inbox's header, one tip at a time
   (`Tip`: Categories, Important Only, the agent); any button puts it away
   for good.
+- **`CapsuleTabs`**: tabs at the top of a list column as pills (the
+  Inbox's categories, Tasks' Open and Done): a symbol each, and the
+  chosen one widens to show its name. With two tabs whose names fit,
+  both show their names. The highlight slides
+  to the chosen pill (`.snappy`, 0.2 s; none with Reduce Motion).
+- **`AnswerButton`**: one of a question's set answers as a large button
+  (the writing guide's questions): a number key (1 to 9), the answer, and
+  a check on the answer given before. Choosing it answers and goes on, so
+  such a question has no Save; *Back* returns to the question before.
+- **Review flows** (proposed rules, proposed facts): cards in the detail,
+  one current (`.card(.attention)`); the current card's Return action is
+  prominent (`.defaultAction(true)`), the others' plain.
 - **`NewDot`**: the small red dot after a sidebar entry with something
-  new since the user last looked (Analysis, spec §14.10). It clears when
+  new since the user last looked (proposed rules on the Writing Guide,
+  proposed facts on Facts, spec §14.10). It clears when
   the user opens the section; it is not a count (the badge counts).
 - **Empty states**: `ContentUnavailableView`, with a title, an SF Symbol
   and at most one sentence.
@@ -385,6 +398,7 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Invitation to learn, light](design/guide-invite-light.png) | ![Invitation to learn, dark](design/guide-invite-dark.png) |
 | ![Invitation banner, light](design/guide-banner-light.png) | ![Invitation banner, dark](design/guide-banner-dark.png) |
 | ![Reader with quoted history folded, light](design/reader-quote-light.png) | ![Reader with quoted history folded, dark](design/reader-quote-dark.png) |
-| ![Analysis, light](design/analysis-light.png) | ![Analysis, dark](design/analysis-dark.png) |
+| ![Reviewing proposed rules in the Writing Guide, light](design/guide-proposed-light.png) | ![Reviewing proposed rules in the Writing Guide, dark](design/guide-proposed-dark.png) |
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
+| ![Reviewing proposed facts, light](design/facts-proposed-light.png) | ![Reviewing proposed facts, dark](design/facts-proposed-dark.png) |
 | ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |

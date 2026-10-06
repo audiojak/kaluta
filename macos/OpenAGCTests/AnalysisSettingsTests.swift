@@ -20,7 +20,7 @@ struct AnalysisSettingsTests {
         notifier.isAppActive = { false }
         notifier.announceAnalysis(proposals: 3, accountID: "a", today: "2026-10-05")
         notifier.announceAnalysis(proposals: 1, accountID: "a", today: "2026-10-05")
-        #expect(posted.map(\.content.body) == ["3 new proposals in Analysis"], "once a day")
+        #expect(posted.map(\.content.body) == ["3 new proposals from your mail"], "once a day")
         #expect(posted.first?.content.userInfo["analysis"] as? Bool == true)
         notifier.announceAnalysis(proposals: 1, accountID: "a", today: "2026-10-06")
         #expect(posted.count == 2)
@@ -47,8 +47,10 @@ struct AnalysisSettingsTests {
         try await core.debugSeedAnalysis()
         await model.refreshAnalysisDots()
         #expect(model.unseenAnalysisAccounts == [model.openAccountID ?? ""])
-        model.openAnalysis()
-        await model.analysisShown()
-        #expect(model.unseenAnalysisAccounts.isEmpty, "seen: the dot goes")
+        model.openProposedRules()
+        await model.proposalsShown(.rules)
+        model.openFacts()
+        await model.proposalsShown(.facts)
+        #expect(model.unseenAnalysisAccounts.isEmpty, "seen on both pages: the dot goes")
     }
 }

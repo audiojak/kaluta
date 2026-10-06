@@ -63,7 +63,7 @@ enum GuideInterview {
                           detail: "Topics, projects or figures, one per line or separated by commas.",
                           answer: .list(template: "Never mention %@", kind: .rule, check: nil)),
             GuideQuestion(id: "F3", category: "F3", prompt: "Facts a draft may use about you",
-                          detail: "Only what you fill in is used. They are kept in Analysis › Facts.", answer: .facts([
+                          detail: "Only what you fill in is used. They are kept in Facts.", answer: .facts([
                               ("Role and company", "work", "Occupation or role"),
                               ("Calendar link", "availability", "Calendar link"),
                               ("Time zone", "availability", "Time zone"),

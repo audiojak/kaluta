@@ -5,10 +5,17 @@ import UniformTypeIdentifiers
 /// Facts (spec §14.11): changing them, each change on the account's undo
 /// stack (ADR 0006).
 extension AppModel {
-    /// Open Analysis on its Facts tab.
-    func openFacts() {
-        openAnalysis()
-        analysis.showsFacts = true
+    /// The sidebar's Facts entry, in place of a mailbox id.
+    static let factsMailboxID = "@facts"
+
+    var isFacts: Bool { selectedMailboxID == Self.factsMailboxID && threads.searchQuery == nil }
+
+    /// Open Facts; with `proposed`, its review flow on the first proposed fact.
+    func openFacts(proposed: Bool = false) {
+        guidePrompt = nil
+        selectedMailboxID = Self.factsMailboxID
+        analysis.reviewingFacts = proposed
+        if proposed, let first = analysis.factProposals.first { facts.selection = AnalysisStore.tag(first) }
     }
 
     /// Apply fact edits in `scope` as one change.
@@ -61,9 +68,22 @@ extension AppModel {
         await recordFacts(accept ? "Accept Fact" : "Reject Fact",
                           notice: accept ? "Added to your facts" : "Left out; it will not be proposed again",
                           global: false) { () async throws(CoreClientError) -> FactChange in
-            try await core.decideFactProposals(proposals.map(\.id), accept: accept)
+            try await core.decideFactProposals(proposals.map(\.id), accept: accept,
+                                               uses: Dictionary(uniqueKeysWithValues: proposals.map { ($0.id, analysis.use(of: $0)) }))
         }
         await analysisChanged()
+    }
+
+    /// Decide proposed facts from the Facts page, then choose the next one
+    /// waiting (else the one before).
+    func decideProposedFacts(_ proposals: [AnalysisFactProposalInfo], accept: Bool) async {
+        let before = analysis.factProposals.map(AnalysisStore.tag)
+        let chosen = facts.selection
+        await decideFactProposals(proposals, accept: accept)
+        guard let chosen, let at = before.firstIndex(of: chosen) else { return }
+        let left = analysis.factProposals.map(AnalysisStore.tag)
+        guard !left.contains(chosen) else { return }
+        facts.selection = before[(at + 1)...].first { left.contains($0) } ?? before[..<at].last { left.contains($0) }
     }
 
     /// Save this account's facts as Markdown or JSON (spec §14.11).
@@ -79,7 +99,7 @@ extension AppModel {
     }
 
     /// Merge another account's exported facts: new ones added (undoable),
-    /// differences proposed in Analysis.
+    /// differences proposed in Facts.
     func mergeFactsFromFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
@@ -93,7 +113,7 @@ extension AppModel {
         do {
             let result = try await core.mergeFacts(json)
             var parts = ["Added \(result.added) \(result.added == 1 ? "fact" : "facts")"]
-            if result.proposed > 0 { parts.append("\(result.proposed) that differ wait in Analysis") }
+            if result.proposed > 0 { parts.append("\(result.proposed) that differ wait in Facts") }
             let notice = parts.joined(separator: "; ")
             if result.changeId != 0 {
                 undo.record(accountID: accountID, actionName: "Merge Facts", noticeText: notice,
