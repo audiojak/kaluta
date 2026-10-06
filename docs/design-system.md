@@ -309,7 +309,10 @@ header row in caption semibold, secondary. Section titles are
 
 Settings panes are grouped `Form`s. Section headers in title case; footers
 plain (grouped forms already draw them secondary). A button that deletes
-something the user cannot get back sits behind a confirmation.
+something the user cannot get back sits behind a confirmation. Buttons that
+add something sit in their own section above what exists (Accounts: *Add
+an Account* over the account rows), never under a list, where they read
+as acting on the row above them.
 
 ## Behaviour
 

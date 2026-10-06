@@ -12,13 +12,32 @@ struct AccountSettings: View {
 
     var body: some View {
         Form {
-            Section("Gmail") {
+            // Above the accounts, so the buttons read as adding one rather
+            // than as acting on the account listed above them.
+            if model.accountState != .signingIn {
+                Section {
+                    Button(isDemo || model.accounts.isEmpty ? "Connect Gmail…" : "Another Gmail Account…") {
+                        Task { await model.signIn(with: .effective(), adding: !isDemo && !model.accounts.isEmpty) }
+                    }
+                    .hoverHelp(isDemo ? "Sign in with Google to use your Gmail instead of the demo"
+                               : "Sign in with Google to add a Gmail account")
+                    .disabled(!GoogleClientConfiguration.effective().isUsable)
+                    Button("Agent Mailbox…") { model.beginAgentMailbox() }
+                        .hoverHelp("Give one of your agents an address of its own on Primitive")
+                    Button("From an Archived Mailbox…") { Task { await model.beginImport() } }
+                        .hoverHelp("Make a read-only account from an .mbox file, such as a Google Takeout export")
+                        .disabled(model.runningImport != nil)
+                } header: {
+                    Text("Add an Account")
+                } footer: {
+                    Text("Each account has its own mail, writing guide and facts. An agent mailbox is an address for one of your agents; an archived mailbox is read-only.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("Accounts") {
                 switch model.accountState {
                 case .open(let id) where id == AppModel.demoAccountID:
                     LabeledContent("Account") { Text("Demo mailbox (nothing leaves this Mac)") }
-                    Button("Connect Gmail Instead…") { Task { await model.signIn(with: .effective()) } }
-                        .hoverHelp("Sign in with Google to use your Gmail instead of the demo")
-                        .disabled(!GoogleClientConfiguration.effective().isUsable)
                 case .open:
                     ForEach(model.accounts, id: \.id) { account in
                         AccountRow(account: account, onRemove: { removing = account })
@@ -29,14 +48,6 @@ struct AccountSettings: View {
                     if model.needsReauthentication {
                         Label(reauthenticationHint, systemImage: "exclamationmark.triangle").foregroundStyle(Tone.caution)
                     }
-                    Button("Add Account…") { Task { await model.addAccount() } }
-                        .hoverHelp("Sign in to another Gmail account")
-                        .disabled(!GoogleClientConfiguration.effective().isUsable)
-                    Button("Create an Agent Mailbox…") { model.beginAgentMailbox() }
-                        .hoverHelp("Give one of your agents an address of its own on Primitive")
-                    Button("Create an Account from an Archived Mailbox…") { Task { await model.beginImport() } }
-                        .hoverHelp("Make a read-only account from an .mbox file, such as a Google Takeout export")
-                        .disabled(model.runningImport != nil)
                 case .signingIn:
                     HStack {
                         ProgressView().controlSize(.small)
@@ -44,9 +55,6 @@ struct AccountSettings: View {
                     }
                 default:
                     Text("No account is connected.").foregroundStyle(.secondary)
-                    Button("Connect Gmail…") { Task { await model.signIn(with: .effective()) } }
-                        .hoverHelp("Sign in with Google to add your Gmail")
-                        .disabled(!GoogleClientConfiguration.effective().isUsable)
                 }
             }
             Section {
@@ -113,6 +121,12 @@ struct AccountSettings: View {
 }
 
 extension AccountSettings {
+    /// The demo mailbox is open: Gmail replaces it rather than joining it.
+    var isDemo: Bool {
+        if case let .open(id) = model.accountState, id == AppModel.demoAccountID { return true }
+        return false
+    }
+
     /// One line on why syncing stopped. A saved sign-in the Keychain will
     /// not hand over (typically a rebuilt development app) is not Google's
     /// doing, and the mail already here is safe.
