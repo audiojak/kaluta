@@ -24,7 +24,9 @@ struct FormattingBar: View {
             button("Quote", "text.quote", on: state.quoted, help: "Quote: an indented block, sent as a quotation (⇧⌘9)",
                    key: "9", shift: true, action: commands.toggleQuote)
             separator
-            button("Link", "link", on: false, help: "Make the selection a link (⌘K)", key: "k", action: askForLink)
+            // ⇧⌘K: ⌘K asks the agent from every window (spec §14.3).
+            button("Link", "link", on: false, help: "Make the selection a link (⇧⌘K)", key: "k", shift: true,
+                   action: askForLink)
             button("Clear Formatting", "eraser", on: false,
                    help: "Clear bold, italic, underline, strikethrough and links from the selection (⌘\\)",
                    key: "\\", action: commands.clearFormatting)

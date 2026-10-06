@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 uniffi::setup_scaffolding!();
 
 mod account;
+mod agent_mailbox;
 mod agents;
 mod analysis_compare;
 mod analysis_glean;
@@ -42,6 +43,10 @@ mod tasks;
 mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
+pub use agent_mailbox::{
+    AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentSendRule, AgentService,
+    AgentVerification,
+};
 pub use agents::{
     AgentActionInfo, AgentEventInfo, AgentProviderInfo, AgentSessionInfo, AgentStatusInfo, AgentTranscriptItem,
     PromptContextInfo, TextExtractor,
@@ -87,6 +92,7 @@ pub struct Core {
     store_opens: std::sync::atomic::AtomicUsize,
     imports: archive::Imports,
     accounts: account::AccountState,
+    agent_mail: agent_mailbox::AgentMailState,
     agents: agents::AgentHub,
     /// How long a send waits in the outbox so it can be undone (spec
     /// §14.6a); set from Settings, 0 = off.
@@ -119,6 +125,7 @@ impl Core {
             store_opens: Default::default(),
             imports: Default::default(),
             accounts: Default::default(),
+            agent_mail: Default::default(),
             agents: Default::default(),
             send_delay_ms: Default::default(),
         }))

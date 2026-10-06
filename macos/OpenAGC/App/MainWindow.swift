@@ -66,12 +66,16 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.importDraft }, set: { model.importDraft = $0 })) { draft in
             ImportMailboxSheet(draft: draft)
         }
+        .sheet(item: Binding(get: { model.agentMailboxSheet }, set: { model.agentMailboxSheet = $0 })) { request in
+            AgentMailboxSheet(request: request)
+        }
         .sheet(item: Binding(get: { model.runningImport.map(RunningImport.init) }, set: { if $0 == nil { model.runningImport = nil } })) { running in
             ImportProgressSheet(accountID: running.id)
                 .interactiveDismissDisabled()
         }
         .task { if model.accountState == .starting { await model.start() } }
         .onAppear {
+            model.focus.start(model: model)
             model.openComposer = { openWindow(id: "compose", value: $0) }
             model.openThreadWindow = { openWindow(id: "thread", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
@@ -195,6 +199,7 @@ struct MainWindow: View {
             parts.append("Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))
         }
         if model.isArchive { parts.append("Imported mailbox · cannot send") }
+        if model.isAgentMailbox { parts.append("Agent mailbox") }
         return parts.joined(separator: " · ")
     }
 
@@ -210,6 +215,12 @@ struct MainWindow: View {
             VStack(spacing: 0) {
                 if model.needsReauthentication {
                     ReauthenticationBanner()
+                }
+                if let failed = model.failedSends.first {
+                    FailedSendBanner(draft: failed, more: model.failedSends.count - 1)
+                }
+                if let plan = model.unverifiedAgentPlan, !model.isGuide, !model.isFacts {
+                    AgentLimitsBanner(plan: plan)
                 }
                 if let error = model.threads.searchError {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")
@@ -235,14 +246,8 @@ struct MainWindow: View {
                     FactsList(store: model.facts)
                 } else if model.isTaskList {
                     TaskListView()
-                } else if model.threads.rows.isEmpty {
-                    if model.threads.searchQuery != nil {
-                        ContentUnavailableView.search(text: model.searchText)
-                    } else {
-                        ContentUnavailableView("No Conversations", systemImage: "tray")
-                    }
                 } else {
-                    ThreadListView()
+                    ThreadListArea()
                 }
             }
             // Fill the column, so the header stays at the top when the list
@@ -319,15 +324,61 @@ struct MainWindow: View {
     private static let analysisSettingsHeight: CGFloat = 340
 }
 
-/// Google rejected the stored credentials (revoked or expired).
+/// A message the provider would not send: why, and the draft to fix it.
+struct FailedSendBanner: View {
+    @Environment(AppModel.self) private var model
+    let draft: DraftInfo
+    let more: Int
+
+    var body: some View {
+        let subject = draft.subject.isEmpty ? "(no subject)" : draft.subject
+        let others = more > 0 ? " (and \(more) more)" : ""
+        Banner("“\(subject)” wasn't sent\(others): \(draft.error ?? "it was refused"). It is back in Drafts.",
+               systemImage: "exclamationmark.triangle", intent: .attention) {
+            Button("Open Draft") { model.compose(.draft(id: draft.id)) }
+                .hoverHelp("Open the message to change it and send it again")
+        }
+    }
+}
+
+/// The message list. The table stays when the list is empty, under the
+/// empty message: its single-key shortcuts (c for a new message) still work
+/// in an empty mailbox, such as a new agent mailbox.
+struct ThreadListArea: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ThreadListView()
+            .overlay {
+                if model.threads.rows.isEmpty {
+                    Group {
+                        if model.threads.searchQuery != nil {
+                            ContentUnavailableView.search(text: model.searchText)
+                        } else {
+                            ContentUnavailableView("No Conversations", systemImage: "tray")
+                        }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+/// Google rejected the stored credentials (revoked or expired); for an
+/// agent mailbox, its service key is missing or refused.
 private struct ReauthenticationBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
-               intent: .attention) {
-            Button("Sign In") { Task { await model.signIn(with: .effective()) } }
-                .hoverHelp("Sign in to Google again to keep syncing this account")
+        if model.isAgentMailbox {
+            Banner("This agent mailbox's key is missing or was refused, so it isn't syncing.",
+                   systemImage: "key.slash", intent: .attention)
+        } else {
+            Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
+                   intent: .attention) {
+                Button("Sign In") { Task { await model.signIn(with: .effective()) } }
+                    .hoverHelp("Sign in to Google again to keep syncing this account")
+            }
         }
     }
 }

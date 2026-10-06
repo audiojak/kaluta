@@ -447,6 +447,18 @@ impl Core {
         Ok(Arc::new(GmailProvider::new(self.token_source(account_id)?)?))
     }
 
+    /// The provider that syncs an account, by its kind, with its bulk or
+    /// push source: Gmail (IMAP when granted), or an agent mailbox's
+    /// service (spec §7.9).
+    fn provider_for(&self, account_id: &str) -> Result<crate::agent_mailbox::SyncSources, CoreError> {
+        if self.is_agent(account_id) {
+            return self.agent_provider(account_id);
+        }
+        let provider = self.gmail_provider(account_id)?;
+        let imap = self.imap_if_granted(account_id, provider.clone());
+        Ok((provider, imap))
+    }
+
     /// The account's Google token source, from its stored sign-in.
     fn token_source(&self, account_id: &str) -> Result<Arc<GoogleTokenSource>, CoreError> {
         let refresh = secrets::get_redacted(self.secrets.as_ref(), &keys::refresh_token(account_id))?
@@ -465,6 +477,10 @@ impl Core {
     /// Refresh an account's name and picture if the picture is over a week
     /// old or missing (spec §7.7). Best effort: failures are logged.
     async fn refresh_identity(&self, entry: &crate::registry::IndexEntry) {
+        // Only Google accounts have a profile to refresh.
+        if entry.kind != crate::registry::AccountKind::Gmail {
+            return;
+        }
         const WEEK: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
         let avatar = crate::registry::accounts_dir(&self.data_path()).join(&entry.id).join(AVATAR_FILE);
         let fresh = tokio::fs::metadata(&avatar)
@@ -604,6 +620,7 @@ impl Core {
                 added_at: mail_sync::now_millis(),
                 imap: Some(grants_imap),
                 named_by_user: false,
+                service: None,
             })
             .await?;
             tracing::info!(account = %account_id, "gmail account connected");
@@ -628,9 +645,8 @@ impl Core {
         let account_id =
             self.current_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
         // Restarts a running sync: after signing in again the token changed.
-        let provider = self.gmail_provider(&account_id)?;
-        let imap = self.imap_if_granted(&account_id, provider.clone());
-        self.start_sync_with_backfill(provider, imap)
+        let (provider, backfill) = self.provider_for(&account_id)?;
+        self.start_sync_with_backfill(provider, backfill)
     }
 
     /// Ask Gmail for `query` too and download up to `limit` matching
@@ -796,7 +812,15 @@ impl Core {
                 .await
                 .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
             let mut needs_sign_in = Vec::new();
-            for entry in entries.into_iter().filter(|e| e.kind == crate::registry::AccountKind::Gmail) {
+            for entry in entries
+                .into_iter()
+                .filter(|e| matches!(e.kind, crate::registry::AccountKind::Gmail | crate::registry::AccountKind::Agent))
+            {
+                if entry.kind == crate::registry::AccountKind::Agent
+                    && let Err(e) = core.repair_agent_address(&entry.id, &entry.email).await
+                {
+                    tracing::warn!(account = %entry.id, error = %e, "agent mailbox's address not repaired");
+                }
                 if core.is_syncing(&entry.id) {
                     // Already started (the open account): still refresh its
                     // name and picture.
@@ -804,8 +828,8 @@ impl Core {
                     tokio::spawn(async move { refresher.refresh_identity(&entry).await });
                     continue;
                 }
-                let provider = match core.gmail_provider(&entry.id) {
-                    Ok(provider) => provider,
+                let (provider, backfill) = match core.provider_for(&entry.id) {
+                    Ok(found) => found,
                     Err(e) => {
                         tracing::warn!(account = %entry.id, error = %e, "not syncing: no usable sign-in");
                         needs_sign_in.push(entry.id);
@@ -817,9 +841,8 @@ impl Core {
                     tracing::warn!(account = %entry.id, error = %e, "not syncing: the store would not open");
                     continue;
                 }
-                let imap = core.imap_if_granted(&entry.id, provider.clone());
                 let started = crate::registry::SCOPED_ACCOUNT
-                    .sync_scope(entry.id.clone(), || core.start_sync_with_backfill(provider, imap));
+                    .sync_scope(entry.id.clone(), || core.start_sync_with_backfill(provider, backfill));
                 if let Err(e) = started {
                     tracing::warn!(account = %entry.id, error = %e, "could not start sync");
                 }
@@ -943,7 +966,12 @@ impl Core {
     /// Keychain that refuses to answer is an error, not "no credentials":
     /// the user must be told to sign in again rather than see nothing.
     pub fn account_has_credentials(&self, account_id: String) -> Result<bool, CoreError> {
-        match self.secrets.get(keys::refresh_token(&account_id)) {
+        let key = if self.is_agent(&account_id) {
+            keys::mailbox_api_key(&account_id)
+        } else {
+            keys::refresh_token(&account_id)
+        };
+        match self.secrets.get(key) {
             Ok(token) => Ok(token.is_some()),
             Err(e) => {
                 tracing::warn!(error = %e, "could not read the stored sign-in from the Keychain");

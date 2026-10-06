@@ -34,9 +34,10 @@ The short version. Everything below elaborates on these.
 | MIME | `mail-parser` (read), `mail-builder` (write) |
 | HTML email | Sanitized in Rust with `ammonia` at sync time, cached; rendered in a locked-down `WKWebView` |
 | Gmail | Hand-written `reqwest` client over the REST API; `history.list` polling; no push |
+| Agent mailboxes | Accounts on an agent-mail service (Primitive first), created in the app through its sign-up API; REST provider (§7.9, ADR 0014) |
 | OAuth | Desktop-app flow with PKCE and loopback redirect; shipped client ID with bring-your-own override |
 | Scope | `gmail.modify` only (plus `userinfo.email`) |
-| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens through a foreign trait |
+| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent mailboxes' API keys) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
@@ -70,6 +71,8 @@ The short version. Everything below elaborates on these.
 Everything in the product spec's §27: no cloud, no mobile, no Windows/Linux,
 no calendar, no autonomous background sending, no
 embeddings, no shell access for agents, no App Store build.
+*(Amended 2026-10-06: an agent mailbox (§7.9) may let its agents send
+without approval; the user's own accounts never do.)*
 
 ### 1.3 The performance goal
 
@@ -974,7 +977,8 @@ listed by (amended 2026-10-02).
 
 **Not in scope.** A unified inbox, moving mail between accounts, per-account
 signatures beyond what the composer already does, and non-Gmail accounts
-(the IMAP work in §7.4 is backfill only).
+(the IMAP work in §7.4 is backfill only). *(Amended 2026-10-06: agent
+mailboxes on an agent-mail service, §7.9, are the exception.)*
 
 ### 7.8 Archive accounts — mbox import **(Amendment 2026-09-26)**
 
@@ -1062,6 +1066,173 @@ pub trait MailProvider: Send + Sync {
 `mail-sync` is written against this trait; `provider-gmail` is the only
 implementation in MVP. `SyncCursor` and `RemoteId` are opaque so an IMAP
 provider (UIDVALIDITY/MODSEQ) fits later.
+
+### 7.9 Agent mailboxes **(Amendment 2026-10-06)**
+
+An *agent mailbox* is an address that belongs to one of the user's agents,
+hosted by an agent-mail service (Primitive first; AgentMail later). Agents
+use it to sign up for services and to correspond on the user's behalf as
+themselves. It is an account in every sense of §7.7 (its own directory,
+store, writing guide, facts, routines, undo and entry behind the avatar
+button), shown with an agent marker. The user reads it and can send as the
+agent. ADR 0014; plan `docs/plans/agent-mailboxes.md`.
+
+**Model.**
+- The index (§7.7) gains the kind `agent` with `service` (`primitive`).
+  `display_name` is the agent's name; it is the From display name.
+- The service's API key lives in the Keychain as `mailbox.api_key.<id>`
+  (§12); removing the account deletes it. Nothing else is stored about
+  the service account: its plan, limits and verification state are read
+  from the service (`GET /account`) when the account opens and after
+  verifying.
+- The core holds a `MailboxService` per service (sign up, start and finish
+  verification, plan and limits) beside the account's `MailProvider`, and
+  chooses the provider by kind.
+
+**Creating one.** *Accounts › Create an Agent Mailbox…*, also on the
+welcome screen and in Settings › Accounts. A sheet:
+1. Asks for the agent's name, and shows the service (only Primitive at
+   first) with one line on what it is and its free tier.
+2. Shows the service's terms as a link with *Agree and Create*. Primitive
+   requires `terms_accepted: true`; the app sends it only from that button.
+3. Calls the service's sign-up (`POST /v1/agent/accounts`, no
+   authentication, an `Idempotency-Key` so a retry cannot make two
+   accounts). The answer carries the API key and the address
+   (`<name>@<sub>.primitive.email`). The account is registered and opened
+   at once, and syncs.
+4. Offers verification in the same sheet (*Verify with Your Email*), or
+   later from a banner in the mailbox and from its settings.
+
+No agent is involved: setup is a fixed sequence of calls in the core.
+
+**Verification.** Until verified, a Primitive account is on its `agent`
+plan: it can only reply to addresses that have already sent it
+authenticated mail, at most 10 sends an hour and 50 a day. Verifying moves
+it to the free `developer` plan, which still sends only to: people who
+wrote to it first, the email it was verified with, its own verified
+domains, Primitive addresses, and domains that opt in to agent mail (an
+`_agents` DNS record). Other recipients are refused (found 2026-10-06
+with the maintainer's account); the refusal is said in those words, and
+the mailbox's settings say whom it writes to.
+- The email field is prefilled with the current Gmail account's address
+  (any of the user's accounts can be chosen). *Send Code* calls
+  `POST /v1/agent/claim/start {email}`; the sheet then waits for a code,
+  with *Resend* after the service's `resend_after_seconds`.
+- **Fill from mail.** When that address is one of the user's accounts in
+  OpenAGC, the app looks at that account's newest mail, received after
+  *Send Code*, from the service's domain (`primitive.dev`), for a six-digit
+  code, and offers *Fill Code from <address>*. Nothing is read beyond
+  those messages and nothing is filled without the click. This is the one
+  place the app reads one account's mail for another (§7.7), and only for
+  the user.
+- `POST /v1/agent/claim/verify {verification_code}`; a wrong or expired
+  code is said in the sheet.
+
+**Sync (Primitive).** Over its REST API (`https://api.primitive.dev/v1`,
+the key as a Bearer token).
+- Message ids are `in:<uuid>` for received mail (`/emails`) and
+  `out:<uuid>` for sent mail (`/sent-emails`); thread ids are the service's
+  `thread_id`, else the message's own id.
+- Received mail is fetched as raw RFC 822 (`/emails/{id}/raw`) and parsed
+  like any other. Sent mail has no raw form; it is rebuilt from the sent
+  record (`/sent-emails/{id}`: headers, text and HTML bodies). Attachments
+  of sent mail are listed but not downloaded.
+- Labels: received mail gets `INBOX` and, when new, `UNREAD`; sent mail
+  gets `SENT`. Archive, labels, stars, read state and trash are **local
+  only**, as in an archive account (§7.8); nothing the user does deletes
+  mail at the service. The labels list is the system labels.
+- Changes: `GET /changes` (the cursor taken before the first listing, as
+  §7.4 asks). `email.visible` and `sent_email.created` add a message,
+  `email.deleted` and `sent_email.deleted` remove one, other kinds are
+  ignored. A `410 cursor_expired` resyncs (changes are kept 7 days; an
+  idle cursor stays valid). Mail already stored keeps its labels, read
+  state and stars through a resync or a refetch: the provider says its
+  labels are local (`labels_are_local`), and its labels apply only to
+  mail new to the store.
+- A sent message takes the id `/send-mail` returned at once
+  (`adopts_sent_copies`), since Primitive may give it a Message-ID of its
+  own: the optimistic copy is never left beside the real one.
+- Push: the same feed long-polls (`wait=20`) in place of IMAP IDLE, so new
+  mail shows within a second or two while the app is open. Pages are at
+  most 100 (Primitive answers 400 above that).
+- A paused sync says why: the `SyncStatus` event carries the provider's
+  message, and the sidebar footer shows it after "Trying again shortly".
+- No drafts at the service: drafts stay on the Mac until sent. No server
+  search: search is the local index (§8), which holds the whole mailbox.
+
+**Sending (Primitive).** `POST /v1/send-mail` with the From address, one
+recipient, subject, text and HTML bodies, `in_reply_to` and `references`
+for replies, attachments inline (base64, at most 30 MiB), and an
+`Idempotency-Key` derived from the Message-ID so a retried send is sent
+once. Limits shown as they are:
+- **One recipient per message.** The service takes a single `to` and no
+  Cc or Bcc. The composer says so when an agent mailbox has more than one
+  recipient and will not send; agent tools get a structured
+  `one_recipient_only` error.
+- Bodies at most 256 KB together. An empty subject goes as
+  "(no subject)": Primitive refuses an empty one, Gmail does not.
+- Refusals from the service's gates (the agent plan's reply-only rule, its
+  hourly and daily caps) come back as a failed send with the service's
+  message, and the banner offers verification.
+
+**Sending as the agent without approval.** An agent mailbox has a setting
+in its account settings, *When Agents Send*:
+- *Send freely; flag what breaks the guide* (default). On this account,
+  `mail.send` and `mail.forward` run without approval (§10.3 amended).
+  Each send is checked against the mailbox's writing guide when it goes
+  (the guide's checks: banned and required phrases, length): what it
+  breaks is told to the agent in the tool's result
+  (`writing_guide_breaches`) and kept in the activity log with the send.
+  Every send is recorded as an AI composition (ADR 0013).
+- *Ask before each send*: the §10.4 approval flow, as on the user's own
+  accounts.
+`mail.delete` stays approval-gated either way. The user's own accounts
+are unchanged. The setting lives in the mailbox's `agent.json`
+(`send_mode`). An agent working in the mailbox is told in its system
+prompt whose mailbox it is, the name it sends as, and the service's
+limits (one recipient per message).
+
+**Account settings.** Service, address, plan and verification state with
+*Verify…*, *Can write to* (the service's send rules, `GET
+/send-permissions`: anyone, addresses that wrote first, the user's own
+domains, other Primitive mailboxes; sending to anyone is an entitlement
+Primitive grants on request), *Open at primitive.dev…* (the dashboard's
+sign-in; the help names the verified email to sign in as), *When Agents
+Send*, *Copy API Key* (a confirmation says that
+whoever holds the key can read and send the mailbox's mail), *Remove…*.
+Removing deletes the account and its key on the Mac; the service account
+stays (the sheet says so).
+
+**Own domains.** *Use Your Own Domain…* in the mailbox's settings puts
+the agent on a domain the user owns:
+- The domain field suggests a subdomain of the user's own address
+  (`agents.example.com`; nothing for shared hosts such as gmail.com). The
+  agent receives all mail sent to the domain, so a subdomain leaves the
+  user's own mail alone. Primitive refuses a domain whose mail goes
+  elsewhere (`mx_conflict`) and one another account has claimed
+  (`conflict`); both are said in plain words.
+- `POST /v1/domains` answers with the records to create (MX, SPF, DKIM,
+  DMARC, TLS-RPT, ownership). The sheet lists them (type, name, value, what
+  each is for, found or not) with *Copy* on each and *Save Zone File…*
+  (`GET /domains/{id}/zone-file`).
+- *Check Now* (`POST /domains/{id}/verify`), and every 20 seconds while the
+  sheet is open. Reopening the sheet picks up the domain where it was.
+- Verified: the sheet offers the agent's address on it (its name, made an
+  address) and *Use This Address*. The mailbox then sends and receives as
+  that address (`agent.json` keeps the service's own address too, and the
+  agent can go back to it); sync restarts with it.
+- A domain belongs to one agent mailbox: each mailbox is its own account
+  at Primitive, and Primitive lists everything sent to an account's
+  domains as one inbox.
+
+**Testing.** Every test runs against a wiremock fake of the service's API.
+Nothing in automation calls a real service: each sign-up creates a real
+account.
+
+**Not in scope.** Agents outside the app sending through a local MCP
+without the app open (`docs/plans/headless-mcp.md`), sending to several
+recipients by splitting a message, deleting mail at the service, and
+services other than Primitive until their own step.
 
 ---
 
@@ -1291,7 +1462,7 @@ same definitions are rendered to `docs/mcp.md` by a `cargo xtask`.
 | `mail.mark_read` / `mail.mark_unread` | Reversible | |
 | `mail.add_label` / `mail.remove_label` | Reversible | User labels only; `SPAM`/`TRASH` are refused here. |
 | `mail.create_label` | Reversible | Name (nested with `/`), optional color; idempotent — returns the existing label if present. Needed by routines (§11). |
-| `mail.send` | External | Sends an existing draft id. **Always** approval-gated. |
+| `mail.send` | External | Sends an existing draft id. **Always** approval-gated, except on an agent mailbox set to send freely (§7.9). |
 | `mail.forward` | External | Creates a forward draft and requests send approval in one step. |
 | `mail.delete` | External | Moves to Trash (never permanent). Approval-gated. |
 
@@ -1309,7 +1480,7 @@ Default policy:
 |---|---|---|
 | ReadOnly | Allow | — |
 | Reversible | Allow | RequireApproval (per tool) |
-| External | RequireApproval | — (cannot be set to Allow in MVP) |
+| External | RequireApproval | — (cannot be set to Allow in MVP; *amended 2026-10-06:* `send` and `forward` are Allow on an agent mailbox set to send freely, §7.9) |
 
 Every tool call passes through `decide` **inside the core, before the store
 is touched**. This is the only enforcement point; nothing in the agent CLIs
@@ -1701,7 +1872,8 @@ pub trait SecretStore: Send + Sync {
 ```
 
 Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
-`oauth.client_secret.custom` (BYO only), `anthropic.api_key` (optional).
+`oauth.client_secret.custom` (BYO only), `anthropic.api_key` (optional),
+`mailbox.api_key.<account>` (an agent mailbox's service key, §7.9).
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens
@@ -1941,11 +2113,16 @@ with a formatting bar under it, as in Gmail, in every composer: bold,
 italic, underline, strikethrough, bulleted and numbered lists, quote (sent
 as a `blockquote`), link and clear formatting, each lit while it is on at
 the cursor and each one undoable. The usual shortcuts work: ⌘B, ⌘I, ⌘U,
-⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⌘K link (in
-a composer; in the mail window ⌘K asks the agent) and ⌘\ clear. Fonts, sizes and colors stay out, so
-mail looks ordinary in the recipient's client. In the main window, Tab from a
-mailbox in the sidebar puts the keyboard in its thread list, so the arrows
-move between messages (nothing is opened until one is chosen).
+⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⇧⌘K link
+(⌘K asks the agent from every window, the mail window coming forward;
+amended 2026-10-06, it was ⌘K in the composer) and ⌘\ clear. Fonts, sizes and colors stay out, so
+mail looks ordinary in the recipient's client. In the main window, Tab walks
+the columns: sidebar → list → message (when one is shown) → search → sidebar,
+and ⌥Tab or ⇧Tab the other way. Landing on the list selects its first row
+when none is selected (shown in the reader, as a click would) and keeps the
+selection otherwise; the Writing Guide, Facts and Tasks lists take their
+turn the same way *(amended 2026-10-06; before, Tab went only from the
+sidebar to the list and selected nothing)*.
 
 **Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
 through Gmail's drafts list (`drafts.list`) on every incremental round,

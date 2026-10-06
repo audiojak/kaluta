@@ -27,6 +27,10 @@ struct TipTests {
         var elsewhere = inbox
         elsewhere.inInbox = false
         #expect(Tip.next(dismissed: [], context: elsewhere) == nil)
+        var agentMailbox = inbox
+        agentMailbox.categoriesAvailable = false
+        agentMailbox.importantAvailable = false
+        #expect(Tip.next(dismissed: [], context: agentMailbox) == .agent, "no Important marks in an agent mailbox")
     }
 
     @Test func actingOnATipDoesItAndPutsItAwayForGood() {

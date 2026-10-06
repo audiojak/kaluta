@@ -16,6 +16,8 @@ enum Tip: String, CaseIterable {
         var categoriesShown: Bool
         var importantOnly: Bool
         var agentShown: Bool
+        /// The account has Gmail's Important marks (an agent mailbox does not).
+        var importantAvailable = true
     }
 
     /// The tip to show now, if any.
@@ -25,7 +27,7 @@ enum Tip: String, CaseIterable {
             guard !dismissed.contains(tip.rawValue) else { return false }
             switch tip {
             case .categories: return c.categoriesAvailable && c.categoriesShown
-            case .importantOnly: return !c.importantOnly
+            case .importantOnly: return c.importantAvailable && !c.importantOnly
             case .agent: return !c.agentShown
             }
         }

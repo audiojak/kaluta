@@ -71,6 +71,7 @@ struct AccountMenuItems: View {
             .disabled(!GoogleClientConfiguration.effective().isUsable)
         // An imported mailbox is an account of its own (spec §7.8); no
         // shortcut: ⌘⇧I is Load Remote Images.
+        Button("Create an Agent Mailbox…") { model.beginAgentMailbox() } // no-help: menu item
         Button("Create an Account from an Archived Mailbox…") { Task { await model.beginImport() } } // no-help: menu item
             .disabled(model.runningImport != nil)
         Button("Accounts Settings…", action: openSettings) // no-help: menu item

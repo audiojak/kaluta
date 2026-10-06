@@ -18,6 +18,7 @@ struct TaskListView: View {
                     ForEach(section.tasks, id: \.id) { task in
                         TaskRow(task: task)
                             .background(TableProbe(keys: keys))
+                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
                             .tag(task.id)
                             .contextMenu { TaskMenu(task: task) }
                     }
@@ -31,8 +32,15 @@ struct TaskListView: View {
         }
         .listStyle(.inset)
         .focused($focused)
-        .onAppear {
+        // Focus comes in from the sidebar (Tab), as for the thread list;
+        // taking it on appear stole the arrows from the sidebar.
+        .onChange(of: model.threadListFocusRequests) {
             focused = true
+            if model.tasks.selectedID == nil, let first = model.tasks.sections().first?.tasks.first {
+                model.selectTask(first.id)
+            }
+        }
+        .onAppear {
             // The list's table view takes ⌫, ↩ and letters before SwiftUI's
             // key handlers see them, so the keys are caught on the way in,
             // only while that table has focus.

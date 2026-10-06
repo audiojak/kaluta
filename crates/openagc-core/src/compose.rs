@@ -347,8 +347,22 @@ impl Core {
     /// still be taken back with [`Core::cancel_send`].
     pub async fn send_draft(&self, id: i64) -> Result<bool, CoreError> {
         self.refuse_if_archive()?;
-        let from = EmailAddress::new(None, &self.own_address().await?);
         let db = self.db()?;
+        // An agent mailbox sends as the agent, within its service's limits
+        // (spec §7.9).
+        let agent = self.effective_account_id().and_then(|a| self.agent_name(&a));
+        if agent.is_some() {
+            let reader = db.clone();
+            let recipients = runtime::run(async move {
+                Ok(reader
+                    .read(move |c| mail_store::drafts::get(c, id))
+                    .await?
+                    .map_or(0, |d| d.to.len() + d.cc.len() + d.bcc.len()))
+            })
+            .await?;
+            self.check_agent_recipients(recipients)?;
+        }
+        let from = EmailAddress::new(agent.as_deref(), &self.own_address().await?);
         let service = self.sync_service();
         let events = self.account_events();
         let hold = self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed) as mail_domain::Millis;

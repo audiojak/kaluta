@@ -31,6 +31,7 @@ struct ThreadListView: NSViewRepresentable {
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.openClicked(_:))
         table.setAccessibilityLabel("Threads")
+        model.focus.register(table, as: .list)
 
         let scroll = NSScrollView()
         scroll.documentView = table
@@ -45,12 +46,19 @@ struct ThreadListView: NSViewRepresentable {
         let store = model.threads
         context.coordinator.update(rows: store.rows, generation: store.generation,
                                    selected: model.selectedThreadIDs.union(model.selectedThreadID.map { [$0] } ?? []))
-        // Tab from the sidebar: the keyboard comes here. Nothing is selected
-        // for it (opening a thread marks it read); ↓ picks the first.
+        // Tab from the sidebar: the keyboard comes here, on the first
+        // message when none is selected (as clicking it would; it is shown
+        // and, after a moment, marked read), else on the one selected.
         if context.coordinator.focusRequests != model.threadListFocusRequests {
             context.coordinator.focusRequests = model.threadListFocusRequests
             if let table = context.coordinator.table {
-                DispatchQueue.main.async { table.window?.makeFirstResponder(table) }
+                DispatchQueue.main.async {
+                    table.window?.makeFirstResponder(table)
+                    if table.selectedRow < 0, table.numberOfRows > 0 {
+                        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                        table.scrollRowToVisible(0)
+                    }
+                }
             }
         }
     }

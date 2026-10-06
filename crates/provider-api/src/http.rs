@@ -168,22 +168,29 @@ async fn classify(response: Response) -> ProviderError {
         }
         403 => ProviderError::Forbidden(message),
         404 => ProviderError::NotFound(message),
+        // An agent-mail service's change feed pruned past the cursor.
+        410 if reasons.iter().any(|r| r == "cursor_expired") => ProviderError::CursorExpired,
         s if s >= 500 => ProviderError::Server { status: s, message },
         _ => ProviderError::Invalid(format!("HTTP {}: {message}", status.as_u16())),
     }
 }
 
-/// `{"error": {"message": "...", "errors": [{"reason": "..."}]}}`
+/// Google's `{"error": {"message": "...", "errors": [{"reason": "..."}]}}`,
+/// or an agent-mail service's `{"error": {"code": "...", "message": "..."}}`
+/// (Primitive), whose string `code` is read as a reason.
 fn google_error(body: &str) -> (String, Vec<String>) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
         return (body.chars().take(200).collect(), vec![]);
     };
     let err = &v["error"];
     let message = err["message"].as_str().unwrap_or_default().to_owned();
-    let reasons = err["errors"]
+    let mut reasons: Vec<String> = err["errors"]
         .as_array()
         .map(|a| a.iter().filter_map(|e| e["reason"].as_str().map(str::to_owned)).collect())
         .unwrap_or_default();
+    if let Some(code) = err["code"].as_str() {
+        reasons.push(code.to_owned());
+    }
     (message, reasons)
 }
 
@@ -329,6 +336,28 @@ mod tests {
             http.empty(1, Priority::Interactive, |c| c.get(format!("{}/forbidden", server.uri()))).await.unwrap_err();
         assert_eq!(err, ProviderError::Forbidden("Insufficient Permission".into()));
         assert_eq!(server.received_requests().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_services_own_error_body_is_read_and_an_expired_feed_is_a_cursor_error() {
+        let server = MockServer::start().await;
+        Mock::given(path("/gone"))
+            .respond_with(ResponseTemplate::new(410).set_body_json(serde_json::json!({
+                "success": false, "error": {"code": "cursor_expired", "message": "Cursor expired"}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(path("/gate"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "success": false, "error": {"code": "gate_denied", "message": "Agent accounts can only reply"}
+            })))
+            .mount(&server)
+            .await;
+        let http = client(Arc::new(StaticToken("t".into())));
+        let err = http.empty(1, Priority::Interactive, |c| c.get(format!("{}/gone", server.uri()))).await.unwrap_err();
+        assert_eq!(err, ProviderError::CursorExpired);
+        let err = http.empty(1, Priority::Interactive, |c| c.get(format!("{}/gate", server.uri()))).await.unwrap_err();
+        assert_eq!(err, ProviderError::Forbidden("Agent accounts can only reply".into()));
     }
 
     #[test]

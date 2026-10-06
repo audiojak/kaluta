@@ -151,7 +151,7 @@ struct SyncStatusTextTests {
         #expect(lines(.syncing(pending: 0)) == ["Downloading Messages", nil])
         #expect(lines(.syncing(pending: 120, headers: 6406), "imap")
             == ["Downloading over IMAP", "headers for 6,406 messages left"])
-        #expect(lines(.offline).first == "Offline")
+        #expect(lines(.offline()).first == "Offline")
         #expect(lines(.idle).isEmpty, "nothing to say when idle")
         #expect(lines(.idle, signIn: true).first == "Not Syncing")
         // IMAP failed: a quiet note (maintainer decision 3).

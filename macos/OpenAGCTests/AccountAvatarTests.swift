@@ -34,7 +34,7 @@ struct AccountMenuTests {
     private func summary(_ id: String, email: String, name: String? = nil, unread: UInt32 = 0,
                          kind: AccountKind = .gmail) -> AccountSummary {
         AccountSummary(id: id, kind: kind, email: email, displayName: name, avatarPath: nil, position: 0, inboxUnread: unread,
-                       imapEnabled: false)
+                       imapEnabled: false, service: nil)
     }
 
     @Test func menuTitlesShowNameAddressAndUnread() {
@@ -68,7 +68,7 @@ struct AccountMenuTests {
 struct ToolbarAvatarTests {
     @Test func theToolbarAvatarKeepsItsColours() {
         let account = AccountSummary(id: "a", kind: .gmail, email: "a@example.com", displayName: "Ada", avatarPath: nil,
-                                     position: 0, inboxUnread: 0, imapEnabled: false)
+                                     position: 0, inboxUnread: 0, imapEnabled: false, service: nil)
         let image = AccountAvatar.toolbarImage(account)
         #expect(!image.isTemplate, "a template image draws as a blank shape in the toolbar")
         #expect(image.size.width >= 20)
@@ -78,13 +78,13 @@ struct ToolbarAvatarTests {
 struct AccountNameTests {
     @Test func theEditableNameIsTheProfileNameOrTheMailboxName() {
         let gmail = AccountSummary(id: "a", kind: .gmail, email: "me@x.com", displayName: "Me", avatarPath: nil,
-                                   position: 0, inboxUnread: 0, imapEnabled: false)
+                                   position: 0, inboxUnread: 0, imapEnabled: false, service: nil)
         #expect(AccountRow.editableName(gmail) == "Me")
         let unnamed = AccountSummary(id: "b", kind: .gmail, email: "me@x.com", displayName: nil, avatarPath: nil,
-                                     position: 0, inboxUnread: 0, imapEnabled: false)
+                                     position: 0, inboxUnread: 0, imapEnabled: false, service: nil)
         #expect(AccountRow.editableName(unnamed) == "")
         let archive = AccountSummary(id: "c", kind: .archive, email: "2019 archive", displayName: nil, avatarPath: nil,
-                                     position: 0, inboxUnread: 0, imapEnabled: false)
+                                     position: 0, inboxUnread: 0, imapEnabled: false, service: nil)
         #expect(AccountRow.editableName(archive) == "2019 archive")
     }
 }

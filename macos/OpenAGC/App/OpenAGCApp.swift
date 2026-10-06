@@ -221,9 +221,10 @@ struct MailCommands: Commands {
             Button("Create Tasks…") { Task { await model.openBulkTasks() } }
                 .disabled(!mailKey || model.isTaskList || model.threads.rows.isEmpty)
             Divider() // menu
+            // From every window, not only the mail window: it comes forward.
             Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k")
-                .disabled(!mailKey)
+                .disabled(!model.isMailOpen)
             Button(model.agent.isPresented ? "Hide Agent" : "Show Agent") { model.agent.isPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(!mailKey)

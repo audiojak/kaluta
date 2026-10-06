@@ -37,7 +37,9 @@ final class AppModel {
 
     enum SyncDisplay: Equatable {
         /// `headers`: messages waiting for headers only (tiered download).
-        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline, error
+        /// `message`: why, in the provider's words, for the footer.
+        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline(message: String? = nil),
+             error(message: String? = nil)
     }
 
     static let demoAccountID = "demo"
@@ -132,7 +134,8 @@ final class AppModel {
             categoriesAvailable: inboxCategoryCounts.contains { $0.id != InboxCategories.primary && $0.totalCount > 0 },
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
-            agentShown: agent.isPresented))
+            agentShown: agent.isPresented,
+            importantAvailable: !isAgentMailbox))
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -284,6 +287,9 @@ final class AppModel {
     var selectedThreadIDs: Set<String> = []
     /// Failed changes that were undone, shown as a banner.
     private(set) var failedChanges: UInt32 = 0
+    /// Messages the provider would not send, back in Drafts with why: the
+    /// list column's banner.
+    private(set) var failedSends: [DraftInfo] = []
 
     /// Opens a composer window; set by the main window, which has SwiftUI's
     /// `openWindow` action.
@@ -309,6 +315,11 @@ final class AppModel {
     /// progress sheet).
     var importDraft: ImportDraft?
     var runningImport: String?
+    /// Create an Agent Mailbox, or verify one, while its sheet is open
+    /// (spec §7.9).
+    var agentMailboxSheet: AgentMailboxRequest?
+    /// Agent mailboxes' plans as the service last reported them.
+    var agentPlans: [String: AgentMailboxPlan] = [:]
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
@@ -552,6 +563,8 @@ final class AppModel {
             needsReauthentication = false
             reauthenticationReason = nil
             backfillTransport = nil
+            if core.isAgent(accountID) { Task { await refreshAgentPlan(accountID) } }
+            await refreshFailedSends()
             // An imported mailbox has no server and no sign-in (spec §7.8).
             if accountID != Self.demoAccountID, !core.isArchive(accountID) {
                 // A Keychain that will not hand over the sign-in (for example
@@ -601,6 +614,14 @@ final class AppModel {
 
     func focusThreadList() {
         threadListFocusRequests += 1
+    }
+
+    /// The main window's Tab loop (spec §14.3).
+    @ObservationIgnored let focus = FocusCycle()
+
+    /// A message is shown in the reader, so it is a stop in the Tab loop.
+    var readerShown: Bool {
+        selectedThreadID != nil && !isGuide && !isFacts
     }
 
     /// Bumped when routines change, so their views reload.
@@ -656,7 +677,12 @@ final class AppModel {
     /// Bumped to move focus to the agent prompt (⌘K).
     private(set) var agentFocusRequests = 0
 
+    /// ⌘K from any window: the mail window comes forward first.
     func focusAgentPrompt() {
+        if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }),
+           !main.isKeyWindow {
+            main.makeKeyAndOrderFront(nil)
+        }
         agentFocusRequests += 1
     }
 
@@ -914,6 +940,19 @@ final class AppModel {
     /// the commands from being offered.
     var isArchive: Bool {
         accounts.first { $0.id == openAccountID }?.kind == .archive
+    }
+
+    /// Read which sends failed (drafts back with an error).
+    func refreshFailedSends() async {
+        let failed = ((try? await core?.drafts()) ?? []).filter { $0.status == .failed }
+        if failed.map(\.id) != failedSends.map(\.id) || failed.map(\.error) != failedSends.map(\.error) {
+            failedSends = failed
+        }
+    }
+
+    /// The account on screen is an agent's mailbox (spec §7.9).
+    var isAgentMailbox: Bool {
+        accounts.first { $0.id == openAccountID }?.kind == .agent
     }
 
     static let cannotSendReason = "This is an imported mailbox; it cannot send mail."
@@ -1363,6 +1402,7 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
+            if mailboxID == "DRAFT" { await refreshFailedSends() }
             // A category tab may have gained its first thread or lost its
             // last: then the Inbox shows another narrowing.
             if selectedMailboxID == "INBOX", mailboxID == "INBOX" || mailboxID.hasPrefix("CATEGORY_"),
@@ -1386,7 +1426,7 @@ final class AppModel {
                 needsReauthentication = true
                 reauthenticationReason = .googleRejected
             }
-        case let .syncStatus(state, pending, headers):
+        case let .syncStatus(state, pending, headers, message):
             refreshTransport()
             switch state {
             case .idle:
@@ -1395,11 +1435,12 @@ final class AppModel {
             case .bootstrapping, .syncing:
                 syncDisplay = pending + headers > 0 || state == .bootstrapping
                     ? .syncing(pending: pending, headers: headers) : .idle
-            case .offline: syncDisplay = .offline
-            case .error: syncDisplay = .error
+            case .offline: syncDisplay = .offline(message: message)
+            case .error: syncDisplay = .error(message: message)
             }
         case let .outboxStatus(_, failed):
             failedChanges = failed
+            await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))
         case let .agent(sessionID, events):

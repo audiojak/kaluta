@@ -309,7 +309,10 @@ header row in caption semibold, secondary. Section titles are
 
 Settings panes are grouped `Form`s. Section headers in title case; footers
 plain (grouped forms already draw them secondary). A button that deletes
-something the user cannot get back sits behind a confirmation.
+something the user cannot get back sits behind a confirmation. Buttons that
+add something sit in their own section above what exists (Accounts: *Add
+an Account* over the account rows), never under a list, where they read
+as acting on the row above them.
 
 ## Behaviour
 
@@ -332,6 +335,13 @@ with an Undo button. Task actions (done, delete) undo the same way.
   task and `⇧T` opens bulk task creation. In the task list the same keys
   act on the task: `↩` edit, `r`/`a`/`f` answer its email, `e` done,
   `c` category, `⌫` delete.
+- **Tab walks the main window's columns**: sidebar → list → message
+  (when one is shown) → search → sidebar; ⌥Tab and ⇧Tab go back. Landing
+  on a list selects its first row when nothing is selected, else keeps
+  the selection. No column takes the keyboard on appearing, so arrowing
+  through the sidebar never loses the arrows to the column beside it.
+- **⌘K asks the agent from every window** (the mail window comes
+  forward); in the composer, ⇧⌘K makes a link.
 - **⌘ keys live in menus**, and act only while the mail window is key.
 - Help tags name the key the user presses where the control is: single
   keys in lower case ("Archive (e)"), menu keys with their symbols ("Move
@@ -402,3 +412,7 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
 | ![Reviewing proposed facts, light](design/facts-proposed-light.png) | ![Reviewing proposed facts, dark](design/facts-proposed-dark.png) |
 | ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |
+| ![Create an Agent Mailbox, light](design/agent-create-light.png) | ![Create an Agent Mailbox, dark](design/agent-create-dark.png) |
+| ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
+| ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
+| ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |

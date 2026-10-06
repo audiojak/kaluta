@@ -8,6 +8,8 @@ import WebKit
 struct MessageWebView: NSViewRepresentable {
     let html: String
     let allowRemoteImages: Bool
+    /// The web view once made; the main window's Tab loop registers it.
+    var onCreated: ((WKWebView) -> Void)?
     /// Inline images by content id; the page reloads when more arrive.
     var inlineImages: [String: InlineImage] = [:]
     /// Open on the last message (the composer's view of a thread) rather
@@ -25,6 +27,7 @@ struct MessageWebView: NSViewRepresentable {
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.scheme)
         config.setURLSchemeHandler(context.coordinator.inlineImages, forURLScheme: CidSchemeHandler.scheme)
         let webView = WKWebView(frame: .zero, configuration: config)
+        onCreated?(webView)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = false

@@ -18,6 +18,10 @@ pub mod keys {
     pub fn refresh_token(account_id: &str) -> String {
         format!("oauth.refresh_token.{account_id}")
     }
+    /// An agent mailbox's key at its service (spec §7.9).
+    pub fn mailbox_api_key(account_id: &str) -> String {
+        format!("mailbox.api_key.{account_id}")
+    }
     pub const CUSTOM_CLIENT_SECRET: &str = "oauth.client_secret.custom";
     pub const ANTHROPIC_API_KEY: &str = "anthropic.api_key";
 }

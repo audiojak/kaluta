@@ -243,6 +243,8 @@ impl SyncEngine {
                 continue;
             }
             let timer = crate::transport::Timer::start();
+            // A send's optimistic copy and the id the provider gave it.
+            let mut adopt: Option<(MessageId, MessageId)> = None;
             let result = match &queued.op {
                 OutboxOp::ModifyLabels { message_ids, add, remove } => {
                     // Before the call: history may report it before we return.
@@ -281,8 +283,12 @@ impl SyncEngine {
                     }
                     result
                 }
-                OutboxOp::Send { raw, thread_id, .. } => match crate::compose::decode_raw(raw) {
-                    Some(bytes) => self.provider().send(&bytes, thread_id.as_ref()).await.map(|_| ()),
+                OutboxOp::Send { raw, thread_id, local_message_id, .. } => match crate::compose::decode_raw(raw) {
+                    Some(bytes) => self.provider().send(&bytes, thread_id.as_ref()).await.map(|sent| {
+                        if self.provider().adopts_sent_copies() {
+                            adopt = Some((local_message_id.clone(), sent));
+                        }
+                    }),
                     None => Err(ProviderError::Invalid("queued message is corrupt".into())),
                 },
                 OutboxOp::SyncDraft { draft_id, from } => self.mirror_draft(*draft_id, from).await?,
@@ -298,7 +304,18 @@ impl SyncEngine {
             let id = queued.id;
             match result {
                 Ok(()) => {
-                    self.db().write(move |tx| outbox::complete(tx, id)).await?;
+                    let changes = self
+                        .db()
+                        .write(move |tx| {
+                            outbox::complete(tx, id)?;
+                            let mut w = MailWriter::new(tx);
+                            if let Some((local, sent)) = &adopt {
+                                w.adopt_local_copy(local, sent)?;
+                            }
+                            w.finish()
+                        })
+                        .await?;
+                    self.publish_changes(&changes);
                     report.sent += 1;
                 }
                 // A message deleted on the server: nothing left to change.
@@ -316,7 +333,11 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "outbox op failed permanently; rolling back");
-                    let message = e.to_string();
+                    // The provider's own words, shown in Drafts and the banner.
+                    let message = match &e {
+                        ProviderError::Forbidden(m) | ProviderError::Invalid(m) => m.clone(),
+                        other => other.to_string(),
+                    };
                     let changes = self.db().write(move |tx| outbox::fail(tx, id, &message)).await?;
                     self.publish_changes(&changes);
                     report.failed += 1;

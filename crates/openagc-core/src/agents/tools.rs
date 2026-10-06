@@ -77,6 +77,10 @@ pub(crate) async fn call(core: &Arc<Core>, session: &str, tool: Tool, arguments:
                 Decision::Deny(reason) => Some(reason.to_string()),
                 Decision::Allow => None,
                 Decision::RequireApproval => {
+                    // An agent mailbox set to send freely (spec §7.9).
+                    if matches!(tool, Tool::Send | Tool::Forward) && core.agent_sends_freely() {
+                        return send_freely(core, session, tool, arguments).await;
+                    }
                     return approve_then_run(core, session, tool, arguments).await;
                 }
             }
@@ -175,6 +179,48 @@ async fn approve_then_run(core: &Arc<Core>, session: &str, tool: Tool, arguments
     };
     let state = if matches!(outcome, Outcome::Ok { .. }) { "done" } else { "failed" };
     core.finish_action(action_id, state, Some(super::approvals::outcome_summary(&outcome))).await;
+    outcome
+}
+
+/// Send or forward from an agent mailbox that sends freely: no approval,
+/// recorded like any send, and what breaks the writing guide is flagged in
+/// the activity log and told to the agent (spec §7.9).
+async fn send_freely(core: &Arc<Core>, session: &str, tool: Tool, arguments: Value) -> Outcome {
+    let proposal = match prepare(core, session, tool, &arguments).await {
+        Ok(p) => p,
+        Err(outcome) => {
+            let id = core.record_action(session, tool, &arguments, "failed").await;
+            core.finish_action(id, "failed", Some(super::approvals::outcome_summary(&outcome))).await;
+            return outcome;
+        }
+    };
+    let action_id = core.record_action(session, tool, &arguments, "allowed").await;
+    let breaches = proposal.summary.split_once(GUIDE_BREACH).map(|(_, b)| b.to_owned());
+    let outcome = match proposal.draft_id {
+        Some(draft) => match core.clone().send_draft(draft).await {
+            Ok(_) => {
+                let mut sent = json!({ "sent": true, "draft_id": draft });
+                if let Some(breaches) = &breaches {
+                    sent["writing_guide_breaches"] = json!(breaches);
+                }
+                Outcome::json(sent)
+            }
+            Err(e) => failed(e),
+        },
+        None => Outcome::error("failed", "no draft to send"),
+    };
+    // A forward that could not go leaves no draft behind, as when declined.
+    if tool == Tool::Forward
+        && !matches!(outcome, Outcome::Ok { .. })
+        && let Some(draft) = proposal.draft_id
+    {
+        let _ = core.delete_draft(draft).await;
+    }
+    let (state, summary) = match &outcome {
+        Outcome::Ok { .. } => ("done", proposal.summary),
+        _ => ("failed", super::approvals::outcome_summary(&outcome)),
+    };
+    core.finish_action(action_id, state, Some(summary)).await;
     outcome
 }
 
@@ -594,13 +640,15 @@ fn draft_target(d: &crate::DraftInfo) -> (crate::guide_render::Target, String) {
 }
 
 /// " · Breaks your writing guide: …" for an approval, or nothing.
+/// Where a proposal's summary says what the draft breaks.
+const GUIDE_BREACH: &str = " · Breaks your writing guide: ";
+
 async fn guide_warning(core: &Arc<Core>, d: &crate::DraftInfo) -> String {
     let (target, text) = draft_target(d);
     match core.check_against_guide(target, &text).await {
-        Ok(failures) if !failures.is_empty() => format!(
-            " · Breaks your writing guide: {}",
-            failures.iter().map(|f| f.message.clone()).collect::<Vec<_>>().join("; ")
-        ),
+        Ok(failures) if !failures.is_empty() => {
+            format!("{GUIDE_BREACH}{}", failures.iter().map(|f| f.message.clone()).collect::<Vec<_>>().join("; "))
+        }
         _ => String::new(),
     }
 }

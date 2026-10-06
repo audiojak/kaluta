@@ -18,6 +18,11 @@ struct AccountAvatar: View {
                         Image(systemName: "archivebox.fill")
                             .font(.system(size: size * 0.45, weight: .semibold))
                             .foregroundStyle(.white)
+                    } else if account.kind == .agent {
+                        // An agent's mailbox (spec §7.9).
+                        Image(systemName: "sparkles")
+                            .font(.system(size: size * 0.45, weight: .semibold))
+                            .foregroundStyle(.white)
                     } else {
                         Text(AccountAvatar.initials(name: account.displayName, email: account.email))
                             .font(.system(size: size * 0.42, weight: .semibold))
