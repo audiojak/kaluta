@@ -144,6 +144,15 @@ enum Tone {
         "review": .systemIndigo, "admin": .systemBrown, "follow up": .systemCyan,
     ]
 
+    /// The dot on a sidebar entry with something new since the user last
+    /// looked (Analysis, spec §14.10): red, as app badges are, so it reads
+    /// as "new", not as unread mail.
+    static let newItems = Color.red
+    /// Words the user added or kept where the AI wrote something else, in
+    /// a side-by-side comparison; the AI's replaced words are struck
+    /// through in the secondary colour instead.
+    static let changedText = Color.accentColor.opacity(0.22)
+
     /// A highlighted (keyboard-selected) item inside glass.
     static let highlight = AnyShapeStyle(.tint.opacity(0.25))
     /// A small filled control resting on the background (attachments).

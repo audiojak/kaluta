@@ -66,10 +66,9 @@ extension AppModel {
         guideBannerAccount = nil
     }
 
+    /// The learning run's decisions wait in Analysis (spec §14.10).
     func openGuideDecisionsNow() {
-        guidePrompt = nil
-        selectedMailboxID = Self.guideMailboxID
-        showGuideDecisions()
+        openAnalysis(learning: true)
     }
 }
 

@@ -240,7 +240,7 @@ pub fn set_meta(tx: &Transaction<'_>, key: &str, value: &str) -> StoreResult<()>
 // MARK: Proposals
 
 /// A proposed change, as stored.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ProposalRow {
     pub id: i64,
     /// `guide` or `fact`.
@@ -290,7 +290,7 @@ fn proposal_row(r: &Row<'_>) -> rusqlite::Result<ProposalRow> {
 }
 
 /// One pair's evidence for a proposal.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct EvidenceRow {
     pub composition_id: i64,
     pub sent_quote: String,
@@ -413,6 +413,91 @@ pub fn set_proposal_status(tx: &Transaction<'_>, id: i64, status: &str, now: Mil
     tx.prepare_cached("UPDATE analysis_proposals SET status = ?2, decided_at = ?3, updated_at = ?4 WHERE id = ?1")?
         .execute(params![id, status, decided, now])?;
     Ok(())
+}
+
+/// A proposal and its evidence, for undo.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProposalSnapshot {
+    pub proposal: ProposalRow,
+    pub evidence: Vec<EvidenceRow>,
+}
+
+pub fn snapshot_proposal(conn: &Connection, id: i64) -> StoreResult<Option<ProposalSnapshot>> {
+    Ok(match proposal(conn, id)? {
+        Some(p) => Some(ProposalSnapshot { evidence: evidence(conn, id)?, proposal: p }),
+        None => None,
+    })
+}
+
+/// Put proposals back as the snapshots have them (undo and redo).
+pub fn restore_proposals(tx: &Transaction<'_>, snapshots: &[ProposalSnapshot], now: Millis) -> StoreResult<()> {
+    for s in snapshots {
+        let p = &s.proposal;
+        tx.prepare_cached(
+            "INSERT OR REPLACE INTO analysis_proposals (id, target, op, entry_id, category, kind, statement,
+               scope_json, match_key, status, support, contradicts_entry_id, payload_json, created_at, updated_at,
+               shown_at, decided_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        )?
+        .execute(params![
+            p.id,
+            p.target,
+            p.op,
+            p.entry_id,
+            p.category,
+            p.kind,
+            p.statement,
+            p.scope_json,
+            p.match_key,
+            p.status,
+            p.support,
+            p.contradicts_entry_id,
+            p.payload_json,
+            p.created_at,
+            p.updated_at,
+            p.shown_at,
+            p.decided_at
+        ])?;
+        tx.prepare_cached("DELETE FROM analysis_evidence WHERE proposal_id = ?1")?.execute([p.id])?;
+        let mut add = tx.prepare_cached(
+            "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for e in &s.evidence {
+            add.execute(params![p.id, e.composition_id, e.sent_quote, e.ai_quote, now])?;
+        }
+    }
+    Ok(())
+}
+
+/// Open proposals a pair is evidence for.
+pub fn pair_proposals(conn: &Connection, composition_id: i64) -> StoreResult<Vec<i64>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT p.id FROM analysis_proposals p JOIN analysis_evidence e ON e.proposal_id = p.id
+             WHERE e.composition_id = ?1 AND p.status IN ('watching', 'proposed') ORDER BY p.id",
+        )?
+        .query_map([composition_id], |r| r.get(0))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Leave one pair out of every open proposal ("Ignore Edits to This
+/// Message"); returns the proposals it was in.
+pub fn drop_pair(tx: &Transaction<'_>, composition_id: i64) -> StoreResult<Vec<i64>> {
+    let ids = pair_proposals(tx, composition_id)?;
+    for id in &ids {
+        tx.prepare_cached("DELETE FROM analysis_evidence WHERE proposal_id = ?1 AND composition_id = ?2")?
+            .execute(params![id, composition_id])?;
+        tx.prepare_cached(
+            "UPDATE analysis_proposals SET support = (SELECT COUNT(*) FROM analysis_evidence WHERE proposal_id = ?1)
+             WHERE id = ?1",
+        )?
+        .execute([id])?;
+        // Nothing left behind it: back to watching, out of the queue.
+        tx.prepare_cached("UPDATE analysis_proposals SET status = 'watching' WHERE id = ?1 AND support = 0")?
+            .execute([id])?;
+    }
+    Ok(ids)
 }
 
 /// Count drafts that applied an entry: sent as written, or changed

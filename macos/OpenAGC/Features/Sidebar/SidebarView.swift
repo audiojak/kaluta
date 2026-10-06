@@ -27,10 +27,24 @@ struct SidebarView: View {
                     .badge(model.tasks.dueCount)
                     .tag(AppModel.tasksMailboxID)
                     .hoverHelp("Tasks you made from email, by when they are due")
-                // The writing guide AI drafts follow (spec §14.9); the badge
-                // counts decisions waiting.
+                // Proposed changes to the guide (spec §14.10), once the
+                // account has learned; a dot while something is new.
+                if model.showsAnalysis {
+                    Label {
+                        HStack(spacing: Space.s) {
+                            Text("Analysis")
+                            if model.analysis.unseen, !model.isAnalysis { NewDot() }
+                        }
+                    } icon: {
+                        Image(systemName: "sparkle.magnifyingglass")
+                    }
+                    .badge(model.analysis.waiting)
+                    .tag(AppModel.analysisMailboxID)
+                    .hoverHelp("Changes to your writing guide, learned from how you edit AI drafts")
+                }
+                // The writing guide AI drafts follow (spec §14.9); its
+                // decisions wait in Analysis.
                 Label("Writing Guide", systemImage: "text.book.closed")
-                    .badge(model.guideDecisionsWaiting)
                     .tag(AppModel.guideMailboxID)
                     .hoverHelp("The rules and style your AI drafts follow")
             }
@@ -75,7 +89,7 @@ struct SidebarView: View {
             keys.start { event in
                 // Tab (not ⇧Tab) from a mailbox: into its list of threads.
                 guard event.keyCode == 48, !event.modifierFlags.contains(.shift),
-                      !model.isGuide, !model.isTaskList else { return false }
+                      !model.isGuide, !model.isTaskList, !model.isAnalysis else { return false }
                 model.focusThreadList()
                 return true
             }

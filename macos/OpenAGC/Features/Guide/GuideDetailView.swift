@@ -2,14 +2,12 @@ import SwiftUI
 
 /// The Writing Guide section's detail column: the chosen category's
 /// entries, read like a document, with their scope and the quotes from the
-/// user's mail behind them; or the decisions waiting.
+/// user's mail behind them. Decisions wait in Analysis (spec §14.10).
 struct GuideDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.guide.showsDecisions {
-            GuideDecisionsView()
-        } else if let category = model.guide.selected {
+        if let category = model.guide.selected {
             GuideCategoryDetail(category: category)
         } else {
             ContentUnavailableView("No Category Selected", systemImage: "text.book.closed")

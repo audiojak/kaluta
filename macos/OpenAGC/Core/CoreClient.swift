@@ -672,6 +672,45 @@ final class CoreClient: Sendable {
         try await call { try await core.analysisProgress() }
     }
 
+    func analysisQueue() async throws(CoreClientError) -> AnalysisQueue {
+        try await call { try await core.analysisQueue() }
+    }
+
+    /// The user opened Analysis: its dot clears.
+    func analysisSeen() async throws(CoreClientError) {
+        try await call { try await core.analysisSeen() }
+    }
+
+    func analysisPairs(_ proposalID: Int64) async throws(CoreClientError) -> [AnalysisPairInfo] {
+        try await call { try await core.analysisPairs(proposalId: proposalID) }
+    }
+
+    /// Accept or reject proposals as one change; undone with `undoGuideChange`.
+    func decideAnalysisProposals(_ ids: [Int64], accept: Bool) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.decideAnalysisProposals(ids: ids, accept: accept) }
+    }
+
+    func acceptAnalysisProposal(_ id: Int64, as fields: GuideEntryFields) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.acceptAnalysisProposalEdited(id: id, fields: fields) }
+    }
+
+    func ignoreAnalysisPair(_ compositionID: Int64) async throws(CoreClientError) -> GuideChange {
+        try await call { try await core.ignoreAnalysisPair(compositionId: compositionID) }
+    }
+
+    func analysisMetrics() async throws(CoreClientError) -> AnalysisMetrics {
+        try await call { try await core.analysisMetrics() }
+    }
+
+    /// Snapshots: a few reviewed pairs and proposals on the demo account.
+    func debugSeedAnalysis() async throws(CoreClientError) {
+        try await call { try await core.debugSeedAnalysis() }
+    }
+
+    func guideEntryHealth() async throws(CoreClientError) -> [GuideEntryHealth] {
+        try await call { try await core.guideEntryHealth() }
+    }
+
     /// Proposals ready to decide (from finished runs only).
     func guideDecisions() async throws(CoreClientError) -> [GuideEntry] {
         try await call { try await core.guideDecisions() }
@@ -1080,6 +1119,12 @@ typealias AudienceStatus = OpenAGCCore.AudienceStatus
 typealias GuideProgress = OpenAGCCore.GuideProgress
 typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
 typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
+typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
+typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
+typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
+typealias AnalysisMetrics = OpenAGCCore.AnalysisMetrics
+typealias AnalysisOp = OpenAGCCore.AnalysisOp
+typealias GuideEntryHealth = OpenAGCCore.GuideEntryHealth
 typealias AnalysisRunInfo = OpenAGCCore.AnalysisRunInfo
 typealias GuideRunKind = OpenAGCCore.GuideRunKind
 typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
@@ -1131,6 +1176,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case guideChanged
     case guideProgress(GuideProgress)
     case analysisProgress(AnalysisProgress)
+    case analysisChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1218,6 +1264,8 @@ private extension CoreClientEvent {
             self = .guideProgress(progress)
         case let .analysisProgress(progress):
             self = .analysisProgress(progress)
+        case .analysisChanged:
+            self = .analysisChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

@@ -529,7 +529,18 @@ impl Core {
     /// Apply edits as one change in one transaction: recorded for exact
     /// undo, and a new version when the accepted guide changed.
     pub(crate) async fn apply_edits(&self, edits: Vec<GuideEdit>, reason: String) -> Result<GuideChange, CoreError> {
-        if edits.is_empty() {
+        self.apply_edits_with(edits, reason, None).await
+    }
+
+    /// Apply edits and an Analysis step (deciding proposals, leaving a pair
+    /// out) as one change: undo puts both back (spec §14.10, ADR 0006).
+    pub(crate) async fn apply_edits_with(
+        &self,
+        edits: Vec<GuideEdit>,
+        reason: String,
+        step: Option<AnalysisStep>,
+    ) -> Result<GuideChange, CoreError> {
+        if edits.is_empty() && step.is_none() {
             return Err(invalid("nothing to change"));
         }
         // Validate before touching the store.
@@ -608,7 +619,18 @@ impl Core {
                             after.push(s);
                         }
                     }
-                    let change_id = store::record_change(tx, &reason, &before, &after, now)?;
+                    let analysis = match &step {
+                        None => None,
+                        Some(step) => Some(step.apply(tx, now)?),
+                    };
+                    let change_id = store::record_change_with(
+                        tx,
+                        &reason,
+                        &before,
+                        &after,
+                        analysis.as_ref().map(|(b, a)| (b.as_str(), a.as_str())),
+                        now,
+                    )?;
                     let accepted = |v: &[Snapshot]| v.iter().any(|s| s.entry.status == GuideStatus::Accepted.as_str());
                     let version = if accepted(&before) || accepted(&after) {
                         store::record_version(tx, &reason, now)?
@@ -637,6 +659,11 @@ impl Core {
                 ids.sort_unstable();
                 ids.dedup();
                 store::restore(tx, &ids, if undo { &before } else { &after })?;
+                if let Some((was, is)) = store::change_analysis(tx, change_id)? {
+                    let snapshots: Vec<mail_store::analysis::ProposalSnapshot> =
+                        serde_json::from_str(if undo { &was } else { &is })?;
+                    mail_store::analysis::restore_proposals(tx, &snapshots, now)?;
+                }
                 store::record_version(tx, &format!("{} {reason}", if undo { "undo" } else { "redo" }), now)?;
                 Ok(())
             })
@@ -645,7 +672,48 @@ impl Core {
         })
         .await?;
         self.guide_changed();
+        self.analysis_changed();
         Ok(())
+    }
+}
+
+/// What a guide change also does in Analysis.
+#[derive(Debug, Clone)]
+pub(crate) enum AnalysisStep {
+    /// Mark proposals accepted or rejected.
+    Decide { ids: Vec<i64>, status: &'static str },
+    /// Leave a pair out of every open proposal.
+    IgnorePair(i64),
+}
+
+impl AnalysisStep {
+    /// Do it, returning the proposals it touched before and after (JSON).
+    fn apply(&self, tx: &mail_store::Transaction<'_>, now: i64) -> mail_store::StoreResult<(String, String)> {
+        use mail_store::analysis;
+        let ids = match self {
+            Self::Decide { ids, .. } => ids.clone(),
+            Self::IgnorePair(pair) => analysis::pair_proposals(tx, *pair)?,
+        };
+        let snapshots = |tx: &mail_store::Transaction<'_>| -> mail_store::StoreResult<Vec<analysis::ProposalSnapshot>> {
+            let mut out = Vec::new();
+            for id in &ids {
+                out.extend(analysis::snapshot_proposal(tx, *id)?);
+            }
+            Ok(out)
+        };
+        let before = snapshots(tx)?;
+        match self {
+            Self::Decide { ids, status } => {
+                for id in ids {
+                    analysis::set_proposal_status(tx, *id, status, now)?;
+                }
+            }
+            Self::IgnorePair(pair) => {
+                analysis::drop_pair(tx, *pair)?;
+            }
+        }
+        let after = snapshots(tx)?;
+        Ok((serde_json::to_string(&before)?, serde_json::to_string(&after)?))
     }
 }
 

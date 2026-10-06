@@ -165,7 +165,8 @@ final class AppModel {
     /// narrowed to Important when that switch is on and to the category
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
-        guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID else { return nil }
+        guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID,
+              id != Self.analysisMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -325,6 +326,8 @@ final class AppModel {
     let tasks: TaskListStore
     /// The writing guide (spec §14.9).
     let guide: GuideStore
+    /// The Analysis section's queue (spec §14.10).
+    let analysis: AnalysisStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -355,6 +358,7 @@ final class AppModel {
         routines = RoutinesStore(core: core)
         tasks = TaskListStore(core: core)
         guide = GuideStore(core: core)
+        analysis = AnalysisStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -518,6 +522,7 @@ final class AppModel {
             guideProgress = try? await core.guideProgress()
             if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
             analysisProgress = try? await core.analysisProgress()
+            await analysis.load()
             await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -587,6 +592,8 @@ final class AppModel {
     var guideProgress: GuideProgress?
     /// The daily review's state for the open account (spec §14.10).
     var analysisProgress: AnalysisProgress?
+    /// Why the last Analysis action failed, shown in its header.
+    var analysisError: String?
     /// A sheet of the Writing Guide section, while open.
     var guideSheet: GuideSheet?
     /// Why the last guide action failed, shown in the section.
@@ -1264,6 +1271,7 @@ final class AppModel {
 
         if isTaskList { Task { await tasks.load() } }
         if isGuide { Task { await guide.load() } }
+        if isAnalysis { Task { await analysisShown() } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1368,6 +1376,8 @@ final class AppModel {
         case .guideChanged:
             guideRevision += 1
             await guide.load()
+            // Learning decisions are counted in Analysis.
+            await analysis.load()
         case let .guideProgress(progress):
             let finished = guideProgress?.run?.status == .running && progress.run?.status == .done
             guideProgress = progress
@@ -1375,12 +1385,19 @@ final class AppModel {
                 await guide.load()
                 let waiting = Int(progress.decisionsTotal) - Int(progress.decisionsDone)
                 notifier.announceGuide(decisions: waiting, accountID: tagged.accountID)
-                if waiting > 0, guideSheet == nil, !(isGuide && guide.showsDecisions) {
+                // The first finished run opens Analysis, where its decisions wait.
+                analysisProgress = try? await core?.analysisProgress()
+                await analysis.load()
+                if waiting > 0, guideSheet == nil, !isAnalysis {
                     guidePrompt = .finished(decisions: waiting)
                 }
             }
         case let .analysisProgress(progress):
+            let finished = analysisProgress?.run?.status == .running && progress.run?.status == .done
             analysisProgress = progress
+            if finished { await analysisChanged() }
+        case .analysisChanged:
+            await analysisChanged()
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

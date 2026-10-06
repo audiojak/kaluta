@@ -152,6 +152,8 @@ pub enum CoreEvent {
     GuideProgress {
         progress: crate::guide_run::GuideProgress,
     },
+    /// Proposals in Analysis were added, decided or seen; re-read them.
+    AnalysisChanged,
     /// The daily review moved on, paused or finished (spec §14.10).
     AnalysisProgress {
         progress: crate::analysis_run::AnalysisProgress,

@@ -41,6 +41,18 @@ struct PaneDivider: View {
     }
 }
 
+/// The small dot after a sidebar entry with something new (`Tone.newItems`).
+struct NewDot: View {
+    var body: some View {
+        Circle()
+            .fill(Tone.newItems)
+            .frame(width: Self.size, height: Self.size)
+            .accessibilityLabel("New")
+    }
+
+    private static let size: CGFloat = 7
+}
+
 /// A notice or warning across a column: an icon, a line of text and an
 /// optional action (sign in again, cannot send from here).
 struct Banner<Actions: View>: View {

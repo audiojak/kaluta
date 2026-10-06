@@ -2504,10 +2504,14 @@ side snippets of what the AI wrote and what the user sent, with the
 differing words marked (*Why?*); a fact proposal shows the value and the
 quote it came from. Return accepts, ⌫ rejects, e edits; *Accept All in
 Group* takes a group at once. Each is one change on the account's undo
-stack (§14.6a), and accepted guide changes make a new guide version. A
-rejected proposal offers *Don't Suggest This Again*; any pair offers
-*Ignore Edits to This Message*. A *Facts* tab sits beside the proposals
-(§14.11).
+stack (§14.6a), recorded with the guide's own change so one Undo puts the
+guide and the proposal back, and accepted guide changes make a new guide
+version. A rejected proposal is never raised again (rejecting is *Don't
+Suggest This Again*); any pair offers *Ignore Edits to This Message*,
+which takes it out of every open proposal. The learning runs' decisions
+are one row, *From learning*, whose detail is the decisions flow of
+§14.9. The sidebar entry's badge counts what waits; the Writing Guide's
+badge is gone. A *Facts* tab sits beside the proposals (§14.11).
 
 The header says when the review last ran, what it examined (pairs
 matched, unmatched), the next run, *Run Now* and *Pause*, and the progress

@@ -485,7 +485,8 @@ struct GuidePromptTests {
         }
         #expect(decisions > 0)
         model.openGuideDecisionsNow()
-        #expect(model.isGuide && model.guide.showsDecisions && model.guidePrompt == nil)
+        // The decisions wait in Analysis (spec §14.10).
+        #expect(model.isAnalysis && model.analysis.selection == AnalysisStore.learningTag && model.guidePrompt == nil)
     }
 }
 

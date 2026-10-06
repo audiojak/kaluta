@@ -10,9 +10,12 @@ enum GuideSheet: Identifiable {
     case interview(only: String?)
     case change
     case merge
+    /// An Analysis proposal, edited before it is accepted.
+    case proposal(AnalysisProposalInfo)
 
     var id: String {
         switch self {
+        case let .proposal(p): "proposal-\(p.id)"
         case .learn: "learn"
         case let .interview(only): "interview-\(only ?? "all")"
         case .change: "change"
@@ -69,10 +72,11 @@ struct GuideHeader: View {
                     .disabled(model.guideRunActive)
                     .hoverHelp(model.guideRunActive ? "A learning run is in progress"
                         : "Analyse your sent mail to propose rules and guidelines")
-                if model.guideDecisionsWaiting > 0 {
-                    Button("Decisions (\(model.guideDecisionsWaiting))") { model.showGuideDecisions() }
-                        .buttonStyle(.borderedProminent)
-                        .hoverHelp("Accept, edit or reject what the analysis proposed")
+                if model.analysis.waiting > 0 {
+                    Button(model.analysis.waiting == 1 ? "1 decision waiting in Analysis"
+                           : "\(model.analysis.waiting) decisions waiting in Analysis") { model.openAnalysis(learning: model.analysis.learningDecisions > 0) }
+                        .buttonStyle(.link)
+                        .hoverHelp("Accept, edit or reject what was learned, in Analysis")
                 }
                 Spacer(minLength: 0)
                 Menu {
@@ -248,11 +252,6 @@ struct GuideRunFooter: View {
 extension AppModel {
     func showGuideCategory(_ id: String?) {
         guide.selectedCategory = id
-        guide.showsDecisions = false
-    }
-
-    func showGuideDecisions() {
-        guide.showsDecisions = true
     }
 
     func resumeGuideRun() async {

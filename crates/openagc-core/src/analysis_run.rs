@@ -420,6 +420,7 @@ impl Core {
                 break;
             }
             if self.merge_compare(&pairs, &entries, &answer).await? {
+                self.analysis_changed();
                 break;
             }
             if attempt == 2 {

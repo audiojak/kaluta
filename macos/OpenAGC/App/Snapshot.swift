@@ -139,7 +139,18 @@ enum Snapshot {
                 model.selectedMailboxID = AppModel.guideMailboxID
                 model.guideProgress = try? await core.guideProgress()
                 await model.guide.load()
-                if guide == "decisions" { model.showGuideDecisions() } else { model.showGuideCategory("A1") }
+                if guide == "decisions" {
+                    model.openAnalysis(learning: true)
+                } else if guide == "analysis" {
+                    // A day of reviews: proposals from edited AI drafts (spec §14.10).
+                    try? await core.debugSeedAnalysis()
+                    model.analysisProgress = try? await core.analysisProgress()
+                    model.openAnalysis()
+                    await model.analysis.load()
+                    model.analysis.selection = model.analysis.proposals.first.map(AnalysisStore.tag)
+                } else {
+                    model.showGuideCategory("A1")
+                }
                 try? await Task.sleep(for: .milliseconds(800))
             }
             // The writing guide's own prompts (spec §14.9): banner, invite, ready.

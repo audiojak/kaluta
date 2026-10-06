@@ -258,10 +258,31 @@ pub fn record_change(
     after: &[Snapshot],
     now: Millis,
 ) -> StoreResult<i64> {
+    record_change_with(tx, reason, before, after, None, now)
+}
+
+/// Record a change that also decided Analysis proposals: their snapshots
+/// before and after (JSON), put back with the entries on undo.
+pub fn record_change_with(
+    tx: &Transaction<'_>,
+    reason: &str,
+    before: &[Snapshot],
+    after: &[Snapshot],
+    analysis: Option<(&str, &str)>,
+    now: Millis,
+) -> StoreResult<i64> {
     tx.prepare_cached(
-        "INSERT INTO guide_changes (reason, before_json, after_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO guide_changes (reason, before_json, after_json, created_at, analysis_before, analysis_after)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?
-    .execute(params![reason, serde_json::to_string(before)?, serde_json::to_string(after)?, now])?;
+    .execute(params![
+        reason,
+        serde_json::to_string(before)?,
+        serde_json::to_string(after)?,
+        now,
+        analysis.map(|a| a.0),
+        analysis.map(|a| a.1)
+    ])?;
     let id = tx.last_insert_rowid();
     // Keep the last 200 changes: far more than the undo stack's 50.
     tx.prepare_cached("DELETE FROM guide_changes WHERE id <= ?1")?.execute([id - 200])?;
@@ -280,6 +301,18 @@ pub fn get_change(conn: &Connection, id: i64) -> StoreResult<Option<Change>> {
     Ok(match row {
         Some((reason, before, after)) => Some((reason, serde_json::from_str(&before)?, serde_json::from_str(&after)?)),
         None => None,
+    })
+}
+
+/// The Analysis proposals a change decided, before and after (JSON).
+pub fn change_analysis(conn: &Connection, id: i64) -> StoreResult<Option<(String, String)>> {
+    let row: Option<(Option<String>, Option<String>)> = conn
+        .prepare_cached("SELECT analysis_before, analysis_after FROM guide_changes WHERE id = ?1")?
+        .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    Ok(match row {
+        Some((Some(before), Some(after))) => Some((before, after)),
+        _ => None,
     })
 }
 

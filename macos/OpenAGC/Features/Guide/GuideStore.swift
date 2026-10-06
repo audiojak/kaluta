@@ -14,8 +14,6 @@ final class GuideStore {
     private(set) var decisions: [GuideEntry] = []
     private(set) var loaded = false
     var selectedCategory: String? = "A1"
-    /// The detail column shows the decisions instead of a category.
-    var showsDecisions = false
     private(set) var error: String?
 
     @ObservationIgnored private let core: CoreClient?

@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Decisions (spec §14.9): what a finished analysis proposed, by category,
+/// Decisions (spec §14.9), in Analysis (§14.10): what a finished learning
+/// run proposed, by category,
 /// each with the quotes from the user's mail behind it. Accept (↩), edit
 /// (e) or reject (⌫); every decision is saved as it is made and can be
 /// undone, so the user can leave and come back. A proposal that mail
@@ -57,12 +58,7 @@ struct GuideDecisionsView: View {
 
     private func header(_ waiting: Int) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            HStack {
-                Text("Decisions").font(TypeRole.title)
-                Spacer()
-                Button("Done") { model.guide.showsDecisions = false }
-                    .hoverHelp("Back to the guide; the rest wait for you")
-            }
+            Text("Decisions from Learning").font(TypeRole.title)
             Text(waiting == 0 ? "Nothing waiting"
                  : "\(waiting) waiting. Return accepts, ⌫ rejects, e edits; each can be undone.")
                 .foregroundStyle(.secondary)
