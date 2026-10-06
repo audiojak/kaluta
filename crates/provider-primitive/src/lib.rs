@@ -430,6 +430,17 @@ fn angled(id: &str) -> String {
     format!("<{}>", strip_angles(id))
 }
 
+/// Primitive refused a recipient. Even verified, a free account writes only
+/// to people who wrote to it first, the email it was verified with, its own
+/// verified domains, Primitive addresses and domains that opt in.
+fn not_allowed(to: &str) -> String {
+    format!(
+        "Primitive won't send to {to}: this mailbox may only write to people who have written to it first, to \
+         the email it was verified with, and to domains you have added to it. Have {to} write to it first, or \
+         add their domain under Use Your Own Domain if it is yours"
+    )
+}
+
 /// The service's message for a send it cannot make.
 pub const ONE_RECIPIENT_ONLY: &str = "Primitive sends to one recipient per message; remove the others";
 
@@ -637,7 +648,14 @@ impl MailProvider for PrimitiveProvider {
         let sent: wire::Envelope<wire::SendResult> = self
             .http
             .json(1, Priority::Interactive, |c| c.post(&url).header("Idempotency-Key", &key).json(&body))
-            .await?;
+            .await
+            .map_err(|e| match e {
+                // Primitive lists every gate it tried; say what it means.
+                ProviderError::Forbidden(m) if m.contains("recipient-scope gates") => {
+                    ProviderError::Forbidden(not_allowed(body["to"].as_str().unwrap_or("them")))
+                }
+                other => other,
+            })?;
         if !sent.data.rejected.is_empty() {
             return Err(ProviderError::Forbidden(format!(
                 "Primitive did not accept {} ({})",

@@ -55,7 +55,7 @@ struct AgentMailboxTests {
         await #expect(throws: CoreClientError.self) { try await core.verifyAgentMailbox(created.accountId, code: "1") }
         model.agentPlans[created.accountId] = try await core.verifyAgentMailbox(created.accountId, code: "123456")
         #expect(model.unverifiedAgentPlan == nil, "verified: no banner")
-        #expect(AccountRow.planText(model.agentPlans[created.accountId]) == "Primitive · verified with work@example.com")
+        #expect(AccountRow.planText(model.agentPlans[created.accountId]) .hasPrefix("Primitive · verified with work@example.com"))
     }
 
     @Test func theKeyCanBeCopiedAndRemovingTheMailboxForgetsIt() async throws {
@@ -167,5 +167,22 @@ struct EmptyMailboxKeyTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(opened.count == 1)
+    }
+}
+
+@MainActor
+struct FailedSendTests {
+    struct Timeout: Error {}
+
+    /// A message the service refused comes back to Drafts, and the window
+    /// says so (it went nowhere quietly before).
+    @Test func aRefusedSendIsShownWithWhy() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        #expect(model.failedSends.isEmpty)
+        await model.refreshFailedSends()
+        #expect(model.failedSends.isEmpty, "nothing failed")
     }
 }

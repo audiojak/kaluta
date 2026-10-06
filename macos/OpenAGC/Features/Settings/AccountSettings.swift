@@ -170,7 +170,11 @@ struct AccountRow: View {
     /// An agent mailbox's plan in a line.
     static func planText(_ plan: AgentMailboxPlan?) -> String {
         guard let plan else { return "Primitive" }
-        if plan.verified { return "Primitive · verified" + (plan.email.map { " with \($0)" } ?? "") }
+        if plan.verified {
+            // Primitive still limits whom it writes to (spec §7.9).
+            return "Primitive · verified" + (plan.email.map { " with \($0)" } ?? "")
+                + " · writes to you, people who wrote first and your own domains"
+        }
         return "Primitive · not verified: replies only, \(plan.sendPerHour) an hour"
     }
 
@@ -257,7 +261,7 @@ struct AccountRow: View {
                 HStack {
                     if model.agentPlans[account.id]?.verified == false {
                         Button("Verify…") { model.beginAgentVerification(account.id) }
-                            .hoverHelp("Verify the mailbox with your email to lift its limits")
+                            .hoverHelp("Verify the mailbox with your email to raise its limits and let it write to you")
                     }
                     Button("Use Your Own Domain…") { model.beginAgentDomain(account.id) }
                         .hoverHelp("Give the agent an address on a domain you own, such as agents.example.com")

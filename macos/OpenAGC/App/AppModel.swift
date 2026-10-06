@@ -285,6 +285,9 @@ final class AppModel {
     var selectedThreadIDs: Set<String> = []
     /// Failed changes that were undone, shown as a banner.
     private(set) var failedChanges: UInt32 = 0
+    /// Messages the provider would not send, back in Drafts with why: the
+    /// list column's banner.
+    private(set) var failedSends: [DraftInfo] = []
 
     /// Opens a composer window; set by the main window, which has SwiftUI's
     /// `openWindow` action.
@@ -559,6 +562,7 @@ final class AppModel {
             reauthenticationReason = nil
             backfillTransport = nil
             if core.isAgent(accountID) { Task { await refreshAgentPlan(accountID) } }
+            await refreshFailedSends()
             // An imported mailbox has no server and no sign-in (spec §7.8).
             if accountID != Self.demoAccountID, !core.isArchive(accountID) {
                 // A Keychain that will not hand over the sign-in (for example
@@ -921,6 +925,14 @@ final class AppModel {
     /// the commands from being offered.
     var isArchive: Bool {
         accounts.first { $0.id == openAccountID }?.kind == .archive
+    }
+
+    /// Read which sends failed (drafts back with an error).
+    func refreshFailedSends() async {
+        let failed = ((try? await core?.drafts()) ?? []).filter { $0.status == .failed }
+        if failed.map(\.id) != failedSends.map(\.id) || failed.map(\.error) != failedSends.map(\.error) {
+            failedSends = failed
+        }
     }
 
     /// The account on screen is an agent's mailbox (spec §7.9).
@@ -1375,6 +1387,7 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
+            if mailboxID == "DRAFT" { await refreshFailedSends() }
             // A category tab may have gained its first thread or lost its
             // last: then the Inbox shows another narrowing.
             if selectedMailboxID == "INBOX", mailboxID == "INBOX" || mailboxID.hasPrefix("CATEGORY_"),
@@ -1412,6 +1425,7 @@ final class AppModel {
             }
         case let .outboxStatus(_, failed):
             failedChanges = failed
+            await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))
         case let .agent(sessionID, events):

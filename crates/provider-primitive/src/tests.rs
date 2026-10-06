@@ -468,3 +468,24 @@ async fn a_domain_that_receives_mail_elsewhere_suggests_a_subdomain() {
         ProviderError::Invalid(DOMAIN_TAKEN.into())
     );
 }
+
+#[tokio::test]
+async fn a_refused_recipient_is_said_in_plain_words() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/send-mail"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "success": false, "error": { "code": "recipient_not_allowed",
+            "message": "cannot send to john@actual.ai. All granted recipient-scope gates denied:\n- send_to_known_addresses: ..." }
+        })))
+        .mount(&server)
+        .await;
+    let raw = "From: scout@abc.primitive.email\r\nTo: john@actual.ai\r\nSubject: x\r\nMessage-ID: <x@y>\r\n\r\nx\r\n";
+    match provider(&server).send(raw.as_bytes(), None).await.unwrap_err() {
+        ProviderError::Forbidden(m) => {
+            assert!(m.starts_with("Primitive won't send to john@actual.ai:"), "{m}");
+            assert!(m.contains("written to it first"));
+        }
+        other => panic!("{other:?}"),
+    }
+}

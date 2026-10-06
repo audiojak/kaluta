@@ -333,7 +333,11 @@ impl SyncEngine {
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "outbox op failed permanently; rolling back");
-                    let message = e.to_string();
+                    // The provider's own words, shown in Drafts and the banner.
+                    let message = match &e {
+                        ProviderError::Forbidden(m) | ProviderError::Invalid(m) => m.clone(),
+                        other => other.to_string(),
+                    };
                     let changes = self.db().write(move |tx| outbox::fail(tx, id, &message)).await?;
                     self.publish_changes(&changes);
                     report.failed += 1;

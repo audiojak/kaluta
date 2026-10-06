@@ -1108,7 +1108,12 @@ No agent is involved: setup is a fixed sequence of calls in the core.
 **Verification.** Until verified, a Primitive account is on its `agent`
 plan: it can only reply to addresses that have already sent it
 authenticated mail, at most 10 sends an hour and 50 a day. Verifying moves
-it to the free `developer` plan.
+it to the free `developer` plan, which still sends only to: people who
+wrote to it first, the email it was verified with, its own verified
+domains, Primitive addresses, and domains that opt in to agent mail (an
+`_agents` DNS record). Other recipients are refused (found 2026-10-06
+with the maintainer's account); the refusal is said in those words, and
+the mailbox's settings say whom it writes to.
 - The email field is prefilled with the current Gmail account's address
   (any of the user's accounts can be chosen). *Send Code* calls
   `POST /v1/agent/claim/start {email}`; the sheet then waits for a code,

@@ -215,6 +215,9 @@ struct MainWindow: View {
                 if model.needsReauthentication {
                     ReauthenticationBanner()
                 }
+                if let failed = model.failedSends.first {
+                    FailedSendBanner(draft: failed, more: model.failedSends.count - 1)
+                }
                 if let plan = model.unverifiedAgentPlan, !model.isGuide, !model.isFacts {
                     AgentLimitsBanner(plan: plan)
                 }
@@ -318,6 +321,23 @@ struct MainWindow: View {
 
     private static let analysisSettingsWidth: CGFloat = 560
     private static let analysisSettingsHeight: CGFloat = 340
+}
+
+/// A message the provider would not send: why, and the draft to fix it.
+struct FailedSendBanner: View {
+    @Environment(AppModel.self) private var model
+    let draft: DraftInfo
+    let more: Int
+
+    var body: some View {
+        let subject = draft.subject.isEmpty ? "(no subject)" : draft.subject
+        let others = more > 0 ? " (and \(more) more)" : ""
+        Banner("“\(subject)” wasn't sent\(others): \(draft.error ?? "it was refused"). It is back in Drafts.",
+               systemImage: "exclamationmark.triangle", intent: .attention) {
+            Button("Open Draft") { model.compose(.draft(id: draft.id)) }
+                .hoverHelp("Open the message to change it and send it again")
+        }
+    }
 }
 
 /// The message list. The table stays when the list is empty, under the

@@ -217,7 +217,7 @@ struct AgentVerificationForm: View {
     private var message: String {
         let lead = justCreated ? "\(address) is ready and syncing. " : ""
         if let sentTo { return lead + "Primitive sent a code to \(sentTo)." }
-        return lead + "Verify it with your email to lift the limits: until then it can only reply to people who wrote first."
+        return lead + "Verify it with your email to raise its limits and let it write to you. It can always write to people who wrote to it first."
     }
 
     /// The account the code is going to, if it is one of the user's here.
@@ -279,7 +279,7 @@ struct AgentLimitsBanner: View {
         Banner(AppModel.limitsText(plan), systemImage: "person.badge.shield.checkmark", intent: .attention) {
             if let id = model.openAccountID {
                 Button("Verify…") { model.beginAgentVerification(id) }
-                    .hoverHelp("Verify the mailbox with your email to lift the limits")
+                    .hoverHelp("Verify the mailbox with your email to raise its limits and let it write to you")
             }
         }
     }
