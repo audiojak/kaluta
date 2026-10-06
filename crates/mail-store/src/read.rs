@@ -429,6 +429,34 @@ pub fn suggest_contacts(conn: &Connection, text: &str, limit: u32) -> StoreResul
     Ok(rows)
 }
 
+/// Text of the newest messages from `domain` (or a subdomain of it)
+/// received at or after `since`: subject, then body or snippet. For
+/// finding a verification code the user asked for (spec §7.9).
+pub fn recent_text_from_domain(conn: &Connection, domain: &str, since: i64, limit: u32) -> StoreResult<Vec<String>> {
+    let domain = domain.to_lowercase();
+    let mut stmt = conn.prepare_cached(
+        "SELECT m.from_email, m.subject, m.snippet, b.text_plain FROM messages m
+         LEFT JOIN bodies b ON b.message_id = m.id
+         WHERE m.internal_date >= ?1 AND m.is_sent_by_me = 0 AND m.from_email IS NOT NULL
+         ORDER BY m.internal_date DESC LIMIT 50",
+    )?;
+    let rows = stmt.query_map(params![since], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (from, subject, snippet, text) = row?;
+        let host = from.rsplit_once('@').map(|(_, h)| h.to_lowercase()).unwrap_or_default();
+        if host == domain || host.ends_with(&format!(".{domain}")) {
+            out.push(format!("{subject}\n{}", text.unwrap_or(snippet)));
+            if out.len() >= limit as usize {
+                break;
+            }
+        }
+    }
+    Ok(out)
+}
+
 pub fn sync_state(conn: &Connection, key: &str) -> StoreResult<Option<String>> {
     Ok(conn.prepare_cached("SELECT value FROM sync_state WHERE key = ?1")?.query_row([key], |r| r.get(0)).optional()?)
 }

@@ -236,6 +236,7 @@ impl Core {
             added_at: mail_sync::now_millis(),
             imap: None,
             named_by_user: false,
+            service: None,
         })
         .await?;
 

@@ -49,6 +49,8 @@ pub enum AccountKind {
     Gmail,
     /// An imported mailbox with no server (spec §7.8).
     Archive,
+    /// An agent's mailbox on an agent-mail service (spec §7.9).
+    Agent,
 }
 
 /// One account as listed behind the avatar button.
@@ -66,6 +68,8 @@ pub struct AccountSummary {
     pub inbox_unread: u32,
     /// Backfill may use IMAP (full mail access was granted).
     pub imap_enabled: bool,
+    /// For an agent mailbox, the service it lives on.
+    pub service: Option<crate::agent_mailbox::AgentService>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +92,9 @@ pub(crate) struct IndexEntry {
     /// no longer replaces `display_name`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub named_by_user: bool,
+    /// An agent mailbox's service.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<crate::agent_mailbox::AgentService>,
 }
 
 /// An account directory no listed account owns.
@@ -168,6 +175,23 @@ fn scan(data_dir: &Path) -> Vec<IndexEntry> {
         let created =
             entry.metadata().and_then(|m| m.created().or_else(|_| m.modified())).unwrap_or(std::time::UNIX_EPOCH);
         let added_at = created.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        if let Some(agent) = crate::agent_mailbox::read_meta(&dir) {
+            found.push((
+                created,
+                IndexEntry {
+                    id,
+                    kind: AccountKind::Agent,
+                    email: agent.address,
+                    display_name: Some(agent.name),
+                    avatar_file: None,
+                    added_at,
+                    imap: None,
+                    named_by_user: true,
+                    service: Some(agent.service),
+                },
+            ));
+            continue;
+        }
         if let Some(archive) = read_archive_meta(&dir) {
             found.push((
                 created,
@@ -180,6 +204,7 @@ fn scan(data_dir: &Path) -> Vec<IndexEntry> {
                     added_at,
                     imap: None,
                     named_by_user: false,
+                    service: None,
                 },
             ));
             continue;
@@ -203,6 +228,7 @@ fn scan(data_dir: &Path) -> Vec<IndexEntry> {
                     added_at,
                     imap: None,
                     named_by_user: false,
+                    service: None,
                 },
             ));
         }
@@ -256,6 +282,9 @@ impl Core {
                         }
                         if entry.imap.is_some() {
                             existing.imap = entry.imap;
+                        }
+                        if entry.service.is_some() {
+                            existing.service = entry.service;
                         }
                     }
                     None => entries.push(entry),
@@ -354,6 +383,15 @@ impl Core {
                         entry.named_by_user = !name.is_empty();
                         entry.display_name = (!name.is_empty()).then_some(name);
                     }
+                    AccountKind::Agent => {
+                        if name.is_empty() {
+                            return Err(CoreError::new(ErrorKind::InvalidInput, "an agent needs a name"));
+                        }
+                        // Its own file too, which rebuilds the index.
+                        crate::agent_mailbox::rename_meta(&accounts_dir(&data_dir).join(&account_id), &name)?;
+                        entry.named_by_user = true;
+                        entry.display_name = Some(name);
+                    }
                 }
                 save_index(&data_dir, &entries).map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))
             })
@@ -413,6 +451,7 @@ impl Core {
                         position: i as u32,
                         inbox_unread: 0,
                         imap_enabled: e.imap.unwrap_or(false),
+                        service: e.service,
                     }
                 })
                 .collect())
@@ -460,6 +499,7 @@ impl Core {
         self.close_store(&account_id);
         self.secrets.delete(crate::secrets::keys::refresh_token(&account_id))?;
         self.secrets.delete(crate::account::client_key(&account_id))?;
+        self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id))?;
         let data_dir = self.data_path();
         let _guard = self.index_lock.lock().await;
         runtime::run(async move {
@@ -510,6 +550,7 @@ impl Core {
             added_at: mail_sync::now_millis(),
             imap: None,
             named_by_user: false,
+            service: None,
         })
         .await
     }
@@ -558,6 +599,7 @@ impl Core {
         self.close_store(&account_id);
         let _ = self.secrets.delete(crate::secrets::keys::refresh_token(&account_id));
         let _ = self.secrets.delete(crate::account::client_key(&account_id));
+        let _ = self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id));
         let dir = accounts_dir(&self.data_path()).join(&account_id);
         runtime::run(async move {
             tokio::fs::remove_dir_all(dir).await.map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))
@@ -690,6 +732,7 @@ mod tests {
             added_at: 0,
             imap: None,
             named_by_user: false,
+            service: None,
         };
         block_on(core.register_account(gmail(Some("Profile Name")))).unwrap();
         block_on(core.rename_account("work".into(), "  Work   mail ".into())).unwrap();
@@ -720,6 +763,7 @@ mod tests {
             added_at: 0,
             imap: None,
             named_by_user: false,
+            service: None,
         }))
         .unwrap();
         block_on(core.rename_account("arc".into(), "2019 archive".into())).unwrap();
@@ -753,6 +797,7 @@ mod tests {
                 added_at: 0,
                 imap: None,
                 named_by_user: false,
+                service: None,
             }))
             .unwrap();
         }
@@ -766,6 +811,7 @@ mod tests {
             added_at: 0,
             imap: None,
             named_by_user: false,
+            service: None,
         }))
         .unwrap();
         let list = block_on(core.list_accounts()).unwrap();
@@ -784,6 +830,7 @@ mod tests {
             added_at: 0,
             imap: Some(true),
             named_by_user: false,
+            service: None,
         };
         block_on(core.register_account(granted.clone())).unwrap();
         granted.imap = None;

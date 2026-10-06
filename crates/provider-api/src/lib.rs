@@ -6,6 +6,7 @@
 mod error;
 pub mod fake;
 pub mod http;
+pub mod mailbox;
 pub mod rate_limit;
 pub mod token;
 
@@ -14,6 +15,7 @@ use mail_domain::{EmailAddress, Label, LabelId, MessageId, Millis, ThreadId};
 
 pub use error::{ProviderError, ProviderResult};
 pub use http::{HttpClient, RetryPolicy};
+pub use mailbox::{MailboxPlan, MailboxService, SignedUp, VerificationStarted};
 pub use rate_limit::{Priority, RateLimiter};
 pub use token::{AccessToken, TokenSource};
 
