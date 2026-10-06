@@ -40,6 +40,9 @@ extension AppModel {
         agentPlans[created.accountId] = created.plan
         await reloadAccounts()
         await switchAccount(to: created.accountId)
+        // A new mailbox is empty: the keyboard goes to its list, so c
+        // starts a message at once.
+        focusThreadList()
         // Every account syncs in the background; this starts the new one.
         Task { _ = try? await core.startAllSync() }
         return created

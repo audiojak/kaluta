@@ -240,7 +240,7 @@ fn a_primitive_mailbox_is_created_and_synced_over_its_api() {
             .and(body_partial_json(json!({ "terms_accepted": true, "device_name": "Scout" })))
             .respond_with(ok(json!({
                 "api_key": "prim_k", "org_id": "00000000-0000-0000-0000-000000000001",
-                "address": "scout@abc.primitive.email", "plan": "agent", "limits": limits(),
+                "address": "abc.primitive.email", "plan": "agent", "limits": limits(),
                 "upgrade": { "plan": "developer", "claim_path": "/agent/claim/start" }
             }))),
     );
@@ -425,4 +425,42 @@ fn retrying_a_creation_returns_the_same_mailbox() {
         block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "no spaces".into()))
             .is_err()
     );
+}
+
+#[test]
+fn an_address_is_the_agents_name_at_the_managed_domain() {
+    assert_eq!(
+        mailbox_address("jade-emu.primitive.email", "Research Scout"),
+        "research-scout@jade-emu.primitive.email"
+    );
+    assert_eq!(mailbox_address("me@x.example", "Scout"), "me@x.example");
+    assert_eq!(local_part("  ¡Hola!  "), "hola");
+    assert_eq!(local_part("???"), "agent");
+}
+
+#[test]
+fn a_mailbox_stored_with_only_its_domain_is_repaired_when_sync_starts() {
+    let (t, core, _secrets) = core("repair");
+    core.debug_use_fake_agent_mail(true);
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Jade".into(), "old".into())).unwrap();
+    // As an earlier version wrote it: the managed domain alone.
+    let dir = t.0.join("accounts").join(&agent.account_id);
+    let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("agent.json")).unwrap()).unwrap();
+    raw["address"] = json!("jade-emu.primitive.email");
+    raw["managed_address"] = json!("jade-emu.primitive.email");
+    std::fs::write(dir.join("agent.json"), serde_json::to_vec(&raw).unwrap()).unwrap();
+    let db = block_on(core.store_for(&agent.account_id)).unwrap();
+    db.write_blocking(|tx| mail_store::read::set_sync_state(tx, "account_email", "jade-emu.primitive.email")).unwrap();
+    block_on(core.rename_account(agent.account_id.clone(), "Jade".into())).unwrap();
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(t.0.join("accounts/index.json")).unwrap()).unwrap();
+    index[0]["email"] = json!("jade-emu.primitive.email");
+    std::fs::write(t.0.join("accounts/index.json"), serde_json::to_vec(&index).unwrap()).unwrap();
+
+    block_on(core.clone().start_all_sync()).unwrap();
+    assert_eq!(block_on(core.list_accounts()).unwrap()[0].email, "jade@jade-emu.primitive.email");
+    block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
+    assert_eq!(block_on(core.account_address()).unwrap(), "jade@jade-emu.primitive.email", "the composer's From");
+    core.stop_sync();
 }

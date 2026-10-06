@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import OpenAGC
 
@@ -113,5 +115,57 @@ struct AgentMailboxTests {
         #expect(model.agentMailboxSheet == .create)
         model.beginAgentVerification("x")
         #expect(model.agentMailboxSheet == .verify(accountID: "x"))
+    }
+}
+
+/// A window the test host can make key without a user clicking it.
+private final class EmptyListWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}
+
+@MainActor
+struct EmptyMailboxKeyTests {
+    struct Timeout: Error {}
+
+    private func table(in view: NSView) -> ThreadTableView? {
+        if let table = view as? ThreadTableView { return table }
+        for sub in view.subviews { if let found = table(in: sub) { return found } }
+        return nil
+    }
+
+    /// A new agent mailbox has no mail: c still starts a message.
+    @Test func cStartsAMessageInAnEmptyMailbox() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        _ = try await model.createAgentMailbox(name: "Scout")
+        #expect(model.threads.rows.isEmpty, "a new mailbox is empty")
+        var opened: [ComposeRequest] = []
+        model.openComposer = { opened.append($0) }
+
+        NSApp.activate()
+        let window = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+                                     backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ThreadListArea().environment(model))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        var list: ThreadTableView?
+        for _ in 0..<50 where list == nil {
+            try await Task.sleep(for: .milliseconds(20))
+            list = window.contentView.flatMap(table(in:))
+        }
+        let found = try #require(list, "the table is there under the empty message")
+        window.makeFirstResponder(found)
+        let c = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                              timestamp: ProcessInfo.processInfo.systemUptime,
+                                              windowNumber: window.windowNumber, context: nil, characters: "c",
+                                              charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8))
+        NSApp.postEvent(c, atStart: false)
+        for _ in 0..<100 where opened.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(opened.count == 1)
     }
 }

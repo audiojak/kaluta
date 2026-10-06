@@ -242,14 +242,8 @@ struct MainWindow: View {
                     FactsList(store: model.facts)
                 } else if model.isTaskList {
                     TaskListView()
-                } else if model.threads.rows.isEmpty {
-                    if model.threads.searchQuery != nil {
-                        ContentUnavailableView.search(text: model.searchText)
-                    } else {
-                        ContentUnavailableView("No Conversations", systemImage: "tray")
-                    }
                 } else {
-                    ThreadListView()
+                    ThreadListArea()
                 }
             }
             // Fill the column, so the header stays at the top when the list
@@ -324,6 +318,29 @@ struct MainWindow: View {
 
     private static let analysisSettingsWidth: CGFloat = 560
     private static let analysisSettingsHeight: CGFloat = 340
+}
+
+/// The message list. The table stays when the list is empty, under the
+/// empty message: its single-key shortcuts (c for a new message) still work
+/// in an empty mailbox, such as a new agent mailbox.
+struct ThreadListArea: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        ThreadListView()
+            .overlay {
+                if model.threads.rows.isEmpty {
+                    Group {
+                        if model.threads.searchQuery != nil {
+                            ContentUnavailableView.search(text: model.searchText)
+                        } else {
+                            ContentUnavailableView("No Conversations", systemImage: "tray")
+                        }
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
+    }
 }
 
 /// Google rejected the stored credentials (revoked or expired); for an

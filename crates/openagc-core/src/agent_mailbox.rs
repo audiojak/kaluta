@@ -157,7 +157,27 @@ pub(crate) struct AgentMeta {
 
 pub(crate) fn read_meta(dir: &Path) -> Option<AgentMeta> {
     let bytes = std::fs::read(dir.join(META_FILE)).ok()?;
-    serde_json::from_slice::<AgentMeta>(&bytes).ok().filter(|m| m.kind == "agent")
+    let mut meta = serde_json::from_slice::<AgentMeta>(&bytes).ok().filter(|m| m.kind == "agent")?;
+    // Mailboxes created before 2026-10-06 stored Primitive's managed inbox
+    // domain as the address; read it as the agent's address there.
+    meta.address = mailbox_address(&meta.address, &meta.name);
+    meta.managed_address = meta.managed_address.map(|m| mailbox_address(&m, &meta.name));
+    Some(meta)
+}
+
+/// The agent's name as an address's local part: `Research Scout` →
+/// `research-scout`.
+pub(crate) fn local_part(name: &str) -> String {
+    let dashed: String = name.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let local = dashed.split('-').filter(|s| !s.is_empty()).collect::<Vec<_>>().join("-");
+    if local.is_empty() { "agent".into() } else { local }
+}
+
+/// What a service gives as the mailbox's address, as an address. Primitive
+/// answers with its managed inbox's domain (`jade-emu.primitive.email`),
+/// which takes mail at any local part: the agent's name is used.
+pub(crate) fn mailbox_address(given: &str, name: &str) -> String {
+    if given.contains('@') { given.to_owned() } else { format!("{}@{given}", local_part(name)) }
 }
 
 fn write_meta(dir: &Path, meta: &AgentMeta) -> Result<(), CoreError> {
@@ -283,6 +303,37 @@ impl Core {
             .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this agent mailbox's key is missing from the Keychain"))
     }
 
+    /// Bring the index and the store in line with the mailbox's address
+    /// when an older version recorded only its domain (see [`read_meta`]).
+    pub(crate) async fn repair_agent_address(&self, account_id: &str, listed: &str) -> Result<(), CoreError> {
+        let Some(meta) = self.agent_meta(account_id) else { return Ok(()) };
+        if listed == meta.address {
+            return Ok(());
+        }
+        write_meta(&accounts_dir(&self.data_path()).join(account_id), &meta)?;
+        let db = self.store_for(account_id).await?;
+        let stored = meta.address.clone();
+        runtime::run(async move {
+            db.write(move |tx| mail_store::read::set_sync_state(tx, "account_email", &stored)).await?;
+            Ok(())
+        })
+        .await?;
+        self.register_account(IndexEntry {
+            id: account_id.to_owned(),
+            kind: AccountKind::Agent,
+            email: meta.address.clone(),
+            display_name: None,
+            avatar_file: None,
+            added_at: 0,
+            imap: None,
+            named_by_user: true,
+            service: Some(meta.service),
+        })
+        .await?;
+        tracing::info!(account = %account_id, "agent mailbox's address repaired");
+        Ok(())
+    }
+
     /// The provider and push source that sync an agent mailbox.
     pub(crate) fn agent_provider(&self, account_id: &str) -> Result<SyncSources, CoreError> {
         let meta = self.agent_meta_or_err(account_id)?;
@@ -378,6 +429,7 @@ impl Core {
             let account_id = request_id;
             let SignedUp { api_key, address, plan } =
                 client.sign_up(&name, &account_id).await.map_err(service_error)?;
+            let address = mailbox_address(&address, &name);
             core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
             let dir = accounts_dir(&core.data_path()).join(&account_id);
             write_meta(

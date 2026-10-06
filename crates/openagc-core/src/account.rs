@@ -816,6 +816,11 @@ impl Core {
                 .into_iter()
                 .filter(|e| matches!(e.kind, crate::registry::AccountKind::Gmail | crate::registry::AccountKind::Agent))
             {
+                if entry.kind == crate::registry::AccountKind::Agent
+                    && let Err(e) = core.repair_agent_address(&entry.id, &entry.email).await
+                {
+                    tracing::warn!(account = %entry.id, error = %e, "agent mailbox's address not repaired");
+                }
                 if core.is_syncing(&entry.id) {
                     // Already started (the open account): still refresh its
                     // name and picture.
