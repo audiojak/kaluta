@@ -78,33 +78,10 @@ enum EmailDocument {
         }
     }
 
-    /// "Darshan Patel" → "DP"; "Le, Minh" → "ML"; no name → the address's
-    /// first letter.
-    static func initials(name: String, email: String) -> String {
-        var words = name.split(separator: " ").map(String.init)
-        if name.contains(","), let comma = name.firstIndex(of: ",") {
-            words = (name[name.index(after: comma)...] + " " + name[..<comma]).split(separator: " ").map(String.init)
-        }
-        let letters = words.filter { $0.first?.isLetter == true }
-        if name == email || letters.isEmpty { return String(email.prefix(1)).uppercased() }
-        let first = letters.first!.prefix(1)
-        let last = letters.count > 1 ? letters.last!.prefix(1) : ""
-        return (first + last).uppercased()
-    }
+    /// Initials and colour come from `Avatar`, as the account avatar's do.
+    static func initials(name: String, email: String) -> String { Avatar.initials(name: name, email: email) }
 
-    /// A calm colour per sender, the same every time.
-    static func avatarColor(_ email: String) -> String {
-        let palette = ["#5B8DEF", "#43A67F", "#D98E3C", "#B46BD6", "#D4626E",
-                       "#3FA3B8", "#8C8F4A", "#7A7FD9", "#C2743F", "#4F9D5B"]
-        // FNV-1a with a finaliser, so similar addresses spread over the palette.
-        var x = email.lowercased().utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 }
-        x ^= x >> 16
-        x = x &* 0x7FEB_352D
-        x ^= x >> 15
-        x = x &* 0x846C_A68B
-        x ^= x >> 16
-        return palette[Int(x % UInt32(palette.count))]
-    }
+    static func avatarColor(_ email: String) -> String { Avatar.hex(for: email) }
 
     /// The latest message and every unread one start open, like Mail.
     static func isExpanded(_ message: Message, index: Int, count: Int) -> Bool {

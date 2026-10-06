@@ -252,8 +252,9 @@ directly; its CSS keeps to the same scale.
   sender's HTML.
 - The subject is `TypeRole.title`; the header does not scroll (the web
   view scrolls inside the reader), so it is not a `.columnHeader`.
-- Avatars in the reader and `AccountAvatar` should share one initials and
-  colour function (inventory gap; oagc-068 follow-up).
+- **Avatars** (`Avatar`): one initials and colour function for the reader's
+  sender circles and `AccountAvatar` ("Last, First" handled, ten colours
+  that carry white text), so an address looks the same everywhere.
 
 ### Composer
 

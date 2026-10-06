@@ -45,6 +45,7 @@
 		41F36E445C76099104FF1BD8 /* CategoryTabTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3099D543330783FF161C148F /* CategoryTabTests.swift */; };
 		4203D60C0EB77CC6D7DEF253 /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E288D150328C8BC8F1B8D1 /* Tokens.swift */; };
 		47BB1BF70E3B10CD8E5513B2 /* AnalysisView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CBCD4E2D635EC5A94FE9982 /* AnalysisView.swift */; };
+		49BDA4922937C9BAB8DB2724 /* Avatar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B45300AF62CF81181D40AB3F /* Avatar.swift */; };
 		4B30B25AE957C2C75F0AC0FE /* Updater.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFD9EA8BFD3CDA270CCB8109 /* Updater.swift */; };
 		4BBB2B43CEEF1AFA6C20B2D3 /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F36E7595DF6E9B290AE189 /* AttachmentTests.swift */; };
 		4BDBFCA9AB0E6E20DC8E6EA0 /* AppShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE47B2F1BDB2A00655547EA9 /* AppShellTests.swift */; };
@@ -291,6 +292,7 @@
 		AD34CB7C1FA0DB564F8F5DC1 /* AgentSuggestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestionTests.swift; sourceTree = "<group>"; };
 		AE47B2F1BDB2A00655547EA9 /* AppShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellTests.swift; sourceTree = "<group>"; };
 		AF46AFEDFFFF3F8D14FFDF02 /* ComposerHTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHTML.swift; sourceTree = "<group>"; };
+		B45300AF62CF81181D40AB3F /* Avatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Avatar.swift; sourceTree = "<group>"; };
 		BB39A16B1137A564FA4C32FD /* SidebarTreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarTreeTests.swift; sourceTree = "<group>"; };
 		BB9494AAF5D25AD46911AD35 /* NewMailNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMailNotifier.swift; sourceTree = "<group>"; };
 		BCCFF907D89AAA9F8298A38B /* LabelTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelTree.swift; sourceTree = "<group>"; };
@@ -607,6 +609,7 @@
 		B1DF5DA9CE56D0A1EF44D9B0 /* Design */ = {
 			isa = PBXGroup;
 			children = (
+				B45300AF62CF81181D40AB3F /* Avatar.swift */,
 				282C65C46EFBD9CE2DB7AE30 /* Components.swift */,
 				8B1980692C7F9190146DE301 /* DueDay.swift */,
 				FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */,
@@ -984,6 +987,7 @@
 				6ACB449680E2C76A02262484 /* AppModel+Tasks.swift in Sources */,
 				5983A19ACD9796ACFA5E19D5 /* AppModel.swift in Sources */,
 				A64492AC04FB122343BA17D2 /* AttachmentStrip.swift in Sources */,
+				49BDA4922937C9BAB8DB2724 /* Avatar.swift in Sources */,
 				DF53A7536F3E679277D3C187 /* BulkTaskSheet.swift in Sources */,
 				FCED07E1E5873247C4857005 /* ChangeGuideSheet.swift in Sources */,
 				403EB3F17C39C0781B552172 /* Components.swift in Sources */,
