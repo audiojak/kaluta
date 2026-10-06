@@ -532,7 +532,12 @@ final class AppModel {
             guideProgress = try? await core.guideProgress()
             if guideProgress?.run?.status == .running { _ = try? await core.resumeGuideRun() }
             analysisProgress = try? await core.analysisProgress()
+            analysisDaily = (try? await core.analysisSettings())?.dailyReview ?? true
             await analysis.load()
+            // This account's facts, not the last one's (ids overlap).
+            facts.selection = nil
+            factsRevision += 1
+            await facts.load()
             await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -606,6 +611,8 @@ final class AppModel {
     var analysisError: String?
     /// Bumped when facts change (spec §14.11); views showing them reload.
     private(set) var factsRevision = 0
+    /// Whether the open account reviews daily (for the header's wording).
+    var analysisDaily = true
     /// Accounts with Analysis proposals not seen yet: the account menu's dots.
     var unseenAnalysisAccounts: Set<String> = []
     /// A sheet of the Writing Guide section, while open.
@@ -1416,14 +1423,18 @@ final class AppModel {
             let finished = analysisProgress?.run?.status == .running && progress.run?.status == .done
             analysisProgress = progress
             if finished {
-                await analysisChanged()
+                // Counted before anything is marked seen.
+                await analysis.load()
                 await analysisReviewed(accountID: tagged.accountID)
+                await analysisChanged()
             }
         case .analysisChanged:
             await analysisChanged()
         case .factsChanged:
             factsRevision += 1
             await facts.load()
+            // Undoing a fact decision puts its proposal back in Analysis.
+            await analysisChanged()
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

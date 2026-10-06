@@ -105,5 +105,22 @@ struct FactsMergeTests {
         #expect(model.facts.facts.map(\.label).sorted() == ["Occupation or role", "Time zone"])
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Merge Facts")
         #expect(try await core.analysisQueue().facts.map(\.value) == ["CEO"])
+
+        // Rejecting it and undoing that puts it back in Analysis.
+        await model.analysis.load()
+        let proposal = try #require(model.analysis.factProposals.first)
+        await model.decideFactProposals([proposal], accept: false)
+        #expect(model.analysis.factProposals.isEmpty)
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where model.analysis.factProposals.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.analysis.factProposals.map(\.id) == [proposal.id])
+
+        // Opening Analysis from anywhere shows the proposals, not Facts.
+        model.openFacts()
+        #expect(model.analysis.showsFacts)
+        model.openAnalysis()
+        #expect(!model.analysis.showsFacts)
     }
 }

@@ -73,6 +73,11 @@ pub(crate) struct AgentHub {
     pub(crate) analysis_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) analysis_attempts: Mutex<HashMap<String, i64>>,
     pub(crate) analysis_waiting: Mutex<HashMap<String, String>>,
+    /// Starting a review, one at a time (the scheduler and Run Now race).
+    pub(crate) analysis_start: tokio::sync::Mutex<()>,
+    /// With "All mail I send": the newest message a glean in progress read,
+    /// saved once it succeeds.
+    pub(crate) glean_until: Mutex<HashMap<String, i64>>,
     /// When each account's old AI drafts were last purged.
     pub(crate) analysis_purged: Mutex<HashMap<String, i64>>,
     /// Turns the core itself waits on (`watch_turn`), by session.

@@ -20,6 +20,7 @@ extension AppModel {
     /// Open Analysis, on the learning runs' decisions if asked.
     func openAnalysis(learning: Bool = false) {
         guidePrompt = nil
+        analysis.showsFacts = false
         selectedMailboxID = Self.analysisMailboxID
         if learning { analysis.selection = AnalysisStore.learningTag }
     }
@@ -37,7 +38,8 @@ extension AppModel {
 
     /// Proposals changed (a review, a decision, an undo).
     func analysisChanged() async {
-        if isAnalysis { await analysisShown() } else { await analysis.load() }
+        // Seen only when the user can see it: not with the app behind.
+        if isAnalysis, notifier.isAppActive() { await analysisShown() } else { await analysis.load() }
         await refreshAnalysisDots()
     }
 
@@ -51,12 +53,17 @@ extension AppModel {
     func analysisReviewed(accountID: String?) async {
         await refreshAnalysisDots()
         guard let accountID else { return }
-        // Another account's count is not loaded: it is at least one.
-        let count = accountID == openAccountID ? analysis.proposals.filter(\.unseen).count
-            + analysis.factProposals.filter(\.unseen).count
-            : (unseenAnalysisAccounts.contains(accountID) ? 1 : 0)
-        notifier.announceAnalysis(proposals: count, accountID: accountID,
-                                  today: Date().formatted(.iso8601.year().month().day()))
+        // Another account's count is not loaded: no number then.
+        let count: Int? = accountID == openAccountID ? analysis.proposals.filter(\.unseen).count
+            + analysis.factProposals.filter(\.unseen).count : nil
+        guard count.map({ $0 > 0 }) ?? unseenAnalysisAccounts.contains(accountID) else { return }
+        notifier.announceAnalysis(proposals: count, accountID: accountID, today: Self.localDay(Date()))
+    }
+
+    /// The local calendar day, YYYY-MM-DD.
+    static func localDay(_ date: Date) -> String {
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
     func runAnalysisNow() async {

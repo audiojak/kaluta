@@ -273,9 +273,17 @@ final class ComposerAssistant {
             await model.facts.load()
             let known = Set(model.facts.categories.map(\.key))
             let edits: [FactEdit] = given.map { q, a in
-                .add(fields: FactFields(category: known.contains(q.category) ? q.category : "other", label: q.fact,
-                                        value: a, use: .free, asOf: nil),
-                     status: .accepted, source: .writingHelp)
+                let category = known.contains(q.category) ? q.category : "other"
+                // A fact by that label already: the answer replaces its value.
+                if let old = model.facts.facts.first(where: {
+                    $0.scope == .account && $0.status == .accepted && $0.category == category
+                        && $0.label.lowercased() == q.fact.lowercased()
+                }) {
+                    return .update(id: old.id, fields: FactFields(category: category, label: old.label, value: a,
+                                                                  use: old.use, asOf: old.asOf))
+                }
+                return .add(fields: FactFields(category: category, label: q.fact, value: a, use: .free, asOf: nil),
+                            status: .accepted, source: .writingHelp)
             }
             await model.applyFactEdits(edits, actionName: given.count == 1 ? "Add Fact" : "Add Facts",
                                        notice: given.count == 1 ? "Added a fact" : "Added \(given.count) facts")

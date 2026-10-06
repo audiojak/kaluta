@@ -1,7 +1,13 @@
 # Plan: Analysis — learning from what you change in AI drafts, and Facts
 
-Status: in progress (2026-10-05), epic oagc-259, branch `analysis`.
-Spec §14.10 (Analysis) and §14.11 (Facts); ADRs 0012 and 0013.
+Status: built (2026-10-05), epic oagc-259, branch `analysis`, PR
+audiojak/openagc#9. Spec §14.10 (Analysis) and §14.11 (Facts); ADRs 0012
+and 0013. Where the build departs from this plan, the spec says so:
+settings are in Settings › Analysis (there is no Settings › Writing
+Guide); the agent tool is `facts_lookup` (tool names allow no dots);
+rejecting a proposal is "don't suggest this again"; fact proposals show
+at once (one message stating a fact is enough) and a starter set after
+three reviews; a global fact carries no evidence quotes.
 Builds on the writing guide (spec §14.9, ADR 0011, plan `writing-guide.md`).
 
 ## Goal

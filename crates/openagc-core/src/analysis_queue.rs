@@ -269,7 +269,7 @@ impl Core {
                     let learned_at = mail_store::guide::runs(c, 1)?
                         .into_iter()
                         .next()
-                        .filter(|r| r.status == "done" || r.status == "cancelled")
+                        .filter(|r| r.status == "done")
                         .and_then(|r| r.finished_at);
                     Ok((store::proposals(c, &["watching", "proposed"])?, viewed, learned_at))
                 })
@@ -357,19 +357,57 @@ impl Core {
         if ids.is_empty() {
             return Err(CoreError::new(ErrorKind::InvalidInput, "nothing to decide"));
         }
-        let rows = self.proposal_rows(ids).await?;
+        // Only open guide proposals: a double Return or a stale list does
+        // not accept one twice.
+        let rows: Vec<ProposalRow> = self
+            .proposal_rows(ids)
+            .await?
+            .into_iter()
+            .filter(|p| p.target == "guide" && matches!(p.status.as_str(), "proposed" | "watching"))
+            .collect();
         let entries = self.accepted_entries().await?;
         let mut edits = Vec::new();
         let mut decided = Vec::new();
+        // Changes to one entry are made together, on the entry as it is
+        // now: an edit sets its statement and kind, a rescope its scope,
+        // and a removal wins over both.
+        let mut per_entry: BTreeMap<i64, Option<GuideEntryFields>> = BTreeMap::new();
         for p in &rows {
             if accept {
-                match edit_for(p, &entries, None) {
-                    Some(edit) => edits.push(edit),
+                match (op(&p.op), p.entry_id) {
+                    (AnalysisOp::Add, _) => edits.extend(edit_for(p, &entries, None)),
+                    (o, Some(id)) => {
+                        let Some(current) = entries.get(&id) else { continue };
+                        let slot = per_entry.entry(id).or_insert_with(|| {
+                            Some(GuideEntryFields {
+                                category: current.category.clone(),
+                                kind: current.kind,
+                                statement: current.statement.clone(),
+                                scope: current.scope.clone(),
+                                check: current.check.clone(),
+                            })
+                        });
+                        match (o, slot.as_mut()) {
+                            (AnalysisOp::Remove, _) => *slot = None,
+                            (AnalysisOp::Edit, Some(f)) => {
+                                f.statement = p.statement.clone();
+                                f.kind = p.kind.as_deref().and_then(GuideKind::parse).unwrap_or(f.kind);
+                            }
+                            (AnalysisOp::Rescope, Some(f)) => f.scope = scope(&p.scope_json),
+                            _ => {}
+                        }
+                    }
                     // Its entry has gone: nothing to accept.
-                    None => continue,
+                    _ => continue,
                 }
             }
             decided.push(p.id);
+        }
+        for (id, fields) in per_entry {
+            edits.push(match fields {
+                Some(fields) => GuideEdit::Update { id, fields },
+                None => GuideEdit::Delete { id },
+            });
         }
         if decided.is_empty() {
             return Err(CoreError::new(ErrorKind::NotFound, "the entry this changes is no longer in your guide"));
@@ -747,6 +785,38 @@ mod tests {
         block_on(core.undo_guide_change(change.change_id)).unwrap();
         let q = block_on(core.analysis_queue()).unwrap();
         assert_eq!((q.guide[0].id, q.guide[0].support), (p, 2));
+    }
+
+    #[test]
+    fn undoing_an_ignore_keeps_evidence_added_since() {
+        let s = scratch("queue-ignore-later");
+        let core = &s.1;
+        let (a, b, c) = (pair(core, 0.3, 0), pair(core, 0.3, 0), pair(core, 0.3, 0));
+        let p = propose(core, "add", None, "Sign off with 'J'", &[a, b]);
+        let change = block_on(core.ignore_analysis_pair(a)).unwrap();
+        propose(core, "add", None, "Sign off with 'J'", &[c]);
+        block_on(core.undo_guide_change(change.change_id)).unwrap();
+        let db = core.db().unwrap();
+        let mut ids: Vec<i64> =
+            rt(db.read(move |x| store::evidence(x, p))).unwrap().into_iter().map(|e| e.composition_id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![a, b, c], "the ignored pair is back and the later one stays");
+        assert_eq!(block_on(core.analysis_queue()).unwrap().guide[0].support, 3);
+    }
+
+    #[test]
+    fn accepting_a_removal_and_an_edit_of_one_entry_together_removes_it() {
+        let s = scratch("queue-same-entry");
+        let core = &s.1;
+        let (a, b) = (pair(core, 0.3, 0), pair(core, 0.3, 0));
+        let old = entry(core, "Sign off with 'Best regards, John'");
+        let edit = propose(core, "edit", Some(old), "Sign off with 'J'", &[a, b]);
+        let remove = propose(core, "remove", Some(old), "Sign off with 'Best regards, John'", &[a, b]);
+        block_on(core.decide_analysis_proposals(vec![remove, edit], true)).unwrap();
+        assert!(block_on(core.guide_entry(old)).unwrap().is_none(), "the removal wins");
+        assert!(block_on(core.analysis_queue()).unwrap().guide.is_empty(), "both are decided");
+        // Accepting again does nothing: they are decided.
+        assert!(block_on(core.decide_analysis_proposals(vec![edit], true)).is_err());
     }
 
     #[test]

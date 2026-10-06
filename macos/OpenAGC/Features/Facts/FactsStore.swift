@@ -49,8 +49,10 @@ final class FactsStore {
     /// Categories with facts, in order (built-ins first, then the user's
     /// own), each with its facts by label. Hidden categories are left out.
     var sections: [(category: FactCategoryInfo, facts: [FactInfo])] {
-        categories.filter { !$0.hidden }.compactMap { c in
-            let mine = facts.filter { $0.category == c.key }
+        let known = Set(categories.map(\.key))
+        return categories.filter { !$0.hidden }.compactMap { c in
+            // A fact whose category has gone (deleted elsewhere) shows in Other.
+            let mine = facts.filter { $0.category == c.key || (c.key == "other" && !known.contains($0.category)) }
                 .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
             return mine.isEmpty ? nil : (c, mine)
         }

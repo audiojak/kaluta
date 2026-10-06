@@ -107,6 +107,9 @@ pub fn cancel_send(tx: &Transaction<'_>, draft_id: i64, now: Millis) -> StoreRes
     w.delete_message(&local_message_id)?;
     let changes = w.finish()?;
     crate::drafts::set_state(tx, draft_id, crate::drafts::DraftState::Editing, None)?;
+    // That Message-ID never went out: the AI composition is matched again
+    // by thread or recipient, or by the next send's id (spec §14.10).
+    crate::compositions::draft_unsent(tx, draft_id)?;
     Ok(Some(changes))
 }
 

@@ -441,12 +441,21 @@ impl Core {
         runtime::run(async move {
             Ok(db
                 .write(move |tx| {
-                    for (_, entries) in &applied {
-                        for entry in entries {
-                            store::add_health(tx, *entry, 1, 0, now)?;
+                    // Only pairs still waiting for review count, once.
+                    for id in &ids {
+                        let still = mail_store::compositions::get(tx, *id)?
+                            .is_some_and(|c| c.status == mail_store::compositions::Status::Matched);
+                        if !still {
+                            continue;
                         }
+                        for (_, entries) in applied.iter().filter(|(p, _)| p == id) {
+                            for entry in entries {
+                                store::add_health(tx, *entry, 1, 0, now)?;
+                            }
+                        }
+                        store::mark_reviewed(tx, &[*id], now)?;
                     }
-                    store::mark_reviewed(tx, &ids, now)
+                    Ok(())
                 })
                 .await?)
         })

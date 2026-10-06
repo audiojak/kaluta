@@ -17,7 +17,13 @@ final class AnalysisStore {
     private(set) var loaded = false
     private(set) var error: String?
     var selection: String? {
-        didSet { if selection != oldValue { showsAllPairs = false; Task { await loadPairs() } } }
+        didSet {
+            if selection != oldValue {
+                showsAllPairs = false
+                pairs = []
+                Task { await loadPairs() }
+            }
+        }
     }
     /// "Why?": every pair, not just the first few.
     var showsAllPairs = false
@@ -63,10 +69,12 @@ final class AnalysisStore {
                 readAgain = false
                 await read()
             } while readAgain
+            // Cleared here, not by the caller: a load asked for after the
+            // last read must start a new one.
+            reading = nil
         }
         reading = task
         await task.value
-        reading = nil
     }
 
     private func read() async {
@@ -95,7 +103,10 @@ final class AnalysisStore {
 
     func loadPairs() async {
         guard let core, let proposal = selectedProposal else { pairs = []; return }
-        pairs = (try? await core.analysisPairs(proposal.id)) ?? []
+        let read = (try? await core.analysisPairs(proposal.id)) ?? []
+        // Chosen something else meanwhile: that one's pairs are coming.
+        guard selectedProposal?.id == proposal.id else { return }
+        pairs = read
     }
 }
 

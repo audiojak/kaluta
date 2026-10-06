@@ -319,6 +319,15 @@ const STARTERS: &[Starter] = &[
     ),
 ];
 
+/// A starter set's categories: name and description.
+pub(crate) fn starter_categories(set: StarterSet) -> Vec<(String, String)> {
+    STARTERS
+        .iter()
+        .find(|(s, ..)| *s == set)
+        .map(|(_, _, cats)| cats.iter().map(|(n, d, _)| ((*n).to_owned(), (*d).to_owned())).collect())
+        .unwrap_or_default()
+}
+
 fn builtin(key: &str) -> Option<&'static Builtin> {
     BUILTINS.iter().find(|b| b.key == key)
 }
@@ -413,7 +422,8 @@ impl Core {
     /// The accepted facts drafting may see, each as a prompt line.
     pub(crate) async fn fact_lines(&self) -> Result<Vec<String>, CoreError> {
         let categories = self.fact_categories().await?;
-        let name = |key: &str| categories.iter().find(|c| c.key == key).map_or(key.to_owned(), |c| c.name.clone());
+        // A category gone (deleted elsewhere): its facts read as Other.
+        let name = |key: &str| categories.iter().find(|c| c.key == key).map_or("Other".to_owned(), |c| c.name.clone());
         Ok(self
             .list_facts(vec![FactStatus::Accepted])
             .await?
@@ -506,6 +516,21 @@ impl Core {
         reason: String,
         decide: Option<(Vec<i64>, &'static str)>,
     ) -> Result<FactChange, CoreError> {
+        self.apply_facts_full(scope, edits, category_edits, reason, decide, None).await
+    }
+
+    /// As `apply_facts_with`, with the starter set the categories added
+    /// come from (marked, and asking first where the set says so, in the
+    /// same change so undo and redo are exact).
+    pub(crate) async fn apply_facts_full(
+        &self,
+        scope: FactScope,
+        edits: Vec<FactEdit>,
+        category_edits: Vec<CategoryEdit>,
+        reason: String,
+        decide: Option<(Vec<i64>, &'static str)>,
+        starter: Option<StarterSet>,
+    ) -> Result<FactChange, CoreError> {
         if edits.is_empty() && category_edits.is_empty() && decide.is_none() {
             return Err(invalid("nothing to change"));
         }
@@ -591,7 +616,15 @@ impl Core {
                                 if taken {
                                     return Err(invalid_store(&format!("you already have a category like “{name}”")));
                                 }
-                                let key = format!("c{now}{}", added.len());
+                                let from_starter = starter.and_then(|set| {
+                                    let (_, set_name, cats) = STARTERS.iter().find(|(s, ..)| *s == set)?;
+                                    cats.iter().find(|(n, ..)| *n == name).map(|(_, _, u)| (*set_name, *u))
+                                });
+                                // A key not in use, even within the same millisecond.
+                                let mut key = format!("c{now}{}", added.len());
+                                while store::get_category(tx, &key)?.is_some() {
+                                    key.push('x');
+                                }
                                 let position =
                                     stored.iter().map(|r| r.position).max().unwrap_or(0) + 1 + added.len() as i64;
                                 store::put_category(
@@ -603,8 +636,8 @@ impl Core {
                                         position,
                                         builtin: false,
                                         hidden: false,
-                                        default_use: "free".into(),
-                                        starter: None,
+                                        default_use: from_starter.map_or("free", |(_, u)| u.as_str()).into(),
+                                        starter: from_starter.map(|(set, _)| set.to_owned()),
                                         created_at: now,
                                     },
                                 )?;
@@ -711,11 +744,15 @@ impl Core {
                             FactEdit::Delete { id } => store::delete(tx, *id)?,
                         }
                     }
-                    // One fact per label in a category.
+                    // One fact per label in a category, for the facts this
+                    // change touched (an old duplicate elsewhere blocks nothing).
                     let accepted = store::list(tx, &["accepted"])?;
-                    let mut seen = BTreeSet::new();
-                    for f in &accepted {
-                        if !seen.insert((f.category.clone(), f.label.to_lowercase())) {
+                    for f in accepted.iter().filter(|f| fact_ids.contains(&f.id)) {
+                        let twins = accepted
+                            .iter()
+                            .filter(|o| o.category == f.category && o.label.to_lowercase() == f.label.to_lowercase())
+                            .count();
+                        if twins > 1 {
                             return Err(invalid_store(&format!("you already have “{}” in that category", f.label)));
                         }
                     }
@@ -738,38 +775,46 @@ impl Core {
     async fn replay_facts(&self, scope: FactScope, change_id: i64, undo: bool) -> Result<(), CoreError> {
         let db = self.facts_db(scope)?;
         let now = mail_sync::now_millis();
-        let global_side = runtime::run(async move {
-            Ok(db
-                .write(move |tx| {
-                    let (_, before, after) = store::get_change(tx, change_id)?
+        let reader = db.clone();
+        let (before, after) = runtime::run(async move {
+            Ok(reader
+                .read(move |c| {
+                    let (_, before, after) = store::get_change(c, change_id)?
                         .ok_or_else(|| mail_store::StoreError::Invalid("that change can no longer be undone".into()))?;
-                    let (ids, keys) = touched(&before.facts, &after.facts, &before.categories, &after.categories);
-                    let to = if undo { &before } else { &after };
-                    store::restore(tx, &ids, &keys, to, now)?;
-                    // A move between stores: the global side goes back too.
-                    let (gids, gkeys) = touched(
-                        &before.global_facts,
-                        &after.global_facts,
-                        &before.global_categories,
-                        &after.global_categories,
-                    );
-                    let global = Snapshot {
-                        facts: to.global_facts.clone(),
-                        categories: to.global_categories.clone(),
-                        ..Default::default()
-                    };
-                    Ok((gids, gkeys, global))
+                    Ok((before, after))
                 })
                 .await?)
         })
         .await?;
-        let (gids, gkeys, global) = global_side;
-        if !gids.is_empty() || !gkeys.is_empty() {
+        let to = if undo { before.clone() } else { after.clone() };
+        let (ids, keys) = touched(&before.facts, &after.facts, &before.categories, &after.categories);
+        // A move between stores: the global side goes back too.
+        let (gids, gkeys) =
+            touched(&before.global_facts, &after.global_facts, &before.global_categories, &after.global_categories);
+        let global =
+            Snapshot { facts: to.global_facts.clone(), categories: to.global_categories.clone(), ..Default::default() };
+        let restore_global = async {
+            if gids.is_empty() && gkeys.is_empty() {
+                return Ok::<_, CoreError>(());
+            }
             let gdb = self.global_facts_db()?;
-            runtime::run(
-                async move { Ok(gdb.write(move |tx| store::restore(tx, &gids, &gkeys, &global, now)).await?) },
-            )
-            .await?;
+            let (gids, gkeys, global) = (gids.clone(), gkeys.clone(), global.clone());
+            runtime::run(async move { Ok(gdb.write(move |tx| store::restore(tx, &gids, &gkeys, &global, now)).await?) })
+                .await
+        };
+        let local = to.clone();
+        let restore_here = async move {
+            runtime::run(async move { Ok(db.write(move |tx| store::restore(tx, &ids, &keys, &local, now)).await?) })
+                .await
+        };
+        // The side that gets the fact back goes first: a failure between the
+        // two leaves a copy, never a fact in neither store (ADR 0012).
+        if to.global_facts.is_empty() {
+            restore_here.await?;
+            restore_global.await?;
+        } else {
+            restore_global.await?;
+            restore_here.await?;
         }
         self.facts_changed();
         Ok(())
@@ -898,7 +943,7 @@ pub(crate) fn lookup_json(
         .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never && !f.overridden)
         .filter_map(|f| {
             let c = categories.iter().find(|c| c.key == f.category);
-            let name = c.map_or(f.category.clone(), |c| c.name.clone());
+            let name = c.map_or("Other".to_owned(), |c| c.name.clone());
             if let Some(w) = &want
                 && *w != f.category.to_lowercase()
                 && *w != name.to_lowercase()
@@ -1029,31 +1074,7 @@ impl Core {
         if edits.is_empty() {
             return Err(invalid(format!("you already have the {name} categories")));
         }
-        let change = self.apply_facts(FactScope::Account, vec![], edits, format!("starter set {name}")).await?;
-        // Mark them as the set's, with its sensitive ones asking first.
-        let db = self.db()?;
-        let keys = change.categories.clone();
-        let set_name = (*name).to_owned();
-        let defaults: Vec<(&str, FactUse)> = cats.iter().map(|(n, _, u)| (*n, *u)).collect();
-        let defaults: Vec<(String, FactUse)> = defaults.into_iter().map(|(n, u)| (n.to_owned(), u)).collect();
-        runtime::run(async move {
-            Ok(db
-                .write(move |tx| {
-                    for key in &keys {
-                        if let Some(mut r) = store::get_category(tx, key)? {
-                            r.starter = Some(set_name.clone());
-                            if let Some((_, u)) = defaults.iter().find(|(n, _)| *n == r.name) {
-                                r.default_use = u.as_str().into();
-                            }
-                            store::put_category(tx, &r)?;
-                        }
-                    }
-                    Ok(())
-                })
-                .await?)
-        })
-        .await?;
-        Ok(change)
+        self.apply_facts_full(FactScope::Account, vec![], edits, format!("starter set {name}"), None, Some(set)).await
     }
 
     pub async fn undo_fact_change(&self, change_id: i64) -> Result<(), CoreError> {

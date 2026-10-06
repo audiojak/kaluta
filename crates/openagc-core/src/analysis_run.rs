@@ -289,6 +289,8 @@ impl Core {
         agent: Option<String>,
         now: Millis,
     ) -> Result<RunRow, CoreError> {
+        // One start at a time: matching and counting must not run twice.
+        let _starting = self.agents.analysis_start.lock().await;
         let agent = match agent {
             Some(a) => a,
             None => self.analysis_agent().await?,
@@ -318,9 +320,11 @@ impl Core {
                     if store::active_run(tx)?.is_some() {
                         return Ok(None);
                     }
+                    // The cap is per calendar day, Run Now included.
                     let cap = store::meta(tx, keys::PAIRS_PER_DAY)?
                         .and_then(|v| v.parse::<u32>().ok())
-                        .unwrap_or(DEFAULT_PAIRS_PER_DAY);
+                        .unwrap_or(DEFAULT_PAIRS_PER_DAY)
+                        .saturating_sub(store::pairs_taken_on(tx, &day)?);
                     let pairs = store::pairs_to_compare(tx, cap)?;
                     let new = NewRun {
                         day: &day,
@@ -357,6 +361,13 @@ impl Core {
             if let Err(e) = core.analysis_job(run).await {
                 tracing::warn!(error = %e, "daily review stopped");
                 let _ = core.set_analysis_status(run, "failed", Some(e.to_string())).await;
+                // Pairs it did not reach wait for the next review.
+                if let Ok(db) = core.db() {
+                    let _ = runtime::run(async move {
+                        Ok::<_, CoreError>(db.write(move |tx| store::release_pairs(tx, run)).await?)
+                    })
+                    .await;
+                }
                 core.emit_analysis_progress();
             }
         }));
@@ -696,17 +707,18 @@ pub(crate) mod tests {
         rt(core.analysis_tick(now + 1000));
         assert_eq!(runs(core), 1);
 
-        // Run Now runs again today.
+        // Run Now runs again today, within the same day's cap.
         let manual = rt(core.clone().start_analysis_run(None)).unwrap();
         assert!(!manual.daily);
-        assert_eq!(wait_done(core).total, 1);
-        assert_eq!(status(third), compositions::Status::Reviewed);
+        assert_eq!(wait_done(core).total, 0, "the day's two are used");
+        assert_eq!(status(third), compositions::Status::Matched);
 
-        // The next day the schedule runs again.
+        // The next day the schedule runs again, and takes the one left.
         core.agents.analysis_attempts.lock().unwrap().clear();
         rt(core.analysis_tick(now + DAY));
         assert_eq!(runs(core), 3);
-        assert_eq!(wait_done(core).total, 0);
+        assert_eq!(wait_done(core).total, 1);
+        assert_eq!(status(third), compositions::Status::Reviewed);
     }
 
     #[test]

@@ -111,9 +111,15 @@ extension AppModel {
     @discardableResult
     private func recordFacts(_ actionName: String, notice: String, global: Bool,
                              _ change: () async throws(CoreClientError) -> FactChange) async -> CoreClientError? {
-        guard let core, let accountID = openAccountID else { return nil }
+        guard let core else { return nil }
         do {
             let made = try await change()
+            analysisError = nil
+            // No account open (Settings › Facts): changed, without Undo.
+            guard let accountID = openAccountID else {
+                await facts.load()
+                return nil
+            }
             undo.record(accountID: accountID, actionName: actionName, noticeText: notice,
                         undo: {
                             if global { try? await core.undoGlobalFactChange(made.changeId) } else {
@@ -128,6 +134,8 @@ extension AppModel {
             await facts.load()
             return nil
         } catch {
+            // Shown in the Analysis header, as its other failures are.
+            analysisError = error.message
             return error
         }
     }

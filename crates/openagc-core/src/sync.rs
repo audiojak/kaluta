@@ -362,6 +362,10 @@ impl SyncService {
             match self.engine.sync_incremental().await {
                 Ok(report) => {
                     backoff = Duration::from_secs(5);
+                    // The day's mail is in: the daily review may start (spec
+                    // §14.10). A synced account with nothing to download
+                    // never reports Idle, so this marks it too.
+                    self.settled.store(true, Ordering::SeqCst);
                     if !report.external_label_changes.is_empty()
                         && let Some(notify) = &self.external
                     {

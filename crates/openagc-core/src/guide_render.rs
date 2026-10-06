@@ -73,7 +73,10 @@ pub(crate) fn render(
     examples: &[String],
     version: i64,
 ) -> (String, Vec<String>) {
-    let accepted: Vec<&GuideEntry> = entries.iter().filter(|e| e.status == GuideStatus::Accepted).collect();
+    // F3 entries left over from before Facts (spec §14.11) are not used:
+    // facts render from their own store, by their use.
+    let accepted: Vec<&GuideEntry> =
+        entries.iter().filter(|e| e.status == GuideStatus::Accepted && e.category != "F3").collect();
     if accepted.is_empty() {
         return (String::new(), vec![]);
     }

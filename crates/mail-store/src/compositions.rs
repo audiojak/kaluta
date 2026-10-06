@@ -292,6 +292,15 @@ pub fn draft_sent(tx: &Transaction<'_>, draft_id: i64, rfc822_message_id: &str) 
     Ok(())
 }
 
+/// A send was taken back (Undo Send): the record forgets its Message-ID.
+pub fn draft_unsent(tx: &Transaction<'_>, draft_id: i64) -> StoreResult<()> {
+    tx.prepare_cached(
+        "UPDATE ai_compositions SET rfc822_message_id = NULL WHERE draft_id = ?1 AND status = 'waiting'",
+    )?
+    .execute([draft_id])?;
+    Ok(())
+}
+
 /// The draft row is going: sent (its record waits for the sent copy) or
 /// discarded (counted, never compared). The record lets go of the draft
 /// id, which SQLite may hand to a new draft.
@@ -535,6 +544,25 @@ mod tests {
             })
             .unwrap();
         assert_ne!(first, second);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn undo_send_forgets_the_message_id() {
+        let (db, dir) = db("unsent");
+        let id = draft(&db);
+        let record_id = db
+            .write_blocking({
+                let c = composition(id, "Hello");
+                move |tx| record(tx, &c, 10)
+            })
+            .unwrap();
+        db.write_blocking(move |tx| {
+            drafts::set_rfc822_id(tx, id, "x.openagc@example.com")?;
+            draft_unsent(tx, id)
+        })
+        .unwrap();
+        assert_eq!(db.read_blocking(move |c| get(c, record_id)).unwrap().unwrap().rfc822_message_id, None);
         let _ = std::fs::remove_dir_all(dir);
     }
 

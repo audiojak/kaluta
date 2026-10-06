@@ -300,8 +300,14 @@ pub fn get_change(conn: &Connection, id: i64) -> StoreResult<Option<(String, Sna
 /// Where a fact the interview wrote ("My time zone: Pacific") belongs:
 /// its category key and label, by the interview's templates (spec §14.11).
 pub fn place(statement: &str) -> (String, String, String) {
-    let (label, value) = match statement.split_once(':') {
-        Some((l, v)) if !v.trim().is_empty() && l.len() <= 60 => (l.trim(), v.trim()),
+    // "Label: value": a colon followed by a space, so links ("https://")
+    // and times ("9:00") stay whole.
+    let split =
+        statement.char_indices().find(|(i, c)| *c == ':' && statement[i + 1..].starts_with(char::is_whitespace));
+    let (label, value) = match split {
+        Some((i, _)) if !statement[i + 1..].trim().is_empty() && i <= 60 => {
+            (statement[..i].trim(), statement[i + 1..].trim())
+        }
         _ => ("Note", statement.trim()),
     };
     let bare = label.strip_prefix("My ").or_else(|| label.strip_prefix("my ")).unwrap_or(label).trim();
@@ -351,8 +357,18 @@ pub fn move_guide_facts(tx: &Transaction<'_>) -> StoreResult<usize> {
     }
     let now = now_millis();
     let mut accepted = false;
+    let mut used: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     for (id, statement, status, source, created_at, updated_at) in &rows {
-        let (category, label, value) = place(statement);
+        let (category, mut label, value) = place(statement);
+        // One label per category: a second "Note" becomes "Note 2".
+        if status == "accepted" {
+            let base = label.clone();
+            let mut n = 1;
+            while !used.insert((category.clone(), label.to_lowercase())) {
+                n += 1;
+                label = format!("{base} {n}");
+            }
+        }
         let f = FactRow {
             id: 0,
             use_: if category == "people" { "ask".into() } else { "free".into() },
@@ -399,6 +415,11 @@ mod tests {
             ("other".into(), "What my company does".into(), "email software".into())
         );
         assert_eq!(p("I live in Oakland"), ("other".into(), "Note".into(), "I live in Oakland".into()));
+        assert_eq!(p("Book time at https://cal.com/j").2, "Book time at https://cal.com/j", "links stay whole");
+        assert_eq!(
+            p("My working hours: 9:00-17:00"),
+            ("availability".into(), "Usual hours".into(), "9:00-17:00".into())
+        );
     }
 
     #[test]

@@ -210,6 +210,8 @@ impl Core {
             (None, None) => return Err(CoreError::new(ErrorKind::InvalidInput, "choose a guide to merge")),
         };
         let (incoming, groups) = read_export(&text)?;
+        // Facts merge through Facts (spec §14.11), not into the guide.
+        let incoming: Vec<_> = incoming.into_iter().filter(|e| e.category != "F3").collect();
         if incoming.is_empty() {
             return Err(CoreError::new(ErrorKind::NotFound, "that guide has no entries"));
         }
@@ -315,10 +317,10 @@ mod tests {
         assert_eq!(plan.identical, 1);
         assert_eq!(plan.additions.iter().map(|a| a.statement.as_str()).collect::<Vec<_>>(), ["Be warm"]);
         let points: Vec<usize> = plan.decisions.iter().map(|d| d.incoming.len()).collect();
-        assert_eq!(points.iter().sum::<usize>(), 2, "the sign-off and the fact are decisions");
+        assert_eq!(points.iter().sum::<usize>(), 1, "the sign-off is a decision; facts merge through Facts");
         let signoff = plan.decisions.iter().find(|d| d.incoming[0].category == "B6").unwrap();
         assert_eq!(signoff.mine[0].statement, "Sign off with 'Best'");
-        assert!(plan.decisions.iter().any(|d| d.incoming[0].category == "F3"), "facts are never taken silently");
+        assert!(!plan.decisions.iter().any(|d| d.incoming[0].category == "F3"));
         assert_eq!(plan.groups[0].name, "Investors");
         assert_eq!(block_on(core.list_guide_entries(vec![])).unwrap().len(), 2, "nothing changed yet");
     }

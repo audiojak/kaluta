@@ -11,7 +11,7 @@ use serde_json::Value;
 
 use crate::facts::{FactCategoryInfo, FactEdit, FactFields, FactInfo, FactScope, FactSource, FactStatus, FactUse};
 use crate::guide_ai::{fenced, loose};
-use crate::{Core, CoreError, ErrorKind, runtime};
+use crate::{Core, CoreError, runtime};
 
 /// The first line of every gleaning prompt: how the fake agent knows one.
 pub const GLEAN_MARKER: &str = "OpenAGC facts glean";
@@ -109,9 +109,16 @@ pub fn never_store(category: &str, label: &str, value: &str) -> bool {
     if secret.iter().any(|w| format!(" {text} ").contains(w)) {
         return true;
     }
+    let words: Vec<&str> = text.split(|c: char| !c.is_alphanumeric()).collect();
+    if ["ssn", "sin", "pwd", "pw", "acct"].iter().any(|w| words.contains(w)) {
+        return true;
+    }
     let ids = [
         "social security",
-        "ssn",
+        "door code",
+        "gate code",
+        "alarm code",
+        "account no",
         "passport",
         "driver's licen",
         "drivers licen",
@@ -132,7 +139,9 @@ pub fn never_store(category: &str, label: &str, value: &str) -> bool {
     // Long runs of digits: card, bank and id numbers (not phones: those
     // have at most 15 digits and are labelled as phones).
     let digits: String = value.chars().filter(|c| c.is_ascii_digit()).collect();
-    let phone = label.to_lowercase().contains("phone");
+    let l = label.to_lowercase();
+    let phone = ["phone", "mobile", "cell", "fax", "whatsapp", "landline", "tel"].iter().any(|w| l.contains(w))
+        && digits.len() <= 15;
     if digits.len() >= 9 && !phone {
         let only_number = value.chars().all(|c| c.is_ascii_digit() || " -./".contains(c));
         if only_number || digits.len() >= 13 {
@@ -274,12 +283,25 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
                 if p.label.is_empty() || p.value.is_empty() || never_store(&p.category, &p.label, &p.value) {
                     continue;
                 }
-                // The same fact again is nothing new.
-                if facts.iter().any(|k| {
+                // A fact by that label already: the same is nothing new, a
+                // different value is a change to it (spec §14.11).
+                if let Some(k) = facts.iter().find(|k| {
                     k.status == FactStatus::Accepted
+                        && k.scope == FactScope::Account
                         && k.category == p.category
-                        && k.label.eq_ignore_ascii_case(&p.label)
-                        && loose(&k.value) == loose(&p.value)
+                        && k.label.to_lowercase() == p.label.to_lowercase()
+                }) {
+                    if loose(&k.value) != loose(&p.value) {
+                        p.label = k.label.clone();
+                        p.fact_id = Some(k.id);
+                        out.push(Found::Alter(p));
+                    }
+                    continue;
+                }
+                // Twice in one answer: once.
+                if out.iter().any(|o| {
+                    matches!(o, Found::Add(q) if q.category == p.category
+                    && q.label.to_lowercase() == p.label.to_lowercase())
                 }) {
                     continue;
                 }
@@ -415,12 +437,8 @@ impl Core {
         let chosen: Vec<_> = candidates.into_iter().take(GLEAN_CAP).collect();
         let until = chosen.last().map(|m| m.at);
         let texts = self.own_texts(chosen.iter().map(|m| m.message_id.clone()).collect()).await?;
-        if let Some(until) = until {
-            let db = self.db()?;
-            runtime::run(async move {
-                Ok(db.write(move |tx| store::set_meta(tx, keys::GLEANED_UNTIL, &until.to_string())).await?)
-            })
-            .await?;
+        if let (Some(until), Some(account)) = (until, self.effective_account_id()) {
+            self.agents.glean_until.lock().unwrap_or_else(|e| e.into_inner()).insert(account, until);
         }
         Ok(chosen
             .into_iter()
@@ -461,10 +479,21 @@ impl Core {
                 None => tracing::warn!(run, "fact gleaning skipped: unreadable answer"),
             }
         }
+        // Read: only now does "All mail I send" move on past these messages.
+        let until = self
+            .effective_account_id()
+            .and_then(|a| self.agents.glean_until.lock().unwrap_or_else(|e| e.into_inner()).remove(&a));
         let db = self.db()?;
-        runtime::run(
-            async move { Ok(db.write(move |tx| store::set_meta(tx, keys::GLEANED_RUN, &run.to_string())).await?) },
-        )
+        runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    if let Some(until) = until {
+                        store::set_meta(tx, keys::GLEANED_UNTIL, &until.to_string())?;
+                    }
+                    store::set_meta(tx, keys::GLEANED_RUN, &run.to_string())
+                })
+                .await?)
+        })
         .await?;
         Ok(())
     }
@@ -567,10 +596,8 @@ impl Core {
                 _ => {}
             }
         }
-        let change = self
-            .apply_facts_with(FactScope::Account, edits, category_edits, "analysis accept".into(), Some((ids, status)))
-            .await?;
-        // A starter set adds its categories as a change of its own.
+        // A starter set's categories are part of the same change.
+        let mut starter = None;
         for s in starters {
             let set = match s.as_str() {
                 "business" => crate::facts::StarterSet::Business,
@@ -578,12 +605,24 @@ impl Core {
                 "household" => crate::facts::StarterSet::Household,
                 _ => crate::facts::StarterSet::JobSearch,
             };
-            if let Err(e) = self.add_fact_starter_set(set).await
-                && e.kind() != ErrorKind::InvalidInput
-            {
-                return Err(e);
+            let have = self.fact_categories().await?;
+            for (name, description) in crate::facts::starter_categories(set) {
+                if !have.iter().any(|c| crate::facts::similar(&c.name, &name)) {
+                    category_edits.push(crate::facts::CategoryEdit::Add { name, description });
+                }
             }
+            starter = Some(set);
         }
+        let change = self
+            .apply_facts_full(
+                FactScope::Account,
+                edits,
+                category_edits,
+                "analysis accept".into(),
+                Some((ids, status)),
+                starter,
+            )
+            .await?;
         self.analysis_changed();
         Ok(change)
     }
@@ -630,6 +669,10 @@ mod tests {
             "My brother who lives in Ohio with his two kids and works nights at the plant near the river"
         ));
         assert!(!never_store("contact", "Phone", "+1 415 555 0100"));
+        assert!(!never_store("contact", "Mobile", "415-555-0100"));
+        assert!(never_store("contact", "Phone", "4111 1111 1111 1111 1"), "a card number is not a phone");
+        assert!(!never_store("other", "Lessons", "Classes at the Mission"), "ssn only as a word");
+        assert!(never_store("other", "Gate code", "4410"));
         assert!(!never_store("people", "Sam", "My assistant"));
         assert!(!never_store("work", "Occupation or role", "CEO of Actual AI"));
     }
@@ -678,6 +721,21 @@ mod tests {
             overridden: false,
             stale: false,
         }
+    }
+
+    #[test]
+    fn a_new_value_for_a_known_label_is_a_change_not_a_second_fact() {
+        let mail = sent("Our team is now Calendar.");
+        let facts = vec![known(7, "work", "Team", "Mail")];
+        let answer = r#"{"facts": [
+            {"op": "add", "category": "work", "label": "team", "value": "Calendar", "evidence": {"message_id": "m1", "quote": "Our team is now Calendar"}},
+            {"op": "add", "category": "work", "label": "Team", "value": "Mail", "evidence": {"message_id": "m1", "quote": "Our team"}}
+        ]}"#;
+        let found = parse(answer, &mail, &categories(), &facts).unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(
+            matches!(&found[0], Found::Alter(p) if p.fact_id == Some(7) && p.value == "Calendar" && p.label == "Team")
+        );
     }
 
     #[test]

@@ -42,9 +42,9 @@ mean "copied", and an edit on one account would not reach the others.
 - **Undo across two stores** is one change on the account's undo stack
   (ADR 0006): the change record in the account's store snapshots both
   sides (the account row and the global row, before and after), and undo
-  writes both back. Edits made directly in Settings › Facts, where no
-  account is in view, are undone from that window's own stack, recorded
-  in the global store.
+  writes both back. Edits made directly in Settings › Facts are recorded
+  in the global store and undone from the open account's undo stack (with
+  no account open they are made without undo).
 - **Removing an account** never removes global facts.
 
 ## Consequences

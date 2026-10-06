@@ -191,6 +191,21 @@ pub fn set_run_status(
     Ok(())
 }
 
+/// Give a stopped run's pairs not compared back to the next review.
+pub fn release_pairs(tx: &Transaction<'_>, run_id: i64) -> StoreResult<()> {
+    tx.prepare_cached("DELETE FROM analysis_run_pairs WHERE run_id = ?1 AND NOT done")?.execute([run_id])?;
+    Ok(())
+}
+
+/// Pairs taken by runs made for `day`: what counts against the day's cap.
+pub fn pairs_taken_on(conn: &Connection, day: &str) -> StoreResult<u32> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT COUNT(*) FROM analysis_run_pairs p JOIN analysis_runs r ON r.id = p.run_id WHERE r.day = ?1",
+        )?
+        .query_row([day], |r| r.get(0))?)
+}
+
 /// Matched pairs the user changed, oldest first: what a run compares. At
 /// most `limit` (the cost cap); the rest wait for the next day.
 pub fn pairs_to_compare(conn: &Connection, limit: u32) -> StoreResult<Vec<i64>> {
@@ -530,10 +545,14 @@ pub fn pair_proposals(conn: &Connection, composition_id: i64) -> StoreResult<Vec
 }
 
 /// Leave one pair out of every open proposal ("Ignore Edits to This
-/// Message"); returns the proposals it was in.
-pub fn drop_pair(tx: &Transaction<'_>, composition_id: i64) -> StoreResult<Vec<i64>> {
+/// Message"); returns the evidence it removed, by proposal, so undo puts
+/// back exactly that (evidence added since stays).
+pub fn drop_pair(tx: &Transaction<'_>, composition_id: i64) -> StoreResult<Vec<(i64, EvidenceRow)>> {
     let ids = pair_proposals(tx, composition_id)?;
+    let mut removed = Vec::new();
     for id in &ids {
+        let row = evidence(tx, *id)?.into_iter().find(|e| e.composition_id == composition_id);
+        removed.extend(row.map(|r| (*id, r)));
         tx.prepare_cached("DELETE FROM analysis_evidence WHERE proposal_id = ?1 AND composition_id = ?2")?
             .execute(params![id, composition_id])?;
         tx.prepare_cached(
@@ -545,7 +564,26 @@ pub fn drop_pair(tx: &Transaction<'_>, composition_id: i64) -> StoreResult<Vec<i
         tx.prepare_cached("UPDATE analysis_proposals SET status = 'watching' WHERE id = ?1 AND support = 0")?
             .execute([id])?;
     }
-    Ok(ids)
+    Ok(removed)
+}
+
+/// Undo of `drop_pair`: put those evidence rows back and recount; a
+/// proposal shown before shows again.
+pub fn restore_pair(tx: &Transaction<'_>, removed: &[(i64, EvidenceRow)], now: Millis) -> StoreResult<()> {
+    for (id, row) in removed {
+        tx.prepare_cached(
+            "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?
+        .execute(params![id, row.composition_id, row.sent_quote, row.ai_quote, now])?;
+        tx.prepare_cached(
+            "UPDATE analysis_proposals SET support = (SELECT COUNT(*) FROM analysis_evidence WHERE proposal_id = ?1),
+               status = CASE WHEN status = 'watching' AND shown_at IS NOT NULL THEN 'proposed' ELSE status END
+             WHERE id = ?1",
+        )?
+        .execute([id])?;
+    }
+    Ok(())
 }
 
 /// Count drafts that applied an entry: sent as written, or changed

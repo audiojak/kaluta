@@ -220,7 +220,7 @@ struct AnalysisHeader: View {
                 .hoverHelp("Write a fact AI drafts may use")
             Menu {
                 Button("Add Category…") { model.guideSheet = .newFactCategory } // no-help: menu
-                Menu("Add Categories From a Starter Set") {
+                Menu("Add Categories From a Starter Set") { // no-help: menu
                     ForEach(model.core?.factStarterSets() ?? [], id: \.name) { set in
                         Button(set.name) { Task { await model.addFactStarterSet(set) } } // no-help: menu
                     }
@@ -245,7 +245,11 @@ struct AnalysisHeader: View {
             if let run = model.analysisProgress?.run, run.status == .running || run.status == .paused {
                 AnalysisRunBar(run: run)
             } else if let run = model.analysisProgress?.run {
-                Text(Self.summary(run)).font(TypeRole.caption).foregroundStyle(.secondary)
+                Text(Self.summary(run, daily: model.analysisDaily)).font(TypeRole.caption).foregroundStyle(.secondary)
+            } else if !model.analysisDaily {
+                Text("Daily reviews are off. Run Now reviews the AI drafts you sent since the last review.")
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 Text("The first review runs today, once mail has synced. It sends the AI drafts you edited, and what you sent, to your own agent (with All mail I send, also the day's sent mail).")
                     .font(TypeRole.caption)
@@ -290,14 +294,14 @@ struct AnalysisHeader: View {
     }
 
     /// "Last reviewed today: 6 drafts compared, 3 sent as written. Next review tomorrow."
-    static func summary(_ run: AnalysisRunInfo) -> String {
+    static func summary(_ run: AnalysisRunInfo, daily: Bool = true) -> String {
         let when = run.finishedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? Date()
         let day = Calendar.current.isDateInToday(when) ? "today" : when.formatted(date: .abbreviated, time: .omitted)
         var parts = ["\(run.total) \(run.total == 1 ? "draft" : "drafts") compared"]
         if run.unchanged > 0 { parts.append("\(run.unchanged) sent as written") }
         if run.unmatched > 0 { parts.append("\(run.unmatched) not found in Sent") }
         let status = run.status == .cancelled ? "Last review stopped" : run.status == .failed ? "Last review failed" : "Last reviewed"
-        return "\(status) \(day): \(parts.joined(separator: ", ")). Next review tomorrow."
+        return "\(status) \(day): \(parts.joined(separator: ", ")).\(daily ? " Next review tomorrow." : "")"
     }
 
     /// "AI drafts changed by 18% (median, this week) · 40% sent as written".

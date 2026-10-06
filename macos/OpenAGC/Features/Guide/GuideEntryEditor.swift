@@ -135,6 +135,7 @@ struct GuideEntryEditor: View {
         let check = checkKind.map { GuideCheck(kind: $0, value: checkValue) }
         let fields = GuideEntryFields(category: category, kind: kind, statement: statement, scope: scope, check: check)
         if let proposal {
+            model.analysisError = nil
             await model.acceptAnalysis(proposal, as: fields)
             if let failure = model.analysisError { error = failure } else { model.guideSheet = nil }
             return

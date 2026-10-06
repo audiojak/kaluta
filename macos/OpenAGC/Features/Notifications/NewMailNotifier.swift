@@ -68,14 +68,19 @@ final class NewMailNotifier: NSObject {
     /// Only when the app is not in front, like new mail.
     /// New proposals in Analysis after a review: at most once a day per
     /// account, only when the app is not in front, only if turned on.
-    func announceAnalysis(proposals: Int, accountID: String?, today: String) {
+    /// `proposals` nil: some, not counted (another account).
+    func announceAnalysis(proposals: Int?, accountID: String?, today: String) {
         let key = "analysisNotified.\(accountID ?? "")"
-        guard proposals > 0, defaults.bool(forKey: Self.analysisKey), !isAppActive(),
+        guard proposals.map({ $0 > 0 }) ?? true, defaults.bool(forKey: Self.analysisKey), !isAppActive(),
               defaults.string(forKey: key) != today else { return }
         defaults.set(today, forKey: key)
         let content = UNMutableNotificationContent()
         content.title = "Analysis"
-        content.body = proposals == 1 ? "1 new proposal in Analysis" : "\(proposals) new proposals in Analysis"
+        content.body = switch proposals {
+        case nil: "New proposals in Analysis"
+        case 1: "1 new proposal in Analysis"
+        case let n?: "\(n) new proposals in Analysis"
+        }
         content.threadIdentifier = "analysis"
         content.userInfo = ["analysis": true, "accountID": accountID ?? ""]
         post(UNNotificationRequest(identifier: "analysis-\(UUID().uuidString)", content: content, trigger: nil))

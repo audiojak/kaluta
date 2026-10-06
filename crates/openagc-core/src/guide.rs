@@ -421,6 +421,10 @@ fn invalid(message: impl Into<String>) -> CoreError {
 /// Checked and tidied fields, or why not.
 pub(crate) fn validate(fields: GuideEntryFields) -> Result<GuideEntryFields, CoreError> {
     let cat = category(&fields.category).ok_or_else(|| invalid(format!("{} is not a category", fields.category)))?;
+    // Facts have their own store now (spec §14.11).
+    if cat.id == "F3" {
+        return Err(invalid("facts about you live in Analysis › Facts"));
+    }
     let statement = clean_text(&fields.statement);
     if statement.is_empty() {
         return Err(invalid("an entry needs a statement"));
@@ -660,11 +664,22 @@ impl Core {
                 ids.dedup();
                 store::restore(tx, &ids, if undo { &before } else { &after })?;
                 if let Some((was, is)) = store::change_analysis(tx, change_id)? {
-                    let snapshots: Vec<mail_store::analysis::ProposalSnapshot> =
-                        serde_json::from_str(if undo { &was } else { &is })?;
-                    mail_store::analysis::restore_proposals(tx, &snapshots, now)?;
+                    match serde_json::from_str::<AnalysisRecord>(if undo { &was } else { &is })? {
+                        AnalysisRecord::Proposals(snapshots) => {
+                            mail_store::analysis::restore_proposals(tx, &snapshots, now)?
+                        }
+                        AnalysisRecord::Ignored { removed, .. } if undo => {
+                            mail_store::analysis::restore_pair(tx, &removed, now)?
+                        }
+                        AnalysisRecord::Ignored { pair, .. } => {
+                            mail_store::analysis::drop_pair(tx, pair)?;
+                        }
+                    }
                 }
-                store::record_version(tx, &format!("{} {reason}", if undo { "undo" } else { "redo" }), now)?;
+                // A change to proposals only leaves the guide as it was.
+                if !ids.is_empty() {
+                    store::record_version(tx, &format!("{} {reason}", if undo { "undo" } else { "redo" }), now)?;
+                }
                 Ok(())
             })
             .await?;
@@ -687,34 +702,45 @@ pub(crate) enum AnalysisStep {
 }
 
 impl AnalysisStep {
-    /// Do it, returning the proposals it touched before and after (JSON).
+    /// Do it, returning what undo and redo need, before and after (JSON).
     fn apply(&self, tx: &mail_store::Transaction<'_>, now: i64) -> mail_store::StoreResult<(String, String)> {
         use mail_store::analysis;
-        let ids = match self {
-            Self::Decide { ids, .. } => ids.clone(),
-            Self::IgnorePair(pair) => analysis::pair_proposals(tx, *pair)?,
-        };
-        let snapshots = |tx: &mail_store::Transaction<'_>| -> mail_store::StoreResult<Vec<analysis::ProposalSnapshot>> {
-            let mut out = Vec::new();
-            for id in &ids {
-                out.extend(analysis::snapshot_proposal(tx, *id)?);
-            }
-            Ok(out)
-        };
-        let before = snapshots(tx)?;
         match self {
             Self::Decide { ids, status } => {
+                let snapshots =
+                    |tx: &mail_store::Transaction<'_>| -> mail_store::StoreResult<Vec<analysis::ProposalSnapshot>> {
+                        let mut out = Vec::new();
+                        for id in ids {
+                            out.extend(analysis::snapshot_proposal(tx, *id)?);
+                        }
+                        Ok(out)
+                    };
+                let before = AnalysisRecord::Proposals(snapshots(tx)?);
                 for id in ids {
                     analysis::set_proposal_status(tx, *id, status, now)?;
                 }
+                let after = AnalysisRecord::Proposals(snapshots(tx)?);
+                Ok((serde_json::to_string(&before)?, serde_json::to_string(&after)?))
             }
             Self::IgnorePair(pair) => {
-                analysis::drop_pair(tx, *pair)?;
+                // Only the rows it removes: evidence added later must
+                // survive undo (ADR 0006).
+                let removed = analysis::drop_pair(tx, *pair)?;
+                let record = serde_json::to_string(&AnalysisRecord::Ignored { pair: *pair, removed })?;
+                Ok((record.clone(), record))
             }
         }
-        let after = snapshots(tx)?;
-        Ok((serde_json::to_string(&before)?, serde_json::to_string(&after)?))
     }
+}
+
+/// What a guide change recorded for Analysis.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub(crate) enum AnalysisRecord {
+    /// Proposals decided: put back as they were.
+    Proposals(Vec<mail_store::analysis::ProposalSnapshot>),
+    /// A pair left out: its evidence rows put back, or taken out again.
+    Ignored { pair: i64, removed: Vec<(i64, mail_store::analysis::EvidenceRow)> },
 }
 
 fn group_info(g: GroupRow) -> AudienceGroup {

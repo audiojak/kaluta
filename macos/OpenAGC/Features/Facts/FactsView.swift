@@ -116,7 +116,8 @@ struct FactDetail: View {
                                    : "Only this account uses it")
                     }
                     Button("Delete") { Task { await model.deleteFact(fact) } } // undoable
-                        .hoverHelp("Delete the fact (⌫); Undo brings it back")
+                        .hoverHelp(fact.scope == .global ? "Delete it for every account (⌫); Undo brings it back"
+                                   : "Delete the fact (⌫); Undo brings it back")
                 }
                 .controlSize(.small)
             }
@@ -166,7 +167,9 @@ struct FactEditor: View {
         Dialog(title: fact == nil ? "New Fact" : "Edit Fact",
                message: scope == .global ? "Every account's AI drafts may use it." : "AI drafts for this account may use it.") {
             Picker("Category", selection: $category) {
-                ForEach(categories.filter { !$0.hidden }, id: \.key) { c in Text(c.name).tag(c.key) }
+                ForEach(categories.filter { !$0.hidden || $0.key == fact?.category }, id: \.key) { c in
+                    Text(c.name).tag(c.key)
+                }
             }
             .hoverHelp("Where it belongs; a category's description says what goes there")
             HStack(spacing: Space.s) {
@@ -196,7 +199,7 @@ struct FactEditor: View {
                 Toggle("True as of", isOn: $dated)
                     .hoverHelp("For facts that age, such as travel dates; old ones are flagged for review")
                 if dated {
-                    DatePicker("", selection: $asOf, displayedComponents: .date).labelsHidden()
+                    DatePicker("Date", selection: $asOf, displayedComponents: .date).labelsHidden()
                 }
             }
             if let error {
@@ -241,7 +244,14 @@ struct NewFactCategorySheet: View {
                message: "Its description tells drafting, and what learns facts from your mail, what belongs there.") {
             TextField("Name, such as Properties", text: $name)
                 .textFieldStyle(.roundedBorder)
-                .onChange(of: name) { Task { similar = try? await model.core?.similarFactCategory(name) } }
+                .onChange(of: name) {
+                    let asked = name
+                    Task {
+                        let found = try? await model.core?.similarFactCategory(asked)
+                        // Only the answer for what the field says now.
+                        if asked == name { similar = found ?? nil }
+                    }
+                }
             TextField("Description, such as Properties I'm currently selling", text: $description, axis: .vertical)
                 .lineLimit(1...3)
                 .textFieldStyle(.roundedBorder)
@@ -306,7 +316,7 @@ struct FactCategoriesSheet: View {
                     Button("Save") {
                         Task {
                             await model.editFactCategories([.update(key: c.key, name: name, description: description)],
-                                                           scope: store.scope, actionName: "Rename Category",
+                                                           scope: c.global ? .global : store.scope, actionName: "Rename Category",
                                                            notice: "Renamed “\(c.name)”")
                             editing = nil
                             await store.load()
@@ -348,12 +358,14 @@ struct FactCategoriesSheet: View {
                     .hoverHelp("Change its name and description")
                     Button("Delete") {
                         Task {
-                            await model.editFactCategories([.delete(key: c.key)], scope: store.scope, actionName: "Delete Category",
+                            await model.editFactCategories([.delete(key: c.key)], scope: c.global ? .global : store.scope,
+                                                           actionName: "Delete Category",
                                                            notice: "Deleted “\(c.name)”; its facts are in Other")
                             await store.load()
                         }
                     } // undoable
-                    .hoverHelp("Delete it; its facts move to Other")
+                    .hoverHelp(c.global ? "Delete it for every account; its facts move to Other"
+                               : "Delete it; its facts move to Other")
                 }
             }
             .controlSize(.small)

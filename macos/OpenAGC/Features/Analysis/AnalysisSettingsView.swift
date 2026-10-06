@@ -49,7 +49,11 @@ struct AnalysisSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .task(id: model.openAccountID) { settings = try? await model.core?.analysisSettings() }
+        .task(id: model.openAccountID) {
+            // Nothing from the last account is written into this one.
+            settings = nil
+            settings = try? await model.core?.analysisSettings()
+        }
     }
 
     /// A binding that saves the whole settings when one changes.
@@ -62,6 +66,7 @@ struct AnalysisSettingsView: View {
                 guard let core = model.core else { return }
                 do throws(CoreClientError) {
                     try await core.setAnalysisSettings(next)
+                    model.analysisDaily = next.dailyReview
                     error = nil
                 } catch {
                     self.error = error.message
