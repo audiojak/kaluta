@@ -5,6 +5,8 @@
 # rules); mark such lines with `// menu`. Status colours come from `Tone`
 # (failure, caution, approved), and dialogs use `CancelButton`, which
 # answers Escape; a Cancel that is not a dialog's is marked `// inline`.
+# Type comes from TypeRole (no raw .font(.callout) or systemFont(ofSize:)),
+# dates from Design/DateStyle.swift, and tap-only rows carry a button trait.
 # Usage: scripts/design-lint.sh [--strict]   (--strict exits 1 on findings)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,12 +21,25 @@ findings=$(grep -rnE \
   -e '\.foregroundStyle\(\.(orange|red|green)\)' \
   -e '(^|[^A-Za-z.])Color\.(orange|red|green)([^A-Za-z]|$)' \
   -e 'Button\("Cancel"' \
+  -e '\.font\(\.(callout|caption2?|headline|body|subheadline|footnote|title[23]?|largeTitle)' \
+  -e 'systemFont\(ofSize:' \
+  -e '(DateFormatter|RelativeDateTimeFormatter)\(\)' \
   -e '(^|[^A-Za-z])Divider\(\)' \
   --include='*.swift' . \
   | grep -v '^\./Design/' \
   | grep -v '// menu' \
   | grep -v '// inline' \
   | grep -v '^\./App/Snapshot\.swift:' || true)
+
+# A row that acts on a tap says so to VoiceOver: .onTapGesture with
+# .accessibilityAddTraits(.isButton) within the next three lines.
+taps=$(grep -rn --include='*.swift' -A3 '\.onTapGesture' . | grep -v '^\./Design/' \
+  | awk -F'[:-]' '/\.onTapGesture/ { if (pending) print pending; pending=$0; n=0; next }
+                  /isButton/ { pending=""; next }
+                  { if (pending && ++n >= 3) { print pending; pending="" } }
+                  END { if (pending) print pending }' \
+  | grep -v 'count: 2' | grep -v '// tap-only' | sed 's/$/ (tap-only: add .accessibilityAddTraits(.isButton))/' || true)
+[[ -n "$taps" ]] && findings=$(printf '%s\n%s' "$findings" "$taps" | sed '/^$/d')
 
 # The reader's and composer's CSS keep to the spacing scale too: literal
 # px in padding, margin, gap and border-radius must be one of the Space or

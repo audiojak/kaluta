@@ -56,7 +56,7 @@ struct ThreadReaderView: View {
             }
             if detail.messages.count > 1 {
                 Text("\(detail.messages.count) messages")
-                    .font(.callout)
+                    .font(TypeRole.meta)
                     .foregroundStyle(.secondary)
             }
         }

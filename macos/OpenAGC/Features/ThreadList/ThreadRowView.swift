@@ -34,7 +34,7 @@ final class ThreadRowView: NSTableCellView {
         badges.imageScaling = .scaleProportionallyDown
         badges.contentTintColor = .secondaryLabelColor
         count.alignment = .right
-        count.font = .systemFont(ofSize: 11, weight: .semibold)
+        count.font = TypeRole.rowCount
         count.textColor = Tone.unreadNS
         repliedMark.image = NSImage(systemSymbolName: "arrowshape.turn.up.left.fill", accessibilityDescription: "Replied")?
             .withSymbolConfiguration(.init(pointSize: 9, weight: .medium))
@@ -242,48 +242,17 @@ final class ThreadRowView: NSTableCellView {
 
     /// A one-line label's text width in its font.
     private static func textWidth(_ field: NSTextField) -> CGFloat {
-        ceil((field.stringValue as NSString).size(withAttributes: [.font: field.font ?? .systemFont(ofSize: 11)]).width)
+        ceil((field.stringValue as NSString).size(withAttributes: [.font: field.font ?? TypeRole.chip]).width)
     }
 
     private static func label(size: CGFloat, lines: Int = 1) -> NSTextField {
         let field = lines > 1 ? NSTextField(wrappingLabelWithString: "") : NSTextField(labelWithString: "")
-        field.font = .systemFont(ofSize: size)
+        field.font = TypeRole.rowText(size: size)
         field.lineBreakMode = lines > 1 ? .byWordWrapping : .byTruncatingTail
         field.maximumNumberOfLines = lines
         field.cell?.truncatesLastVisibleLine = true
         field.isSelectable = false
         return field
-    }
-}
-
-/// Mail-style dates: time today, "Mon" this week, "Sep 12" this year, else
-/// a short date. Formatters are created once; making them per row stalls
-/// scrolling.
-enum RowDateFormatter {
-    private static let time: DateFormatter = make("jmm")
-    private static let weekday: DateFormatter = make("EEE")
-    private static let monthDay: DateFormatter = make("MMMd")
-    private static let full: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .none
-        return f
-    }()
-
-    static func string(forMillis millis: Int64, now: Date = .now, calendar: Calendar = .current) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
-        if calendar.isDate(date, inSameDayAs: now) { return time.string(from: date) }
-        if let days = calendar.dateComponents([.day], from: date, to: now).day, days < 7, date < now {
-            return weekday.string(from: date)
-        }
-        if calendar.isDate(date, equalTo: now, toGranularity: .year) { return monthDay.string(from: date) }
-        return full.string(from: date)
-    }
-
-    private static func make(_ template: String) -> DateFormatter {
-        let f = DateFormatter()
-        f.setLocalizedDateFormatFromTemplate(template)
-        return f
     }
 }
 

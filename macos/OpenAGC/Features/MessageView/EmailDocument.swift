@@ -112,12 +112,7 @@ enum EmailDocument {
         return out
     }
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
+    private static var dateFormatter: DateFormatter { DateStyle.readerHeader }
 
     private static func dateString(_ date: Date) -> String {
         dateFormatter.string(from: date)

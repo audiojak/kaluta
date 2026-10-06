@@ -8,7 +8,7 @@ import AppKit
 /// ordinary mail in the recipient's client. Pure, so it is unit-tested.
 enum ComposerHTML {
     /// The editor's body font; loaded HTML is normalized to it.
-    @MainActor static var bodyFont: NSFont { .systemFont(ofSize: NSFont.systemFontSize + 1) }
+    @MainActor static var bodyFont: NSFont { TypeRole.composerBody }
 
     // MARK: Attributed string → HTML
 

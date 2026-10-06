@@ -170,7 +170,7 @@ struct ComposerView: View {
                     Button("Cc/Bcc") { store.showsCcBcc = true }
                         .hoverHelp("Add Cc and Bcc fields")
                         .buttonStyle(.link)
-                        .font(.callout)
+                        .font(TypeRole.meta)
                 }
             }
             if store.showsCcBcc {
@@ -215,7 +215,7 @@ struct ComposerView: View {
             } label: {
                 Label(showsQuote ? "Hide Conversation" : "Show Conversation",
                       systemImage: showsQuote ? "chevron.up" : "chevron.down")
-                    .font(.callout)
+                    .font(TypeRole.meta)
             }
             .hoverHelp(showsQuote ? "Hide the conversation you are answering" : "Show the conversation you are answering")
             .buttonStyle(.borderless)
@@ -260,7 +260,7 @@ struct ComposerView: View {
             } label: {
                 Label(showsQuote ? "Hide Original" : "Show Original",
                       systemImage: showsQuote ? "chevron.down" : "chevron.up")
-                    .font(.callout)
+                    .font(TypeRole.meta)
             }
             .hoverHelp(showsQuote ? "Hide the message you are answering" : "Show the message you are answering")
             .buttonStyle(.borderless)
@@ -318,7 +318,7 @@ struct ComposerView: View {
                         .hoverHelp("Have \(name) write this into the message (Return)")
                 }
             }
-            .font(.body)
+            .font(TypeRole.body)
             .controlSize(.regular)
             .glassCapsule()
             switch assistant.state {
@@ -435,7 +435,7 @@ struct ComposerView: View {
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
                     }
-                    .font(.callout)
+                    .font(TypeRole.meta)
                     .padding(.horizontal, Space.m)
                     .padding(.vertical, Space.xs)
                     .background(.quaternary, in: .capsule)

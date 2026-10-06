@@ -35,14 +35,14 @@ struct UndoNoticeView: View {
                     Button {
                         undo.dismissNotice()
                     } label: {
-                        Image(systemName: "xmark").font(.caption.weight(.semibold))
+                        Image(systemName: "xmark").font(TypeRole.caption.weight(.semibold))
                     }
                     .hoverHelp("Dismiss")
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Close")
                 }
-                .font(.callout)
+                .font(TypeRole.meta)
                 .glassCapsule()
                 .onHover { undo.setPaused(.hover, $0) }
                 .padding(.bottom, Space.l)

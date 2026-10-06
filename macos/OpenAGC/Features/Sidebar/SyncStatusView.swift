@@ -17,10 +17,10 @@ struct SyncStatusView: View {
                         .padding(.bottom, Space.hair)
                 }
                 Text(lines.title)
-                    .font(.caption.weight(.medium))
+                    .font(TypeRole.caption.weight(.medium))
                 if let detail = lines.detail {
                     Text(detail)
-                        .font(.caption2)
+                        .font(TypeRole.fine)
                         .foregroundStyle(.secondary)
                 }
             }

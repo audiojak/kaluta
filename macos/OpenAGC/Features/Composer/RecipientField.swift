@@ -19,7 +19,7 @@ struct RecipientField: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: NSFont.systemFontSize)
+        field.font = TypeRole.field
         field.completionDelay = 0
         field.tokenizingCharacterSet = CharacterSet(charactersIn: ",;")
         field.cell?.wraps = true

@@ -74,10 +74,16 @@ controls), `card` 8 (cards), `panel` 12 (floating panels). Capsules use
 | `groupLabel` | subheadline semibold | groups inside a panel |
 | `meta` | callout | bars, banners, notices, chips in SwiftUI |
 | `caption` | caption | fine print |
+| `body` | body | Settings rows, detail values |
+| `code` / `codeCaption` | body / caption, monospaced | ids, paths, logs |
+| `fine` | caption2 | the sidebar's sync detail |
+| `welcome` | title semibold | onboarding's heading |
 
 The AppKit thread row uses `TypeRole.rowSender(unread:)` (13 pt, semibold
 when unread), `rowSubject(unread:)` (12 pt, medium when unread),
-`rowSecondary` (12 pt) and `chip` (11 pt medium).
+`rowSecondary` (12 pt), `chip` (11 pt medium) and `rowCount` (11 pt
+semibold); the composer uses `field` and `composerBody`. No view uses a
+raw `.font(.callout)` or `systemFont(ofSize:)`: design lint flags them.
 
 The thread row is calm, as in Mail: sender and date, the subject, two
 lines of preview, and a hairline (`separatorColor`) inset to the text
@@ -321,9 +327,12 @@ with an Undo button. Task actions (done, delete) undo the same way.
 
 ### Dates
 
-Rows use `RowDateFormatter` (time today, weekday this week, else a short
-date); the reader uses a medium date with a short time; tables use month,
-day, hour and minute; due days use `DueDay`. Seconds only in diagnostics.
+Every formatter is in `Design/DateStyle.swift` (design lint flags
+`DateFormatter()` anywhere else). Rows use `RowDateFormatter` (time today,
+weekday this week, else a short date); the reader uses
+`DateStyle.readerHeader` (a medium date with a short time); activity lines
+use `DateStyle.relative`; tables use month, day, hour and minute; due days
+use `DueDay`. Seconds only in diagnostics.
 
 ### Accessibility and focus
 

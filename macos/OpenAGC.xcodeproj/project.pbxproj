@@ -123,6 +123,7 @@
 		CC89EB36D485FE29C268F72A /* ThreadRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF32A9AE2D35843656097005 /* ThreadRowView.swift */; };
 		CEF57777D11FBA73B69E0328 /* InterviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50741EBE28CA752FB58116F8 /* InterviewSheet.swift */; };
 		CF4F91CC076301CA21FE2C86 /* AgentPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AFC64B77AEDD827390E1C08 /* AgentPanel.swift */; };
+		D211DD39A54806FFE916A643 /* DateStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17A4A7F94265ADAB7493447F /* DateStyle.swift */; };
 		D6E08EA9EAAE6A740E84FB05 /* TaskDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12119B6B5E72875BDA8E5C10 /* TaskDialog.swift */; };
 		D8B9D29E5D5F15BCAF819FB9 /* LabelPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7851B97C95FA512DB3CEF19 /* LabelPicker.swift */; };
 		D9974F0610B1100DD537D0A5 /* ThreadListStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A751B74E9626A3A08F4D905F /* ThreadListStore.swift */; };
@@ -200,6 +201,7 @@
 		11B84FAD449704789E8707C7 /* SchemeHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemeHandlers.swift; sourceTree = "<group>"; };
 		12119B6B5E72875BDA8E5C10 /* TaskDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDialog.swift; sourceTree = "<group>"; };
 		15F8DEBC281B735D98308AF6 /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
+		17A4A7F94265ADAB7493447F /* DateStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateStyle.swift; sourceTree = "<group>"; };
 		17B53574C86CCC4F40FC00A1 /* AgentStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStore.swift; sourceTree = "<group>"; };
 		18F0249A501C89A849A51705 /* GuideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideView.swift; sourceTree = "<group>"; };
 		190E7BE352B8FB1A5BC8078E /* RoutinesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesWindow.swift; sourceTree = "<group>"; };
@@ -611,6 +613,7 @@
 			children = (
 				B45300AF62CF81181D40AB3F /* Avatar.swift */,
 				282C65C46EFBD9CE2DB7AE30 /* Components.swift */,
+				17A4A7F94265ADAB7493447F /* DateStyle.swift */,
 				8B1980692C7F9190146DE301 /* DueDay.swift */,
 				FD3B3A87D30B9F0CCE202CA9 /* Surfaces.swift */,
 				59E288D150328C8BC8F1B8D1 /* Tokens.swift */,
@@ -997,6 +1000,7 @@
 				F270849A448CA16CDC060789 /* ComposerThreadPane.swift in Sources */,
 				69662C039B9C1E122F754EDE /* ComposerView.swift in Sources */,
 				36A454FB046BB704125EF7F3 /* CoreClient.swift in Sources */,
+				D211DD39A54806FFE916A643 /* DateStyle.swift in Sources */,
 				16F271E116BA5AD078A38B81 /* DraftClient.swift in Sources */,
 				128E02DDE73BAE2DEF77E3DF /* DueDay.swift in Sources */,
 				710081AB6EAF380590EA91BF /* EmailDocument.swift in Sources */,

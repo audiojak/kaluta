@@ -62,6 +62,24 @@ enum TypeRole {
     static var rowSecondary: NSFont { .systemFont(ofSize: 12) }
     /// A label chip's text, in rows and elsewhere.
     static var chip: NSFont { .systemFont(ofSize: 11, weight: .medium) }
+    /// Plain text at body size (Settings rows, detail values).
+    static let body = Font.body
+    /// Code, ids and logs: body size, monospaced.
+    static let code = Font.body.monospaced()
+    /// Code at caption size (paths, ids in tables).
+    static let codeCaption = Font.caption.monospaced()
+    /// The smallest status text (the sidebar's sync detail).
+    static let fine = Font.caption2
+    /// A first-run screen's heading (onboarding).
+    static let welcome = Font.title.weight(.semibold)
+    /// A thread row's unread count (AppKit).
+    static var rowCount: NSFont { .systemFont(ofSize: 11, weight: .semibold) }
+    /// A thread row's text at `size` (AppKit labels that set their own size).
+    static func rowText(size: CGFloat) -> NSFont { .systemFont(ofSize: size) }
+    /// The composer's address fields (AppKit).
+    static var field: NSFont { .systemFont(ofSize: NSFont.systemFontSize) }
+    /// The composer's body text: a point larger than the system's.
+    @MainActor static var composerBody: NSFont { .systemFont(ofSize: NSFont.systemFontSize + 1) }
 }
 
 /// Semantic colours. Always system colours underneath, so light, dark,

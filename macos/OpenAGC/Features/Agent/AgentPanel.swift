@@ -156,7 +156,7 @@ struct SuggestionChips: View {
                 .accessibilityHint(chip.fillsOnly ? "Puts this in the field for you to finish" : "Asks the agent")
             }
         }
-        .font(.callout)
+        .font(TypeRole.meta)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Suggestions")
     }
@@ -172,9 +172,9 @@ struct AgentCapabilitiesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Label("Ask \(model.agent.providerName)", systemImage: "sparkles").font(.headline)
+                    Label("Ask \(model.agent.providerName)", systemImage: "sparkles").font(TypeRole.heading)
                     Text("It reads your mail here, on this Mac. Drafts wait for you, and sending always asks first.")
-                        .font(.callout)
+                        .font(TypeRole.meta)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(AgentSuggestions.groups(canDraft: !model.isArchive)) { group in
@@ -232,7 +232,7 @@ struct AgentInspector: View {
             }
             if let usage = agent.lastUsage {
                 InsetRule()
-                Text(usage).font(.caption).foregroundStyle(.secondary)
+                Text(usage).font(TypeRole.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.horizontal, Space.l).padding(.vertical, Space.xs)
             }
@@ -303,9 +303,9 @@ private struct EntryView: View {
                 .textSelection(.enabled)
         case let .thinking(text):
             DisclosureGroup("Thinking", isExpanded: $expanded) {
-                Text(text).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(text).font(TypeRole.meta).foregroundStyle(.secondary).textSelection(.enabled)
             }
-            .font(.callout)
+            .font(TypeRole.meta)
             .foregroundStyle(.secondary)
         case let .tool(name, arguments, state, summary):
             DisclosureGroup(isExpanded: $expanded) {
@@ -313,7 +313,7 @@ private struct EntryView: View {
                     if !arguments.isEmpty { Text(arguments) }
                     if !summary.isEmpty { Text(summary).foregroundStyle(.secondary) }
                 }
-                .font(.caption.monospaced())
+                .font(TypeRole.codeCaption)
                 .textSelection(.enabled)
             } label: {
                 HStack(spacing: Space.s) {
@@ -327,7 +327,7 @@ private struct EntryView: View {
                         Text(arguments).foregroundStyle(.tertiary).lineLimit(1)
                     }
                 }
-                .font(.callout)
+                .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
             }
         case let .results(rows):
@@ -336,6 +336,8 @@ private struct EntryView: View {
                     ResultRow(row: row, selected: model.selectedThreadID == row.id)
                         .contentShape(.rect)
                         .onTapGesture { model.selectedThreadID = row.id }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction { model.selectedThreadID = row.id }
                     if row.id != rows.last?.id { InsetRule(inset: Space.m) }
                 }
             }
@@ -343,7 +345,7 @@ private struct EntryView: View {
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
         case let .error(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.callout)
+                .font(TypeRole.meta)
                 .foregroundStyle(Tone.failure)
         case let .proposal(actionID, tool, summary, draftID, state):
             ProposalCard(actionID: actionID, tool: tool, summary: summary, draftID: draftID, state: state)
@@ -364,7 +366,7 @@ private struct ProposalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Label(summary, systemImage: Self.symbol(tool))
-                .font(.callout.weight(.medium))
+                .font(TypeRole.meta.weight(.medium))
                 .fixedSize(horizontal: false, vertical: true)
             switch state {
             case .pending:
@@ -384,11 +386,11 @@ private struct ProposalCard: View {
                 }
                 .controlSize(.small)
             case .approved:
-                Label("Approved", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(Tone.approved)
+                Label("Approved", systemImage: "checkmark.circle.fill").font(TypeRole.caption).foregroundStyle(Tone.approved)
             case let .sending(until):
                 HStack {
                     ProgressView().controlSize(.mini)
-                    Text("Sending…").font(.caption).foregroundStyle(.secondary)
+                    Text("Sending…").font(TypeRole.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Undo") { model.agent.undoSend(actionID) }
                         .controlSize(.small)
@@ -398,13 +400,13 @@ private struct ProposalCard: View {
             case .undoing:
                 HStack {
                     ProgressView().controlSize(.mini)
-                    Text("Taking it back…").font(.caption).foregroundStyle(.secondary)
+                    Text("Taking it back…").font(TypeRole.caption).foregroundStyle(.secondary)
                 }
             case .takenBack:
                 Label("Not sent. The draft is open for you.", systemImage: "arrow.uturn.backward.circle")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(TypeRole.caption).foregroundStyle(.secondary)
             case .rejected:
-                Label("Declined", systemImage: "xmark.circle").font(.caption).foregroundStyle(.secondary)
+                Label("Declined", systemImage: "xmark.circle").font(TypeRole.caption).foregroundStyle(.secondary)
             }
         }
         .card(state == .pending ? .attention : .neutral, padding: Space.m)
@@ -436,10 +438,10 @@ private struct ResultRow: View {
                     .lineLimit(1)
                 Spacer()
                 Text(RowDateFormatter.string(forMillis: row.lastMessageAt))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(TypeRole.caption).foregroundStyle(.secondary)
             }
-            Text(row.subject.isEmpty ? "(no subject)" : row.subject).font(.callout).lineLimit(1)
-            Text(row.snippet).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(row.subject.isEmpty ? "(no subject)" : row.subject).font(TypeRole.meta).lineLimit(1)
+            Text(row.snippet).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(Space.m)
         .background(selected ? AnyShapeStyle(.selection) : AnyShapeStyle(.clear))

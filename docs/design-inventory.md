@@ -178,7 +178,10 @@ In priority order:
 
 ## Lint candidates
 
-Rules a grep in `scripts/design-lint.sh` could enforce, outside `Design/`:
+Rules a grep in `scripts/design-lint.sh` could enforce, outside `Design/`.
+Enforced (strict) since oagc-068.5/068.6: raw type roles and AppKit fonts,
+dates outside `Design/DateStyle.swift`, tap-only rows, and reader CSS
+numbers. The rest are still candidates.
 
 - **Stack spacing with a capital S.** `(horizontal|vertical)Spacing:
   *[1-9]` catches `KeyboardShortcuts.swift:75`, which the current

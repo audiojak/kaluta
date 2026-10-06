@@ -260,8 +260,7 @@ final class RoutinesStore {
     /// "Sorted 84 threads · 2 h ago", for the list.
     static func activity(_ run: RoutineRunInfo?, now: Date = .now) -> String {
         guard let run else { return "Not run yet" }
-        let when = RelativeDateTimeFormatter().localizedString(
-            for: Date(timeIntervalSince1970: TimeInterval(run.startedAt) / 1000), relativeTo: now)
+        let when = DateStyle.relative(Date(timeIntervalSince1970: TimeInterval(run.startedAt) / 1000), to: now)
         switch run.status {
         case "running": return "Running now"
         case "missed": return "Missed a run \(when)"
