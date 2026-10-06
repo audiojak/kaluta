@@ -9,7 +9,8 @@ correspond on the user's behalf as themselves. The user should be able to
 read that mailbox, send as the agent, and give the agent a writing guide
 and facts, exactly as they do for their own account. Agents that send
 without this app (Claude Code, Codex, scripts) reach the guide and facts
-through the local MCP. Later, a cloud MCP lets cloud agents do the same.
+through the local MCP ([headless-mcp.md](headless-mcp.md)). Later, a
+rules server lets cloud agents do the same.
 
 ## Decisions (maintainer, 2026-10-06)
 
@@ -25,12 +26,10 @@ through the local MCP. Later, a cloud MCP lets cloud agents do the same.
   make it slower, less predictable and untestable, and the app makes no
   model calls of its own (ADR 0011).
 - **Primitive first**, then AgentMail, then others behind the same seam.
-- **Outside agents:** both routes. By default they use the local MCP, which
-  sends for them (the key stays in the Keychain, every send is recorded and
-  checked against the guide). For an agent that must call the service
-  itself, the mailbox's settings offer *Copy API Key*.
-- **The MCP works headless:** outside agents can read the guide and facts,
-  and send, without the app open.
+- **Outside agents:** both routes. The local MCP, which works without the
+  app open, is its own plan: [headless-mcp.md](headless-mcp.md). Here, the
+  mailbox's settings offer *Copy API Key* for agents that call the service
+  themselves; the app sees their mail when it syncs.
 
 ### Resolved 2026-10-06
 
@@ -39,11 +38,8 @@ through the local MCP. Later, a cloud MCP lets cloud agents do the same.
   daily review compares them with the guide. *Ask before each send* is the
   other choice. The spec's non-goal (§1.2) and approval rule (§10.2) are
   amended for agent mailboxes only.
-- **Keychain:** a helper embedded in the app bundle, signed with the same
-  team and Keychain access group, reads the key. `openagc-mcp` in mailbox
-  mode runs as, or calls, that helper.
-- **Writers:** the outbox takes a cross-process lock, so the app and a
-  headless send never send the same message twice.
+- **Keychain helper and outbox lock:** moved with the headless MCP to
+  [headless-mcp.md](headless-mcp.md).
 - **Cloud:** not a cloud MCP bolted onto the app, but a separate **rules
   server** in this repository (guide, guidelines and facts), possibly
   speaking MCP. The user can deploy it themselves, or use one the project
@@ -112,7 +108,7 @@ docs.agentmail.to `agent-onboarding.md`, `imap-smtp.md`, `websockets.md`.
   guide, facts, learning and undo, marked as an agent's.
 - Account settings: service, address, verification state, *Copy API Key*
   (behind a confirmation that says what a holder can do), *Rotate Key*,
-  *Connect an Agent…* (below).
+  and later *Connect an Agent…* (headless-mcp).
 
 ### Own domains (Primitive)
 
@@ -152,29 +148,10 @@ own account by hand:
 - How many domains does each plan allow? `GET /v1/account` reports the
   limits.
 
-### The local MCP for outside agents
-
-Today `openagc-mcp` is a stateless shim for sessions the app starts; it
-talks to the running core over a socket and gets no secrets (§10.1, §12).
-Outside agents need a second mode:
-
-- `openagc-mcp --mailbox <address>`: stdio, no app needed. Tools:
-  - Read-only: the mailbox's guide (`guide_rules`), its facts
-    (`facts_lookup`, as today), and its mail (`mail_search`,
-    `mail_get_thread`).
-  - `mail_send` / `mail_reply`: sends through the service, records the
-    message as AI-written (ADR 0013), and checks it against the guide.
-- **Connect an Agent…** writes the MCP entry into Claude Code's or Codex's
-  config (or shows the line to paste), scoped to that mailbox.
-- When the app is running, the shim goes through the core as now. When it
-  isn't, it opens the account's stores read-only, and for a send it queues
-  to the outbox and sends itself.
-
 ## Open questions
 
 1. **Spec scope.** §7.7 puts non-Gmail accounts out of scope. A new §7.9
-   *Agent mailboxes* and an ADR (provider seam, secrets, the helper, the
-   outbox lock) come first.
+   *Agent mailboxes* and an ADR (provider seam, secrets) come first.
 2. **Tests.** Every test uses wiremock fakes of each service. Nothing in
    automation calls a real sign-up endpoint: each call creates a real
    account.
@@ -183,22 +160,20 @@ Outside agents need a second mode:
 
 1. ADR and spec §7.9 (agent mailboxes, the autonomy setting, own domains);
    amend §1.2 and §10.2 for agent mailboxes.
-2. Signing spike: the embedded helper reads a Keychain item the app wrote.
-3. Core: `AccountKind::AgentMailbox`, provider choice by kind, the
+2. Core: `AccountKind::AgentMailbox`, provider choice by kind, the
    `MailboxService` trait, the secret key name.
-4. `provider-primitive`: sign up, verify, read, long-poll changes, send,
+3. `provider-primitive`: sign up, verify, read, long-poll changes, send,
    reply. Wiremock fake and tests.
-5. App: Create an Agent Mailbox (terms, create, verify, code auto-fill),
+4. App: Create an Agent Mailbox (terms, create, verify, code auto-fill),
    the agent marker, account settings.
-6. Outbox lock across processes.
-7. MCP: `--mailbox` mode, guide and facts tools, sending, Connect an
-   Agent…
-8. The autonomy setting, and the daily review of the agent's sends against
-   its guide.
-9. Own domains with Primitive: Add Domain…, the records table, the
+5. The autonomy setting (for agents the app starts; the headless MCP
+   uses it too), and the daily review of every send from the mailbox,
+   including those made with a copied key, against its guide.
+6. Own domains with Primitive: Add Domain…, the records table, the
    verify loop, and addresses on the domain.
-10. AgentMail: likely a generic IMAP/SMTP provider plus its sign-up, which
+7. AgentMail: likely a generic IMAP/SMTP provider plus its sign-up, which
    also opens the door to Fastmail and generic IMAP.
 
-Later, its own plan: the rules server (guide, guidelines and facts for
-cloud agents; self-hosted or project-hosted).
+Separate plans: [headless-mcp.md](headless-mcp.md); the rules server
+(guide, guidelines and facts for cloud agents; self-hosted or
+project-hosted).
