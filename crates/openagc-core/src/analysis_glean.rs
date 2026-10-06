@@ -179,6 +179,18 @@ pub fn never_store(category: &str, label: &str, value: &str) -> bool {
     false
 }
 
+/// Whether a quote states a value: a word of it (three letters or more,
+/// or a number) occurs in the quote.
+fn states(quote: &str, value: &str) -> bool {
+    let quote = loose(quote);
+    let words: Vec<String> = value
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3 || w.chars().any(|c| c.is_ascii_digit()))
+        .map(str::to_lowercase)
+        .collect();
+    words.is_empty() || words.iter().any(|w| quote.contains(w.as_str()))
+}
+
 fn capped(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
@@ -260,7 +272,8 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
         let message = e.and_then(|e| e.get("message_id")).and_then(Value::as_str).unwrap_or("");
         let quote = clean(e.and_then(|e| e.get("quote")), QUOTE_CAP);
         let Some(m) = by_id.get(message) else { continue };
-        if quote.is_empty() || !loose(&fenced(&m.text)).contains(&loose(&quote)) {
+        // At least two words, found in the message.
+        if quote.split_whitespace().count() < 2 || !loose(&fenced(&m.text)).contains(&loose(&quote)) {
             continue;
         }
         let mut p = FactPayload {
@@ -281,6 +294,10 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
                 p.label = clean(f.get("label"), 80);
                 p.value = clean(f.get("value"), 400);
                 if p.label.is_empty() || p.value.is_empty() || never_store(&p.category, &p.label, &p.value) {
+                    continue;
+                }
+                // The quote must say it: one of the value's words is in it.
+                if !states(&p.quote, &p.value) {
                     continue;
                 }
                 // A fact by that label already: the same is nothing new, a
@@ -656,6 +673,13 @@ mod tests {
     use crate::analysis_run::tests::{learned, no_schedule, rt, wait_done};
 
     #[test]
+    fn a_quote_must_state_the_value() {
+        assert!(states("I'm the CTO at Acme.", "CTO at Acme"));
+        assert!(states("Call me on 415 555 0100", "+1 415 555 0100"));
+        assert!(!states("Thanks for the note", "CTO at Acme"));
+    }
+
+    #[test]
     fn what_must_never_be_stored_is_dropped() {
         assert!(never_store("other", "Wi-Fi password", "hunter2"));
         assert!(never_store("contact", "Card", "4111 1111 1111 1111"));
@@ -690,7 +714,7 @@ mod tests {
         let mail = sent("Hi Ann,\nI'm the CTO at Acme. My calendar: https://cal.com/j\nJ");
         let answer = r#"{"facts": [
             {"op": "add", "category": "work", "label": "Occupation or role", "value": "CTO at Acme", "evidence": {"message_id": "m1", "quote": "I'm the CTO at Acme."}},
-            {"op": "add", "category": "Availability", "label": "Calendar link", "value": "https://cal.com/j", "as_of": "2026-10-01", "evidence": {"message_id": "m1", "quote": "https://cal.com/j"}},
+            {"op": "add", "category": "Availability", "label": "Calendar link", "value": "https://cal.com/j", "as_of": "2026-10-01", "evidence": {"message_id": "m1", "quote": "My calendar: https://cal.com/j"}},
             {"op": "add", "category": "work", "label": "Team", "value": "Mail", "evidence": {"message_id": "m1", "quote": "not in it"}},
             {"op": "add", "category": "hobbies", "label": "Golf", "value": "yes", "evidence": {"message_id": "m1", "quote": "Hi Ann"}},
             {"op": "add", "category": "other", "label": "Password", "value": "x", "evidence": {"message_id": "m1", "quote": "Hi Ann"}},

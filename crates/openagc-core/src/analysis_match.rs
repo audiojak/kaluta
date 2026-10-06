@@ -11,6 +11,8 @@ use crate::{Core, CoreError, runtime};
 
 /// A record not matched within this long is given up on.
 pub const MATCH_WINDOW_MS: Millis = 14 * 24 * 60 * 60 * 1000;
+/// A record whose draft is still open is not guessed at for this long.
+pub const OPEN_DRAFT_MS: Millis = 24 * 60 * 60 * 1000;
 /// Under this word overlap a thread or recipient match is a different
 /// message ("Thanks!" after a long draft), not an edit of the draft.
 pub const MIN_OVERLAP: f64 = 0.15;
@@ -128,8 +130,10 @@ pub fn match_records(
         let ai = record.ai_text.as_deref().unwrap_or_default();
         let after = |s: &&SentCandidate| s.at > record.created_at;
         let mut candidates: Vec<(&SentCandidate, Method)> = Vec::new();
-        // A draft sent with a Message-ID waits for that exact copy.
-        if record.rfc822_message_id.is_none() {
+        // A draft sent with a Message-ID waits for that exact copy; one still
+        // open waits for its own send, for a day (it may go from Gmail).
+        let open = record.draft_id.is_some() && now - record.created_at < OPEN_DRAFT_MS;
+        if record.rfc822_message_id.is_none() && !open {
             if matches!(record.kind, Kind::Reply | Kind::Forward)
                 && let Some(thread) = record.thread_id.as_deref()
                 && let Some(next) = sent.iter().filter(after).find(|s| s.thread_id == thread)
@@ -412,6 +416,19 @@ mod tests {
         let exact_sent = [sent("m2", "t2", 200, &["ann@x.com"], Some("abc"))];
         let out = run(&[exact], &exact_sent, &[("m2", "Thanks!")], 400);
         assert_eq!(method(&out[0].1), Some(("m2", Method::SentDraft)));
+    }
+
+    #[test]
+    fn a_draft_still_open_is_not_guessed_at_for_a_day() {
+        let mut open = record(1, Kind::Reply, 100, Some("t1"), &["ann@x.com"], AI);
+        open.draft_id = Some(9);
+        let sent = [sent("m1", "t1", 200, &["ann@x.com"], None)];
+        assert!(
+            run(std::slice::from_ref(&open), &sent, &[("m1", EDITED)], 400).is_empty(),
+            "it waits for its own send"
+        );
+        let later = run(&[open], &sent, &[("m1", EDITED)], 100 + OPEN_DRAFT_MS + 1);
+        assert_eq!(method(&later[0].1), Some(("m1", Method::ThreadNext)), "sent some other way, after a day");
     }
 
     #[test]

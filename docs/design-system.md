@@ -74,10 +74,16 @@ controls), `card` 8 (cards), `panel` 12 (floating panels). Capsules use
 | `groupLabel` | subheadline semibold | groups inside a panel |
 | `meta` | callout | bars, banners, notices, chips in SwiftUI |
 | `caption` | caption | fine print |
+| `body` | body | Settings rows, detail values |
+| `code` / `codeCaption` | body / caption, monospaced | ids, paths, logs |
+| `fine` | caption2 | the sidebar's sync detail |
+| `welcome` | title semibold | onboarding's heading |
 
 The AppKit thread row uses `TypeRole.rowSender(unread:)` (13 pt, semibold
 when unread), `rowSubject(unread:)` (12 pt, medium when unread),
-`rowSecondary` (12 pt) and `chip` (11 pt medium).
+`rowSecondary` (12 pt), `chip` (11 pt medium) and `rowCount` (11 pt
+semibold); the composer uses `field` and `composerBody`. No view uses a
+raw `.font(.callout)` or `systemFont(ofSize:)`: design lint flags them.
 
 The thread row is calm, as in Mail: sender and date, the subject, two
 lines of preview, and a hairline (`separatorColor`) inset to the text
@@ -242,7 +248,9 @@ second line, and the due day in the date's slot at the trailing edge.
 ### Reader
 
 The reader is HTML (`EmailDocument`), so it cannot use the tokens
-directly; its CSS keeps to the same scale.
+directly; its CSS keeps to the same scale: values come from `Space` and
+`Radius` through `px(_:)`, and design-lint flags any other px in padding,
+margin, gap or border-radius.
 
 - One card per message (`<details>`): an initials avatar (32 pt, 26 when
   collapsed), the sender, the date in the reader's style, and the body.
@@ -252,8 +260,9 @@ directly; its CSS keeps to the same scale.
   sender's HTML.
 - The subject is `TypeRole.title`; the header does not scroll (the web
   view scrolls inside the reader), so it is not a `.columnHeader`.
-- Avatars in the reader and `AccountAvatar` should share one initials and
-  colour function (inventory gap; oagc-068 follow-up).
+- **Avatars** (`Avatar`): one initials and colour function for the reader's
+  sender circles and `AccountAvatar` ("Last, First" handled, ten colours
+  that carry white text), so an address looks the same everywhere.
 
 ### Composer
 
@@ -318,9 +327,12 @@ with an Undo button. Task actions (done, delete) undo the same way.
 
 ### Dates
 
-Rows use `RowDateFormatter` (time today, weekday this week, else a short
-date); the reader uses a medium date with a short time; tables use month,
-day, hour and minute; due days use `DueDay`. Seconds only in diagnostics.
+Every formatter is in `Design/DateStyle.swift` (design lint flags
+`DateFormatter()` anywhere else). Rows use `RowDateFormatter` (time today,
+weekday this week, else a short date); the reader uses
+`DateStyle.readerHeader` (a medium date with a short time); activity lines
+use `DateStyle.relative`; tables use month, day, hour and minute; due days
+use `DueDay`. Seconds only in diagnostics.
 
 ### Accessibility and focus
 
@@ -375,3 +387,4 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Reader with quoted history folded, light](design/reader-quote-light.png) | ![Reader with quoted history folded, dark](design/reader-quote-dark.png) |
 | ![Analysis, light](design/analysis-light.png) | ![Analysis, dark](design/analysis-dark.png) |
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
+| ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |

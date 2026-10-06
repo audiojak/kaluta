@@ -340,22 +340,48 @@ impl Core {
         let groups = self.list_audience_groups().await?;
         let db = self.db()?;
         let ids = ids.to_vec();
-        let records = runtime::run(async move {
+        let (records, versions) = runtime::run(async move {
             Ok(db
                 .read(move |c| {
                     let mut out = Vec::new();
+                    let mut versions = BTreeMap::new();
                     for id in ids {
-                        out.extend(mail_store::compositions::get(c, id)?);
+                        let Some(r) = mail_store::compositions::get(c, id)? else { continue };
+                        // The guide the draft was written under, when it is kept.
+                        if let Some(v) = r.guide_version
+                            && !versions.contains_key(&v)
+                            && let Some(rows) = mail_store::guide::version_entries(c, v)?
+                        {
+                            versions.insert(v, rows);
+                        }
+                        out.push(r);
                     }
-                    Ok(out)
+                    Ok((out, versions))
                 })
                 .await?)
         })
         .await?;
+        let versions: BTreeMap<i64, Vec<GuideEntry>> = versions
+            .into_iter()
+            .map(|(v, rows)| {
+                let entries = rows
+                    .into_iter()
+                    .map(|entry| crate::guide::from_snapshot(mail_store::guide::Snapshot { entry, evidence: vec![] }))
+                    .collect();
+                (v, entries)
+            })
+            .collect();
+        let now: BTreeSet<i64> = entries.iter().map(|e| e.id).collect();
         let pairs = records
             .into_iter()
             .filter_map(|c| {
-                let applied = applied_entries(&entries, &groups, &c);
+                // What applied when it was drafted, of what is still in the guide.
+                let applied = match c.guide_version.and_then(|v| versions.get(&v)) {
+                    Some(then) => {
+                        applied_entries(then, &groups, &c).into_iter().filter(|id| now.contains(id)).collect()
+                    }
+                    None => applied_entries(&entries, &groups, &c),
+                };
                 Some(Pair {
                     id: c.id,
                     kind: c.kind.as_str().into(),

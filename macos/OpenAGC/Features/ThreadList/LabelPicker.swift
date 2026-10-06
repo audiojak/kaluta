@@ -94,7 +94,7 @@ struct LabelPickerView: View {
             }
             .frame(maxHeight: 320)
             if let error {
-                Text(error).font(.caption).foregroundStyle(Tone.failure)
+                Text(error).font(TypeRole.caption).foregroundStyle(Tone.failure)
             }
         }
         .padding(Space.m)

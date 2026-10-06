@@ -248,6 +248,12 @@ final class ComposerStore {
         }
     }
 
+    /// Anything worth asking about before it is thrown away.
+    var hasContent: Bool {
+        !body.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !subject.trimmingCharacters(in: .whitespaces).isEmpty || !attachments.isEmpty
+    }
+
     func discard() async {
         autosaveTask?.cancel()
         isDirty = false

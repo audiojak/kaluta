@@ -78,33 +78,10 @@ enum EmailDocument {
         }
     }
 
-    /// "Darshan Patel" → "DP"; "Le, Minh" → "ML"; no name → the address's
-    /// first letter.
-    static func initials(name: String, email: String) -> String {
-        var words = name.split(separator: " ").map(String.init)
-        if name.contains(","), let comma = name.firstIndex(of: ",") {
-            words = (name[name.index(after: comma)...] + " " + name[..<comma]).split(separator: " ").map(String.init)
-        }
-        let letters = words.filter { $0.first?.isLetter == true }
-        if name == email || letters.isEmpty { return String(email.prefix(1)).uppercased() }
-        let first = letters.first!.prefix(1)
-        let last = letters.count > 1 ? letters.last!.prefix(1) : ""
-        return (first + last).uppercased()
-    }
+    /// Initials and colour come from `Avatar`, as the account avatar's do.
+    static func initials(name: String, email: String) -> String { Avatar.initials(name: name, email: email) }
 
-    /// A calm colour per sender, the same every time.
-    static func avatarColor(_ email: String) -> String {
-        let palette = ["#5B8DEF", "#43A67F", "#D98E3C", "#B46BD6", "#D4626E",
-                       "#3FA3B8", "#8C8F4A", "#7A7FD9", "#C2743F", "#4F9D5B"]
-        // FNV-1a with a finaliser, so similar addresses spread over the palette.
-        var x = email.lowercased().utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 }
-        x ^= x >> 16
-        x = x &* 0x7FEB_352D
-        x ^= x >> 15
-        x = x &* 0x846C_A68B
-        x ^= x >> 16
-        return palette[Int(x % UInt32(palette.count))]
-    }
+    static func avatarColor(_ email: String) -> String { Avatar.hex(for: email) }
 
     /// The latest message and every unread one start open, like Mail.
     static func isExpanded(_ message: Message, index: Int, count: Int) -> Bool {
@@ -135,24 +112,26 @@ enum EmailDocument {
         return out
     }
 
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
+    private static var dateFormatter: DateFormatter { DateStyle.readerHeader }
 
     private static func dateString(_ date: Date) -> String {
         dateFormatter.string(from: date)
     }
 
+    /// A design token as CSS (docs/design-system.md): the reader keeps to
+    /// the same spacing and radius scale as the app.
+    private static func px(_ value: CGFloat) -> String { "\(Int(value))px" }
+
+    /// Message cards: `Radius.card`, padded `Space.m`/`Space.l`; no outline
+    /// (only attention cards have one). The body lines up past the avatar
+    /// (32) and the gap (`Space.m`).
     private static let stylesheet = """
-    :root { color-scheme: light dark; --card: color-mix(in srgb, CanvasText 4%, Canvas); \
-    --line: color-mix(in srgb, CanvasText 10%, transparent); }
+    :root { color-scheme: light dark; --card: color-mix(in srgb, CanvasText 4%, Canvas); }
     html, body { margin: 0; background: Canvas; color: CanvasText; overflow-x: hidden; }
     body { font: 14px/1.45 -apple-system, system-ui, sans-serif; padding: 8px 20px 24px; overflow-wrap: anywhere; }
-    .msg { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin: 0 0 8px; }
-    summary { list-style: none; cursor: default; display: flex; gap: 10px; align-items: flex-start; }
+    .msg { background: var(--card); border-radius: \(px(Radius.card)); padding: \(px(Space.m)) \(px(Space.l)); \
+    margin: 0 0 \(px(Space.m)); }
+    summary { list-style: none; cursor: default; display: flex; gap: \(px(Space.m)); align-items: flex-start; }
     summary::-webkit-details-marker { display: none; }
     .avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; color: #fff; font: 600 12px/32px -apple-system, system-ui; \
     text-align: center; letter-spacing: 0.3px; }
@@ -165,26 +144,28 @@ enum EmailDocument {
     .addr { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     details:not([open]) .addr, details:not([open]) .to { display: none; }
     .date { margin-left: auto; font-size: 12px; white-space: nowrap; }
-    .to { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .snippet { margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .to { margin-top: \(px(Space.hair)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .snippet { margin-top: \(px(Space.hair)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     details[open] .snippet { display: none; }
-    .body { margin: 12px 0 2px 42px; overflow-x: auto; }
+    .body { margin: \(px(Space.l)) 0 \(px(Space.hair)) \(px(32 + Space.m)); overflow-x: auto; }
     .body img { max-width: 100%; height: auto; }
     .body table { max-width: 100%; }
     .body pre { white-space: pre-wrap; }
-    .body.paper { background: #ffffff; color: #111111; color-scheme: light; border-radius: 8px; padding: 12px; }
+    .body.paper { background: #ffffff; color: #111111; color-scheme: light; border-radius: \(px(Radius.card)); \
+    padding: \(px(Space.l)); }
     .body.pending { color: GrayText; font-style: italic; }
     .msg.draft { background: transparent; border: 1px dashed color-mix(in srgb, #FF9500 70%, transparent); }
     .badge { flex: none; font: 600 11px/16px -apple-system, system-ui; color: #C75C00; padding: 0 6px; border-radius: 4px; \
     background: color-mix(in srgb, #FF9500 18%, transparent); }
     @media (prefers-color-scheme: dark) { .badge { color: #FFB45C; } }
-    blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }
+    blockquote { margin: \(px(Space.m)) 0; padding-left: \(px(Space.m)); border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }
     a { color: LinkText; }
-    .body details.openagc-quote { margin: 10px 0 0; }
-    .body details.openagc-quote > summary { display: inline-block; padding: 0 9px; border-radius: 8px; cursor: pointer; \
+    .body details.openagc-quote { margin: \(px(Space.l)) 0 0; }
+    .body details.openagc-quote > summary { display: inline-block; padding: 0 \(px(Space.m)); \
+    border-radius: \(px(Radius.card)); cursor: pointer; \
     font: 700 12px/16px -apple-system, system-ui; letter-spacing: 1px; color: GrayText; \
     background: color-mix(in srgb, CanvasText 9%, transparent); }
     .body details.openagc-quote > summary:hover { background: color-mix(in srgb, CanvasText 16%, transparent); }
-    .body details.openagc-quote[open] > summary { margin-bottom: 8px; }
+    .body details.openagc-quote[open] > summary { margin-bottom: \(px(Space.m)); }
     """
 }

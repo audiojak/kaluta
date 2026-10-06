@@ -12,7 +12,7 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
                 VStack(alignment: .leading, spacing: Space.s) {
-                    Text("Welcome to OpenAGC").font(.title.weight(.semibold))
+                    Text("Welcome to OpenAGC").font(TypeRole.welcome)
                     Text("A Mac email client that works with the AI agents you already use.")
                         .foregroundStyle(.secondary)
                 }
@@ -22,7 +22,7 @@ struct OnboardingView: View {
                     Label("Agents see mail only when you ask them to, through tools you control.", systemImage: "sparkles")
                     Label("Sending and deleting always wait for your approval.", systemImage: "hand.raised")
                 }
-                .font(.callout)
+                .font(TypeRole.meta)
 
                 if model.accountState == .signingIn {
                     HStack(spacing: Space.m) {
@@ -49,11 +49,11 @@ struct OnboardingView: View {
                     }
                     if !client.isUsable {
                         Text("This build doesn't include a Google sign-in client yet. Add your own under Advanced; it takes about five minutes.")
-                            .font(.callout)
+                            .font(TypeRole.meta)
                             .foregroundStyle(.secondary)
                     }
                     if let error = model.signInError {
-                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tone.failure).font(.callout)
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Tone.failure).font(TypeRole.meta)
                     }
                 }
 
@@ -62,10 +62,10 @@ struct OnboardingView: View {
                 DisclosureGroup("Advanced: use your own Google OAuth client", isExpanded: $showAdvanced) {
                     VStack(alignment: .leading, spacing: Space.m) {
                         Text("Create a “Desktop app” OAuth client in Google Cloud with the Gmail API enabled, then paste its ID and secret. Your own client avoids Google's unverified-app warning.")
-                            .font(.callout)
+                            .font(TypeRole.meta)
                             .foregroundStyle(.secondary)
                         Link("Step-by-step instructions", destination: URL(string: "https://github.com/audiojak/openagc/blob/main/docs/google-oauth-client.md")!)
-                            .font(.callout)
+                            .font(TypeRole.meta)
                         GoogleClientFields()
                     }
                     .textFieldStyle(.roundedBorder)
@@ -85,9 +85,9 @@ private struct OnboardingAgents: View {
     var body: some View {
         let agent = model.agent
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Agents").font(.headline)
+            Text("Agents").font(TypeRole.heading)
             Text("OpenAGC works with the Claude Code or Codex command-line tools you already have, signed in with your own account. You can add one later.")
-                .font(.callout)
+                .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
             if agent.providers.isEmpty {
                 HStack(spacing: Space.m) {
@@ -100,7 +100,7 @@ private struct OnboardingAgents: View {
                 Label {
                     VStack(alignment: .leading, spacing: Space.hair) {
                         Text(provider.name)
-                        Text(status.detail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(status.detail).font(TypeRole.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                 } icon: {
                     Image(systemName: status.symbol).foregroundStyle(status.isReady ? .green : .secondary)

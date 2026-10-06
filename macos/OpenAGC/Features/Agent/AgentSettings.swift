@@ -75,7 +75,7 @@ private struct AgentRow: View {
                 .foregroundStyle(status.isReady ? .green : .secondary)
             VStack(alignment: .leading, spacing: Space.hair) {
                 HStack(spacing: Space.s) {
-                    Text(provider.name).font(.headline)
+                    Text(provider.name).font(TypeRole.heading)
                     if isDefault {
                         Text("Default")
                             .font(Font(TypeRole.chip))
@@ -85,7 +85,7 @@ private struct AgentRow: View {
                             .accessibilityLabel("the default agent")
                     }
                 }
-                Text(status.detail).font(.callout).foregroundStyle(.secondary)
+                Text(status.detail).font(TypeRole.meta).foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
         }

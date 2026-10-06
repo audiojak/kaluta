@@ -45,7 +45,7 @@ struct AgentPermissionsSettings: View {
                     }
                 }
                 if let keyError {
-                    Text(keyError).foregroundStyle(Tone.failure).font(.callout)
+                    Text(keyError).foregroundStyle(Tone.failure).font(TypeRole.meta)
                 }
             } header: {
                 Text("Claude API Key (Optional)")

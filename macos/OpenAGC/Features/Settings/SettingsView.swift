@@ -62,7 +62,7 @@ private struct GeneralSettings: View {
                 }
                 .hoverHelp("How long a sent message waits so you can take it back")
                 Text("Messages wait this long before they go, so you can take one back with Undo (⌘Z). Quitting sends them at once.")
-                    .font(.caption)
+                    .font(TypeRole.caption)
                     .foregroundStyle(.secondary)
             }
             Section("New Mail") {

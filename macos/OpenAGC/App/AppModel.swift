@@ -1071,7 +1071,7 @@ final class AppModel {
                 compose(.draft(id: draft.id))
             } catch let error as CoreClientError {
                 logger.error("open draft failed: \(error.message, privacy: .private)")
-                undo.show("Couldn't open the draft: \(error.message)", accountID: account)
+                undo.show("Couldn't open the draft: \(error.message)", accountID: account, offersUndo: false)
             } catch {}
         }
     }
@@ -1130,7 +1130,7 @@ final class AppModel {
                 // Sending it again still answers the task.
                 self.compose(.draft(id: draftID, task: taskID))
             } else {
-                self.undo.show("Already sent", accountID: accountID)
+                self.undo.show("Already sent", accountID: accountID, offersUndo: false)
             }
         }
     }

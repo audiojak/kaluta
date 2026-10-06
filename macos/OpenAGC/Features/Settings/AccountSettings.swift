@@ -7,6 +7,8 @@ struct AccountSettings: View {
     @Environment(AppModel.self) private var model
     @State private var removing: AccountSummary?
     @State private var orphans: [OrphanedStore] = []
+    /// Deleting leftover mail cannot be undone: asked first.
+    @State private var deleting: OrphanedStore?
 
     var body: some View {
         Form {
@@ -55,20 +57,28 @@ struct AccountSettings: View {
             }
 
             Section("Data on this Mac") {
-                ForEach(orphans, id: \.id) { orphan in
-                    HStack {
-                        VStack(alignment: .leading, spacing: Space.hair) {
-                            Text("Leftover mail from \(orphan.email ?? "an old sign-in")")
-                            Text(ByteCountFormatter.string(fromByteCount: Int64(orphan.bytes), countStyle: .file))
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Delete", role: .destructive) {
+                EmptyView()
+                    .confirmationDialog("Delete the leftover mail?", isPresented: Binding(
+                        get: { deleting != nil }, set: { if !$0 { deleting = nil } }
+                    ), presenting: deleting) { orphan in
+                        Button("Delete Mail Data", role: .destructive) { // no-help: dialog
                             Task {
                                 try? await model.core?.removeOrphanedStore(orphan.id)
                                 orphans = (try? await model.core?.orphanedStores()) ?? []
                             }
                         }
+                    } message: { orphan in
+                        Text("The copy of \(orphan.email ?? "an old sign-in")'s mail on this Mac is deleted. Gmail is not affected. This cannot be undone.")
+                    }
+                ForEach(orphans, id: \.id) { orphan in
+                    HStack {
+                        VStack(alignment: .leading, spacing: Space.hair) {
+                            Text("Leftover mail from \(orphan.email ?? "an old sign-in")")
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(orphan.bytes), countStyle: .file))
+                                .font(TypeRole.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Delete", role: .destructive) { deleting = orphan }
                     }
                     .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected")
                 }
@@ -165,9 +175,9 @@ struct AccountRow: View {
             HStack(spacing: Space.m) {
                 AccountAvatar(account: account, size: 32)
                 VStack(alignment: .leading, spacing: Space.hair) {
-                    Text(account.displayName ?? account.email).font(.body.weight(.medium))
-                    if account.displayName != nil { Text(account.email).font(.caption).foregroundStyle(.secondary) }
-                    Text(status).font(.caption).foregroundStyle(signedIn == false ? .orange : .secondary)
+                    Text(account.displayName ?? account.email).font(TypeRole.body.weight(.medium))
+                    if account.displayName != nil { Text(account.email).font(TypeRole.caption).foregroundStyle(.secondary) }
+                    Text(status).font(TypeRole.caption).foregroundStyle(signedIn == false ? .orange : .secondary)
                 }
                 Spacer()
                 if account.id != model.openAccountID {
@@ -206,7 +216,7 @@ struct AccountRow: View {
                 .onChange(of: account.displayName) { name = Self.editableName(account) }
                 .onChange(of: account.email) { name = Self.editableName(account) }
             if let nameError {
-                Text(nameError).font(.caption).foregroundStyle(Tone.failure)
+                Text(nameError).font(TypeRole.caption).foregroundStyle(Tone.failure)
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(
@@ -345,7 +355,7 @@ struct GoogleClientFields: View {
             }
             .hoverHelp("Use this Google client for sign-in")
             Link("How to create one", destination: URL(string: "https://github.com/audiojak/openagc/blob/main/docs/google-oauth-client.md")!)
-            if let status { Text(status).foregroundStyle(.secondary).font(.callout) }
+            if let status { Text(status).foregroundStyle(.secondary).font(TypeRole.meta) }
         }
     }
 }
@@ -361,7 +371,7 @@ struct PrivacySettings: View {
                 Label("An agent sees mail only when you ask it something, through OpenAGC's tools, and every access is logged in Permissions › Activity.", systemImage: "sparkles")
                 Label("A Claude cloud routine works on Anthropic's side, under the Gmail access you granted at claude.ai.", systemImage: "cloud")
             }
-            .font(.callout)
+            .font(TypeRole.meta)
             Section {
                 if allowed.isEmpty {
                     Text("Remote images are blocked in every message until you load them.").foregroundStyle(.secondary)

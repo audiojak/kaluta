@@ -11,6 +11,14 @@ struct AccountAvatarTests {
         #expect(AccountAvatar.initials(name: "  ", email: "zed@example.com") == "Z")
         #expect(AccountAvatar.initials(name: "123 !!", email: "q@example.com") == "Q", "no letters: use the address")
         #expect(AccountAvatar.initials(name: nil, email: "") == "?")
+        #expect(AccountAvatar.initials(name: "Le, Minh", email: "m@example.com") == "ML", "Last, First")
+    }
+
+    @Test func theReaderAndTheAccountAvatarAgree() {
+        for (name, email) in [("Le, Minh", "m@example.com"), ("Ada Lovelace", "ada@example.com"), ("", "z@x.com")] {
+            #expect(EmailDocument.initials(name: name, email: email) == AccountAvatar.initials(name: name, email: email))
+            #expect(EmailDocument.avatarColor(email) == Avatar.palette[AccountAvatar.paletteIndex(for: email)])
+        }
     }
 
     @Test func eachAddressKeepsItsColour() {

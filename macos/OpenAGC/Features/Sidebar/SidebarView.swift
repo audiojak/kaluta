@@ -66,7 +66,7 @@ struct SidebarView: View {
                         VStack(alignment: .leading, spacing: Space.hair) {
                             Label(routine.name, systemImage: routine.enabled ? "clock.arrow.2.circlepath" : "pause.circle")
                             Text(RoutinesStore.activity(model.routines.latestRuns[routine.id]))
-                                .font(.caption)
+                                .font(TypeRole.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.leading, Self.activityIndent)
                         }

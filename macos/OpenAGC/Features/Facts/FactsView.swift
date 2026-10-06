@@ -9,6 +9,14 @@ struct FactsList: View {
 
     var body: some View {
         List(selection: $store.selection) {
+            // Proposed changes first (spec §14.11), decided here or in Proposals.
+            if store.scope == .account, !model.analysis.factProposals.isEmpty {
+                Section("Proposed") {
+                    ForEach(model.analysis.factProposals, id: \.id) { proposal in
+                        ProposedFactRow(proposal: proposal)
+                    }
+                }
+            }
             ForEach(store.sections, id: \.category.key) { section in
                 Section {
                     // Global and account ids overlap: rows are told apart by tag.
@@ -31,6 +39,27 @@ struct FactsList: View {
             if let fact = store.selected { Task { await model.deleteFact(fact) } }
         }
         .task(id: model.factsRevision) { await store.load() }
+    }
+}
+
+private struct ProposedFactRow: View {
+    @Environment(AppModel.self) private var model
+    let proposal: AnalysisFactProposalInfo
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(proposal.subtitle).font(TypeRole.caption).foregroundStyle(.secondary)
+                Text(proposal.headline).lineLimit(2)
+            }
+            Spacer(minLength: Space.m)
+            Button("Accept") { Task { await model.decideFactProposals([proposal], accept: true) } }
+                .hoverHelp("Add it to your facts; Undo takes it back")
+            Button("Reject") { Task { await model.decideFactProposals([proposal], accept: false) } } // undoable
+                .hoverHelp("Leave it out; it will not be proposed again")
+        }
+        .controlSize(.small)
+        .accessibilityElement(children: .contain)
     }
 }
 

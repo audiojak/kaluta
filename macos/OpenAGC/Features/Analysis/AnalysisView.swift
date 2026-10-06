@@ -85,7 +85,6 @@ struct AnalysisView: View {
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
             return act(.edit)
         }
-        .task { await model.analysisShown() }
     }
 
     private enum Action { case accept, reject, edit }

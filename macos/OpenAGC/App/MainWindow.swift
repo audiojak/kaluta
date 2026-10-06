@@ -205,7 +205,7 @@ struct MainWindow: View {
                 }
                 if let error = model.threads.searchError {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")
-                        .font(.callout)
+                        .font(TypeRole.meta)
                         .foregroundStyle(.secondary)
                         .padding(Space.m)
                 }
@@ -214,7 +214,7 @@ struct MainWindow: View {
                         ProgressView().controlSize(.small)
                         Text("Also searching Gmail for older mail…")
                     }
-                    .font(.callout)
+                    .font(TypeRole.meta)
                     .foregroundStyle(.secondary)
                     .padding(Space.m)
                 }

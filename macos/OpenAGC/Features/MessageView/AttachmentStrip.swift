@@ -26,7 +26,7 @@ struct AttachmentStrip: View {
             }
             if let error {
                 Text(error)
-                    .font(.caption)
+                    .font(TypeRole.caption)
                     .foregroundStyle(Tone.failure)
                     .padding(.horizontal, Space.xxl)
             }
@@ -51,13 +51,15 @@ struct AttachmentStrip: View {
             Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
                 .foregroundStyle(.secondary)
         }
-        .font(.callout)
+        .font(TypeRole.meta)
         .padding(.horizontal, Space.m)
         .padding(.vertical, Space.s)
         .background(Tone.controlFill, in: .rect(cornerRadius: Radius.control))
         .contentShape(.rect)
         .onTapGesture(count: 2) { perform(attachment) { NSWorkspace.shared.open($0) } }
         .onTapGesture { perform(attachment) { previewURL = $0 } }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { perform(attachment) { previewURL = $0 } }
         .onDrag { dragProvider(attachment) }
         .contextMenu {
             Button("Quick Look") { perform(attachment) { previewURL = $0 } }

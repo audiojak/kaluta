@@ -236,7 +236,7 @@ pub async fn send_draft(
     let now = now_millis();
     let (draft, outgoing) = outgoing_message(db, draft, &from, rfc822_id.clone(), now).await?;
     let raw = mail_mime::build(&outgoing).map_err(|e| SyncError::Store(StoreError::Invalid(e.to_string())))?;
-    let text = mail_mime::html_to_text(&draft.body_html);
+    let text = mail_mime::html_to_quoted_text(&draft.body_html);
     let sanitized = mail_mime::sanitize_html(&draft.body_html);
     let token = random_token();
     let thread_id = ThreadId(draft.thread_id.clone().unwrap_or_else(|| format!("{LOCAL_PREFIX}thread-{token}")));

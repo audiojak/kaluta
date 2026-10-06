@@ -72,6 +72,68 @@ fn write_unquoted(node: &Node, out: &mut String) {
     }
 }
 
+/// Plain text for HTML mail, with quotes marked as mail clients expect:
+/// each line of a `<blockquote>` starts with `> ` (`> > ` when nested), so
+/// a plain-text reader can tell the quoted history from the reply.
+pub fn html_to_quoted_text(html: &str) -> String {
+    let mut out = String::new();
+    quoted_text(&parse(html), &mut out);
+    // Lines end without trailing spaces; at most one blank line in a row.
+    let mut tidy = String::with_capacity(out.len());
+    let mut blank = 0;
+    for line in out.lines() {
+        let line = line.trim_end();
+        blank = if line.is_empty() { blank + 1 } else { 0 };
+        if blank > 1 {
+            continue;
+        }
+        tidy.push_str(line);
+        tidy.push('\n');
+    }
+    tidy.trim_matches('\n').to_owned()
+}
+
+fn quoted_text(nodes: &[Node], out: &mut String) {
+    let mut plain = String::new();
+    let flush = |plain: &mut String, out: &mut String| {
+        if !plain.is_empty() {
+            out.push_str(&crate::html_to_text(plain));
+            plain.clear();
+        }
+    };
+    for node in nodes {
+        match node {
+            Node::Element { name, children, .. } if name == "blockquote" => {
+                flush(&mut plain, out);
+                let mut inner = String::new();
+                quoted_text(children, &mut inner);
+                if !out.is_empty() && !out.ends_with('\n') {
+                    out.push('\n');
+                }
+                for line in inner.trim_matches('\n').lines() {
+                    let line = line.trim_end();
+                    out.push_str(if line.is_empty() { ">" } else { "> " });
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            // A quote further in: this element's own text, then its parts.
+            Node::Element { name, children, .. } if contains(node, "blockquote") => {
+                flush(&mut plain, out);
+                if !out.is_empty() && !out.ends_with('\n') && !VOID.contains(&name.as_str()) {
+                    out.push('\n');
+                }
+                quoted_text(children, out);
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            _ => write(node, &mut plain),
+        }
+    }
+    flush(&mut plain, out);
+}
+
 /// Plain text split at its quoted history: the reply, and the rest (from
 /// the attribution or header line on), if any.
 pub fn split_quoted_text(text: &str) -> (&str, Option<&str>) {
@@ -396,6 +458,24 @@ mod tests {
         );
         assert!(out.contains("wrote:<br></div><blockquote"), "{out}");
         assert!(out.ends_with("</blockquote></details></div>"), "{out}");
+    }
+
+    #[test]
+    fn plain_text_marks_quotes() {
+        let html = "<p>Thanks, Friday works.</p><p>On 2026-09-21, Ann wrote:</p>\
+                    <blockquote><p>Lunch on Friday?</p><blockquote><p>Earlier note</p></blockquote></blockquote>";
+        let text = html_to_quoted_text(html);
+        assert_eq!(
+            text, "Thanks, Friday works.\nOn 2026-09-21, Ann wrote:\n> Lunch on Friday?\n> > Earlier note",
+            "{text:?}"
+        );
+        // Gmail's own structure: the quote inside a div.
+        let gmail =
+            r#"<div>Sounds good.</div><div><div>On Tue, Ann wrote:<br></div><blockquote>Thursday?</blockquote></div>"#;
+        let text = html_to_quoted_text(gmail);
+        assert!(text.starts_with("Sounds good."), "{text:?}");
+        assert!(text.contains("wrote:\n> Thursday?"), "{text:?}");
+        assert_eq!(html_to_quoted_text("<p>No quote</p>"), "No quote");
     }
 
     #[test]

@@ -12,6 +12,8 @@ struct ComposerView: View {
     @State private var store: ComposerStore?
     @State private var showsQuote = true
     @State private var importing = false
+    /// Discarding cannot be undone: asked first when the draft has anything in it.
+    @State private var confirmingDiscard = false
     @State private var assistant = ComposerAssistant()
     @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
@@ -118,6 +120,11 @@ struct ComposerView: View {
             }
         }
         .disabled(store.phase == .sending)
+        .confirmationDialog("Discard this draft?", isPresented: $confirmingDiscard) {
+            Button("Discard Draft", role: .destructive) { Task { await store.discard() } } // no-help: dialog
+        } message: {
+            Text("It is deleted here and in Gmail's drafts, with its attachments. This cannot be undone.")
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Attach", systemImage: "paperclip") { importing = true }
@@ -126,8 +133,10 @@ struct ComposerView: View {
                 // Reviewing an agent's draft: the decision is the approval
                 // card's, so sending here would go around it.
                 if request.agentName == nil {
-                    Button("Discard", systemImage: "trash") { Task { await store.discard() } }
-                        .help(ToolbarHelp.composer("Discard")) // toolbar
+                    Button("Discard", systemImage: "trash") {
+                        if store.hasContent { confirmingDiscard = true } else { Task { await store.discard() } }
+                    }
+                    .help(ToolbarHelp.composer("Discard")) // toolbar
                     Button("Send", systemImage: "paperplane.fill") { Task { await store.send() } }
                         .keyboardShortcut("d", modifiers: [.command, .shift])
                         .disabled(!store.canSend)
@@ -161,7 +170,7 @@ struct ComposerView: View {
                     Button("Cc/Bcc") { store.showsCcBcc = true }
                         .hoverHelp("Add Cc and Bcc fields")
                         .buttonStyle(.link)
-                        .font(.callout)
+                        .font(TypeRole.meta)
                 }
             }
             if store.showsCcBcc {
@@ -206,7 +215,7 @@ struct ComposerView: View {
             } label: {
                 Label(showsQuote ? "Hide Conversation" : "Show Conversation",
                       systemImage: showsQuote ? "chevron.up" : "chevron.down")
-                    .font(.callout)
+                    .font(TypeRole.meta)
             }
             .hoverHelp(showsQuote ? "Hide the conversation you are answering" : "Show the conversation you are answering")
             .buttonStyle(.borderless)
@@ -251,7 +260,7 @@ struct ComposerView: View {
             } label: {
                 Label(showsQuote ? "Hide Original" : "Show Original",
                       systemImage: showsQuote ? "chevron.down" : "chevron.up")
-                    .font(.callout)
+                    .font(TypeRole.meta)
             }
             .hoverHelp(showsQuote ? "Hide the message you are answering" : "Show the message you are answering")
             .buttonStyle(.borderless)
@@ -309,7 +318,7 @@ struct ComposerView: View {
                         .hoverHelp("Have \(name) write this into the message (Return)")
                 }
             }
-            .font(.body)
+            .font(TypeRole.body)
             .controlSize(.regular)
             .glassCapsule()
             switch assistant.state {
@@ -426,7 +435,7 @@ struct ComposerView: View {
                             .labelStyle(.iconOnly)
                             .buttonStyle(.borderless)
                     }
-                    .font(.callout)
+                    .font(TypeRole.meta)
                     .padding(.horizontal, Space.m)
                     .padding(.vertical, Space.xs)
                     .background(.quaternary, in: .capsule)
@@ -446,7 +455,7 @@ struct ComposerView: View {
         <meta name="color-scheme" content="light dark">
         <style>:root{color-scheme:light dark}
         body{font:13px -apple-system;margin:8px 16px;background:Canvas;color:GrayText}
-        blockquote{margin:0 0 0 4px;padding-left:10px;border-left:2px solid color-mix(in srgb, CanvasText 25%, transparent)}
+        blockquote{margin:0 0 0 4px;padding-left:8px;border-left:2px solid color-mix(in srgb, CanvasText 25%, transparent)}
         a{color:LinkText}</style>
         </head><body>\(html)</body></html>
         """

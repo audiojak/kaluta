@@ -88,11 +88,11 @@ struct KeyboardShortcutsView: View {
             VStack(alignment: .leading, spacing: Space.xxl) {
                 ForEach(KeyboardShortcutGuide.groups) { group in
                     VStack(alignment: .leading, spacing: Space.s) {
-                        Text(group.title).font(.headline)
+                        Text(group.title).font(TypeRole.heading)
                         Grid(alignment: .leading, horizontalSpacing: Space.xl, verticalSpacing: Space.xs) {
                             ForEach(group.shortcuts, id: \.self) { s in
                                 GridRow {
-                                    Text(s.keys).font(.body.monospaced()).gridColumnAlignment(.trailing)
+                                    Text(s.keys).font(TypeRole.code).gridColumnAlignment(.trailing)
                                     Text(s.action)
                                 }
                             }
@@ -100,7 +100,7 @@ struct KeyboardShortcutsView: View {
                     }
                 }
                 Text("With Full Keyboard Access on (System Settings › Keyboard), Tab reaches every button, including approvals in the agent panel.")
-                    .font(.callout)
+                    .font(TypeRole.meta)
                     .foregroundStyle(.secondary)
             }
             .padding(Space.xxl)

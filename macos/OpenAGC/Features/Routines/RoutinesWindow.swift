@@ -55,15 +55,15 @@ private struct RoutineList: View {
             ForEach(store.routines, id: \.id) { routine in
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: Space.hair) {
-                        Text(routine.name).font(.headline)
+                        Text(routine.name).font(TypeRole.heading)
                         HStack(spacing: Space.s) {
                             Text(RoutineRunner(rawValue: routine.runner)?.badge ?? routine.runner)
                             if routine.changedSincePublish { Text("· unpublished changes").foregroundStyle(Tone.caution) }
                         }
-                        .font(.caption)
+                        .font(TypeRole.caption)
                         .foregroundStyle(.secondary)
                         Text(RoutinesStore.activity(store.latestRuns[routine.id]))
-                            .font(.caption)
+                            .font(TypeRole.caption)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -88,6 +88,8 @@ private struct RoutineList: View {
 private struct RoutineEditor: View {
     @Environment(AppModel.self) private var model
     @State private var editingPrompt = false
+    /// Deleting a routine cannot be undone: asked first.
+    @State private var confirmingDelete = false
     @State private var expanded: Set<String> = []
 
     var body: some View {
@@ -121,7 +123,7 @@ private struct RoutineEditor: View {
             }
             .hoverHelp("Where the routine runs: here on this Mac, or in Claude's or ChatGPT's cloud")
             Text(model.routines.runner.explanation)
-                .font(.callout)
+                .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if model.routines.runner == .local {
@@ -173,11 +175,11 @@ private struct RoutineEditor: View {
                         set(parsed.0, c.hour ?? 8, c.minute ?? 0, parsed.weekday)
                     }), displayedComponents: .hourAndMinute)
             case .custom:
-                TextField("RRULE", text: d.schedule.rrule).font(.body.monospaced())
+                TextField("RRULE", text: d.schedule.rrule).font(TypeRole.code)
             }
             LabeledContent("Runs") { Text(model.core?.describeSchedule(d.wrappedValue.schedule.rrule) ?? "") }
             if let note = model.routines.runner.scheduleNote {
-                Text(note).font(.caption).foregroundStyle(.secondary)
+                Text(note).font(TypeRole.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -185,11 +187,11 @@ private struct RoutineEditor: View {
     private func scope(_ d: Binding<RoutineDefinition>) -> some View {
         Section("Which mail") {
             TextField("Search", text: d.scope)
-                .font(.body.monospaced())
+                .font(TypeRole.code)
                 .onSubmit { Task { await model.routines.countScope() } }
             if let count = model.routines.scopeCount {
                 Text(count >= 500 ? "Matches 500 or more threads right now" : "Matches \(count) thread\(count == 1 ? "" : "s") right now")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(TypeRole.caption).foregroundStyle(.secondary)
             }
             TextField("Parent label", text: d.parentLabel)
             Stepper("At most \(d.wrappedValue.limits.maxThreadsPerRun) threads per run", value: d.limits.maxThreadsPerRun, in: 10...500, step: 10)
@@ -237,10 +239,10 @@ private struct RoutineEditor: View {
                 } label: {
                     HStack {
                         Circle().fill(RoutineEditorColors.color(bucket.color)).frame(width: 10, height: 10)
-                        Text(bucket.labelName).font(.body.monospaced())
+                        Text(bucket.labelName).font(TypeRole.code)
                         Text(bucket.title).foregroundStyle(.secondary)
                         Spacer()
-                        Text(bucket.cadence.capitalized).font(.caption).foregroundStyle(.secondary)
+                        Text(bucket.cadence.capitalized).font(TypeRole.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -308,15 +310,20 @@ private struct RoutineEditor: View {
         let store = model.routines
         return VStack(spacing: Space.s) {
             if let error = store.error {
-                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Tone.failure).font(.callout)
+                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(Tone.failure).font(TypeRole.meta)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else if let message = store.message {
-                Label(message, systemImage: "checkmark.circle").foregroundStyle(.secondary).font(.callout)
+                Label(message, systemImage: "checkmark.circle").foregroundStyle(.secondary).font(TypeRole.meta)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack {
-                Button("Delete", role: .destructive) { Task { await store.delete() } }
+                Button("Delete", role: .destructive) { confirmingDelete = true }
                     .hoverHelp("Delete this routine; mail it filed keeps its labels")
+                    .confirmationDialog("Delete this routine?", isPresented: $confirmingDelete) {
+                        Button("Delete Routine", role: .destructive) { Task { await store.delete() } } // no-help: dialog
+                    } message: {
+                        Text("Its schedule and history go. Mail it filed keeps its labels. This cannot be undone.")
+                    }
                 Spacer()
                 if let busy = store.busy {
                     ProgressView().controlSize(.small)
@@ -359,7 +366,7 @@ private struct BucketEditor: View {
     let others: [RoutineDefinition.Bucket]
 
     var body: some View {
-        TextField("Label", text: $bucket.labelName).font(.body.monospaced())
+        TextField("Label", text: $bucket.labelName).font(TypeRole.code)
         TextField("Title", text: $bucket.title)
         Picker("Color", selection: $bucket.color) {
             ForEach(RoutineDefinition.Bucket.colors, id: \.self) { name in
@@ -372,8 +379,8 @@ private struct BucketEditor: View {
         }
         .hoverHelp("How often you plan to look at this bucket; the agent uses it to judge urgency")
         VStack(alignment: .leading) {
-            Text("What belongs here").font(.caption).foregroundStyle(.secondary)
-            TextEditor(text: $bucket.description).frame(minHeight: 60).font(.body)
+            Text("What belongs here").font(TypeRole.caption).foregroundStyle(.secondary)
+            TextEditor(text: $bucket.description).frame(minHeight: 60).font(TypeRole.body)
         }
         LinesField(title: "Examples, one per line", lines: $bucket.positiveExamples)
         LinesField(title: "Not this (e.g. “Failed payments belong in 1-Daily.”), one per line", lines: $bucket.negativeExamples)
@@ -391,7 +398,7 @@ private struct LinesField: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(title).font(TypeRole.caption).foregroundStyle(.secondary)
             TextEditor(text: Binding(
                 get: { lines.joined(separator: "\n") },
                 set: { lines = $0.split(separator: "\n", omittingEmptySubsequences: false).map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty } }))
@@ -410,19 +417,21 @@ private struct PreviewRowView: View {
         HStack {
             VStack(alignment: .leading) {
                 Text(subject ?? row.threadId).lineLimit(1)
-                Text(row.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(row.reason).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
             if let bucket {
-                Text(bucket.labelName).font(.caption.monospaced())
+                Text(bucket.labelName).font(TypeRole.codeCaption)
                     .padding(.horizontal, Space.s).padding(.vertical, Space.hair)
                     .background(RoutineEditorColors.color(bucket.color).opacity(0.2), in: .capsule)
             } else {
-                Text("Leave in inbox").font(.caption).foregroundStyle(.secondary)
+                Text("Leave in inbox").font(TypeRole.caption).foregroundStyle(.secondary)
             }
         }
         .task { subject = try? await model.core?.thread(row.threadId)?.thread.subject }
         .onTapGesture { model.selectedThreadID = row.threadId }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { model.selectedThreadID = row.threadId }
     }
 }
 
@@ -452,7 +461,7 @@ private struct RunRow: View {
         DisclosureGroup(isExpanded: $expanded) {
             if let report = run.reportText, !report.isEmpty {
                 // Plain text: a cloud log can quote mail; it is shown, never acted on.
-                Text(report).font(.callout.monospaced()).textSelection(.enabled)
+                Text(report).font(TypeRole.meta.monospaced()).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("No report.").foregroundStyle(.secondary)
@@ -469,7 +478,7 @@ private struct RunRow: View {
                 Spacer()
                 if run.threadCount > 0 { Text("\(run.threadCount) threads").foregroundStyle(.secondary) }
             }
-            .font(.callout)
+            .font(TypeRole.meta)
         }
     }
 }
@@ -486,7 +495,7 @@ private struct PromptEditor: View {
         Dialog(title: "Prompt",
                message: "This is what the agent is told. Editing it by hand stops the settings from changing it until you reset.",
                width: nil) {
-            TextEditor(text: $text).font(.body.monospaced()).frame(minWidth: 640, minHeight: 420)
+            TextEditor(text: $text).font(TypeRole.code).frame(minWidth: 640, minHeight: 420)
             let missing = PromptSafety.missing(text)
             if !missing.isEmpty {
                 Label("This prompt no longer says: \(missing.joined(separator: ", ")).", systemImage: "exclamationmark.triangle.fill")
@@ -547,7 +556,7 @@ private struct HandoffSheet: View {
                 Text("1. Copy the prompt and open your routines at claude.ai.\n2. Create a routine, paste the prompt, add the Gmail connector, and set the schedule to \(handoff.cronUtc.map { "the cron `\($0)` (UTC)" } ?? handoff.scheduleText).\n3. Paste the new routine's link below so OpenAGC can show its runs.")
             }
             ScrollView {
-                Text(handoff.prompt).font(.caption.monospaced()).textSelection(.enabled)
+                Text(handoff.prompt).font(TypeRole.codeCaption).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(height: 220)
@@ -592,7 +601,7 @@ private struct LaunchAtLoginToggle: View {
         }))
         .hoverHelp("Start OpenAGC when you log in, so routines on this Mac run on time")
         if let error {
-            Text(error).font(.caption).foregroundStyle(Tone.failure)
+            Text(error).font(TypeRole.caption).foregroundStyle(Tone.failure)
         }
     }
 }
