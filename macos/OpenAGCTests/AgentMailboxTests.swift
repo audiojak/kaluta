@@ -247,3 +247,47 @@ struct DashboardLinkTests {
         #expect(core.agentServiceDashboardURL(.primitive)?.host() == "www.primitive.dev")
     }
 }
+
+@MainActor
+struct TabIntoListTests {
+    struct Timeout: Error {}
+
+    private func table(in view: NSView) -> ThreadTableView? {
+        if let table = view as? ThreadTableView { return table }
+        for sub in view.subviews { if let found = table(in: sub) { return found } }
+        return nil
+    }
+
+    /// Tab from the sidebar lands on the first message when none is selected.
+    @Test func tabSelectsTheFirstMessageWhenNoneIsSelected() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 40)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        let first = try #require(model.threads.rows.first).id
+        let second = try #require(model.threads.rows.dropFirst().first).id
+        #expect(model.selectedThreadID == nil)
+
+        NSApp.activate()
+        let window = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled],
+                                     backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ThreadListArea().environment(model))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        for _ in 0..<50 where window.contentView.flatMap(table(in:)) == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        model.focusThreadList()
+        for _ in 0..<100 where model.selectedThreadID == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.selectedThreadID == first)
+
+        // With a selection, Tab keeps it.
+        model.selectedThreadID = second
+        model.focusThreadList()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(model.selectedThreadID == second)
+    }
+}

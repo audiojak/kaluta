@@ -2116,8 +2116,11 @@ the cursor and each one undoable. The usual shortcuts work: ⌘B, ⌘I, ⌘U,
 ⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⌘K link (in
 a composer; in the mail window ⌘K asks the agent) and ⌘\ clear. Fonts, sizes and colors stay out, so
 mail looks ordinary in the recipient's client. In the main window, Tab from a
-mailbox in the sidebar puts the keyboard in its thread list, so the arrows
-move between messages (nothing is opened until one is chosen).
+mailbox in the sidebar puts the keyboard in its thread list, on the first
+message when none is selected (shown in the reader, as a click would) and
+on the selection otherwise, so the arrows move between messages; from Tasks
+it does the same in the task list *(amended 2026-10-06; before, Tab
+selected nothing)*.
 
 **Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
 through Gmail's drafts list (`drafts.list`) on every incremental round,

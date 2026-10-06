@@ -33,7 +33,12 @@ struct TaskListView: View {
         .focused($focused)
         // Focus comes in from the sidebar (Tab), as for the thread list;
         // taking it on appear stole the arrows from the sidebar.
-        .onChange(of: model.threadListFocusRequests) { focused = true }
+        .onChange(of: model.threadListFocusRequests) {
+            focused = true
+            if model.tasks.selectedID == nil, let first = model.tasks.sections().first?.tasks.first {
+                model.selectTask(first.id)
+            }
+        }
         .onAppear {
             // The list's table view takes ⌫, ↩ and letters before SwiftUI's
             // key handlers see them, so the keys are caught on the way in,

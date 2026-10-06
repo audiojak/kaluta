@@ -336,9 +336,10 @@ with an Undo button. Task actions (done, delete) undo the same way.
   act on the task: `↩` edit, `r`/`a`/`f` answer its email, `e` done,
   `c` category, `⌫` delete.
 - **A list takes the keyboard only when asked**: Tab from the sidebar
-  moves into the list shown (threads or tasks), and ⇧Tab back. No list
-  takes focus on appearing, so arrowing through the sidebar never loses
-  the arrows to the column beside it.
+  moves into the list shown (threads or tasks) and lands on the first row
+  when nothing is selected, else on the selection; ⇧Tab goes back. No
+  list takes focus on appearing, so arrowing through the sidebar never
+  loses the arrows to the column beside it.
 - **⌘ keys live in menus**, and act only while the mail window is key.
 - Help tags name the key the user presses where the control is: single
   keys in lower case ("Archive (e)"), menu keys with their symbols ("Move
