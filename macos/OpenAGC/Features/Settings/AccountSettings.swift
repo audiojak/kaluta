@@ -195,6 +195,14 @@ struct AccountRow: View {
         return parts.isEmpty ? "Nobody yet" : parts.joined(separator: " · ")
     }
 
+    /// How to sign in to the service's dashboard for this mailbox.
+    static func dashboardHelp(_ plan: AgentMailboxPlan?) -> String {
+        switch plan?.email {
+        case let .some(email): "Open Primitive's dashboard in your browser; sign in as \(email), the email this mailbox was verified with"
+        default: "Open Primitive's dashboard in your browser; verify the mailbox first, then sign in with that email"
+        }
+    }
+
     /// An agent mailbox's plan in a line.
     static func planText(_ plan: AgentMailboxPlan?) -> String {
         guard let plan else { return "Primitive" }
@@ -295,6 +303,10 @@ struct AccountRow: View {
                     if model.agentPlans[account.id]?.verified == false {
                         Button("Verify…") { model.beginAgentVerification(account.id) }
                             .hoverHelp("Verify the mailbox with your email to raise its limits and let it write to you")
+                    }
+                    if let dashboard = model.core?.agentServiceDashboardURL(.primitive) {
+                        Button("Open at primitive.dev…") { NSWorkspace.shared.open(dashboard) }
+                            .hoverHelp(Self.dashboardHelp(model.agentPlans[account.id]))
                     }
                     Button("Use Your Own Domain…") { model.beginAgentDomain(account.id) }
                         .hoverHelp("Give the agent an address on a domain you own, such as agents.example.com")

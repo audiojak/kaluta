@@ -235,6 +235,10 @@ final class CoreClient: Sendable {
         URL(string: core.agentServiceTermsUrl(service: service))
     }
 
+    func agentServiceDashboardURL(_ service: AgentService) -> URL? {
+        URL(string: core.agentServiceDashboardUrl(service: service))
+    }
+
     func isAgent(_ accountID: String) -> Bool { core.accountIsAgent(accountId: accountID) }
 
     /// Where an agent mailbox may send now (kind: any_recipient,

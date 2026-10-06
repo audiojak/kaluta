@@ -691,6 +691,14 @@ impl Core {
         }
     }
 
+    /// Where the service's dashboard signs in; the user signs in with the
+    /// email the mailbox was verified with.
+    pub fn agent_service_dashboard_url(&self, service: AgentService) -> String {
+        match service {
+            AgentService::Primitive => provider_primitive::DASHBOARD_URL.to_owned(),
+        }
+    }
+
     /// Whether `account_id` is an agent mailbox.
     pub fn account_is_agent(&self, account_id: String) -> bool {
         self.is_agent(&account_id)

@@ -28,6 +28,8 @@ use sha2::{Digest, Sha256};
 
 pub const PRIMITIVE_API: &str = "https://api.primitive.dev/v1";
 pub const TERMS_URL: &str = "https://www.primitive.dev/terms";
+/// The dashboard's sign-in: email first, or Google, GitHub or Spotify.
+pub const DASHBOARD_URL: &str = "https://www.primitive.dev/login";
 /// Verification codes come from Primitive's own domain.
 pub const CODE_SENDER_DOMAIN: &str = "primitive.dev";
 

@@ -1196,7 +1196,9 @@ limits (one recipient per message).
 *Verify…*, *Can write to* (the service's send rules, `GET
 /send-permissions`: anyone, addresses that wrote first, the user's own
 domains, other Primitive mailboxes; sending to anyone is an entitlement
-Primitive grants on request), *When Agents Send*, *Copy API Key* (a confirmation says that
+Primitive grants on request), *Open at primitive.dev…* (the dashboard's
+sign-in; the help names the verified email to sign in as), *When Agents
+Send*, *Copy API Key* (a confirmation says that
 whoever holds the key can read and send the mailbox's mail), *Remove…*.
 Removing deletes the account and its key on the Mac; the service account
 stays (the sheet says so).

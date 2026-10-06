@@ -235,3 +235,15 @@ struct SendRulesTextTests {
         #expect(SyncStatusView.footer(.error(), transport: nil, needsSignIn: false)?.detail == "Trying again shortly")
     }
 }
+
+@MainActor
+struct DashboardLinkTests {
+    @Test func theDashboardHelpNamesTheVerifiedEmail() throws {
+        let verified = AgentMailboxPlan(name: "developer", verified: true, replyOnly: false, sendPerHour: 1000,
+                                        sendPerDay: 10000, email: "info@example.com")
+        #expect(AccountRow.dashboardHelp(verified).contains("sign in as info@example.com"))
+        #expect(AccountRow.dashboardHelp(nil).contains("verify the mailbox first"))
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        #expect(core.agentServiceDashboardURL(.primitive)?.host() == "www.primitive.dev")
+    }
+}
