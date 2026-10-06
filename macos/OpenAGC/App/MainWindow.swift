@@ -42,6 +42,14 @@ struct MainWindow: View {
                 NewFactCategorySheet(scope: .account) { model.guideSheet = nil }
             case .factCategories:
                 FactCategoriesSheet(store: model.facts) { model.guideSheet = nil }
+            case .analysisSettings:
+                Dialog(title: "Analysis Settings") {
+                    AnalysisSettingsView().frame(width: 460, height: 320)
+                } buttons: {
+                    Button("Done") { model.guideSheet = nil }
+                        .keyboardShortcut(.defaultAction)
+                        .hoverHelp("Close (Return)")
+                }
             case let .proposal(p):
                 GuideEntryEditor(proposal: p, check: p.entryId.flatMap { id in model.guide.entries.first { $0.id == id } }?.check)
             }

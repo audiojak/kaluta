@@ -31,12 +31,32 @@ extension AppModel {
         if analysis.unseen {
             try? await core.analysisSeen()
             await analysis.load()
+            await refreshAnalysisDots()
         }
     }
 
     /// Proposals changed (a review, a decision, an undo).
     func analysisChanged() async {
         if isAnalysis { await analysisShown() } else { await analysis.load() }
+        await refreshAnalysisDots()
+    }
+
+    func refreshAnalysisDots() async {
+        guard let core else { return }
+        let unseen = Set(await core.accountsWithUnseenAnalysis())
+        if unseen != unseenAnalysisAccounts { unseenAnalysisAccounts = unseen }
+    }
+
+    /// A review finished in some account: the notification, if wanted.
+    func analysisReviewed(accountID: String?) async {
+        await refreshAnalysisDots()
+        guard let accountID else { return }
+        // Another account's count is not loaded: it is at least one.
+        let count = accountID == openAccountID ? analysis.proposals.filter(\.unseen).count
+            + analysis.factProposals.filter(\.unseen).count
+            : (unseenAnalysisAccounts.contains(accountID) ? 1 : 0)
+        notifier.announceAnalysis(proposals: count, accountID: accountID,
+                                  today: Date().formatted(.iso8601.year().month().day()))
     }
 
     func runAnalysisNow() async {

@@ -243,7 +243,7 @@ struct AnalysisHeader: View {
             } else if let run = model.analysisProgress?.run {
                 Text(Self.summary(run)).font(TypeRole.caption).foregroundStyle(.secondary)
             } else {
-                Text("The first review runs today, once mail has synced. It sends the AI drafts you edited, and what you sent, to your own agent.")
+                Text("The first review runs today, once mail has synced. It sends the AI drafts you edited, and what you sent, to your own agent (with All mail I send, also the day's sent mail).")
                     .font(TypeRole.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -273,6 +273,13 @@ struct AnalysisHeader: View {
                         .hoverHelp("Connect Claude Code or Codex")
                 }
                 Spacer(minLength: 0)
+                Button {
+                    model.guideSheet = .analysisSettings
+                } label: {
+                    Label("Analysis Settings", systemImage: "gearshape")
+                }
+                .labelStyle(.iconOnly)
+                .hoverHelp("The daily review, where facts are learned from, and how long AI drafts are kept")
             }
             .controlSize(.small)
         }

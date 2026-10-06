@@ -2520,7 +2520,8 @@ median distance over four weeks) and how many were sent as written. The
 Writing Guide shows each entry's health: how often drafts that applied it
 were sent unchanged or overridden.
 
-**Settings** (the section's header menu and Settings › Writing Guide):
+**Settings** (the section's header and Settings › Analysis; per account,
+except the notification, which is app-wide):
 *Daily review* on or off; *Learn facts from*: *Off* · *Mail written with
 AI* · *All mail I send* (default *Mail written with AI*; received mail is
 never used); *Pairs a day* (default 50); *Keep AI drafts for* 7, 30 or 90

@@ -16,12 +16,14 @@ enum GuideSheet: Identifiable {
     case fact(FactInfo?, category: String?)
     case newFactCategory
     case factCategories
+    case analysisSettings
 
     var id: String {
         switch self {
         case let .fact(f, category): "fact-\(f.map { FactsStore.tag($0) } ?? "new")-\(category ?? "")"
         case .newFactCategory: "new-fact-category"
         case .factCategories: "fact-categories"
+        case .analysisSettings: "analysis-settings"
         case let .proposal(p): "proposal-\(p.id)"
         case .learn: "learn"
         case let .interview(only): "interview-\(only ?? "all")"

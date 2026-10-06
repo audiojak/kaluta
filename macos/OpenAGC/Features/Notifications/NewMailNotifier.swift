@@ -10,6 +10,9 @@ import UserNotifications
 @MainActor
 final class NewMailNotifier: NSObject {
     static let notifyKey = "notifyNewMail"
+    /// "N new proposals in Analysis", once a day (spec §14.10); off unless
+    /// the user turns it on.
+    static let analysisKey = "notifyAnalysis"
     static let badgeKey = "showDockBadge"
     /// More new messages than this at once become one summary notification.
     static let summaryThreshold = 3
@@ -23,6 +26,8 @@ final class NewMailNotifier: NSObject {
     var openThread: ((String, String?) -> Void)?
     /// Opens the writing guide's decisions, in this account (or the open one).
     var openGuideDecisions: ((String?) -> Void)?
+    /// Opens Analysis, in this account (or the open one).
+    var openAnalysis: ((String?) -> Void)?
 
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "notifications")
@@ -30,7 +35,7 @@ final class NewMailNotifier: NSObject {
 
     init(defaults: UserDefaults = CoreClient.appDefaults(), post: ((UNNotificationRequest) -> Void)? = nil) {
         self.defaults = defaults
-        defaults.register(defaults: [Self.notifyKey: true, Self.badgeKey: true])
+        defaults.register(defaults: [Self.notifyKey: true, Self.badgeKey: true, Self.analysisKey: false])
         self.post = post ?? { _ in }
         super.init()
         if post == nil {
@@ -61,6 +66,21 @@ final class NewMailNotifier: NSObject {
 
     /// A learning run finished (spec §14.9): its decisions are waiting.
     /// Only when the app is not in front, like new mail.
+    /// New proposals in Analysis after a review: at most once a day per
+    /// account, only when the app is not in front, only if turned on.
+    func announceAnalysis(proposals: Int, accountID: String?, today: String) {
+        let key = "analysisNotified.\(accountID ?? "")"
+        guard proposals > 0, defaults.bool(forKey: Self.analysisKey), !isAppActive(),
+              defaults.string(forKey: key) != today else { return }
+        defaults.set(today, forKey: key)
+        let content = UNMutableNotificationContent()
+        content.title = "Analysis"
+        content.body = proposals == 1 ? "1 new proposal in Analysis" : "\(proposals) new proposals in Analysis"
+        content.threadIdentifier = "analysis"
+        content.userInfo = ["analysis": true, "accountID": accountID ?? ""]
+        post(UNNotificationRequest(identifier: "analysis-\(UUID().uuidString)", content: content, trigger: nil))
+    }
+
     func announceGuide(decisions: Int, accountID: String? = nil) {
         guard decisions > 0, !isAppActive() else { return }
         post(Self.guideRequest(decisions: decisions, accountID: accountID))
@@ -150,9 +170,11 @@ extension NewMailNotifier: UNUserNotificationCenterDelegate {
         let threadID = info["threadID"] as? String
         let accountID = info["accountID"] as? String
         let guide = info["guide"] as? Bool ?? false
+        let analysis = info["analysis"] as? Bool ?? false
         await MainActor.run {
             NSApp.activate()
             if guide { openGuideDecisions?(accountID.flatMap { $0.isEmpty ? nil : $0 }) }
+            if analysis { openAnalysis?(accountID.flatMap { $0.isEmpty ? nil : $0 }) }
             if let threadID, !threadID.isEmpty { openThread?(threadID, accountID) }
         }
     }

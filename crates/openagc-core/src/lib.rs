@@ -12,6 +12,7 @@ mod analysis_glean;
 mod analysis_match;
 mod analysis_queue;
 mod analysis_run;
+mod analysis_settings;
 mod archive;
 mod attachments;
 mod cloud_routines;

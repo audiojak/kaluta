@@ -84,6 +84,14 @@ private struct GuideCategoryDetail: View {
 
 /// One entry as a card: its kind, statement, scope, check and evidence.
 struct GuideEntryCard: View {
+    /// "AI drafts that followed it: 4 sent as written, 1 changed against it".
+    static func healthLine(_ h: GuideEntryHealth) -> String {
+        var parts: [String] = []
+        if h.unchanged > 0 { parts.append("\(h.unchanged) sent as written") }
+        if h.overridden > 0 { parts.append("\(h.overridden) changed against it") }
+        return "AI drafts that followed it: " + parts.joined(separator: ", ")
+    }
+
     @Environment(AppModel.self) private var model
     let entry: GuideEntry
     @State private var showsAllQuotes = false
@@ -108,6 +116,11 @@ struct GuideEntryCard: View {
             }
             if entry.support > 0 || entry.contradict > 0 {
                 Text(evidenceLine).font(TypeRole.caption).foregroundStyle(.secondary)
+            }
+            if let health = model.guide.health[entry.id], health.unchanged + health.overridden > 0 {
+                Text(Self.healthLine(health))
+                    .font(TypeRole.caption)
+                    .foregroundStyle(health.overridden > health.unchanged ? Tone.caution : .secondary)
             }
             let quotes = entry.evidence.filter { !$0.contradicts }
             ForEach(Array(quotes.prefix(showsAllQuotes ? quotes.count : 2).enumerated()), id: \.offset) { _, quote in

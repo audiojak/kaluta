@@ -12,6 +12,8 @@ final class GuideStore {
     private(set) var groups: [AudienceGroup] = []
     /// Proposals ready to decide (finished runs only).
     private(set) var decisions: [GuideEntry] = []
+    /// How AI drafts that applied each entry fared (spec §14.10), by entry.
+    private(set) var health: [Int64: GuideEntryHealth] = [:]
     private(set) var loaded = false
     var selectedCategory: String? = "A1"
     private(set) var error: String?
@@ -33,12 +35,14 @@ final class GuideStore {
             let entries = try await core.guideEntries([.accepted])
             let groups = try await core.audienceGroups()
             let decisions = try await core.guideDecisions()
+            let health = (try? await core.guideEntryHealth()) ?? []
             guard mine > applied else { return }
             applied = mine
             self.categories = categories
             self.entries = entries
             self.groups = groups
             self.decisions = decisions
+            self.health = Dictionary(health.map { ($0.entryId, $0) }, uniquingKeysWith: { a, _ in a })
             error = nil
         } catch let error as CoreClientError {
             self.error = error.message

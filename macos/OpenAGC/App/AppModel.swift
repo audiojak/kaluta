@@ -390,6 +390,13 @@ final class AppModel {
                 self.openGuideDecisionsNow()
             }
         }
+        notifier.openAnalysis = { [weak self] account in
+            guard let self else { return }
+            Task {
+                if let account, account != self.openAccountID { await self.switchAccount(to: account) }
+                self.openAnalysis()
+            }
+        }
         notifier.install()
         if openDemo {
             await openDemoMailbox()
@@ -599,6 +606,8 @@ final class AppModel {
     var analysisError: String?
     /// Bumped when facts change (spec §14.11); views showing them reload.
     private(set) var factsRevision = 0
+    /// Accounts with Analysis proposals not seen yet: the account menu's dots.
+    var unseenAnalysisAccounts: Set<String> = []
     /// A sheet of the Writing Guide section, while open.
     var guideSheet: GuideSheet?
     /// Why the last guide action failed, shown in the section.
@@ -1325,6 +1334,12 @@ final class AppModel {
                 // Another account's counts moved: refresh the menu and Dock
                 // at most every few seconds rather than on every batch.
                 scheduleAccountsReload()
+            case let .analysisProgress(progress):
+                // Another account's review finished: its menu dot, and the
+                // notification if the user wants one.
+                if progress.run?.status == .done { await analysisReviewed(accountID: tagged.accountID) }
+            case .analysisChanged:
+                await refreshAnalysisDots()
             default:
                 break
             }
@@ -1400,7 +1415,10 @@ final class AppModel {
         case let .analysisProgress(progress):
             let finished = analysisProgress?.run?.status == .running && progress.run?.status == .done
             analysisProgress = progress
-            if finished { await analysisChanged() }
+            if finished {
+                await analysisChanged()
+                await analysisReviewed(accountID: tagged.accountID)
+            }
         case .analysisChanged:
             await analysisChanged()
         case .factsChanged:

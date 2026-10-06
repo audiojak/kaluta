@@ -711,6 +711,19 @@ final class CoreClient: Sendable {
         try await call { try await core.setAnalysisFactsFrom(from: from) }
     }
 
+    func analysisSettings() async throws(CoreClientError) -> AnalysisSettings {
+        try await call { try await core.analysisSettings() }
+    }
+
+    func setAnalysisSettings(_ settings: AnalysisSettings) async throws(CoreClientError) {
+        try await call { try await core.setAnalysisSettings(settings: settings) }
+    }
+
+    /// Accounts with Analysis proposals the user has not seen (menu dots).
+    func accountsWithUnseenAnalysis() async -> [String] {
+        await core.accountsWithUnseenAnalysis()
+    }
+
     func analysisMetrics() async throws(CoreClientError) -> AnalysisMetrics {
         try await call { try await core.analysisMetrics() }
     }
@@ -1220,6 +1233,7 @@ typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
 typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
 typealias AnalysisFactProposalInfo = OpenAGCCore.AnalysisFactProposalInfo
 typealias FactsFrom = OpenAGCCore.FactsFrom
+typealias AnalysisSettings = OpenAGCCore.AnalysisSettings
 typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
 typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
 typealias AnalysisMetrics = OpenAGCCore.AnalysisMetrics

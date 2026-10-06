@@ -57,7 +57,8 @@ struct AccountMenuItems: View {
             Button { // no-help: menu item
                 Task { await model.switchAccount(to: account.id) }
             } label: {
-                Image(nsImage: AccountAvatar.menuImage(account, current: account.id == model.openAccountID))
+                Image(nsImage: AccountAvatar.menuImage(account, current: account.id == model.openAccountID,
+                                                       unseen: model.unseenAnalysisAccounts.contains(account.id)))
                 Text(AccountMenuItems.title(account))
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
@@ -93,9 +94,11 @@ extension AccountAvatar {
 
     /// The avatar as a menu image, with a check ring on the current account.
     @MainActor
-    static func menuImage(_ account: AccountSummary, current: Bool) -> NSImage {
+    /// `unseen`: a dot for new proposals in its Analysis (spec §14.10).
+    static func menuImage(_ account: AccountSummary, current: Bool, unseen: Bool = false) -> NSImage {
         let view = AccountAvatar(account: account, size: 18)
             .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: current ? 2 : 0))
+            .overlay(alignment: .topTrailing) { if unseen { NewDot() } }
             .padding(Space.hair)
         let renderer = ImageRenderer(content: view)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
