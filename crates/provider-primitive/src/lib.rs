@@ -18,9 +18,9 @@ use base64::Engine;
 use futures::stream::{FuturesUnordered, StreamExt};
 use mail_domain::{EmailAddress, Label, LabelColor, LabelId, LabelKind, MessageId, Millis, ThreadId, system_labels};
 use provider_api::{
-    BackfillSource, Change, ChangeSet, FetchedAttachment, FetchedBody, FetchedMessage, HttpClient, IdPage, LabelOp,
-    ListFilter, MailProvider, MailboxPlan, MailboxService, PageToken, Priority, Profile, ProviderError, ProviderResult,
-    RateLimiter, RetryPolicy, SignedUp, SyncCursor, TokenSource, VerificationStarted,
+    BackfillSource, Change, ChangeSet, DnsRecord, FetchedAttachment, FetchedBody, FetchedMessage, HttpClient, IdPage,
+    LabelOp, ListFilter, MailProvider, MailboxDomain, MailboxPlan, MailboxService, PageToken, Priority, Profile,
+    ProviderError, ProviderResult, RateLimiter, RetryPolicy, SignedUp, SyncCursor, TokenSource, VerificationStarted,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -729,18 +729,30 @@ impl PrimitiveService {
     }
 
     async fn call<T: serde::de::DeserializeOwned>(&self, request: reqwest::RequestBuilder) -> ProviderResult<T> {
+        let body = self.call_text(request).await?;
+        let envelope: wire::Envelope<T> =
+            serde_json::from_str(&body).map_err(|e| ProviderError::Decode(e.to_string()))?;
+        Ok(envelope.data)
+    }
+
+    /// A call's body as text, or its error classified and worded.
+    async fn call_text(&self, request: reqwest::RequestBuilder) -> ProviderResult<String> {
         let response = request.send().await.map_err(|e| ProviderError::Network(e.to_string()))?;
         let status = response.status();
         let body = response.text().await.map_err(|e| ProviderError::Network(e.to_string()))?;
         if status.is_success() {
-            let envelope: wire::Envelope<T> =
-                serde_json::from_str(&body).map_err(|e| ProviderError::Decode(e.to_string()))?;
-            return Ok(envelope.data);
+            return Ok(body);
         }
-        let message = serde_json::from_str::<serde_json::Value>(&body)
-            .ok()
-            .and_then(|v| v["error"]["message"].as_str().map(str::to_owned))
-            .unwrap_or_else(|| format!("Primitive answered {}", status.as_u16()));
+        let error = serde_json::from_str::<serde_json::Value>(&body).ok().map(|v| v["error"].clone());
+        let code = error.as_ref().and_then(|e| e["code"].as_str().map(str::to_owned)).unwrap_or_default();
+        let message = match code.as_str() {
+            "mx_conflict" => DOMAIN_RECEIVES_ELSEWHERE.to_owned(),
+            "conflict" if status.as_u16() == 409 => DOMAIN_TAKEN.to_owned(),
+            _ => error
+                .as_ref()
+                .and_then(|e| e["message"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| format!("Primitive answered {}", status.as_u16())),
+        };
         Err(match status.as_u16() {
             401 => ProviderError::Unauthorized,
             403 => ProviderError::Forbidden(message),
@@ -749,6 +761,34 @@ impl PrimitiveService {
             s if s >= 500 => ProviderError::Server { status: s, message },
             _ => ProviderError::Invalid(message),
         })
+    }
+}
+
+/// A domain whose mail already goes elsewhere (Primitive's `mx_conflict`).
+pub const DOMAIN_RECEIVES_ELSEWHERE: &str = "That domain already receives mail somewhere else. Use a subdomain for \
+     the agent, such as agents.example.com, so your own mail is not affected.";
+/// A domain another account has claimed.
+pub const DOMAIN_TAKEN: &str = "Another Primitive account has already added that domain.";
+
+fn record_of(r: wire::DnsRecord) -> DnsRecord {
+    DnsRecord {
+        kind: r.kind,
+        fqdn: r.fqdn,
+        value: r.value,
+        priority: r.priority,
+        purpose: r.purpose,
+        required: r.required,
+        status: r.status,
+        message: r.message,
+    }
+}
+
+fn domain_of(d: wire::Domain) -> MailboxDomain {
+    MailboxDomain {
+        id: d.id,
+        domain: d.domain,
+        verified: d.verified,
+        records: d.dns_records.into_iter().map(record_of).collect(),
     }
 }
 
@@ -830,6 +870,46 @@ impl MailboxService for PrimitiveService {
             )
             .await?;
         Ok(plan_of(claimed.plan, claimed.email, &claimed.limits))
+    }
+
+    async fn domains(&self, api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {
+        let domains: Vec<wire::Domain> =
+            self.call(self.client.get(format!("{}/domains", self.base)).bearer_auth(api_key)).await?;
+        Ok(domains.into_iter().map(domain_of).collect())
+    }
+
+    async fn add_domain(&self, api_key: &str, domain: &str) -> ProviderResult<MailboxDomain> {
+        let domain = domain.trim().trim_end_matches('.').to_lowercase();
+        let added: wire::Domain = self
+            .call(
+                self.client
+                    .post(format!("{}/domains", self.base))
+                    .bearer_auth(api_key)
+                    .header("Idempotency-Key", format!("add-domain-{domain}"))
+                    .json(&json!({ "domain": domain })),
+            )
+            .await?;
+        Ok(domain_of(added))
+    }
+
+    async fn verify_domain(&self, api_key: &str, domain_id: &str) -> ProviderResult<MailboxDomain> {
+        let checked: wire::DomainCheck = self
+            .call(self.client.post(format!("{}/domains/{domain_id}/verify", self.base)).bearer_auth(api_key))
+            .await?;
+        // The check carries no name; the listing does.
+        let name =
+            self.domains(api_key).await?.into_iter().find(|d| d.id == domain_id).map(|d| d.domain).unwrap_or_default();
+        Ok(MailboxDomain {
+            id: domain_id.to_owned(),
+            domain: name,
+            verified: checked.verified,
+            records: checked.dns_records.into_iter().map(record_of).collect(),
+        })
+    }
+
+    async fn zone_file(&self, api_key: &str, domain_id: &str) -> ProviderResult<String> {
+        self.call_text(self.client.get(format!("{}/domains/{domain_id}/zone-file", self.base)).bearer_auth(api_key))
+            .await
     }
 }
 

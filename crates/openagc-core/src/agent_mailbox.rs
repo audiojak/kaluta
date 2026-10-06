@@ -14,8 +14,8 @@ use mail_domain::Redacted;
 use provider_api::fake::FakeProvider;
 use provider_api::token::StaticToken;
 use provider_api::{
-    BackfillSource, MailProvider, MailboxPlan, MailboxService, ProviderError, ProviderResult, SignedUp,
-    VerificationStarted,
+    BackfillSource, DnsRecord, MailProvider, MailboxDomain, MailboxPlan, MailboxService, ProviderError, ProviderResult,
+    SignedUp, VerificationStarted,
 };
 use serde::{Deserialize, Serialize};
 
@@ -74,6 +74,56 @@ impl From<MailboxPlan> for AgentMailboxPlan {
     }
 }
 
+/// A DNS record an own domain needs (spec §7.9).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AgentDnsRecord {
+    /// `MX` or `TXT`.
+    pub kind: String,
+    pub fqdn: String,
+    pub value: String,
+    pub priority: Option<u32>,
+    /// `inbound_mx`, `ownership_verification`, `spf`, `dkim`, `dmarc`,
+    /// `tls_reporting`.
+    pub purpose: String,
+    pub required: bool,
+    /// `pending`, `found`, `missing` or `incorrect`.
+    pub status: String,
+    pub message: Option<String>,
+}
+
+/// One of the user's domains on an agent mailbox's account.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AgentDomain {
+    pub id: String,
+    pub domain: String,
+    pub verified: bool,
+    pub records: Vec<AgentDnsRecord>,
+}
+
+impl From<MailboxDomain> for AgentDomain {
+    fn from(d: MailboxDomain) -> Self {
+        Self {
+            id: d.id,
+            domain: d.domain,
+            verified: d.verified,
+            records: d
+                .records
+                .into_iter()
+                .map(|r: DnsRecord| AgentDnsRecord {
+                    kind: r.kind,
+                    fqdn: r.fqdn,
+                    value: r.value,
+                    priority: r.priority,
+                    purpose: r.purpose,
+                    required: r.required,
+                    status: r.status,
+                    message: r.message,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AgentMailboxCreated {
     pub account_id: String,
@@ -99,6 +149,10 @@ pub(crate) struct AgentMeta {
     pub created_at: i64,
     #[serde(default)]
     pub send_mode: AgentSendMode,
+    /// The address the service gave it, kept when the agent moves to an
+    /// own domain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_address: Option<String>,
 }
 
 pub(crate) fn read_meta(dir: &Path) -> Option<AgentMeta> {
@@ -219,6 +273,11 @@ impl Core {
         self.agent_meta(account_id).ok_or_else(|| CoreError::new(ErrorKind::NotFound, "not an agent mailbox"))
     }
 
+    fn agent_client(&self, account_id: &str) -> Result<(Arc<dyn MailboxService>, Redacted<String>), CoreError> {
+        let meta = self.agent_meta_or_err(account_id)?;
+        Ok((self.mailbox_service(meta.service)?, self.agent_key(account_id)?))
+    }
+
     fn agent_key(&self, account_id: &str) -> Result<Redacted<String>, CoreError> {
         secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(account_id))?
             .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this agent mailbox's key is missing from the Keychain"))
@@ -325,6 +384,7 @@ impl Core {
                     name: name.clone(),
                     created_at: mail_sync::now_millis(),
                     send_mode: AgentSendMode::default(),
+                    managed_address: Some(address.clone()),
                 },
             )?;
             let db = core.store_for(&account_id).await?;
@@ -439,6 +499,95 @@ impl Core {
         write_meta(&dir, &meta)
     }
 
+    /// The user's own domains on this mailbox's account.
+    pub async fn agent_domains(&self, account_id: String) -> Result<Vec<AgentDomain>, CoreError> {
+        let (client, key) = self.agent_client(&account_id)?;
+        runtime::run(async move {
+            Ok(client.domains(key.expose()).await.map_err(service_error)?.into_iter().map(Into::into).collect())
+        })
+        .await
+    }
+
+    /// Add one of the user's domains (a subdomain such as
+    /// `agents.example.com` is the usual choice): the DNS records to create.
+    pub async fn add_agent_domain(&self, account_id: String, domain: String) -> Result<AgentDomain, CoreError> {
+        let domain = domain.trim().trim_end_matches('.').to_lowercase();
+        if !domain.contains('.') || domain.contains('@') || domain.contains(char::is_whitespace) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "enter a domain such as agents.example.com"));
+        }
+        let (client, key) = self.agent_client(&account_id)?;
+        runtime::run(
+            async move { client.add_domain(key.expose(), &domain).await.map(Into::into).map_err(service_error) },
+        )
+        .await
+    }
+
+    /// Check a domain's records now.
+    pub async fn check_agent_domain(&self, account_id: String, domain_id: String) -> Result<AgentDomain, CoreError> {
+        let (client, key) = self.agent_client(&account_id)?;
+        runtime::run(async move {
+            client.verify_domain(key.expose(), &domain_id).await.map(Into::into).map_err(service_error)
+        })
+        .await
+    }
+
+    /// The records as a BIND zone file.
+    pub async fn agent_domain_zone_file(&self, account_id: String, domain_id: String) -> Result<String, CoreError> {
+        let (client, key) = self.agent_client(&account_id)?;
+        runtime::run(async move { client.zone_file(key.expose(), &domain_id).await.map_err(service_error) }).await
+    }
+
+    /// Send and receive as `address`: the address the service gave the
+    /// mailbox, or one on a verified own domain. Sync restarts with it.
+    pub async fn set_agent_address(self: Arc<Self>, account_id: String, address: String) -> Result<(), CoreError> {
+        let address = address.trim().to_lowercase();
+        let Some((local, domain)) = address.rsplit_once('@') else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "enter an address such as scout@agents.example.com"));
+        };
+        if local.is_empty() || local.contains(char::is_whitespace) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "enter an address such as scout@agents.example.com"));
+        }
+        let mut meta = self.agent_meta_or_err(&account_id)?;
+        let managed = meta.managed_address.clone().is_some_and(|m| m == address);
+        if !managed {
+            let domains = self.agent_domains(account_id.clone()).await?;
+            if !domains.iter().any(|d| d.verified && d.domain == domain) {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidInput,
+                    format!("{domain} is not one of this mailbox's verified domains"),
+                ));
+            }
+        }
+        meta.address = address.clone();
+        write_meta(&accounts_dir(&self.data_path()).join(&account_id), &meta)?;
+        let db = self.store_for(&account_id).await?;
+        let stored = address.clone();
+        runtime::run(async move {
+            db.write(move |tx| mail_store::read::set_sync_state(tx, "account_email", &stored)).await?;
+            Ok(())
+        })
+        .await?;
+        self.register_account(IndexEntry {
+            id: account_id.clone(),
+            kind: AccountKind::Agent,
+            email: address,
+            display_name: None,
+            avatar_file: None,
+            added_at: 0,
+            imap: None,
+            named_by_user: true,
+            service: Some(meta.service),
+        })
+        .await?;
+        // Sends go from the new address: restart its sync with it.
+        if self.is_syncing(&account_id) {
+            self.stop_sync_for(&account_id);
+            let (provider, push) = self.agent_provider(&account_id)?;
+            crate::registry::SCOPED_ACCOUNT.sync_scope(account_id, || self.start_sync_with_backfill(provider, push))?;
+        }
+        Ok(())
+    }
+
     /// The service's terms, shown before creating a mailbox.
     pub fn agent_service_terms_url(&self, service: AgentService) -> String {
         match service {
@@ -504,6 +653,27 @@ impl Core {
 #[derive(Default)]
 pub(crate) struct FakeMailboxService {
     accounts: Mutex<HashMap<String, MailboxPlan>>,
+    /// Domains by key; each check finds the records, as if DNS had caught up.
+    domains: Mutex<HashMap<String, Vec<MailboxDomain>>>,
+}
+
+fn fake_records(domain: &str, status: &str) -> Vec<DnsRecord> {
+    let record = |kind: &str, fqdn: String, value: &str, purpose: &str| DnsRecord {
+        kind: kind.into(),
+        fqdn,
+        value: value.into(),
+        priority: (kind == "MX").then_some(10),
+        purpose: purpose.into(),
+        required: true,
+        status: status.into(),
+        message: None,
+    };
+    vec![
+        record("MX", domain.to_owned(), "in.demo.primitive.email", "inbound_mx"),
+        record("TXT", domain.to_owned(), "v=spf1 include:demo.primitive.email ~all", "spf"),
+        record("TXT", format!("prim._domainkey.{domain}"), "v=DKIM1; k=rsa; p=MIGf…", "dkim"),
+        record("TXT", format!("_dmarc.{domain}"), "v=DMARC1; p=none", "dmarc"),
+    ]
 }
 
 fn fake_plan(verified: bool, email: Option<String>) -> MailboxPlan {
@@ -565,6 +735,53 @@ impl MailboxService for FakeMailboxService {
         }
         *plan = fake_plan(true, plan.email.clone());
         Ok(plan.clone())
+    }
+
+    async fn domains(&self, api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {
+        Ok(self.domains.lock().unwrap_or_else(|e| e.into_inner()).get(api_key).cloned().unwrap_or_default())
+    }
+
+    async fn add_domain(&self, api_key: &str, domain: &str) -> ProviderResult<MailboxDomain> {
+        // A bare domain stands for one whose mail goes elsewhere.
+        if domain.matches('.').count() < 2 {
+            return Err(ProviderError::Invalid(provider_primitive::DOMAIN_RECEIVES_ELSEWHERE.into()));
+        }
+        let mut all = self.domains.lock().unwrap_or_else(|e| e.into_inner());
+        let list = all.entry(api_key.to_owned()).or_default();
+        if let Some(existing) = list.iter().find(|d| d.domain == domain) {
+            return Ok(existing.clone());
+        }
+        let added = MailboxDomain {
+            id: format!("fake-domain-{}", list.len() + 1),
+            domain: domain.to_owned(),
+            verified: false,
+            records: fake_records(domain, "pending"),
+        };
+        list.push(added.clone());
+        Ok(added)
+    }
+
+    async fn verify_domain(&self, api_key: &str, domain_id: &str) -> ProviderResult<MailboxDomain> {
+        let mut all = self.domains.lock().unwrap_or_else(|e| e.into_inner());
+        let domain = all
+            .get_mut(api_key)
+            .and_then(|l| l.iter_mut().find(|d| d.id == domain_id))
+            .ok_or_else(|| ProviderError::NotFound(domain_id.to_owned()))?;
+        domain.verified = true;
+        domain.records = fake_records(&domain.domain, "found");
+        Ok(domain.clone())
+    }
+
+    async fn zone_file(&self, api_key: &str, domain_id: &str) -> ProviderResult<String> {
+        let all = self.domains.lock().unwrap_or_else(|e| e.into_inner());
+        let domain = all
+            .get(api_key)
+            .and_then(|l| l.iter().find(|d| d.id == domain_id))
+            .ok_or_else(|| ProviderError::NotFound(domain_id.to_owned()))?;
+        Ok(fake_records(&domain.domain, "pending")
+            .iter()
+            .map(|r| format!("{}. 300 IN {} {}\n", r.fqdn, r.kind, r.value))
+            .collect())
     }
 }
 

@@ -182,3 +182,44 @@ pub struct SendResult {
     #[serde(default)]
     pub rejected: Vec<String>,
 }
+
+/// A record a domain needs (`dns_records`).
+#[derive(Debug, Deserialize)]
+pub struct DnsRecord {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub fqdn: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub priority: Option<u32>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub purpose: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+/// A domain from `POST /domains` or `GET /domains`.
+#[derive(Debug, Deserialize)]
+pub struct Domain {
+    pub id: String,
+    pub domain: String,
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default)]
+    pub dns_records: Vec<DnsRecord>,
+}
+
+/// `POST /domains/{id}/verify`.
+#[derive(Debug, Deserialize)]
+pub struct DomainCheck {
+    #[serde(default)]
+    pub verified: bool,
+    #[serde(default)]
+    pub dns_records: Vec<DnsRecord>,
+}

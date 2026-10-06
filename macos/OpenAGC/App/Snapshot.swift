@@ -32,10 +32,11 @@ import os
 ///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
-///   -OpenAGCSnapshotAgentMailbox create|verify|banner  the Create an Agent
-///                                       Mailbox sheet, or a new mailbox (fake
-///                                       service) with its verify sheet or its
-///                                       limits banner (spec §7.9)
+///   -OpenAGCSnapshotAgentMailbox create|verify|banner|domain|domain-ready
+///                                       the Create an Agent Mailbox sheet, or a
+///                                       new mailbox (fake service) with its
+///                                       verify sheet, its limits banner, or its
+///                                       own-domain sheet (spec §7.9)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -216,6 +217,13 @@ enum Snapshot {
                                                     subject: "Confirm your sign-up",
                                                     body: "Click to confirm the account for research-scout.")
                     if agent == "verify" { model.beginAgentVerification(created.accountId) }
+                    if agent == "domain" || agent == "domain-ready" {
+                        let added = try? await core.addAgentDomain(created.accountId, domain: "agents.example.com")
+                        if agent == "domain-ready", let added {
+                            _ = try? await core.checkAgentDomain(created.accountId, domainID: added.id)
+                        }
+                        model.beginAgentDomain(created.accountId)
+                    }
                 }
                 try? await Task.sleep(for: .milliseconds(1200))
                 if agent != "banner", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {

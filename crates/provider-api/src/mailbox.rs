@@ -40,6 +40,35 @@ pub struct VerificationStarted {
     pub expires_in_secs: u32,
 }
 
+/// A DNS record a domain needs at the user's DNS host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DnsRecord {
+    /// `MX` or `TXT`.
+    pub kind: String,
+    /// The full name to create it at.
+    pub fqdn: String,
+    pub value: String,
+    pub priority: Option<u32>,
+    /// What it is for: `inbound_mx`, `ownership_verification`, `spf`,
+    /// `dkim`, `dmarc`, `tls_reporting`.
+    pub purpose: String,
+    pub required: bool,
+    /// `pending`, `found`, `missing` or `incorrect`.
+    pub status: String,
+    /// The service's note when it is wrong.
+    pub message: Option<String>,
+}
+
+/// One of the user's domains at the service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MailboxDomain {
+    pub id: String,
+    pub domain: String,
+    pub verified: bool,
+    /// What to create; empty once verified (the service stops listing them).
+    pub records: Vec<DnsRecord>,
+}
+
 /// One agent-mail service: everything about an account that is not mail.
 #[async_trait]
 pub trait MailboxService: Send + Sync {
@@ -60,4 +89,21 @@ pub trait MailboxService: Send + Sync {
     async fn start_verification(&self, api_key: &str, email: &str) -> ProviderResult<VerificationStarted>;
     /// Confirm the code; the account's plan afterwards.
     async fn verify(&self, api_key: &str, code: &str) -> ProviderResult<MailboxPlan>;
+
+    /// The user's own domains on the account.
+    async fn domains(&self, _api_key: &str) -> ProviderResult<Vec<MailboxDomain>> {
+        Ok(vec![])
+    }
+    /// Claim `domain` for the account: the records to create.
+    async fn add_domain(&self, _api_key: &str, _domain: &str) -> ProviderResult<MailboxDomain> {
+        Err(crate::ProviderError::Unavailable("this service has no own domains".into()))
+    }
+    /// Check the domain's records now.
+    async fn verify_domain(&self, _api_key: &str, _domain_id: &str) -> ProviderResult<MailboxDomain> {
+        Err(crate::ProviderError::Unavailable("this service has no own domains".into()))
+    }
+    /// The records as a BIND zone file, for DNS hosts that import one.
+    async fn zone_file(&self, _api_key: &str, _domain_id: &str) -> ProviderResult<String> {
+        Err(crate::ProviderError::Unavailable("this service has no own domains".into()))
+    }
 }

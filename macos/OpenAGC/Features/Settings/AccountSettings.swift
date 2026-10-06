@@ -259,6 +259,8 @@ struct AccountRow: View {
                         Button("Verify…") { model.beginAgentVerification(account.id) }
                             .hoverHelp("Verify the mailbox with your email to lift its limits")
                     }
+                    Button("Use Your Own Domain…") { model.beginAgentDomain(account.id) }
+                        .hoverHelp("Give the agent an address on a domain you own, such as agents.example.com")
                     Button("Copy API Key…") { confirmingCopy = true }
                         .hoverHelp("Copy the mailbox's Primitive key, for an agent that calls Primitive itself")
                 }

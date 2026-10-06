@@ -233,6 +233,28 @@ final class CoreClient: Sendable {
 
     func isAgent(_ accountID: String) -> Bool { core.accountIsAgent(accountId: accountID) }
 
+    /// The user's own domains on an agent mailbox's account.
+    func agentDomains(_ accountID: String) async throws(CoreClientError) -> [AgentDomain] {
+        try await call { try await core.agentDomains(accountId: accountID) }
+    }
+
+    func addAgentDomain(_ accountID: String, domain: String) async throws(CoreClientError) -> AgentDomain {
+        try await call { try await core.addAgentDomain(accountId: accountID, domain: domain) }
+    }
+
+    func checkAgentDomain(_ accountID: String, domainID: String) async throws(CoreClientError) -> AgentDomain {
+        try await call { try await core.checkAgentDomain(accountId: accountID, domainId: domainID) }
+    }
+
+    func agentDomainZoneFile(_ accountID: String, domainID: String) async throws(CoreClientError) -> String {
+        try await call { try await core.agentDomainZoneFile(accountId: accountID, domainId: domainID) }
+    }
+
+    /// Send and receive as `address` (the service's own, or on a verified domain).
+    func setAgentAddress(_ accountID: String, _ address: String) async throws(CoreClientError) {
+        try await call { try await core.setAgentAddress(accountId: accountID, address: address) }
+    }
+
     /// Whether agents send from this mailbox without asking.
     func agentSendMode(_ accountID: String) -> AgentSendMode? {
         try? core.agentSendMode(accountId: accountID)
@@ -1272,6 +1294,8 @@ typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService
 typealias AgentSendMode = OpenAGCCore.AgentSendMode
+typealias AgentDomain = OpenAGCCore.AgentDomain
+typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
 typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
 typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
 typealias AgentVerification = OpenAGCCore.AgentVerification

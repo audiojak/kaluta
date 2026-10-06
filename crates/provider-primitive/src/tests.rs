@@ -387,3 +387,84 @@ async fn labels_drafts_and_trash_stay_on_the_mac() {
     assert_eq!(label.id, LabelId::new("Local_Clients_Acme"));
     assert!(server.received_requests().await.unwrap().is_empty(), "nothing reached Primitive");
 }
+
+fn record(purpose: &str, status: &str) -> serde_json::Value {
+    json!({ "type": if purpose == "inbound_mx" { "MX" } else { "TXT" }, "name": "agents",
+            "fqdn": format!("{purpose}.agents.example.com"), "value": "v", "priority": 10, "ttl": 300,
+            "required": true, "purpose": purpose, "status": status })
+}
+
+#[tokio::test]
+async fn a_domain_is_added_with_its_records_checked_and_listed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/domains"))
+        .and(body_partial_json(json!({ "domain": "agents.example.com" })))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "success": true, "data": {
+            "id": "d1", "org_id": "o", "domain": "agents.example.com", "verified": false,
+            "verification_token": "t", "created_at": "2026-10-06T00:00:00Z",
+            "dns_records": [record("inbound_mx", "pending"), record("dkim", "pending")]
+        }})))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/domains/d1/verify"))
+        .respond_with(ok(json!({ "verified": false, "mxFound": true, "txtFound": false,
+                                 "dns_records": [record("inbound_mx", "found"), record("dkim", "missing")],
+                                 "error": "DKIM not found" })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/domains"))
+        .respond_with(ok(json!([{ "id": "d1", "org_id": "o", "domain": "agents.example.com", "verified": false,
+                                  "is_active": true, "created_at": "2026-10-06T00:00:00Z", "dns_health": "healthy" }])))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/domains/d1/zone-file"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("agents.example.com. 300 IN MX 10 in.primitive.dev.\n"),
+        )
+        .mount(&server)
+        .await;
+    let service = PrimitiveService::with_base(&server.uri()).unwrap();
+    let added = service.add_domain("k", " Agents.Example.com. ").await.unwrap();
+    assert_eq!(added.domain, "agents.example.com");
+    assert_eq!(added.records.len(), 2);
+    assert_eq!(added.records[0].kind, "MX");
+    let checked = service.verify_domain("k", "d1").await.unwrap();
+    assert!(!checked.verified);
+    assert_eq!(checked.domain, "agents.example.com");
+    assert_eq!(checked.records.iter().map(|r| r.status.as_str()).collect::<Vec<_>>(), vec!["found", "missing"]);
+    assert!(service.zone_file("k", "d1").await.unwrap().contains("IN MX"));
+}
+
+#[tokio::test]
+async fn a_domain_that_receives_mail_elsewhere_suggests_a_subdomain() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/domains"))
+        .and(body_partial_json(json!({ "domain": "example.com" })))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "success": false, "error": { "code": "mx_conflict", "message": "MX points elsewhere" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/domains"))
+        .and(body_partial_json(json!({ "domain": "taken.example" })))
+        .respond_with(ResponseTemplate::new(409).set_body_json(json!({
+            "success": false, "error": { "code": "conflict", "message": "Domain already claimed" }
+        })))
+        .mount(&server)
+        .await;
+    let service = PrimitiveService::with_base(&server.uri()).unwrap();
+    assert_eq!(
+        service.add_domain("k", "example.com").await.unwrap_err(),
+        ProviderError::Invalid(DOMAIN_RECEIVES_ELSEWHERE.into())
+    );
+    assert_eq!(
+        service.add_domain("k", "taken.example").await.unwrap_err(),
+        ProviderError::Invalid(DOMAIN_TAKEN.into())
+    );
+}

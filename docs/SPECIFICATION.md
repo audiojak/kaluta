@@ -1184,11 +1184,27 @@ whoever holds the key can read and send the mailbox's mail), *Remove…*.
 Removing deletes the account and its key on the Mac; the service account
 stays (the sheet says so).
 
-**Own domains.** A verified account can put agent addresses on the user's
-own domain (`agents.example.com`): the app adds the domain at the service,
-lists the DNS records to create with *Copy* and *Save Zone File*, checks
-them until the domain verifies, and then offers addresses on it. Detail in
-the plan; to be specified with that step.
+**Own domains.** *Use Your Own Domain…* in the mailbox's settings puts
+the agent on a domain the user owns:
+- The domain field suggests a subdomain of the user's own address
+  (`agents.example.com`; nothing for shared hosts such as gmail.com). The
+  agent receives all mail sent to the domain, so a subdomain leaves the
+  user's own mail alone. Primitive refuses a domain whose mail goes
+  elsewhere (`mx_conflict`) and one another account has claimed
+  (`conflict`); both are said in plain words.
+- `POST /v1/domains` answers with the records to create (MX, SPF, DKIM,
+  DMARC, TLS-RPT, ownership). The sheet lists them (type, name, value, what
+  each is for, found or not) with *Copy* on each and *Save Zone File…*
+  (`GET /domains/{id}/zone-file`).
+- *Check Now* (`POST /domains/{id}/verify`), and every 20 seconds while the
+  sheet is open. Reopening the sheet picks up the domain where it was.
+- Verified: the sheet offers the agent's address on it (its name, made an
+  address) and *Use This Address*. The mailbox then sends and receives as
+  that address (`agent.json` keeps the service's own address too, and the
+  agent can go back to it); sync restarts with it.
+- A domain belongs to one agent mailbox: each mailbox is its own account
+  at Primitive, and Primitive lists everything sent to an account's
+  domains as one inbox.
 
 **Testing.** Every test runs against a wiremock fake of the service's API.
 Nothing in automation calls a real service: each sign-up creates a real

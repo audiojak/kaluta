@@ -74,6 +74,33 @@ struct AgentMailboxTests {
         #expect(core.agentSendMode("work") == nil, "not an agent mailbox")
     }
 
+    @Test func anOwnDomainBecomesTheAgentsAddressOnceVerified() async throws {
+        let (model, core) = try await modelWithAnAccount()
+        let created = try await model.createAgentMailbox(name: "Research Scout")
+        #expect(model.suggestedAgentDomain == "agents.example.com", "a subdomain of the user's own")
+        let added = try await core.addAgentDomain(created.accountId, domain: "agents.example.com")
+        #expect(!added.verified)
+        #expect(added.records.contains { $0.kind == "MX" })
+        #expect(AppModel.recordPurpose("dkim") == "Signs sent mail (DKIM)")
+        let checked = try await core.checkAgentDomain(created.accountId, domainID: added.id)
+        #expect(checked.verified)
+        let address = model.suggestedAgentAddress(created.accountId, on: checked.domain)
+        #expect(address == "research-scout@agents.example.com")
+        try await core.setAgentAddress(created.accountId, address)
+        await model.reloadAccounts()
+        #expect(model.accounts.first { $0.id == created.accountId }?.email == address)
+        model.beginAgentDomain(created.accountId)
+        #expect(model.agentMailboxSheet == .domain(accountID: created.accountId))
+    }
+
+    @Test func noDomainIsSuggestedForSharedMailHosts() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("me", email: "someone@gmail.com", threads: 2)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        #expect(model.suggestedAgentDomain == "")
+    }
+
     @Test func aNameIsRequired() async throws {
         let (model, _) = try await modelWithAnAccount()
         await #expect(throws: CoreClientError.self) { try await model.createAgentMailbox(name: "   ") }

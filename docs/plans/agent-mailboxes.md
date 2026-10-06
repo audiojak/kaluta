@@ -1,6 +1,8 @@
 # Plan: agent mailboxes (Primitive first, AgentMail later)
 
-Status: planning (2026-10-06). Nothing built.
+Status: built overnight 2026-10-06 on branch `overnight-6` (oagc-uys.1,
+.2, .4, .5, .8, .9); AgentMailbox (.6) left. See the end for what is left
+to check by hand.
 
 ## Why
 
@@ -131,12 +133,16 @@ adds DNS records at their own DNS host. Everything else stays in the app.
 - Once the domain is verified, the agent's address can be
   `name@agents.example.com`. Choosing it creates an exact recipient route,
   and mail sends from it, since sending works from any verified domain
-  with an active DKIM key. One domain can serve several agent mailboxes,
-  each with its own address.
+  with an active DKIM key. *(Built differently: each agent mailbox is its
+  own Primitive account, and Primitive lists everything sent to an
+  account's domains as one inbox, so a domain belongs to one mailbox; no
+  routes are created. Routes are for webhooks and functions.)*
 - `conflict` (another organisation has claimed the domain) is shown as
   such, with nothing to retry.
 - **Later:** Domain Connect or a Cloudflare token could write the records
-  automatically, for hosts that support it.
+  automatically, for hosts that support it. Checking in the background
+  with a notification when the domain is ready (the sheet checks while it
+  is open, and picks up where it was when reopened).
 
 Unclear in the docs; check against a fake first, then with the maintainer's
 own account by hand:
@@ -177,3 +183,51 @@ own account by hand:
 Separate plans: [headless-mcp.md](headless-mcp.md); the rules server
 (guide, guidelines and facts for cloud agents; self-hosted or
 project-hosted).
+
+## AgentMail: findings before building (2026-10-06, overnight)
+
+Read from docs.agentmail.to (`openapi.json`, `agent-onboarding.md`,
+`messages.md`, `labels.md`); not built, because two things need the
+maintainer:
+
+- **One organisation per human email, and signing up again rotates its
+  key.** `POST /v0/agent/sign-up` with the same `human_email` returns the
+  same organisation with a *new* API key, so the first mailbox's stored key
+  would stop working. A second agent mailbox must be a new inbox in the
+  same organisation (`POST /v0/inboxes`, free tier 3 inboxes), sharing one
+  key. That changes the per-mailbox key model (§7.9): the key belongs to
+  the organisation; each mailbox stores its `inbox_id`. Decision needed:
+  share the key across agent mailboxes on AgentMail (one Keychain item per
+  organisation), or one organisation per mailbox with a different email
+  each (not practical).
+- **The email comes first.** Without `human_email` the inbox is
+  receive-only and a lost key cannot be recovered; with it, the code is
+  sent at sign-up. So the create sheet asks for the user's email up front
+  for AgentMail (and the service is chosen first), unlike Primitive.
+- Unverified accounts may send only to the human (403
+  `message_rejected`); verify is `POST /v0/agent/verify {otp_code}`; up to
+  10 attempts per code, codes last 24 hours.
+
+What maps well: a REST provider like Primitive's, but richer. Messages
+have string labels (`unread` and the user's own; `received`/`sent`
+system labels to confirm against a real account), `PATCH` adds and removes
+labels, so archive, labels and read state can sync both ways; raw MIME is
+`GET .../messages/{id}/raw`; sends take `to`, `cc` and `bcc` (no
+one-recipient limit); drafts exist server-side. Changes: `GET
+/v0/inboxes/{id}/events` lists `label.added`/`label.removed` events
+(paged); whether arrival shows there or needs a listing by time is to be
+checked. WebSockets push new mail without a public URL.
+
+The plan's earlier idea of a generic IMAP/SMTP provider for AgentMail is
+not needed: its REST API covers more (labels, drafts) than its IMAP does
+(no drafts). A generic IMAP/SMTP provider stays worth building for
+Fastmail and other IMAP accounts, as its own work.
+
+## Left to check by hand (needs the maintainer's own Primitive account)
+
+- Whether the email-free agent plan can add a domain at all.
+- Whether `/emails/{id}/raw` answers with an API key (the docs say a
+  "valid session"; the provider falls back to the record's text and
+  HTML).
+- The code email's sender domain (assumed `primitive.dev` or a subdomain).
+- That `/send-mail` takes a display name in `from` (`"Scout" <addr>`).

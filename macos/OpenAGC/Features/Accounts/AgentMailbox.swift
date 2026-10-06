@@ -7,11 +7,14 @@ enum AgentMailboxRequest: Identifiable, Equatable {
     case create
     /// Verify an existing one.
     case verify(accountID: String)
+    /// Put it on one of the user's own domains.
+    case domain(accountID: String)
 
     var id: String {
         switch self {
         case .create: "create"
         case let .verify(accountID): "verify-\(accountID)"
+        case let .domain(accountID): "domain-\(accountID)"
         }
     }
 }
@@ -75,7 +78,9 @@ struct AgentMailboxSheet: View {
 
     var body: some View {
         Group {
-            if let created {
+            if case let .domain(accountID) = request {
+                AgentDomainForm(accountID: accountID)
+            } else if let created {
                 AgentVerificationForm(accountID: created.accountID, address: created.address, justCreated: request == .create)
             } else {
                 createForm

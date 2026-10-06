@@ -61,6 +61,7 @@ fn the_agents_prompt_says_whose_mailbox_it_is_and_the_one_recipient_rule() {
         name: "Scout".into(),
         created_at: 0,
         send_mode: AgentSendMode::Freely,
+        managed_address: None,
     };
     let prompt = agent_prompt(&meta);
     assert!(prompt.contains("goes out as Scout <scout@abc.primitive.email>"));
@@ -358,4 +359,41 @@ fn an_agent_mailbox_that_sends_freely_sends_without_asking_and_flags_what_breaks
     }
     assert_eq!(fake.message_count(), 1, "nothing more was sent");
     core.stop_sync();
+}
+
+#[test]
+fn an_own_domain_is_added_checked_and_becomes_the_agents_address() {
+    let (_t, core, _secrets) = core("domain");
+    core.debug_use_fake_agent_mail(true);
+    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let id = agent.account_id.clone();
+    assert!(block_on(core.agent_domains(id.clone())).unwrap().is_empty());
+
+    // A domain whose mail goes elsewhere: the service suggests a subdomain.
+    let err = block_on(core.add_agent_domain(id.clone(), "example.com".into())).unwrap_err();
+    assert_eq!(err.to_string(), provider_primitive::DOMAIN_RECEIVES_ELSEWHERE);
+    assert!(block_on(core.add_agent_domain(id.clone(), "not a domain".into())).is_err());
+
+    let added = block_on(core.add_agent_domain(id.clone(), "Agents.Example.com.".into())).unwrap();
+    assert_eq!(added.domain, "agents.example.com");
+    assert!(!added.verified);
+    assert!(added.records.iter().any(|r| r.kind == "MX" && r.status == "pending"));
+    assert!(block_on(core.agent_domain_zone_file(id.clone(), added.id.clone())).unwrap().contains(" IN MX "));
+
+    // Not verified yet: the address cannot move there.
+    assert!(block_on(core.clone().set_agent_address(id.clone(), "scout@agents.example.com".into())).is_err());
+    let checked = block_on(core.check_agent_domain(id.clone(), added.id.clone())).unwrap();
+    assert!(checked.verified && checked.records.iter().all(|r| r.status == "found"));
+
+    block_on(core.clone().set_agent_address(id.clone(), "Scout@agents.example.com".into())).unwrap();
+    let listed = block_on(core.list_accounts()).unwrap();
+    assert_eq!(listed[0].email, "scout@agents.example.com");
+    assert_eq!(core.agent_meta(&id).unwrap().managed_address.as_deref(), Some(agent.address.as_str()));
+    block_on(core.clone().set_current_account(id.clone())).unwrap();
+    assert_eq!(block_on(core.account_address()).unwrap(), "scout@agents.example.com", "the composer's From");
+
+    // Elsewhere is refused; back to the service's own address is fine.
+    assert!(block_on(core.clone().set_agent_address(id.clone(), "scout@other.example.org".into())).is_err());
+    block_on(core.clone().set_agent_address(id.clone(), agent.address.clone())).unwrap();
+    assert_eq!(block_on(core.list_accounts()).unwrap()[0].email, agent.address);
 }

@@ -68,6 +68,7 @@
 		6970CB34DB11FB6191DDD395 /* InboxCategories.swift in Sources */ = {isa = PBXBuildFile; fileRef = E37D8F4A094C1AC18DB808DC /* InboxCategories.swift */; };
 		6ACB449680E2C76A02262484 /* AppModel+Tasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0D26F833C2199E4C16795D /* AppModel+Tasks.swift */; };
 		6F0DEB707ABBB25DA5066D0D /* openagc_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3ECF1113029DF896EFBDA03 /* openagc_core.swift */; };
+		6F9F56926EB95DA8D0560155 /* AgentDomains.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB662B23C46E4C4A080A0B20 /* AgentDomains.swift */; };
 		6FD0B155169950868B0E2D83 /* ImportMailbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FCBE0C4FC7F267DC74AB18D /* ImportMailbox.swift */; };
 		70D4EC96D9BC0BC67EAE0885 /* AgentSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFBC630572AC27DA6ED8285 /* AgentSettings.swift */; };
 		710081AB6EAF380590EA91BF /* EmailDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6407F10744C6609C6D77A3E9 /* EmailDocument.swift */; };
@@ -329,6 +330,7 @@
 		E37D8F4A094C1AC18DB808DC /* InboxCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxCategories.swift; sourceTree = "<group>"; };
 		E4C676A513B753ECEBB6FF97 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		E7851B97C95FA512DB3CEF19 /* LabelPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPicker.swift; sourceTree = "<group>"; };
+		EB662B23C46E4C4A080A0B20 /* AgentDomains.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentDomains.swift; sourceTree = "<group>"; };
 		EC0913B609E033D24E8FB9A3 /* SyncDebuggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerTests.swift; sourceTree = "<group>"; };
 		EC1B952488DEE5A94BB9D8BF /* MenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuTests.swift; sourceTree = "<group>"; };
 		F29EE263B741DE6C936C9E2B /* LearnSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnSheet.swift; sourceTree = "<group>"; };
@@ -402,6 +404,7 @@
 			children = (
 				331D2F57E10A1874F6103AFF /* AccountAvatar.swift */,
 				0ECC21C8EFCB7A1F70BD6BF9 /* AccountMenu.swift */,
+				EB662B23C46E4C4A080A0B20 /* AgentDomains.swift */,
 				9901C727198D90990117DFF8 /* AgentMailbox.swift */,
 				9FCBE0C4FC7F267DC74AB18D /* ImportMailbox.swift */,
 			);
@@ -990,6 +993,7 @@
 				A63769C5AD66664F34653DEE /* AccountMenu.swift in Sources */,
 				E84BD27D7D2BF39707A7E276 /* AccountSettings.swift in Sources */,
 				5DAD4D28F079583BBC9786C5 /* AgentActivity.swift in Sources */,
+				6F9F56926EB95DA8D0560155 /* AgentDomains.swift in Sources */,
 				CF6CEA2DB04DF0A191670D36 /* AgentMailbox.swift in Sources */,
 				CF4F91CC076301CA21FE2C86 /* AgentPanel.swift in Sources */,
 				70D4EC96D9BC0BC67EAE0885 /* AgentSettings.swift in Sources */,
