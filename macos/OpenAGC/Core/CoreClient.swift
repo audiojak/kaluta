@@ -41,6 +41,17 @@ final class CoreClient: Sendable {
         if UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents") || Self.isRunningTests {
             core.debugUseFakeAgents()
         }
+        // Agent mailboxes (spec §7.9): tests and fake-agent runs never
+        // create a real account at the service; each sign-up is a real one.
+        if Self.usesFakeAgentMail {
+            core.debugUseFakeAgentMail(enabled: true)
+        }
+    }
+
+    /// Agent mailboxes are created against an in-memory service.
+    static var usesFakeAgentMail: Bool {
+        isRunningTests || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents")
+            || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgentMail")
     }
 
     /// The app's Keychain items, or a separate service when hosting tests
@@ -186,6 +197,55 @@ final class CoreClient: Sendable {
     }
 
     func isArchive(_ accountID: String) -> Bool { core.accountIsArchive(accountId: accountID) }
+
+    // MARK: Agent mailboxes (spec §7.9)
+
+    /// Create a mailbox for an agent. Accepts the service's terms: only
+    /// from the user's Agree and Create.
+    func createAgentMailbox(service: AgentService, name: String) async throws(CoreClientError) -> AgentMailboxCreated {
+        try await call { try await core.createAgentMailbox(service: service, name: name) }
+    }
+
+    func agentMailboxPlan(_ accountID: String) async throws(CoreClientError) -> AgentMailboxPlan {
+        try await call { try await core.agentMailboxPlan(accountId: accountID) }
+    }
+
+    func startAgentMailboxVerification(_ accountID: String, email: String) async throws(CoreClientError) -> AgentVerification {
+        try await call { try await core.startAgentMailboxVerification(accountId: accountID, email: email) }
+    }
+
+    func verifyAgentMailbox(_ accountID: String, code: String) async throws(CoreClientError) -> AgentMailboxPlan {
+        try await call { try await core.verifyAgentMailbox(accountId: accountID, code: code) }
+    }
+
+    /// The verification code, once it is in the user's account `inAccount`.
+    func findAgentMailboxCode(_ accountID: String, in inAccount: String) async -> String? {
+        (try? await call { try await core.findAgentMailboxCode(accountId: accountID, inAccountId: inAccount) }) ?? nil
+    }
+
+    func agentMailboxAPIKey(_ accountID: String) throws(CoreClientError) -> String {
+        try callSync { try core.agentMailboxApiKey(accountId: accountID) }
+    }
+
+    func agentServiceTermsURL(_ service: AgentService) -> URL? {
+        URL(string: core.agentServiceTermsUrl(service: service))
+    }
+
+    func isAgent(_ accountID: String) -> Bool { core.accountIsAgent(accountId: accountID) }
+
+    /// Whether agents send from this mailbox without asking.
+    func agentSendMode(_ accountID: String) -> AgentSendMode? {
+        try? core.agentSendMode(accountId: accountID)
+    }
+
+    func setAgentSendMode(_ accountID: String, _ mode: AgentSendMode) throws(CoreClientError) {
+        try callSync { try core.setAgentSendMode(accountId: accountID, mode: mode) }
+    }
+
+    /// Tests: deliver a message into a fake agent mailbox.
+    func deliverToAgentMailbox(_ accountID: String, from: String, subject: String, body: String) throws(CoreClientError) {
+        try callSync { try core.debugDeliverToAgentMailbox(accountId: accountID, from: from, subject: subject, body: body) }
+    }
 
     /// Development/test hook: a listed account with a synthetic mailbox and
     /// no sign-in.
@@ -1099,6 +1159,16 @@ final class CoreClient: Sendable {
         }
     }
 
+    private func callSync<T>(_ body: () throws -> T) throws(CoreClientError) -> T {
+        do {
+            return try body()
+        } catch let error as CoreError {
+            throw CoreClientError(error)
+        } catch {
+            throw CoreClientError(kind: .internalError, message: String(describing: error))
+        }
+    }
+
     private func call<T>(_ body: () async throws -> T) async throws(CoreClientError) -> T {
         do {
             return try await body()
@@ -1200,6 +1270,11 @@ typealias BodyWindow = OpenAGCCore.BodyWindow
 typealias UndoToken = OpenAGCCore.UndoToken
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
+typealias AgentService = OpenAGCCore.AgentService
+typealias AgentSendMode = OpenAGCCore.AgentSendMode
+typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
+typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
+typealias AgentVerification = OpenAGCCore.AgentVerification
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus
 typealias OrphanedStore = OpenAGCCore.OrphanedStore

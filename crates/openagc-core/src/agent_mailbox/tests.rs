@@ -53,6 +53,21 @@ fn inbox_rows(core: &Core) -> usize {
 }
 
 #[test]
+fn the_agents_prompt_says_whose_mailbox_it_is_and_the_one_recipient_rule() {
+    let meta = AgentMeta {
+        kind: "agent".into(),
+        service: AgentService::Primitive,
+        address: "scout@abc.primitive.email".into(),
+        name: "Scout".into(),
+        created_at: 0,
+        send_mode: AgentSendMode::Freely,
+    };
+    let prompt = agent_prompt(&meta);
+    assert!(prompt.contains("goes out as Scout <scout@abc.primitive.email>"));
+    assert!(prompt.contains("exactly one recipient"));
+}
+
+#[test]
 fn a_six_digit_code_is_found_on_its_own() {
     assert_eq!(find_code("Your code is 482913.").as_deref(), Some("482913"));
     assert_eq!(find_code("Code: 482913\nexpires in 10 minutes").as_deref(), Some("482913"));
@@ -264,4 +279,83 @@ fn a_primitive_mailbox_is_created_and_synced_over_its_api() {
             == Some("Bearer prim_k")),
         "every mail call carries the mailbox's key"
     );
+}
+
+fn tool(core: &Arc<Core>, session: &str, tool: permissions::Tool, args: serde_json::Value) -> agent_mcp::Outcome {
+    crate::runtime::runtime().block_on(crate::agents::tools_call_for_tests(core, session, tool, args))
+}
+
+#[test]
+fn an_agent_mailbox_that_sends_freely_sends_without_asking_and_flags_what_breaks_the_guide() {
+    use crate::guide::{
+        GuideCheck, GuideCheckKind, GuideEdit, GuideEntryFields, GuideKind, GuideScope, GuideSource, GuideStatus,
+    };
+    use agent_mcp::Outcome;
+    use permissions::Tool;
+
+    let (_t, core, _secrets) = core("freely");
+    core.debug_use_fake_agent_mail(true);
+    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    assert_eq!(core.agent_send_mode(agent.account_id.clone()).unwrap(), AgentSendMode::Freely, "the default");
+    block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
+    core.clone().start_sync().unwrap();
+    block_on(core.apply_guide_edits(
+        vec![GuideEdit::Add {
+            fields: GuideEntryFields {
+                category: "B6".into(),
+                kind: GuideKind::Rule,
+                statement: "Never say circle back".into(),
+                scope: GuideScope::default(),
+                check: Some(GuideCheck { kind: GuideCheckKind::BannedPhrase, value: "circle back".into() }),
+            },
+            status: GuideStatus::Accepted,
+            source: GuideSource::You,
+            origin: None,
+        }],
+        "test".into(),
+    ))
+    .unwrap();
+    let db = core.db().unwrap();
+    db.write_blocking(|tx| mail_store::agents::start_session(tx, "s1", "claude-code", 1)).unwrap();
+    core.agents.register("s1", permissions::Scope::Mailbox, None);
+    let draft_of = |out: Outcome| match out {
+        Outcome::Ok { structured: Some(v), .. } => v["draft_id"].as_i64().unwrap(),
+        other => panic!("{other:?}"),
+    };
+
+    let draft = draft_of(tool(
+        &core,
+        "s1",
+        Tool::CreateDraft,
+        json!({ "to": ["ada@example.com"], "subject": "Hi", "body_markdown": "Let's circle back tomorrow." }),
+    ));
+    match tool(&core, "s1", Tool::Send, json!({ "draft_id": draft })) {
+        Outcome::Ok { structured: Some(v), .. } => {
+            assert_eq!(v["sent"], true, "sent without asking");
+            assert!(v["writing_guide_breaches"].as_str().unwrap().contains("circle back"), "the agent is told");
+        }
+        other => panic!("{other:?}"),
+    }
+    let log = block_on(core.list_agent_actions(10)).unwrap();
+    let send = log.iter().find(|a| a.tool == "mail_send").unwrap();
+    assert_eq!(send.state, "done");
+    assert!(send.result_summary.as_deref().is_some_and(|s| s.contains("Breaks your writing guide")), "{send:?}");
+    let fake = core.fake_agent_mailbox(&agent.account_id).unwrap();
+    wait_for("the send", || fake.message_count() == 1);
+
+    // Asking before each send: the send waits for the user.
+    core.set_agent_send_mode(agent.account_id.clone(), AgentSendMode::Ask).unwrap();
+    *core.agents.approvals.timeout.lock().unwrap() = Some(Duration::from_millis(200));
+    let draft = draft_of(tool(
+        &core,
+        "s1",
+        Tool::CreateDraft,
+        json!({ "to": ["ada@example.com"], "subject": "Again", "body_markdown": "Hello" }),
+    ));
+    match tool(&core, "s1", Tool::Send, json!({ "draft_id": draft })) {
+        Outcome::Error { code, .. } => assert_eq!(code, "approval_timeout"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(fake.message_count(), 1, "nothing more was sent");
+    core.stop_sync();
 }

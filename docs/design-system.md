@@ -402,3 +402,6 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
 | ![Reviewing proposed facts, light](design/facts-proposed-light.png) | ![Reviewing proposed facts, dark](design/facts-proposed-dark.png) |
 | ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |
+| ![Create an Agent Mailbox, light](design/agent-create-light.png) | ![Create an Agent Mailbox, dark](design/agent-create-dark.png) |
+| ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
+| ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |

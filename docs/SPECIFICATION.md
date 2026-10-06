@@ -1163,15 +1163,20 @@ once. Limits shown as they are:
 
 **Sending as the agent without approval.** An agent mailbox has a setting
 in its account settings, *When Agents Send*:
-- *Send freely, flag anything against the guide* (default). On this
-  account, `mail.send`, `mail.forward` and the reply tools run without
-  approval (§10.3 amended). Every send is recorded as an AI composition
-  (ADR 0013), and the daily review (§14.10) compares the account's sent
-  mail with its writing guide and proposes changes or flags breaches.
+- *Send freely; flag what breaks the guide* (default). On this account,
+  `mail.send` and `mail.forward` run without approval (§10.3 amended).
+  Each send is checked against the mailbox's writing guide when it goes
+  (the guide's checks: banned and required phrases, length): what it
+  breaks is told to the agent in the tool's result
+  (`writing_guide_breaches`) and kept in the activity log with the send.
+  Every send is recorded as an AI composition (ADR 0013).
 - *Ask before each send*: the §10.4 approval flow, as on the user's own
   accounts.
 `mail.delete` stays approval-gated either way. The user's own accounts
-are unchanged.
+are unchanged. The setting lives in the mailbox's `agent.json`
+(`send_mode`). An agent working in the mailbox is told in its system
+prompt whose mailbox it is, the name it sends as, and the service's
+limits (one recipient per message).
 
 **Account settings.** Service, address, plan and verification state with
 *Verify…*, *When Agents Send*, *Copy API Key* (a confirmation says that

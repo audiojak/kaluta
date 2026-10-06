@@ -35,6 +35,17 @@ pub enum AgentService {
     Primitive,
 }
 
+/// Whether agents send from an agent mailbox without asking (spec §7.9).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSendMode {
+    /// Send freely; what breaks the writing guide is flagged (the default).
+    #[default]
+    Freely,
+    /// Ask before each send, as on the user's own accounts.
+    Ask,
+}
+
 /// What an agent mailbox may do now (spec §7.9).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct AgentMailboxPlan {
@@ -86,6 +97,8 @@ pub(crate) struct AgentMeta {
     pub name: String,
     #[serde(default)]
     pub created_at: i64,
+    #[serde(default)]
+    pub send_mode: AgentSendMode,
 }
 
 pub(crate) fn read_meta(dir: &Path) -> Option<AgentMeta> {
@@ -110,6 +123,24 @@ pub(crate) fn rename_meta(dir: &Path, name: &str) -> Result<(), CoreError> {
 
 /// What syncs an account: its provider, and a bulk or push source.
 pub(crate) type SyncSources = (Arc<dyn MailProvider>, Option<Arc<dyn BackfillSource>>);
+
+/// Appended to the agent's system prompt in an agent mailbox: whose
+/// mailbox it is and what its service allows.
+pub(crate) fn agent_prompt(meta: &AgentMeta) -> String {
+    let limits = match meta.service {
+        AgentService::Primitive => {
+            "Each message goes to exactly one recipient (no Cc or Bcc): to write to several people, \
+             write to each separately. Drafts stay on this Mac until sent."
+        }
+    };
+    format!(
+        "\n\n## This is an agent's mailbox\n\nThis mailbox, {address}, belongs to an agent called \
+         {name}, not to the user. Mail you send from it goes out as {name} <{address}>. Write as \
+         {name}, on the user's behalf. {limits}\n",
+        address = meta.address,
+        name = meta.name,
+    )
+}
 
 /// A six-digit code standing on its own in `text`.
 pub(crate) fn find_code(text: &str) -> Option<String> {
@@ -234,6 +265,14 @@ impl Core {
         self.agent_mail.fake_mailboxes.lock().unwrap_or_else(|e| e.into_inner()).get(account_id).cloned()
     }
 
+    /// Agents on the account this work acts on send without approval: an
+    /// agent mailbox set to send freely (spec §7.9).
+    pub(crate) fn agent_sends_freely(&self) -> bool {
+        self.effective_account_id()
+            .and_then(|id| self.agent_meta(&id))
+            .is_some_and(|m| m.send_mode == AgentSendMode::Freely)
+    }
+
     /// The From display name for sends: the agent's name.
     pub(crate) fn agent_name(&self, account_id: &str) -> Option<String> {
         self.agent_meta(account_id).map(|m| m.name)
@@ -285,6 +324,7 @@ impl Core {
                     address: address.clone(),
                     name: name.clone(),
                     created_at: mail_sync::now_millis(),
+                    send_mode: AgentSendMode::default(),
                 },
             )?;
             let db = core.store_for(&account_id).await?;
@@ -386,6 +426,19 @@ impl Core {
         Ok(self.agent_key(&account_id)?.expose().clone())
     }
 
+    /// Whether agents send from this mailbox without asking.
+    pub fn agent_send_mode(&self, account_id: String) -> Result<AgentSendMode, CoreError> {
+        Ok(self.agent_meta_or_err(&account_id)?.send_mode)
+    }
+
+    /// Change it (the mailbox's settings, *When Agents Send*).
+    pub fn set_agent_send_mode(&self, account_id: String, mode: AgentSendMode) -> Result<(), CoreError> {
+        let dir = accounts_dir(&self.data_path()).join(&account_id);
+        let mut meta = self.agent_meta_or_err(&account_id)?;
+        meta.send_mode = mode;
+        write_meta(&dir, &meta)
+    }
+
     /// The service's terms, shown before creating a mailbox.
     pub fn agent_service_terms_url(&self, service: AgentService) -> String {
         match service {
@@ -414,6 +467,12 @@ impl Core {
         subject: String,
         body: String,
     ) -> Result<(), CoreError> {
+        if !self.agent_mail.fake.load(Ordering::SeqCst) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "agent mail is not fake in this run"));
+        }
+        // The fake mailbox exists from the first provider asked for it,
+        // which may be this call when sync has not started yet.
+        self.agent_provider(&account_id)?;
         let fake = self
             .fake_agent_mailbox(&account_id)
             .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no fake mailbox for that account"))?;
@@ -429,7 +488,7 @@ impl Core {
             snippet: body.chars().take(200).collect(),
             internal_date: now,
             message_id_header: Some(format!("fake{n}@agent.test")),
-            from: Some(mail_domain::EmailAddress::new(None, &from)),
+            from: mail_mime::parse_headers([("From", from.as_str())]).from,
             subject,
             date: Some(now),
             body: Some(provider_api::FetchedBody { text: Some(body), html: None, attachments: vec![] }),

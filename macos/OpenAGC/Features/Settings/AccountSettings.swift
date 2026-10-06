@@ -32,6 +32,8 @@ struct AccountSettings: View {
                     Button("Add Account…") { Task { await model.addAccount() } }
                         .hoverHelp("Sign in to another Gmail account")
                         .disabled(!GoogleClientConfiguration.effective().isUsable)
+                    Button("Create an Agent Mailbox…") { model.beginAgentMailbox() }
+                        .hoverHelp("Give one of your agents an address of its own on Primitive")
                     Button("Create an Account from an Archived Mailbox…") { Task { await model.beginImport() } }
                         .hoverHelp("Make a read-only account from an .mbox file, such as a Google Takeout export")
                         .disabled(model.runningImport != nil)
@@ -101,7 +103,11 @@ struct AccountSettings: View {
                 removing = nil
             }
         } message: {
-            Text("OpenAGC forgets the sign-in and deletes the mail it downloaded for this account. Gmail itself is not changed.")
+            if removing?.kind == .agent {
+                Text("OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at Primitive.")
+            } else {
+                Text("OpenAGC forgets the sign-in and deletes the mail it downloaded for this account. Gmail itself is not changed.")
+            }
         }
     }
 }
@@ -133,6 +139,9 @@ struct AccountRow: View {
     @State private var name = ""
     @State private var nameError: String?
     @FocusState private var nameFocused: Bool
+    /// Copy API Key asks first: whoever holds the key can use the mailbox.
+    @State private var confirmingCopy = false
+    @State private var sendMode: AgentSendMode?
 
     /// Above this many messages, suggest IMAP to accounts without it.
     static let suggestIMAPAbove: UInt64 = 20_000
@@ -156,6 +165,13 @@ struct AccountRow: View {
     /// The name as it can be changed: an archive's is its listed name.
     static func editableName(_ account: AccountSummary) -> String {
         account.kind == .archive ? account.email : account.displayName ?? ""
+    }
+
+    /// An agent mailbox's plan in a line.
+    static func planText(_ plan: AgentMailboxPlan?) -> String {
+        guard let plan else { return "Primitive" }
+        if plan.verified { return "Primitive · verified" + (plan.email.map { " with \($0)" } ?? "") }
+        return "Primitive · not verified: replies only, \(plan.sendPerHour) an hour"
     }
 
     private func rename() async {
@@ -193,7 +209,7 @@ struct AccountRow: View {
                         .hoverHelp("Import the mailbox file again, adding anything missing")
                         .disabled(model.imports[account.id].map { !$0.done } ?? false)
                 }
-                if signedIn == false {
+                if signedIn == false, account.kind == .gmail {
                     Button("Sign In…") {
                         Task {
                             await model.switchAccount(to: account.id)
@@ -203,20 +219,59 @@ struct AccountRow: View {
                     .hoverHelp("Sign in to Google again for this account")
                 }
                 Button("Remove…", role: .destructive, action: onRemove)
-                    .hoverHelp("Remove this account from OpenAGC; Gmail itself is not changed")
+                    .hoverHelp(account.kind == .agent ? "Remove this mailbox from OpenAGC; it stays at Primitive"
+                               : "Remove this account from OpenAGC; Gmail itself is not changed")
             }
             TextField("Name", text: $name,
-                      prompt: Text(account.kind == .archive ? "A name for this mailbox" : "Your name from Google"))
+                      prompt: Text(account.kind == .archive ? "A name for this mailbox"
+                                   : account.kind == .agent ? "The agent's name" : "Your name from Google"))
                 .focused($nameFocused)
                 .onSubmit { Task { await rename() } }
                 .onChange(of: nameFocused) { _, focused in if !focused { Task { await rename() } } }
                 .hoverHelp(account.kind == .archive ? "What this mailbox is called in OpenAGC"
+                           : account.kind == .agent ? "The agent's name; mail it sends comes from this name"
                            : "Shown beside the address in OpenAGC; leave empty to use your Google profile's name")
                 .onAppear { name = Self.editableName(account) }
                 .onChange(of: account.displayName) { name = Self.editableName(account) }
                 .onChange(of: account.email) { name = Self.editableName(account) }
             if let nameError {
                 Text(nameError).font(TypeRole.caption).foregroundStyle(Tone.failure)
+            }
+            if account.kind == .agent {
+                LabeledContent("Service") {
+                    Text(Self.planText(model.agentPlans[account.id])).foregroundStyle(.secondary)
+                }
+                // Spec §7.9: agents may send from their own mailbox freely.
+                Picker("When agents send", selection: Binding(
+                    get: { sendMode ?? .freely },
+                    set: { newValue in
+                        sendMode = newValue
+                        try? model.core?.setAgentSendMode(account.id, newValue)
+                    }
+                )) {
+                    Text("Send freely; flag what breaks the guide").tag(AgentSendMode.freely)
+                    Text("Ask before each send").tag(AgentSendMode.ask)
+                }
+                .hoverHelp("Whether agents working in this mailbox send without asking you first. Deleting mail always asks")
+                .disabled(sendMode == nil)
+                HStack {
+                    if model.agentPlans[account.id]?.verified == false {
+                        Button("Verify…") { model.beginAgentVerification(account.id) }
+                            .hoverHelp("Verify the mailbox with your email to lift its limits")
+                    }
+                    Button("Copy API Key…") { confirmingCopy = true }
+                        .hoverHelp("Copy the mailbox's Primitive key, for an agent that calls Primitive itself")
+                }
+                .confirmationDialog("Copy the mailbox's API key?", isPresented: $confirmingCopy) {
+                    Button("Copy API Key") { // no-help: confirmation dialog button
+                        if let key = try? model.core?.agentMailboxAPIKey(account.id) {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(key, forType: .string)
+                        }
+                    }
+                } message: {
+                    Text("Whoever has this key can read the mailbox's mail and send as the agent. Give it only to an agent you run.")
+                }
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(
@@ -264,7 +319,11 @@ struct AccountRow: View {
         .task(id: account.id) {
             window = try? await model.core?.syncWindow(for: account.id)
             bodyWindow = account.kind == .gmail ? try? await model.core?.bodyWindow(for: account.id) : nil
-            signedIn = account.kind == .gmail ? ((try? model.core?.accountHasCredentials(account.id)) ?? false) : nil
+            signedIn = account.kind == .archive ? nil : ((try? model.core?.accountHasCredentials(account.id)) ?? false)
+            if account.kind == .agent {
+                sendMode = model.core?.agentSendMode(account.id)
+                await model.refreshAgentPlan(account.id)
+            }
             backfill = await model.core?.backfillStatus(account.id)
         }
     }
@@ -288,6 +347,7 @@ struct AccountRow: View {
             } else {
                 "Imported mailbox · cannot send"
             }
+        case (.agent, false?): "Not syncing — the mailbox's key is missing"
         case (_, false?): "Not syncing — sign in again"
         case (_, true?):
             (account.id == model.openAccountID ? "Showing · syncing" : "Syncing in the background") + transportNote

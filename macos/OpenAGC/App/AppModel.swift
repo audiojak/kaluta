@@ -132,7 +132,8 @@ final class AppModel {
             categoriesAvailable: inboxCategoryCounts.contains { $0.id != InboxCategories.primary && $0.totalCount > 0 },
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
-            agentShown: agent.isPresented))
+            agentShown: agent.isPresented,
+            importantAvailable: !isAgentMailbox))
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -309,6 +310,11 @@ final class AppModel {
     /// progress sheet).
     var importDraft: ImportDraft?
     var runningImport: String?
+    /// Create an Agent Mailbox, or verify one, while its sheet is open
+    /// (spec §7.9).
+    var agentMailboxSheet: AgentMailboxRequest?
+    /// Agent mailboxes' plans as the service last reported them.
+    var agentPlans: [String: AgentMailboxPlan] = [:]
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
@@ -552,6 +558,7 @@ final class AppModel {
             needsReauthentication = false
             reauthenticationReason = nil
             backfillTransport = nil
+            if core.isAgent(accountID) { Task { await refreshAgentPlan(accountID) } }
             // An imported mailbox has no server and no sign-in (spec §7.8).
             if accountID != Self.demoAccountID, !core.isArchive(accountID) {
                 // A Keychain that will not hand over the sign-in (for example
@@ -914,6 +921,11 @@ final class AppModel {
     /// the commands from being offered.
     var isArchive: Bool {
         accounts.first { $0.id == openAccountID }?.kind == .archive
+    }
+
+    /// The account on screen is an agent's mailbox (spec §7.9).
+    var isAgentMailbox: Bool {
+        accounts.first { $0.id == openAccountID }?.kind == .agent
     }
 
     static let cannotSendReason = "This is an imported mailbox; it cannot send mail."

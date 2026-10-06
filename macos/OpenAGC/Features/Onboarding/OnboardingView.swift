@@ -46,6 +46,9 @@ struct OnboardingView: View {
                         Button("Explore a Demo Mailbox") { Task { await model.openDemoMailbox() } }
                             .hoverHelp("Try OpenAGC with made-up mail; nothing leaves this Mac")
                             .controlSize(.large)
+                        Button("Create an Agent Mailbox…") { model.beginAgentMailbox() }
+                            .hoverHelp("Give one of your agents an address of its own on Primitive")
+                            .controlSize(.large)
                     }
                     if !client.isUsable {
                         Text("This build doesn't include a Google sign-in client yet. Add your own under Advanced; it takes about five minutes.")

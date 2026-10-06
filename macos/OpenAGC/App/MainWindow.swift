@@ -66,6 +66,9 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.importDraft }, set: { model.importDraft = $0 })) { draft in
             ImportMailboxSheet(draft: draft)
         }
+        .sheet(item: Binding(get: { model.agentMailboxSheet }, set: { model.agentMailboxSheet = $0 })) { request in
+            AgentMailboxSheet(request: request)
+        }
         .sheet(item: Binding(get: { model.runningImport.map(RunningImport.init) }, set: { if $0 == nil { model.runningImport = nil } })) { running in
             ImportProgressSheet(accountID: running.id)
                 .interactiveDismissDisabled()
@@ -195,6 +198,7 @@ struct MainWindow: View {
             parts.append("Filtered: " + ListFilter.ordered(model.listFilters).map(\.title).joined(separator: ", "))
         }
         if model.isArchive { parts.append("Imported mailbox · cannot send") }
+        if model.isAgentMailbox { parts.append("Agent mailbox") }
         return parts.joined(separator: " · ")
     }
 
@@ -210,6 +214,9 @@ struct MainWindow: View {
             VStack(spacing: 0) {
                 if model.needsReauthentication {
                     ReauthenticationBanner()
+                }
+                if let plan = model.unverifiedAgentPlan, !model.isGuide, !model.isFacts {
+                    AgentLimitsBanner(plan: plan)
                 }
                 if let error = model.threads.searchError {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")

@@ -32,6 +32,10 @@ import os
 ///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
+///   -OpenAGCSnapshotAgentMailbox create|verify|banner  the Create an Agent
+///                                       Mailbox sheet, or a new mailbox (fake
+///                                       service) with its verify sheet or its
+///                                       limits banner (spec §7.9)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -199,6 +203,25 @@ enum Snapshot {
                     window = sheet
                 }
             }
+            if let agent = defaults.string(forKey: "OpenAGCSnapshotAgentMailbox"), let model = delegate.model,
+               let core = model.core {
+                if agent == "create" {
+                    model.beginAgentMailbox()
+                } else if CoreClient.usesFakeAgentMail,
+                          let created = try? await model.createAgentMailbox(name: "Research Scout") {
+                    try? core.deliverToAgentMailbox(created.accountId, from: "Ada Lovelace <ada@example.com>",
+                                                    subject: "Your library card",
+                                                    body: "Welcome! Your card number is on the attached sheet.")
+                    try? core.deliverToAgentMailbox(created.accountId, from: "Northwind Labs <hello@northwind.example>",
+                                                    subject: "Confirm your sign-up",
+                                                    body: "Click to confirm the account for research-scout.")
+                    if agent == "verify" { model.beginAgentVerification(created.accountId) }
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+                if agent != "banner", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                    window = sheet
+                }
+            }
             if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID
@@ -246,6 +269,7 @@ enum Snapshot {
             // A sheet left open keeps the app from quitting.
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
+            delegate.model?.agentMailboxSheet = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)

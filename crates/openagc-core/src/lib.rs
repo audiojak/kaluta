@@ -43,7 +43,7 @@ mod tasks;
 mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
-pub use agent_mailbox::{AgentMailboxCreated, AgentMailboxPlan, AgentService, AgentVerification};
+pub use agent_mailbox::{AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentService, AgentVerification};
 pub use agents::{
     AgentActionInfo, AgentEventInfo, AgentProviderInfo, AgentSessionInfo, AgentStatusInfo, AgentTranscriptItem,
     PromptContextInfo, TextExtractor,

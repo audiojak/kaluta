@@ -48,8 +48,9 @@ are all Gmail-shaped.
 - **Sending without approval, per mailbox.** An agent mailbox has a send
   setting: *send freely, flag breaches afterwards* (default) or *ask
   before each send*. Freely, the External send tools of agents on that
-  account run without approval; every send is recorded (ADR 0013) and the
-  daily review compares it with the mailbox's guide. Deleting mail stays
+  account run without approval; every send is recorded (ADR 0013) and
+  checked against the mailbox's guide as it goes, with what it breaks
+  told to the agent and kept in the activity log. Deleting mail stays
   approval-gated, and the user's own accounts are unchanged.
 
 ## Consequences
