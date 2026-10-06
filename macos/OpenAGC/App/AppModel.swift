@@ -328,6 +328,8 @@ final class AppModel {
     let guide: GuideStore
     /// The Analysis section's queue (spec §14.10).
     let analysis: AnalysisStore
+    /// The open account's facts, with the global ones (spec §14.11).
+    let facts: FactsStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     let core: CoreClient?
@@ -359,6 +361,7 @@ final class AppModel {
         tasks = TaskListStore(core: core)
         guide = GuideStore(core: core)
         analysis = AnalysisStore(core: core)
+        facts = FactsStore(core: core)
         undo = MailUndo(core: core)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
@@ -1402,6 +1405,7 @@ final class AppModel {
             await analysisChanged()
         case .factsChanged:
             factsRevision += 1
+            await facts.load()
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

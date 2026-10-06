@@ -34,6 +34,14 @@ struct MainWindow: View {
             case let .interview(only): InterviewSheet(only: only)
             case .change: ChangeGuideSheet()
             case .merge: MergeGuideSheet()
+            case let .fact(f, category):
+                FactEditor(fact: f, scope: f?.scope ?? .account, categories: model.facts.categories, category: category) {
+                    model.guideSheet = nil
+                }
+            case .newFactCategory:
+                NewFactCategorySheet(scope: .account) { model.guideSheet = nil }
+            case .factCategories:
+                FactCategoriesSheet(store: model.facts) { model.guideSheet = nil }
             case let .proposal(p):
                 GuideEntryEditor(proposal: p, check: p.entryId.flatMap { id in model.guide.entries.first { $0.id == id } }?.check)
             }

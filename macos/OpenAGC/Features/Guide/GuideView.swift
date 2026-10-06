@@ -12,9 +12,16 @@ enum GuideSheet: Identifiable {
     case merge
     /// An Analysis proposal, edited before it is accepted.
     case proposal(AnalysisProposalInfo)
+    /// A fact of this account (spec §14.11): new (nil) or to edit.
+    case fact(FactInfo?, category: String?)
+    case newFactCategory
+    case factCategories
 
     var id: String {
         switch self {
+        case let .fact(f, category): "fact-\(f.map { FactsStore.tag($0) } ?? "new")-\(category ?? "")"
+        case .newFactCategory: "new-fact-category"
+        case .factCategories: "fact-categories"
         case let .proposal(p): "proposal-\(p.id)"
         case .learn: "learn"
         case let .interview(only): "interview-\(only ?? "all")"

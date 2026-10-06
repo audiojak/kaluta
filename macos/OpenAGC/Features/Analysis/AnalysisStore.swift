@@ -22,6 +22,8 @@ final class AnalysisStore {
     /// "Why?": every pair, not just the first few.
     var showsAllPairs = false
     var watchingExpanded = false
+    /// The Facts tab instead of the proposals (spec §14.11).
+    var showsFacts = false
 
     @ObservationIgnored private let core: CoreClient?
     /// One read at a time; a load asked for meanwhile reads once more after
@@ -34,12 +36,16 @@ final class AnalysisStore {
     }
 
     static func tag(_ proposal: AnalysisProposalInfo) -> String { "p\(proposal.id)" }
+    static func tag(_ proposal: AnalysisFactProposalInfo) -> String { "f\(proposal.id)" }
+
+    var selectedFactProposal: AnalysisFactProposalInfo? { factProposals.first { Self.tag($0) == selection } }
 
     var proposals: [AnalysisProposalInfo] { queue?.guide ?? [] }
+    var factProposals: [AnalysisFactProposalInfo] { queue?.facts ?? [] }
     var watching: [AnalysisProposalInfo] { queue?.watching ?? [] }
     var learningDecisions: Int { Int(queue?.learningDecisions ?? 0) }
     /// Everything waiting a decision.
-    var waiting: Int { proposals.count + learningDecisions }
+    var waiting: Int { proposals.count + factProposals.count + learningDecisions }
     var unseen: Bool { queue?.unseen ?? false }
 
     var selectedProposal: AnalysisProposalInfo? {
@@ -72,8 +78,10 @@ final class AnalysisStore {
             self.metrics = metrics
             error = nil
             // Keep the selection while it is there; else the first thing waiting.
-            let tags = [queue.learningDecisions > 0 ? Self.learningTag : nil].compactMap { $0 }
-                + (queue.guide + queue.watching).map(Self.tag)
+            var tags = [queue.learningDecisions > 0 ? Self.learningTag : nil].compactMap { $0 }
+            tags += queue.guide.map(Self.tag)
+            tags += queue.facts.map(Self.tag)
+            tags += queue.watching.map(Self.tag)
             if selection.map({ !tags.contains($0) }) ?? true {
                 selection = tags.first
             } else {

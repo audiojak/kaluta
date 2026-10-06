@@ -374,3 +374,4 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Invitation banner, light](design/guide-banner-light.png) | ![Invitation banner, dark](design/guide-banner-dark.png) |
 | ![Reader with quoted history folded, light](design/reader-quote-light.png) | ![Reader with quoted history folded, dark](design/reader-quote-dark.png) |
 | ![Analysis, light](design/analysis-light.png) | ![Analysis, dark](design/analysis-dark.png) |
+| ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |

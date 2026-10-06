@@ -220,9 +220,11 @@ struct GuideInterviewTests {
         #expect(banned.allSatisfy { $0.kind == .rule && $0.check?.kind == .bannedPhrase })
         #expect(banned[1].check?.value == "per my last email")
         let facts = try #require(qs.first { $0.id == "F3" })
-        let made = GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO, Actual AI", "", "Pacific"])
-        #expect(made.map(\.statement) == ["My role: CEO, Actual AI", "My time zone: Pacific"])
-        #expect(made.allSatisfy { $0.kind == .fact && $0.category == "F3" })
+        #expect(GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO"]).isEmpty, "facts are not guide entries")
+        let made = GuideInterview.facts(for: facts, fields: ["CEO, Actual AI", "", "Pacific"])
+        let fields = made.compactMap { edit -> FactFields? in if case let .add(f, _, _) = edit { f } else { nil } }
+        #expect(fields.map { "\($0.category)/\($0.label): \($0.value)" }
+                == ["work/Occupation or role: CEO, Actual AI", "availability/Time zone: Pacific"])
         let invent = try #require(qs.first { $0.id == "F4" })
         #expect(GuideInterview.entries(for: invent, choice: 0, text: "", fields: []).first?.kind == .rule)
         #expect(GuideInterview.entries(for: invent, choice: nil, text: "", fields: []).isEmpty)
@@ -515,14 +517,17 @@ struct MissingFactsTests {
             Issue.record("expected questions, got \(assistant.state)")
             return
         }
-        #expect(questions.map(\.fact) == ["My role", "What my company does"])
+        #expect(questions.map(\.fact) == ["Occupation or role", "What the company does"])
+        #expect(questions.map(\.category) == ["work", "work"])
         #expect(store.body.string == before, "nothing written yet")
 
         await assistant.answer([questions[0].id: "CEO of Actual AI"], save: true)
         for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
         #expect(assistant.state == .done)
         #expect(store.body.string.contains("CEO of Actual AI"), "the answers reached the agent")
-        let facts = try await core.guideEntries([.accepted]).filter { $0.category == "F3" }
-        #expect(facts.map(\.statement) == ["My role: CEO of Actual AI"], "kept in the guide; the unanswered one is not")
+        let facts = try await core.facts()
+        #expect(facts.map { "\($0.category)/\($0.label): \($0.value)" } == ["work/Occupation or role: CEO of Actual AI"],
+                "kept in Facts; the unanswered one is not")
+        #expect(facts.first?.source == .writingHelp)
     }
 }

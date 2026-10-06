@@ -32,6 +32,15 @@ private struct GuideCategoryDetail: View {
                 if category.id == "D1" {
                     GuideAudiences()
                 }
+                if category.id == "F3" {
+                    // Facts have a place of their own (spec §14.11).
+                    HStack(spacing: Space.m) {
+                        Text("Facts now live in Analysis › Facts.").foregroundStyle(.secondary)
+                        Button("Open Facts") { model.openFacts() }
+                            .hoverHelp("See and change the facts AI drafts may use")
+                    }
+                    .card(.info)
+                }
                 if entries.isEmpty {
                     Text(category.learned ? "Nothing yet. Learn from your sent mail, or add an entry yourself."
                          : "Nothing yet. Your mail cannot show this: answer the questions, or add an entry yourself.")

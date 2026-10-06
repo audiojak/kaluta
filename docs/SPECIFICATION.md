@@ -2626,7 +2626,8 @@ read-only `facts_lookup` tool (by category or words; never-share facts
 left out), so a long list need not sit in every prompt; tool names allow
 no dots.
 
-**The Facts tab** (in Analysis): facts by category, with a globe on
+**The Facts tab** (in Analysis, beside *Proposals*; fact proposals wait in
+the proposals' *Facts* group): facts by category, with a globe on
 global ones, custom categories after the built-in ones in the user's
 order; proposed changes at the top; *Add Fact*, *Add Category…* and *Add
 Categories › From a Starter Set…*; edit, delete, change *use*, *Make
@@ -2634,7 +2635,10 @@ Global* and *Make This Account's Only*. Each is one undoable change
 (§14.6a). The list exports to Markdown and JSON with its custom
 categories, and merges into another account's facts, creating categories
 that are missing. The Writing Guide's F3 category says "Facts now live in
-Analysis › Facts."
+Analysis › Facts." The interview's fact questions and writing help's
+kept answers (each question carrying a category and label) write facts.
+Settings › Facts lists the global facts with the same editing; its
+changes go on the open account's undo stack.
 
 ---
 

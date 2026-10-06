@@ -9,8 +9,16 @@ struct AnalysisView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if model.analysis.showsFacts {
+            FactsList(store: model.facts)
+        } else {
+            proposals
+        }
+    }
+
+    private var proposals: some View {
         @Bindable var analysis = model.analysis
-        List(selection: $analysis.selection) {
+        return List(selection: $analysis.selection) {
             if analysis.learningDecisions > 0 {
                 Section("From Learning") {
                     Label(analysis.learningDecisions == 1 ? "1 decision from learning"
@@ -31,6 +39,22 @@ struct AnalysisView: View {
                             .buttonStyle(.link)
                             .controlSize(.small)
                             .hoverHelp("Make every change in this group; one Undo takes them all back")
+                    }
+                }
+            }
+            if !analysis.factProposals.isEmpty {
+                Section {
+                    ForEach(analysis.factProposals, id: \.id) { proposal in
+                        AnalysisFactRow(proposal: proposal).tag(AnalysisStore.tag(proposal))
+                    }
+                } header: {
+                    HStack {
+                        Text("Facts")
+                        Spacer(minLength: Space.m)
+                        Button("Accept All") { Task { await model.decideFactProposals(analysis.factProposals, accept: true) } }
+                            .buttonStyle(.link)
+                            .controlSize(.small)
+                            .hoverHelp("Add every fact in this group; one Undo takes them all back")
                     }
                 }
             }
@@ -67,6 +91,14 @@ struct AnalysisView: View {
     private enum Action { case accept, reject, edit }
 
     private func act(_ action: Action) -> KeyPress.Result {
+        if let fact = model.analysis.selectedFactProposal {
+            switch action {
+            case .accept: Task { await model.decideFactProposals([fact], accept: true) }
+            case .reject: Task { await model.decideFactProposals([fact], accept: false) }
+            case .edit: return .ignored
+            }
+            return .handled
+        }
         guard let proposal = model.analysis.selectedProposal else { return .ignored }
         switch action {
         case .accept: Task { await model.decideAnalysis([proposal], accept: true) }
@@ -76,6 +108,66 @@ struct AnalysisView: View {
             model.guideSheet = .proposal(proposal)
         }
         return .handled
+    }
+}
+
+private struct AnalysisFactRow: View {
+    let proposal: AnalysisFactProposalInfo
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Image(systemName: proposal.symbol).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(proposal.headline).lineLimit(2)
+                Text(proposal.subtitle).font(TypeRole.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if proposal.unseen { NewDot() }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension AnalysisFactProposalInfo {
+    var symbol: String {
+        switch (kind, op) {
+        case ("category", _): "folder.badge.plus"
+        case ("starter", _): "square.stack.3d.up"
+        case (_, .edit): "pencil.circle"
+        case (_, .remove): "minus.circle"
+        default: "plus.circle"
+        }
+    }
+
+    /// "Occupation or role: CTO", "New category: Sailing".
+    var headline: String {
+        switch kind {
+        case "category": "New category: \(name)"
+        case "starter": "Add the \(starterName) categories"
+        default: op == .remove ? "Remove \(label)" : "\(label): \(value)"
+        }
+    }
+
+    var subtitle: String {
+        switch kind {
+        case "category": "\(factCount) facts from Other"
+        case "starter": "Your mail keeps showing facts that fit them"
+        default:
+            switch op {
+            case .edit: "\(categoryName) · was \(beforeValue ?? "")"
+            case .remove: "\(categoryName) · your mail no longer says so"
+            default: "New fact · \(categoryName)"
+            }
+        }
+    }
+
+    var starterName: String {
+        switch starter {
+        case "business": "Business"
+        case "freelance": "Freelance or consulting"
+        case "household": "Household"
+        default: "Job search"
+        }
     }
 }
 
@@ -104,6 +196,47 @@ struct AnalysisHeader: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            CapsuleTabs(tabs: [
+                CapsuleTabs.Tab(id: "proposals", title: "Proposals", symbol: "sparkle.magnifyingglass",
+                                count: model.analysis.waiting),
+                CapsuleTabs.Tab(id: "facts", title: "Facts", symbol: "person.text.rectangle"),
+            ], selection: Binding(get: { model.analysis.showsFacts ? "facts" : "proposals" },
+                                  set: { model.analysis.showsFacts = $0 == "facts" }), countNoun: "waiting")
+            .accessibilityLabel("Show")
+            if model.analysis.showsFacts {
+                factsActions
+            } else {
+                review
+            }
+        }
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.m)
+    }
+
+    private var factsActions: some View {
+        HStack(spacing: Space.m) {
+            Button("Add Fact…") { model.guideSheet = .fact(nil, category: nil) }
+                .hoverHelp("Write a fact AI drafts may use")
+            Menu {
+                Button("Add Category…") { model.guideSheet = .newFactCategory } // no-help: menu
+                Menu("Add Categories From a Starter Set") {
+                    ForEach(model.core?.factStarterSets() ?? [], id: \.name) { set in
+                        Button(set.name) { Task { await model.addFactStarterSet(set) } } // no-help: menu
+                    }
+                }
+                Button("Categories…") { model.guideSheet = .factCategories } // no-help: menu
+            } label: {
+                Label("Categories", systemImage: "folder")
+            }
+            .fixedSize()
+            .hoverHelp("Add your own categories, or a starter set, and hide ones you do not need")
+            Spacer(minLength: 0)
+        }
+        .controlSize(.small)
+    }
+
+    @ViewBuilder private var review: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             if let run = model.analysisProgress?.run, run.status == .running || run.status == .paused {
                 AnalysisRunBar(run: run)
@@ -143,8 +276,6 @@ struct AnalysisHeader: View {
             }
             .controlSize(.small)
         }
-        .padding(.horizontal, Space.l)
-        .padding(.vertical, Space.m)
     }
 
     /// "Last reviewed today: 6 drafts compared, 3 sent as written. Next review tomorrow."
@@ -210,8 +341,16 @@ struct AnalysisDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.analysis.selection == AnalysisStore.learningTag {
+        if model.analysis.showsFacts {
+            if let fact = model.facts.selected {
+                FactDetail(fact: fact, store: model.facts) { model.guideSheet = .fact($0, category: nil) }
+            } else {
+                ContentUnavailableView("No Fact Selected", systemImage: "person.text.rectangle")
+            }
+        } else if model.analysis.selection == AnalysisStore.learningTag {
             GuideDecisionsView()
+        } else if let fact = model.analysis.selectedFactProposal {
+            AnalysisFactDetail(proposal: fact)
         } else if let proposal = model.analysis.selectedProposal {
             AnalysisProposalDetail(proposal: proposal)
         } else {
@@ -314,6 +453,44 @@ private struct AnalysisProposalDetail: View {
 
     private static let firstPairs = 3
     private static let readingWidth: CGFloat = 760
+}
+
+/// A proposed fact: what it would say, and the words in the user's mail.
+private struct AnalysisFactDetail: View {
+    @Environment(AppModel.self) private var model
+    let proposal: AnalysisFactProposalInfo
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.l) {
+                Label(proposal.subtitle, systemImage: proposal.symbol).font(TypeRole.caption).foregroundStyle(.secondary)
+                Text(proposal.headline).font(TypeRole.title).fixedSize(horizontal: false, vertical: true)
+                if proposal.kind == "category", !proposal.description.isEmpty {
+                    Text(proposal.description).foregroundStyle(.secondary)
+                }
+                if !proposal.quote.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        Text("From your mail").font(TypeRole.groupLabel)
+                        Text("“\(proposal.quote)”").font(TypeRole.meta).italic().foregroundStyle(.secondary)
+                    }
+                    .card()
+                }
+                HStack(spacing: Space.m) {
+                    Button("Accept") { Task { await model.decideFactProposals([proposal], accept: true) } }
+                        .buttonStyle(.borderedProminent)
+                        .hoverHelp("Add it to your facts (Return); Undo takes it back")
+                    Button("Reject") { Task { await model.decideFactProposals([proposal], accept: false) } } // undoable
+                        .hoverHelp("Leave it out; it will not be proposed again (⌫)")
+                }
+                .controlSize(.small)
+            }
+            .padding(Space.xxl)
+            .frame(maxWidth: Self.readingWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private static let readingWidth: CGFloat = 720
 }
 
 /// One message: what the AI drafted beside what the user sent, the

@@ -148,6 +148,26 @@ enum Snapshot {
                     model.openAnalysis()
                     await model.analysis.load()
                     model.analysis.selection = model.analysis.proposals.first.map(AnalysisStore.tag)
+                } else if guide == "facts" {
+                    // Facts (spec §14.11): a few of each kind, one global.
+                    func fact(_ c: String, _ l: String, _ v: String, _ u: FactUse = .free) -> FactEdit {
+                        .add(fields: FactFields(category: c, label: l, value: v, use: u, asOf: nil), status: .accepted,
+                             source: .you)
+                    }
+                    let made = try? await core.applyFactEdits([
+                        fact("identity", "Preferred name", "Jo"), fact("identity", "Pronouns", "they/them"),
+                        fact("availability", "Time zone", "Pacific"),
+                        fact("availability", "Calendar link", "https://cal.example.com/jo"),
+                        fact("people", "Sam Rivera", "My assistant", .ask), fact("work", "Occupation or role", "Founder"),
+                        fact("contact", "Mailing address", "1 Main St", .never),
+                    ], reason: "snapshot")
+                    if let id = made?.facts.first(where: { $0.label == "Time zone" })?.id {
+                        _ = try? await core.makeFactGlobal(id)
+                    }
+                    model.analysisProgress = try? await core.analysisProgress()
+                    model.openFacts()
+                    await model.facts.load()
+                    model.facts.selection = model.facts.facts.first { $0.label == "Calendar link" }.map(FactsStore.tag)
                 } else {
                     model.showGuideCategory("A1")
                 }

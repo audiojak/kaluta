@@ -292,7 +292,7 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
         return None;
     }
     Some(
-        r#"{"questions": [{"question": "What is your role?", "fact": "My role"}, {"question": "What does your company do?", "fact": "What my company does"}]}"#
+        r#"{"questions": [{"question": "What is your role?", "category": "work", "label": "Occupation or role"}, {"question": "What does your company do?", "category": "work", "label": "What the company does"}]}"#
             .into(),
     )
 }
