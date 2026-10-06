@@ -456,10 +456,12 @@ fn send_body(raw: &[u8], address: &str) -> ProviderResult<serde_json::Value> {
         Some(name) => format!("\"{}\" <{address}>", name.replace(['"', '\\'], "")),
         None => address.to_owned(),
     };
+    // Primitive refuses an empty subject (HTTP 400); Gmail takes one.
+    let subject = if h.subject.trim().is_empty() { "(no subject)" } else { h.subject.as_str() };
     let mut body = json!({
         "from": from,
         "to": to.email,
-        "subject": h.subject,
+        "subject": subject,
     });
     if let Some(text) = &parsed.text {
         body["body_text"] = json!(text);

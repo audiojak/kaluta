@@ -29,7 +29,10 @@ extension View {
         padding(.horizontal, inset)
             .padding(.vertical, Space.s)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(intent.fill)
+            // Only behind the band: a background fill extends into safe
+            // areas by default, which tinted the column header above a
+            // banner at the top of a list.
+            .background(intent.fill, ignoresSafeAreaEdges: [])
     }
 
     /// A column header that the content scrolls under (macOS 26): a

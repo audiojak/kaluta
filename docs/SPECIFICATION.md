@@ -1166,7 +1166,8 @@ once. Limits shown as they are:
   Cc or Bcc. The composer says so when an agent mailbox has more than one
   recipient and will not send; agent tools get a structured
   `one_recipient_only` error.
-- Bodies at most 256 KB together.
+- Bodies at most 256 KB together. An empty subject goes as
+  "(no subject)": Primitive refuses an empty one, Gmail does not.
 - Refusals from the service's gates (the agent plan's reply-only rule, its
   hourly and daily caps) come back as a failed send with the service's
   message, and the banner offers verification.

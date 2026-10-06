@@ -367,6 +367,15 @@ Message-ID: <r1@openagc>\r\nIn-Reply-To: <m1@example.com>\r\nReferences: <m1@exa
 }
 
 #[test]
+fn an_empty_subject_is_sent_as_no_subject() {
+    let raw = "From: scout@abc.primitive.email\r\nTo: ada@example.com\r\nSubject: \r\n\r\nHi\r\n";
+    let body = send_body(raw.as_bytes(), "scout@abc.primitive.email").unwrap();
+    assert_eq!(body["subject"], "(no subject)");
+    let raw = "From: scout@abc.primitive.email\r\nTo: ada@example.com\r\n\r\nHi\r\n";
+    assert_eq!(send_body(raw.as_bytes(), "scout@abc.primitive.email").unwrap()["subject"], "(no subject)");
+}
+
+#[test]
 fn the_idempotency_key_follows_the_message_id() {
     let a = "Message-ID: <same@x>\r\nSubject: one\r\n\r\na";
     let b = "Message-ID: <same@x>\r\nSubject: two\r\n\r\nb";
