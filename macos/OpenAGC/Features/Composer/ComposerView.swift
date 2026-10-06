@@ -455,7 +455,7 @@ struct ComposerView: View {
         <meta name="color-scheme" content="light dark">
         <style>:root{color-scheme:light dark}
         body{font:13px -apple-system;margin:8px 16px;background:Canvas;color:GrayText}
-        blockquote{margin:0 0 0 4px;padding-left:10px;border-left:2px solid color-mix(in srgb, CanvasText 25%, transparent)}
+        blockquote{margin:0 0 0 4px;padding-left:8px;border-left:2px solid color-mix(in srgb, CanvasText 25%, transparent)}
         a{color:LinkText}</style>
         </head><body>\(html)</body></html>
         """

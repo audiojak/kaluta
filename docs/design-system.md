@@ -242,7 +242,9 @@ second line, and the due day in the date's slot at the trailing edge.
 ### Reader
 
 The reader is HTML (`EmailDocument`), so it cannot use the tokens
-directly; its CSS keeps to the same scale.
+directly; its CSS keeps to the same scale: values come from `Space` and
+`Radius` through `px(_:)`, and design-lint flags any other px in padding,
+margin, gap or border-radius.
 
 - One card per message (`<details>`): an initials avatar (32 pt, 26 when
   collapsed), the sender, the date in the reader's style, and the body.

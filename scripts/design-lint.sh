@@ -26,6 +26,21 @@ findings=$(grep -rnE \
   | grep -v '// inline' \
   | grep -v '^\./App/Snapshot\.swift:' || true)
 
+# The reader's and composer's CSS keep to the spacing scale too: literal
+# px in padding, margin, gap and border-radius must be one of the Space or
+# Radius values (or come from them by interpolation).
+css=$(grep -nE '(padding|margin|gap|border-radius)[^;{}]*[0-9]px' \
+        Features/MessageView/EmailDocument.swift Features/Composer/ComposerView.swift \
+  | while IFS= read -r line; do
+      for v in $(printf '%s\n' "$line" | grep -oE '(padding|margin|gap|border-radius)(-[a-z]+)?:[^;}]*' \
+                 | grep -oE '[0-9]+px' | tr -d 'px'); do
+        if [[ " 0 2 4 6 8 12 16 20 24 32 " != *" $v "* ]]; then
+          printf '%s (%spx off the scale)\n' "$line" "$v"
+        fi
+      done
+    done)
+[[ -n "$css" ]] && findings=$(printf '%s\n%s' "$findings" "$css" | sed '/^$/d')
+
 if [[ -z "$findings" ]]; then
   echo "design-lint: clean"
   exit 0
