@@ -2113,14 +2113,16 @@ with a formatting bar under it, as in Gmail, in every composer: bold,
 italic, underline, strikethrough, bulleted and numbered lists, quote (sent
 as a `blockquote`), link and clear formatting, each lit while it is on at
 the cursor and each one undoable. The usual shortcuts work: ⌘B, ⌘I, ⌘U,
-⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⌘K link (in
-a composer; in the mail window ⌘K asks the agent) and ⌘\ clear. Fonts, sizes and colors stay out, so
-mail looks ordinary in the recipient's client. In the main window, Tab from a
-mailbox in the sidebar puts the keyboard in its thread list, on the first
-message when none is selected (shown in the reader, as a click would) and
-on the selection otherwise, so the arrows move between messages; from Tasks
-it does the same in the task list *(amended 2026-10-06; before, Tab
-selected nothing)*.
+⇧⌘X strikethrough, ⇧⌘8 bulleted, ⇧⌘7 numbered, ⇧⌘9 quote, ⇧⌘K link
+(⌘K asks the agent from every window, the mail window coming forward;
+amended 2026-10-06, it was ⌘K in the composer) and ⌘\ clear. Fonts, sizes and colors stay out, so
+mail looks ordinary in the recipient's client. In the main window, Tab walks
+the columns: sidebar → list → message (when one is shown) → search → sidebar,
+and ⌥Tab or ⇧Tab the other way. Landing on the list selects its first row
+when none is selected (shown in the reader, as a click would) and keeps the
+selection otherwise; the Writing Guide, Facts and Tasks lists take their
+turn the same way *(amended 2026-10-06; before, Tab went only from the
+sidebar to the list and selected nothing)*.
 
 **Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
 through Gmail's drafts list (`drafts.list`) on every incremental round,

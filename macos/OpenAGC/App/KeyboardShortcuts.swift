@@ -66,7 +66,9 @@ enum KeyboardShortcutGuide {
             .init(keys: "⌘\\", action: "Clear formatting", inThreadList: false),
         ]),
         Group(title: "Agents and routines", shortcuts: [
-            .init(keys: "⌘K", action: "Ask the agent; in a message you write, add a link", inThreadList: false),
+            .init(keys: "⌘K", action: "Ask the agent, from any window", inThreadList: false),
+            .init(keys: "Tab", action: "Next column: sidebar, list, message, search", inThreadList: false),
+            .init(keys: "⌥Tab", action: "Previous column (⇧Tab too)", inThreadList: false),
             .init(keys: "⌥⌘I", action: "Show or hide the agent panel", inThreadList: false),
             .init(keys: "⌥⌘R", action: "Routines", inThreadList: false),
             .init(keys: "↑ ↓  Tab  ↩  esc", action: "In the prompt: choose a suggestion, or hide them", inThreadList: false),

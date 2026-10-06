@@ -27,6 +27,8 @@ struct ThreadReaderView: View {
                 MessageWebView(
                     html: EmailDocument.thread(reader.documentMessages, isDark: colorScheme == .dark),
                     allowRemoteImages: reader.allowsRemoteImages,
+                    // The main window's reader is a stop in its Tab loop.
+                    onCreated: store == nil ? { [focus = model.focus] in focus.register($0, as: .reader) } : nil,
                     inlineImages: reader.inlineImages)
             } else {
                 Color.clear

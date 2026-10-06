@@ -677,7 +677,12 @@ final class AppModel {
     /// Bumped to move focus to the agent prompt (⌘K).
     private(set) var agentFocusRequests = 0
 
+    /// ⌘K from any window: the mail window comes forward first.
     func focusAgentPrompt() {
+        if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }),
+           !main.isKeyWindow {
+            main.makeKeyAndOrderFront(nil)
+        }
         agentFocusRequests += 1
     }
 
