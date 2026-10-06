@@ -106,6 +106,7 @@ async fn run(core: &Arc<Core>, session: &str, tool: Tool, arguments: Value) -> O
         Tool::ListLabels => list_labels(core).await,
         Tool::GetAttachmentText => attachment_text(core, session, arguments).await,
         Tool::PresentThreads => present_threads(core, session, arguments),
+        Tool::FactsLookup => facts_lookup(core, arguments).await,
         Tool::CreateDraft => create_draft(core, session, arguments).await,
         Tool::UpdateDraft => update_draft(core, session, arguments).await,
         Tool::Archive => change_threads(core, arguments, ThreadChange::Archive).await,
@@ -656,6 +657,22 @@ fn draft_json(d: &crate::DraftInfo) -> Value {
         "cc": d.cc.iter().map(|a| a.email.clone()).collect::<Vec<_>>(),
         "reply_to_message_id": d.in_reply_to_message_id,
     })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FactsLookupArgs {
+    category: Option<String>,
+    query: Option<String>,
+}
+
+/// The user's facts drafting may use (spec §14.11); never-share facts are
+/// left out.
+async fn facts_lookup(core: &Arc<Core>, arguments: Value) -> Result<Outcome, Outcome> {
+    let a: FactsLookupArgs = args(arguments)?;
+    let facts = core.list_facts(vec![crate::facts::FactStatus::Accepted]).await.map_err(failed)?;
+    let categories = core.fact_categories().await.map_err(failed)?;
+    Ok(Outcome::json(crate::facts::lookup_json(&facts, &categories, a.category.as_deref(), a.query.as_deref())))
 }
 
 #[derive(Deserialize)]

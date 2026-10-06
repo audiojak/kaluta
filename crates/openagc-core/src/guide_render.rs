@@ -142,12 +142,26 @@ pub(crate) fn render(
     (out, audiences)
 }
 
+/// The guide's text with the user's facts after it (by their use: never
+/// shared facts are not in `facts`).
+pub(crate) fn with_facts(text: String, facts: &[String]) -> String {
+    if facts.is_empty() {
+        return text;
+    }
+    let section =
+        format!("\nFacts about the user you may use (use only these; never invent others):\n{}\n", facts.join("\n"));
+    if text.is_empty() { section.trim_start().to_owned() } else { text + &section }
+}
+
 impl Core {
     /// The guide rendered for a message or (with no target) a session.
     pub(crate) async fn render_guide(&self, target: Option<Target>) -> Result<GuideRendered, CoreError> {
         let entries = self.list_guide_entries(vec![GuideStatus::Accepted]).await?;
+        // Facts live in their own store (spec §14.11) and go with the guide.
+        let facts = self.fact_lines().await?;
         if entries.is_empty() {
-            return Ok(GuideRendered { text: String::new(), version: self.guide_version().await?, audiences: vec![] });
+            let version = self.guide_version().await?;
+            return Ok(GuideRendered { text: with_facts(String::new(), &facts), version, audiences: vec![] });
         }
         let groups = self.list_audience_groups().await?;
         let version = self.guide_version().await?;
@@ -167,7 +181,7 @@ impl Core {
             }
         }
         let (text, audiences) = render(&entries, &groups, target.as_ref(), &examples, version);
-        Ok(GuideRendered { text, version, audiences })
+        Ok(GuideRendered { text: with_facts(text, &facts), version, audiences })
     }
 }
 

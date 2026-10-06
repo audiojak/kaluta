@@ -594,6 +594,8 @@ final class AppModel {
     var analysisProgress: AnalysisProgress?
     /// Why the last Analysis action failed, shown in its header.
     var analysisError: String?
+    /// Bumped when facts change (spec §14.11); views showing them reload.
+    private(set) var factsRevision = 0
     /// A sheet of the Writing Guide section, while open.
     var guideSheet: GuideSheet?
     /// Why the last guide action failed, shown in the section.
@@ -1398,6 +1400,8 @@ final class AppModel {
             if finished { await analysisChanged() }
         case .analysisChanged:
             await analysisChanged()
+        case .factsChanged:
+            factsRevision += 1
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

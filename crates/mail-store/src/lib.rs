@@ -11,6 +11,7 @@ mod db;
 pub mod demo;
 pub mod drafts;
 mod error;
+pub mod facts;
 pub mod guide;
 pub mod outbox;
 pub mod queue;

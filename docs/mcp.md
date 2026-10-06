@@ -45,6 +45,17 @@ List the user's labels with unread and total counts.
 
 No arguments.
 
+## `facts_lookup`
+
+Look up facts about the user that drafts may use (their role, time zone, calendar link, the people they mention). Use only these facts; never invent others. A fact marked ask_before_using needs the user's yes before it goes in a message.
+
+**Risk:** Read-only — always allowed
+
+| Argument | Type | Required | Notes |
+|---|---|---|---|
+| `category` | string |  | A category name or key, such as Work. |
+| `query` | string |  | Words to look for in labels and values. |
+
 ## `mail_get_attachment_text`
 
 Extract the text of an attachment (text files, PDF, .docx), at most 100 KB. Never returns binary data.

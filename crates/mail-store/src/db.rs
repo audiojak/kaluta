@@ -33,9 +33,16 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0014_analysis_runs.sql"),
     include_str!("../migrations/0015_analysis_proposals.sql"),
     include_str!("../migrations/0016_analysis_undo.sql"),
+    include_str!("../migrations/0017_facts.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
+
+/// The migration scripts, in order (tests build old stores from them).
+#[cfg(test)]
+pub(crate) fn migrations() -> &'static [&'static str] {
+    MIGRATIONS
+}
 
 pub fn schema_version() -> u32 {
     MIGRATIONS.len() as u32
@@ -250,6 +257,11 @@ fn migrate(conn: &mut Connection) -> StoreResult<()> {
             continue;
         }
         txn.execute_batch(sql).map_err(|e| StoreError::Migration(format!("v{version}: {e}")))?;
+        // Steps SQL cannot do, in the same transaction.
+        if version == crate::facts::MIGRATION_VERSION {
+            crate::facts::move_guide_facts(&txn)
+                .map_err(|e| StoreError::Migration(format!("v{version}: moving facts: {e}")))?;
+        }
         // user_version cannot be bound as a parameter.
         txn.execute_batch(&format!("PRAGMA user_version = {version}"))?;
         txn.commit()?;

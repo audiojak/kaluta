@@ -18,6 +18,7 @@ mod compose;
 mod compositions;
 mod error;
 mod events;
+mod facts;
 pub mod ffi;
 mod guide;
 mod guide_ai;

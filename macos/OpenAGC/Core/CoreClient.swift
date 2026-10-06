@@ -702,6 +702,43 @@ final class CoreClient: Sendable {
         try await call { try await core.analysisMetrics() }
     }
 
+    // MARK: Facts (spec §14.11)
+
+    func facts(_ statuses: [FactStatus] = [.accepted]) async throws(CoreClientError) -> [FactInfo] {
+        try await call { try await core.listFacts(statuses: statuses) }
+    }
+
+    func factCategories() async throws(CoreClientError) -> [FactCategoryInfo] {
+        try await call { try await core.factCategories() }
+    }
+
+    func factStarterSets() -> [StarterSetInfo] { core.factStarterSets() }
+
+    func similarFactCategory(_ name: String) async throws(CoreClientError) -> FactCategoryInfo? {
+        try await call { try await core.similarFactCategory(name: name) }
+    }
+
+    /// Change facts as one change; undone with `undoFactChange`.
+    func applyFactEdits(_ edits: [FactEdit], reason: String) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.applyFactEdits(edits: edits, reason: reason) }
+    }
+
+    func editFactCategories(_ edits: [CategoryEdit]) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.editFactCategories(edits: edits) }
+    }
+
+    func addFactStarterSet(_ set: StarterSet) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.addFactStarterSet(set: set) }
+    }
+
+    func undoFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoFactChange(changeId: id) }
+    }
+
+    func redoFactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoFactChange(changeId: id) }
+    }
+
     /// Snapshots: a few reviewed pairs and proposals on the demo account.
     func debugSeedAnalysis() async throws(CoreClientError) {
         try await call { try await core.debugSeedAnalysis() }
@@ -1119,6 +1156,17 @@ typealias AudienceStatus = OpenAGCCore.AudienceStatus
 typealias GuideProgress = OpenAGCCore.GuideProgress
 typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
 typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
+typealias FactInfo = OpenAGCCore.FactInfo
+typealias FactFields = OpenAGCCore.FactFields
+typealias FactEdit = OpenAGCCore.FactEdit
+typealias FactUse = OpenAGCCore.FactUse
+typealias FactSource = OpenAGCCore.FactSource
+typealias FactStatus = OpenAGCCore.FactStatus
+typealias FactChange = OpenAGCCore.FactChange
+typealias FactCategoryInfo = OpenAGCCore.FactCategoryInfo
+typealias CategoryEdit = OpenAGCCore.CategoryEdit
+typealias StarterSet = OpenAGCCore.StarterSet
+typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
 typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
 typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
 typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
@@ -1177,6 +1225,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case guideProgress(GuideProgress)
     case analysisProgress(AnalysisProgress)
     case analysisChanged
+    case factsChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1266,6 +1315,8 @@ private extension CoreClientEvent {
             self = .analysisProgress(progress)
         case .analysisChanged:
             self = .analysisChanged
+        case .factsChanged:
+            self = .factsChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

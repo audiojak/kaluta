@@ -82,6 +82,18 @@ fn spec(tool: Tool) -> ToolSpec {
             ),
         ),
         Tool::ListLabels => ("List the user's labels with unread and total counts.", object(json!({}), &[])),
+        Tool::FactsLookup => (
+            "Look up facts about the user that drafts may use (their role, time zone, calendar link, the people \
+             they mention). Use only these facts; never invent others. A fact marked ask_before_using needs the \
+             user's yes before it goes in a message.",
+            object(
+                json!({
+                    "category": { "type": "string", "description": "A category name or key, such as Work." },
+                    "query": { "type": "string", "description": "Words to look for in labels and values." },
+                }),
+                &[],
+            ),
+        ),
         Tool::GetAttachmentText => (
             "Extract the text of an attachment (text files, PDF, .docx), at most 100 KB. Never returns \
              binary data.",
@@ -209,6 +221,6 @@ mod tests {
             }
             assert!(spec.name().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "{}", spec.name());
         }
-        assert!(catalog().iter().filter(|s| s.read_only()).count() == 6);
+        assert!(catalog().iter().filter(|s| s.read_only()).count() == 7);
     }
 }

@@ -2619,8 +2619,9 @@ lists the global facts with the same editing.
 may use" section: *Use freely* facts as facts, *Ask before using* ones
 marked "ask the user before using", *Never share* ones left out. Global
 facts merge under account ones. Agents can also read them through a
-read-only `facts.lookup` tool, so a long list need not sit in every
-prompt.
+read-only `facts_lookup` tool (by category or words; never-share facts
+left out), so a long list need not sit in every prompt; tool names allow
+no dots.
 
 **The Facts tab** (in Analysis): facts by category, with a globe on
 global ones, custom categories after the built-in ones in the user's

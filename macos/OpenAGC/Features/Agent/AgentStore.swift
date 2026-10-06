@@ -321,6 +321,7 @@ final class AgentStore {
         case "mail_get_thread": "Read a thread"
         case "mail_get_message": "Read a message"
         case "mail_list_labels": "Listed labels"
+        case "facts_lookup": "Looked up your facts"
         case "mail_get_attachment_text": "Read an attachment"
         case "mail_present_threads": "Showed threads"
         case "mail_create_draft": "Wrote a draft"
