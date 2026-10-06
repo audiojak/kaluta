@@ -91,13 +91,7 @@ struct SidebarView: View {
         }
         .task { await model.routines.load() }
         .onAppear {
-            keys.start { event in
-                // Tab (not ⇧Tab) from a mailbox: into its list of threads.
-                guard event.keyCode == 48, !event.modifierFlags.contains(.shift),
-                      !model.isGuide, !model.isTaskList, !model.isFacts else { return false }
-                model.focusThreadList()
-                return true
-            }
+            keys.start { event in SidebarView.tabIntoList(event, model: model) }
         }
         .onDisappear { keys.stop() }
         .task(id: model.openAccountID) { expansion.load(account: model.openAccountID) }
@@ -114,6 +108,18 @@ struct SidebarView: View {
                 AccountMenuButton()
             }
         }
+    }
+}
+
+extension SidebarView {
+    /// Tab (not ⇧Tab) from a mailbox or the task list: into its list, which
+    /// takes the keyboard only when asked. Other keys are the list's own.
+    static func tabIntoList(_ event: NSEvent, model: AppModel) -> Bool {
+        guard event.keyCode == 48, !event.modifierFlags.contains(.shift), !model.isGuide, !model.isFacts else {
+            return false
+        }
+        model.focusThreadList()
+        return true
     }
 }
 

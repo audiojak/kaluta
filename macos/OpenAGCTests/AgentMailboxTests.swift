@@ -186,3 +186,29 @@ struct FailedSendTests {
         #expect(model.failedSends.isEmpty, "nothing failed")
     }
 }
+
+@MainActor
+struct SidebarTabTests {
+    private func key(_ code: UInt16, shift: Bool = false) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.shift] : [], timestamp: 0,
+                                      windowNumber: 0, context: nil, characters: "\t",
+                                      charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: code))
+    }
+
+    /// Tab from the sidebar moves into the list shown, the task list too;
+    /// nothing takes the keyboard from the sidebar on its own.
+    @Test func tabMovesIntoTheTaskListAndNothingElseDoes() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        let before = model.threadListFocusRequests
+        model.selectedMailboxID = AppModel.tasksMailboxID
+        #expect(model.isTaskList)
+        #expect(model.threadListFocusRequests == before, "arriving at Tasks asks for no focus")
+        #expect(SidebarView.tabIntoList(try key(48), model: model))
+        #expect(model.threadListFocusRequests == before + 1)
+        #expect(!SidebarView.tabIntoList(try key(48, shift: true), model: model), "⇧Tab goes the other way")
+        #expect(!SidebarView.tabIntoList(try key(126), model: model), "arrows stay the sidebar's")
+    }
+}
