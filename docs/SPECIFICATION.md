@@ -2471,8 +2471,10 @@ originals and signature stripped), and each pair records its distance
   dropped. Changes of substance (a different date, a new paragraph) are
   not style: they go to fact gleaning, never to guide proposals.
 - *Unchanged drafts count*: a draft sent as written (distance ≤ 0.05)
-  supports the entries that applied to it; entries repeatedly overridden
-  lose standing and can be proposed for removal.
+  supports the entries that applied to it; an entry the user's edits go
+  against in three pairs is proposed for removal, with those pairs as
+  its evidence. Content rules (group F) are not compared: they are not
+  style.
 - *Merge*: the same proposal in the same category across pairs and days
   becomes one proposal whose evidence grows. A rejected proposal is not
   raised again; one that contradicts an accepted entry is marked so.

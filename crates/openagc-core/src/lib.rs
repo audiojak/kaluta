@@ -7,6 +7,7 @@ uniffi::setup_scaffolding!();
 
 mod account;
 mod agents;
+mod analysis_compare;
 mod analysis_match;
 mod analysis_run;
 mod archive;

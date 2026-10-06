@@ -237,6 +237,225 @@ pub fn set_meta(tx: &Transaction<'_>, key: &str, value: &str) -> StoreResult<()>
     Ok(())
 }
 
+// MARK: Proposals
+
+/// A proposed change, as stored.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProposalRow {
+    pub id: i64,
+    /// `guide` or `fact`.
+    pub target: String,
+    /// `add`, `edit`, `rescope` or `remove`.
+    pub op: String,
+    pub entry_id: Option<i64>,
+    pub category: String,
+    pub kind: Option<String>,
+    pub statement: String,
+    pub scope_json: String,
+    pub match_key: String,
+    /// `watching`, `proposed`, `accepted` or `rejected`.
+    pub status: String,
+    pub support: i64,
+    pub contradicts_entry_id: Option<i64>,
+    pub payload_json: Option<String>,
+    pub created_at: Millis,
+    pub updated_at: Millis,
+    pub shown_at: Option<Millis>,
+    pub decided_at: Option<Millis>,
+}
+
+const PROPOSAL_COLUMNS: &str = "id, target, op, entry_id, category, kind, statement, scope_json, match_key, status, \
+                                support, contradicts_entry_id, payload_json, created_at, updated_at, shown_at, decided_at";
+
+fn proposal_row(r: &Row<'_>) -> rusqlite::Result<ProposalRow> {
+    Ok(ProposalRow {
+        id: r.get(0)?,
+        target: r.get(1)?,
+        op: r.get(2)?,
+        entry_id: r.get(3)?,
+        category: r.get(4)?,
+        kind: r.get(5)?,
+        statement: r.get(6)?,
+        scope_json: r.get(7)?,
+        match_key: r.get(8)?,
+        status: r.get(9)?,
+        support: r.get(10)?,
+        contradicts_entry_id: r.get(11)?,
+        payload_json: r.get(12)?,
+        created_at: r.get(13)?,
+        updated_at: r.get(14)?,
+        shown_at: r.get(15)?,
+        decided_at: r.get(16)?,
+    })
+}
+
+/// One pair's evidence for a proposal.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EvidenceRow {
+    pub composition_id: i64,
+    pub sent_quote: String,
+    pub ai_quote: String,
+}
+
+/// What a comparison proposes; `threshold` is how many pairs it needs
+/// before it shows.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct NewProposal {
+    pub target: String,
+    pub op: String,
+    pub entry_id: Option<i64>,
+    pub category: String,
+    pub kind: Option<String>,
+    pub statement: String,
+    pub scope_json: String,
+    pub match_key: String,
+    pub contradicts_entry_id: Option<i64>,
+    pub payload_json: Option<String>,
+    pub threshold: i64,
+}
+
+/// Add a proposal, or more evidence for the same one (same target and
+/// key). A proposal already decided is not raised again: `None`.
+/// Otherwise its id; it shows once its pairs reach the threshold.
+pub fn upsert_proposal(
+    tx: &Transaction<'_>,
+    p: &NewProposal,
+    evidence: &[EvidenceRow],
+    now: Millis,
+) -> StoreResult<Option<i64>> {
+    let existing: Option<(i64, String)> = tx
+        .prepare_cached("SELECT id, status FROM analysis_proposals WHERE target = ?1 AND match_key = ?2")?
+        .query_row(params![p.target, p.match_key], |r| Ok((r.get(0)?, r.get(1)?)))
+        .optional()?;
+    let id = match existing {
+        Some((_, status)) if status == "accepted" || status == "rejected" => return Ok(None),
+        Some((id, _)) => {
+            tx.prepare_cached(
+                "UPDATE analysis_proposals SET updated_at = ?2,
+                   contradicts_entry_id = COALESCE(contradicts_entry_id, ?3) WHERE id = ?1",
+            )?
+            .execute(params![id, now, p.contradicts_entry_id])?;
+            id
+        }
+        None => {
+            tx.prepare_cached(
+                "INSERT INTO analysis_proposals (target, op, entry_id, category, kind, statement, scope_json, match_key,
+                   status, contradicts_entry_id, payload_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'watching', ?9, ?10, ?11, ?11)",
+            )?
+            .execute(params![
+                p.target,
+                p.op,
+                p.entry_id,
+                p.category,
+                p.kind,
+                p.statement,
+                p.scope_json,
+                p.match_key,
+                p.contradicts_entry_id,
+                p.payload_json,
+                now
+            ])?;
+            tx.last_insert_rowid()
+        }
+    };
+    let mut add = tx.prepare_cached(
+        "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
+    for e in evidence {
+        add.execute(params![id, e.composition_id, e.sent_quote, e.ai_quote, now])?;
+    }
+    tx.prepare_cached(
+        "UPDATE analysis_proposals SET support = (SELECT COUNT(*) FROM analysis_evidence WHERE proposal_id = ?1)
+         WHERE id = ?1",
+    )?
+    .execute([id])?;
+    tx.prepare_cached(
+        "UPDATE analysis_proposals SET status = 'proposed', shown_at = ?3
+         WHERE id = ?1 AND status = 'watching' AND support >= ?2",
+    )?
+    .execute(params![id, p.threshold.max(1), now])?;
+    Ok(Some(id))
+}
+
+pub fn proposal(conn: &Connection, id: i64) -> StoreResult<Option<ProposalRow>> {
+    Ok(conn
+        .prepare_cached(&format!("SELECT {PROPOSAL_COLUMNS} FROM analysis_proposals WHERE id = ?1"))?
+        .query_row([id], proposal_row)
+        .optional()?)
+}
+
+/// Proposals in any of `statuses`, oldest first.
+pub fn proposals(conn: &Connection, statuses: &[&str]) -> StoreResult<Vec<ProposalRow>> {
+    let all: Vec<ProposalRow> = conn
+        .prepare_cached(&format!("SELECT {PROPOSAL_COLUMNS} FROM analysis_proposals ORDER BY id"))?
+        .query_map([], proposal_row)?
+        .collect::<Result<_, _>>()?;
+    Ok(all.into_iter().filter(|p| statuses.contains(&p.status.as_str())).collect())
+}
+
+/// The pairs behind a proposal, oldest first.
+pub fn evidence(conn: &Connection, proposal_id: i64) -> StoreResult<Vec<EvidenceRow>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT composition_id, sent_quote, ai_quote FROM analysis_evidence WHERE proposal_id = ?1
+             ORDER BY added_at, composition_id",
+        )?
+        .query_map([proposal_id], |r| {
+            Ok(EvidenceRow { composition_id: r.get(0)?, sent_quote: r.get(1)?, ai_quote: r.get(2)? })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
+pub fn set_proposal_status(tx: &Transaction<'_>, id: i64, status: &str, now: Millis) -> StoreResult<()> {
+    let decided = matches!(status, "accepted" | "rejected").then_some(now);
+    tx.prepare_cached("UPDATE analysis_proposals SET status = ?2, decided_at = ?3, updated_at = ?4 WHERE id = ?1")?
+        .execute(params![id, status, decided, now])?;
+    Ok(())
+}
+
+/// Count drafts that applied an entry: sent as written, or changed
+/// against it.
+pub fn add_health(
+    tx: &Transaction<'_>,
+    entry_id: i64,
+    unchanged: i64,
+    overridden: i64,
+    now: Millis,
+) -> StoreResult<()> {
+    tx.prepare_cached(
+        "INSERT INTO analysis_entry_health (entry_id, unchanged, overridden, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT (entry_id) DO UPDATE SET unchanged = unchanged + ?2, overridden = overridden + ?3, updated_at = ?4",
+    )?
+    .execute(params![entry_id, unchanged, overridden, now])?;
+    Ok(())
+}
+
+/// Per entry: drafts sent as written, and changed against it.
+pub fn health(conn: &Connection) -> StoreResult<Vec<(i64, i64, i64)>> {
+    Ok(conn
+        .prepare_cached("SELECT entry_id, unchanged, overridden FROM analysis_entry_health ORDER BY entry_id")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<Result<_, _>>()?)
+}
+
+/// Pairs behind any open change to `entry_id` (edits, rescopes,
+/// removals): how often the user went against it.
+pub fn pairs_against(conn: &Connection, entry_id: i64) -> StoreResult<Vec<EvidenceRow>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT e.composition_id, MIN(e.sent_quote), MIN(e.ai_quote) FROM analysis_evidence e
+             JOIN analysis_proposals p ON p.id = e.proposal_id
+             WHERE p.target = 'guide' AND p.entry_id = ?1 AND p.status IN ('watching', 'proposed')
+             GROUP BY e.composition_id ORDER BY e.composition_id",
+        )?
+        .query_map([entry_id], |r| {
+            Ok(EvidenceRow { composition_id: r.get(0)?, sent_quote: r.get(1)?, ai_quote: r.get(2)? })
+        })?
+        .collect::<Result<_, _>>()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +548,75 @@ mod tests {
         assert_eq!(db.read_blocking(|c| meta(c, "pairs_per_day")).unwrap(), None);
         db.write_blocking(|tx| set_meta(tx, "pairs_per_day", "20")).unwrap();
         assert_eq!(db.read_blocking(|c| meta(c, "pairs_per_day")).unwrap().as_deref(), Some("20"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn guideline(key: &str) -> NewProposal {
+        NewProposal {
+            target: "guide".into(),
+            op: "add".into(),
+            category: "B6".into(),
+            kind: Some("guideline".into()),
+            statement: "Sign off with 'J'".into(),
+            scope_json: "{}".into(),
+            match_key: key.into(),
+            threshold: 2,
+            ..Default::default()
+        }
+    }
+
+    fn quote(pair: i64) -> EvidenceRow {
+        EvidenceRow { composition_id: pair, sent_quote: "J".into(), ai_quote: "Best, John".into() }
+    }
+
+    #[test]
+    fn a_proposal_watches_until_enough_pairs_then_shows_and_a_decided_one_stays_decided() {
+        let (db, dir) = db("proposals");
+        let a = matched(&db, 1, 0.3);
+        let b = matched(&db, 2, 0.3);
+        let c = matched(&db, 3, 0.3);
+        let id = db.write_blocking(move |tx| upsert_proposal(tx, &guideline("k"), &[quote(a)], 10)).unwrap().unwrap();
+        let p = db.read_blocking(move |c| proposal(c, id)).unwrap().unwrap();
+        assert_eq!((p.status.as_str(), p.support, p.shown_at), ("watching", 1, None));
+        // The same pair again does not count twice.
+        db.write_blocking(move |tx| upsert_proposal(tx, &guideline("k"), &[quote(a)], 11)).unwrap();
+        assert_eq!(db.read_blocking(move |c| proposal(c, id)).unwrap().unwrap().support, 1);
+        let again = db.write_blocking(move |tx| upsert_proposal(tx, &guideline("k"), &[quote(b)], 20)).unwrap();
+        assert_eq!(again, Some(id), "one proposal; its evidence grows");
+        let p = db.read_blocking(move |c| proposal(c, id)).unwrap().unwrap();
+        assert_eq!((p.status.as_str(), p.support, p.shown_at), ("proposed", 2, Some(20)));
+        assert_eq!(db.read_blocking(move |c| evidence(c, id)).unwrap().len(), 2);
+        assert_eq!(db.read_blocking(|c| proposals(c, &["proposed"])).unwrap().len(), 1);
+
+        db.write_blocking(move |tx| set_proposal_status(tx, id, "rejected", 30)).unwrap();
+        let raised = db.write_blocking(move |tx| upsert_proposal(tx, &guideline("k"), &[quote(c)], 40)).unwrap();
+        assert_eq!(raised, None, "a rejected proposal is not raised again");
+        let p = db.read_blocking(move |c| proposal(c, id)).unwrap().unwrap();
+        assert_eq!((p.status.as_str(), p.support, p.decided_at), ("rejected", 2, Some(30)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn health_counts_add_up_and_changes_against_an_entry_are_found() {
+        let (db, dir) = db("health");
+        let a = matched(&db, 1, 0.3);
+        let b = matched(&db, 2, 0.3);
+        db.write_blocking(move |tx| {
+            add_health(tx, 7, 1, 0, 1)?;
+            add_health(tx, 7, 2, 1, 2)?;
+            let edit =
+                NewProposal { op: "edit".into(), entry_id: Some(7), match_key: "edit|7|x".into(), ..guideline("") };
+            upsert_proposal(tx, &edit, &[quote(a)], 3)?;
+            let remove =
+                NewProposal { op: "remove".into(), entry_id: Some(7), match_key: "remove|7".into(), ..guideline("") };
+            upsert_proposal(tx, &remove, &[quote(a), quote(b)], 3)?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(db.read_blocking(health).unwrap(), vec![(7, 3, 1)]);
+        let against: Vec<i64> =
+            db.read_blocking(|c| pairs_against(c, 7)).unwrap().into_iter().map(|e| e.composition_id).collect();
+        assert_eq!(against, vec![a, b], "each pair once");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -277,6 +277,18 @@ impl Core {
             return Err(CoreError::new(ErrorKind::Agent, why));
         }
         let found = self.match_compositions(now).await?;
+        // Sent as written: support for the entries that applied, no agent
+        // needed.
+        let db = self.db()?;
+        let (active, unchanged) =
+            runtime::run(
+                async move { Ok(db.read(|c| Ok((store::active_run(c)?, store::unchanged_pairs(c)?))).await?) },
+            )
+            .await?;
+        if active.is_some() {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "a review is already in progress"));
+        }
+        self.reinforce_unchanged(&unchanged, now).await?;
         let db = self.db()?;
         let day = day_of(now);
         let run = runtime::run(async move {
@@ -289,11 +301,7 @@ impl Core {
                     let cap = store::meta(tx, keys::PAIRS_PER_DAY)?
                         .and_then(|v| v.parse::<u32>().ok())
                         .unwrap_or(DEFAULT_PAIRS_PER_DAY);
-                    let unchanged = store::unchanged_pairs(tx)?;
                     let pairs = store::pairs_to_compare(tx, cap)?;
-                    // Sent as written: support for what applied (counted
-                    // by the comparison step), no agent needed.
-                    store::mark_reviewed(tx, &unchanged, now)?;
                     let new = NewRun {
                         day: &day,
                         trigger: if daily { "daily" } else { "manual" },
@@ -395,58 +403,30 @@ impl Core {
         }
     }
 
-    /// Compare one batch of pairs with the agent; whether it was asked.
-    /// The prompt and what is made of the answer are the comparison
-    /// step's (oagc-259.5); a run stopped meanwhile drops the answer.
+    /// Compare one batch of pairs with the agent (spec §14.10); whether it
+    /// was asked. An answer that cannot be read is asked for once more; a
+    /// run stopped meanwhile drops the answer.
     async fn compare_batch(self: &Arc<Self>, run: i64, agent: &str, ids: &[i64]) -> Result<bool, CoreError> {
-        let Some(prompt) = self.compare_prompt(ids).await? else { return Ok(false) };
-        let answer = self.ask_agent_hidden(agent, prompt).await?;
-        let db = self.db()?;
-        let now = runtime::run(async move { Ok(db.read(move |c| store::get_run(c, run)).await?) }).await?;
-        if now.is_some_and(|r| r.status != "cancelled") {
-            self.merge_compare_answer(run, ids, &answer).await?;
+        let (pairs, entries) = self.compare_pairs(ids).await?;
+        if pairs.is_empty() {
+            return Ok(false);
+        }
+        let prompt = crate::analysis_compare::prompt(&pairs, &entries);
+        for attempt in 1..=2 {
+            let answer = self.ask_agent_hidden(agent, prompt.clone()).await?;
+            let db = self.db()?;
+            let now = runtime::run(async move { Ok(db.read(move |c| store::get_run(c, run)).await?) }).await?;
+            if now.is_none_or(|r| r.status == "cancelled") {
+                break;
+            }
+            if self.merge_compare(&pairs, &entries, &answer).await? {
+                break;
+            }
+            if attempt == 2 {
+                tracing::warn!(run, "analysis batch skipped: unreadable answer");
+            }
         }
         Ok(true)
-    }
-
-    /// The comparison prompt for these pairs, or `None` when none has text
-    /// left to compare.
-    async fn compare_prompt(&self, ids: &[i64]) -> Result<Option<String>, CoreError> {
-        let db = self.db()?;
-        let ids = ids.to_vec();
-        let pairs = runtime::run(async move {
-            Ok(db
-                .read(move |c| {
-                    let mut out = Vec::new();
-                    for id in ids {
-                        if let Some(p) = mail_store::compositions::get(c, id)? {
-                            out.push(p);
-                        }
-                    }
-                    Ok(out)
-                })
-                .await?)
-        })
-        .await?;
-        let pairs: Vec<_> = pairs.into_iter().filter(|p| p.ai_text.is_some() && p.sent_text.is_some()).collect();
-        if pairs.is_empty() {
-            return Ok(None);
-        }
-        let mut prompt = String::from("OpenAGC analysis compare\n");
-        for p in &pairs {
-            prompt.push_str(&format!(
-                "\nPair {}\nAI:\n{}\nSent:\n{}\n",
-                p.id,
-                crate::guide_ai::fenced(p.ai_text.as_deref().unwrap_or_default()),
-                crate::guide_ai::fenced(p.sent_text.as_deref().unwrap_or_default())
-            ));
-        }
-        Ok(Some(prompt))
-    }
-
-    /// What the comparison found (oagc-259.5).
-    async fn merge_compare_answer(&self, _run: i64, _ids: &[i64], _answer: &str) -> Result<(), CoreError> {
-        Ok(())
     }
 }
 
@@ -540,7 +520,7 @@ impl Core {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Arc;
 
     use futures::executor::block_on;
@@ -550,11 +530,11 @@ mod tests {
 
     const DAY: Millis = 24 * 60 * 60 * 1000;
 
-    fn rt<T>(f: impl std::future::Future<Output = T>) -> T {
+    pub(crate) fn rt<T>(f: impl std::future::Future<Output = T>) -> T {
         runtime::runtime().block_on(f)
     }
 
-    fn learned(core: &Core) {
+    pub(crate) fn learned(core: &Core) {
         let db = core.db().unwrap();
         rt(db.write(|tx| {
             let run = mail_store::guide::create_run(tx, "latest", None, Some("claude-code"), &[], 20, 1)?;
@@ -564,7 +544,7 @@ mod tests {
     }
 
     /// The app's own scheduler would start the day's review meanwhile.
-    fn no_schedule(core: &Core) {
+    pub(crate) fn no_schedule(core: &Core) {
         let db = core.db().unwrap();
         rt(db.write(|tx| store::set_meta(tx, keys::DAILY_REVIEW, "off"))).unwrap();
     }
@@ -606,7 +586,7 @@ mod tests {
         .unwrap()
     }
 
-    fn wait_done(core: &Arc<Core>) -> AnalysisRunInfo {
+    pub(crate) fn wait_done(core: &Arc<Core>) -> AnalysisRunInfo {
         for _ in 0..3000 {
             // The app's own scheduler may be the one starting it.
             let progress = block_on(core.analysis_progress()).unwrap();
