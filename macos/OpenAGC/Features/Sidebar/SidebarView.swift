@@ -91,7 +91,13 @@ struct SidebarView: View {
         }
         .task { await model.routines.load() }
         .onAppear {
-            keys.start { event in SidebarView.handleKey(event, model: model) }
+            keys.start { event in
+                // Tab (not ⇧Tab) from a mailbox: into its list of threads.
+                guard event.keyCode == 48, !event.modifierFlags.contains(.shift),
+                      !model.isGuide, !model.isTaskList, !model.isFacts else { return false }
+                model.focusThreadList()
+                return true
+            }
         }
         .onDisappear { keys.stop() }
         .task(id: model.openAccountID) { expansion.load(account: model.openAccountID) }
@@ -108,22 +114,6 @@ struct SidebarView: View {
                 AccountMenuButton()
             }
         }
-    }
-}
-
-extension SidebarView {
-    /// The sidebar's own keys, while it has the keyboard (no ⌘, ⌃ or ⌥):
-    /// c starts a new message, as it does in the list; Tab (not ⇧Tab) from
-    /// a mailbox goes into its list of threads.
-    static func handleKey(_ event: NSEvent, model: AppModel) -> Bool {
-        if event.charactersIgnoringModifiers == "c" {
-            model.compose(.new(to: nil))
-            return true
-        }
-        guard event.keyCode == 48, !event.modifierFlags.contains(.shift),
-              !model.isGuide, !model.isTaskList, !model.isFacts else { return false }
-        model.focusThreadList()
-        return true
     }
 }
 

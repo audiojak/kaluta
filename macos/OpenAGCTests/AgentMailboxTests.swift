@@ -169,24 +169,3 @@ struct EmptyMailboxKeyTests {
         #expect(opened.count == 1)
     }
 }
-
-@MainActor
-struct SidebarKeyTests {
-    @Test func cInTheSidebarStartsAMessage() async throws {
-        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
-        try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
-        await model.start(openDemo: false)
-        var opened: [ComposeRequest] = []
-        model.openComposer = { opened.append($0) }
-        let c = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                                              windowNumber: 0, context: nil, characters: "c",
-                                              charactersIgnoringModifiers: "c", isARepeat: false, keyCode: 8))
-        #expect(SidebarView.handleKey(c, model: model))
-        #expect(opened == [.new(to: nil)])
-        let x = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
-                                              windowNumber: 0, context: nil, characters: "x",
-                                              charactersIgnoringModifiers: "x", isARepeat: false, keyCode: 7))
-        #expect(!SidebarView.handleKey(x, model: model), "other letters are left to the list")
-    }
-}
