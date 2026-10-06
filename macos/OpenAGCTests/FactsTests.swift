@@ -106,7 +106,7 @@ struct FactsMergeTests {
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Merge Facts")
         #expect(try await core.analysisQueue().facts.map(\.value) == ["CEO"])
 
-        // Rejecting it and undoing that puts it back in Analysis.
+        // Rejecting it and undoing that puts it back in Facts.
         await model.analysis.load()
         let proposal = try #require(model.analysis.factProposals.first)
         await model.decideFactProposals([proposal], accept: false)
@@ -117,10 +117,19 @@ struct FactsMergeTests {
         }
         #expect(model.analysis.factProposals.map(\.id) == [proposal.id])
 
-        // Opening Analysis from anywhere shows the proposals, not Facts.
-        model.openFacts()
-        #expect(model.analysis.showsFacts)
-        model.openAnalysis()
-        #expect(!model.analysis.showsFacts)
+        // Facts is a page of its own; opening it on its proposals chooses the first.
+        model.openFacts(proposed: true)
+        #expect(model.isFacts && !model.isGuide && model.analysis.reviewingFacts)
+        #expect(model.facts.selection == AnalysisStore.tag(proposal))
+        await model.facts.load()
+        #expect(model.facts.selection == AnalysisStore.tag(proposal), "loading the facts keeps a proposal chosen")
+
+        // Accepted as "ask before using": the user's choice, not the fact's own.
+        #expect(model.analysis.use(of: proposal) == .free)
+        model.analysis.factUses[proposal.id] = .ask
+        await model.decideFactProposals([proposal], accept: true)
+        let role = try #require(model.facts.facts.first { $0.label == "Occupation or role" })
+        #expect((role.value, role.use) == ("CEO", .ask))
+
     }
 }

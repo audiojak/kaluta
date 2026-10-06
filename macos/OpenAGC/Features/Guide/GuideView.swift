@@ -10,7 +10,7 @@ enum GuideSheet: Identifiable {
     case interview(only: String?)
     case change
     case merge
-    /// An Analysis proposal, edited before it is accepted.
+    /// A rule the daily review proposed, edited before it is accepted.
     case proposal(AnalysisProposalInfo)
     /// A fact of this account (spec §14.11): new (nil) or to edit.
     case fact(FactInfo?, category: String?)
@@ -34,15 +34,16 @@ enum GuideSheet: Identifiable {
     }
 }
 
-/// The Writing Guide section's list column (spec §14.9): the progress of
-/// learning and the decisions waiting at the top, then every category by
-/// group with how much of the guide covers it.
+/// The Writing Guide section's list column (spec §14.9): every category
+/// by group with how much of the guide covers it. Proposed rules are
+/// reviewed in the detail, from the header's *Review Proposed Rules*.
 struct GuideView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var guide = model.guide
-        List(selection: Binding(get: { model.guide.selectedCategory },
+        // While reviewing, no category is shown as chosen.
+        List(selection: Binding(get: { model.analysis.reviewingRules ? nil : model.guide.selectedCategory },
                                 set: { model.showGuideCategory($0) })) {
             ForEach(guide.sections, id: \.group) { section in
                 Section(section.name) {
@@ -68,7 +69,8 @@ struct GuideHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            if let progress = model.guideProgress, model.guideRunActive || progress.decisionsTotal > progress.decisionsDone {
+            // While learning runs; afterwards Review Proposed Rules counts what waits.
+            if let progress = model.guideProgress, model.guideRunActive {
                 GuideProgressBars(progress: progress)
             }
             if let run = model.guideProgress?.run, run.status == .done, let finished = run.finishedAt {
@@ -81,12 +83,6 @@ struct GuideHeader: View {
                     .disabled(model.guideRunActive)
                     .hoverHelp(model.guideRunActive ? "A learning run is in progress"
                         : "Analyse your sent mail to propose rules and guidelines")
-                if model.analysis.waiting > 0 {
-                    Button(model.analysis.waiting == 1 ? "1 decision waiting in Analysis"
-                           : "\(model.analysis.waiting) decisions waiting in Analysis") { model.openAnalysis(learning: model.analysis.learningDecisions > 0) }
-                        .buttonStyle(.link)
-                        .hoverHelp("Accept, edit or reject what was learned, in Analysis")
-                }
                 Spacer(minLength: 0)
                 Menu {
                     Button("Ask \(model.agent.providerName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
@@ -104,9 +100,40 @@ struct GuideHeader: View {
                 .hoverHelp("Change, merge or export the guide")
             }
             .controlSize(.small)
+            // The daily review proposes rules from how AI drafts get edited.
+            if model.reviewsAvailable {
+                ReviewStatus()
+            }
+            reviewButton
         }
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.m)
+    }
+}
+
+extension GuideHeader {
+    /// Opens the review flow in the detail: the proposed rules, else the
+    /// patterns still collecting evidence.
+    @ViewBuilder var reviewButton: some View {
+        let waiting = model.analysis.rulesWaiting
+        let watching = model.analysis.watching.count
+        if waiting > 0 {
+            Button {
+                model.openProposedRules()
+            } label: {
+                Label(waiting == 1 ? "Review 1 Proposed Rule" : "Review \(waiting) Proposed Rules", systemImage: "checklist")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .hoverHelp("Go through the rules proposed for your guide: Return accepts, ⌫ rejects, e edits")
+        } else if watching > 0 {
+            Button(watching == 1 ? "1 pattern collecting evidence" : "\(watching) patterns collecting evidence") {
+                model.openProposedRules()
+            }
+            .buttonStyle(.link)
+            .controlSize(.small)
+            .hoverHelp("Patterns in your edits not yet seen often enough to propose")
+        }
     }
 }
 
@@ -118,7 +145,7 @@ struct GuideProgressBars: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             if let run = progress.run, run.status == .running || run.status == .paused {
-                bar(title: run.status == .paused ? "Analysis paused" : "Analysis",
+                bar(title: run.status == .paused ? "Learning paused" : "Learning",
                     detail: "\(run.done.formatted()) of \(run.total.formatted()) messages, batch \(min(run.batchesDone + 1, run.batches)) of \(run.batches)",
                     value: run.total == 0 ? 0 : Double(run.done) / Double(run.total))
                 if let left = Self.timeLeft(run) {
@@ -259,7 +286,9 @@ struct GuideRunFooter: View {
 }
 
 extension AppModel {
+    /// A category chosen: the review flow gives way to it.
     func showGuideCategory(_ id: String?) {
+        analysis.reviewingRules = false
         guide.selectedCategory = id
     }
 

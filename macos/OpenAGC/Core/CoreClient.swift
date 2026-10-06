@@ -676,9 +676,9 @@ final class CoreClient: Sendable {
         try await call { try await core.analysisQueue() }
     }
 
-    /// The user opened Analysis: its dot clears.
-    func analysisSeen() async throws(CoreClientError) {
-        try await call { try await core.analysisSeen() }
+    /// The user looked at a page's proposals: its dot clears.
+    func analysisSeen(_ page: ProposalPage) async throws(CoreClientError) {
+        try await call { try await core.analysisSeen(page: page) }
     }
 
     func analysisPairs(_ proposalID: Int64) async throws(CoreClientError) -> [AnalysisPairInfo] {
@@ -699,8 +699,10 @@ final class CoreClient: Sendable {
     }
 
     /// Accept or reject fact proposals; undone with `undoFactChange`.
-    func decideFactProposals(_ ids: [Int64], accept: Bool) async throws(CoreClientError) -> FactChange {
-        try await call { try await core.decideFactAnalysisProposals(ids: ids, accept: accept) }
+    /// `uses`, by proposal id, is how freely drafts may use each accepted fact.
+    func decideFactProposals(_ ids: [Int64], accept: Bool,
+                             uses: [Int64: FactUse] = [:]) async throws(CoreClientError) -> FactChange {
+        try await call { try await core.decideFactAnalysisProposals(ids: ids, accept: accept, uses: uses) }
     }
 
     func analysisFactsFrom() async throws(CoreClientError) -> FactsFrom {
@@ -813,6 +815,10 @@ final class CoreClient: Sendable {
     /// Snapshots: a few reviewed pairs and proposals on the demo account.
     func debugSeedAnalysis() async throws(CoreClientError) {
         try await call { try await core.debugSeedAnalysis() }
+    }
+
+    func debugSeedFactProposals() async throws(CoreClientError) {
+        try await call { try await core.debugSeedFactProposals() }
     }
 
     func guideEntryHealth() async throws(CoreClientError) -> [GuideEntryHealth] {
@@ -1241,6 +1247,7 @@ typealias CategoryEdit = OpenAGCCore.CategoryEdit
 typealias StarterSet = OpenAGCCore.StarterSet
 typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
 typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
+typealias ProposalPage = OpenAGCCore.ProposalPage
 typealias AnalysisFactProposalInfo = OpenAGCCore.AnalysisFactProposalInfo
 typealias FactsFrom = OpenAGCCore.FactsFrom
 typealias AnalysisSettings = OpenAGCCore.AnalysisSettings

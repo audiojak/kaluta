@@ -1,15 +1,10 @@
 import Foundation
 
-/// The Analysis section (spec §14.10): opening it, Run Now, and deciding
-/// proposals with Undo.
+/// Proposals (spec §14.10): proposed rules wait in the Writing Guide and
+/// proposed facts in Facts. Run Now, and deciding proposals with Undo.
 extension AppModel {
-    /// The sidebar's Analysis entry, in place of a mailbox id.
-    static let analysisMailboxID = "@analysis"
-
-    var isAnalysis: Bool { selectedMailboxID == Self.analysisMailboxID && threads.searchQuery == nil }
-
-    /// Analysis shows once the account has finished a learning run.
-    var showsAnalysis: Bool { analysisProgress?.available == true }
+    /// The daily review runs once the account has finished a learning run.
+    var reviewsAvailable: Bool { analysisProgress?.available == true }
 
     /// A daily review in progress (running or paused).
     var analysisRunActive: Bool {
@@ -17,21 +12,87 @@ extension AppModel {
         return status == .running || status == .paused
     }
 
-    /// Open Analysis, on the learning runs' decisions if asked.
-    func openAnalysis(learning: Bool = false) {
+    /// Open the Writing Guide's review flow on its first proposed rule (the
+    /// learning decisions first when asked).
+    func openProposedRules(learning: Bool = false) {
         guidePrompt = nil
-        analysis.showsFacts = false
-        selectedMailboxID = Self.analysisMailboxID
-        if learning { analysis.selection = AnalysisStore.learningTag }
+        selectedMailboxID = Self.guideMailboxID
+        analysis.reviewingRules = true
+        let first = learning ? guide.decisions.first.map(AnalysisStore.tag) : nil
+        analysis.selection = first ?? proposedRuleTags.first
     }
 
-    /// Looking at Analysis: read it, and clear the dot.
-    func analysisShown() async {
+    /// The Writing Guide's proposed rules, in list order.
+    var proposedRuleTags: [String] {
+        guide.decisions.map(AnalysisStore.tag) + analysis.proposals.map(AnalysisStore.tag)
+    }
+
+    /// The learning decision chosen in the Writing Guide.
+    var selectedDecision: GuideEntry? {
+        guard let tag = analysis.selection else { return nil }
+        return guide.decisions.first { AnalysisStore.tag($0) == tag }
+    }
+
+    /// After deciding the chosen rule, the next one waiting (else the one
+    /// before), so the user can go down the list.
+    private func selectNextProposedRule(after tag: String?, in before: [String]) {
+        guard let tag, let at = before.firstIndex(of: tag) else { return }
+        let left = proposedRuleTags
+        analysis.selection = before[(at + 1)...].first { left.contains($0) }
+            ?? before[..<at].last { left.contains($0) }
+    }
+
+    /// Accept a learning decision; one that goes against an accepted entry
+    /// replaces it, as its default button says.
+    func acceptDecision(_ entry: GuideEntry) async {
+        let before = proposedRuleTags
+        if let old = entry.contradictionOf.flatMap({ id in guide.entries.first { $0.id == id } }), old.status == .accepted {
+            await replaceGuideEntry(old, with: entry)
+        } else {
+            await decideGuide(entry, accept: true)
+        }
+        await analysis.load()
+        selectNextProposedRule(after: AnalysisStore.tag(entry), in: before)
+    }
+
+    func decideProposedRule(reject entry: GuideEntry) async {
+        let before = proposedRuleTags
+        await decideGuide(entry, accept: false)
+        await analysis.load()
+        selectNextProposedRule(after: AnalysisStore.tag(entry), in: before)
+    }
+
+    func decideProposedRule(_ proposal: AnalysisProposalInfo, accept: Bool) async {
+        let before = proposedRuleTags
+        await decideAnalysis([proposal], accept: accept)
+        selectNextProposedRule(after: AnalysisStore.tag(proposal), in: before)
+    }
+
+    /// Accept All on the Proposed section: every proposed rule that goes
+    /// against none of the user's (those wait for a decision of their own).
+    /// The learning decisions and the review's proposals are one change
+    /// each.
+    func acceptAllProposedRules() async {
+        let decisions = guide.decisions.filter { $0.contradictionOf == nil }
+        if !decisions.isEmpty {
+            await applyGuideEdits(decisions.map { .decide(id: $0.id, status: .accepted) }, reason: "accept",
+                                  actionName: "Accept All",
+                                  notice: decisions.count == 1 ? "Added to your writing guide"
+                                      : "\(decisions.count) added to your writing guide")
+        }
+        let proposals = analysis.proposals.filter { $0.contradicts == nil }
+        if !proposals.isEmpty { await decideAnalysis(proposals, accept: true) }
+        await analysis.load()
+        analysis.selection = proposedRuleTags.first
+    }
+
+    /// Looking at a page's proposals: read them, and clear its dot.
+    func proposalsShown(_ page: ProposalPage) async {
         guard let core else { return }
         await analysis.load()
-        // Seen when the proposals show, not the Facts tab.
-        if analysis.unseen, !analysis.showsFacts {
-            try? await core.analysisSeen()
+        let unseen = page == .rules ? analysis.unseenRules : analysis.unseenFacts
+        if unseen {
+            try? await core.analysisSeen(page)
             await analysis.load()
             await refreshAnalysisDots()
         }
@@ -40,9 +101,12 @@ extension AppModel {
     /// Proposals changed (a review, a decision, an undo).
     func analysisChanged() async {
         // Seen only when the user can see it: not with the app behind.
-        if isAnalysis, notifier.isAppActive() { await analysisShown() } else { await analysis.load() }
+        if notifier.isAppActive(), let page = shownProposalPage { await proposalsShown(page) } else { await analysis.load() }
         await refreshAnalysisDots()
     }
+
+    /// The page showing proposals, if one is in front.
+    var shownProposalPage: ProposalPage? { isGuide ? .rules : isFacts ? .facts : nil }
 
     func refreshAnalysisDots() async {
         guard let core else { return }

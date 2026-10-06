@@ -27,26 +27,31 @@ struct SidebarView: View {
                     .badge(model.tasks.dueCount)
                     .tag(AppModel.tasksMailboxID)
                     .hoverHelp("Tasks you made from email, by when they are due")
-                // Proposed changes to the guide (spec §14.10), once the
-                // account has learned; a dot while something is new.
-                if model.showsAnalysis {
-                    Label {
-                        HStack(spacing: Space.s) {
-                            Text("Analysis")
-                            if model.analysis.unseen, !model.isAnalysis { NewDot() }
-                        }
-                    } icon: {
-                        Image(systemName: "sparkle.magnifyingglass")
+                // The writing guide AI drafts follow (spec §14.9): the badge
+                // counts proposed rules, the dot says one is new (§14.10).
+                Label {
+                    HStack(spacing: Space.s) {
+                        Text("Writing Guide")
+                        if model.analysis.unseenRules, !model.isGuide { NewDot() }
                     }
-                    .badge(model.analysis.waiting)
-                    .tag(AppModel.analysisMailboxID)
-                    .hoverHelp("Changes to your writing guide, learned from how you edit AI drafts")
+                } icon: {
+                    Image(systemName: "text.book.closed")
                 }
-                // The writing guide AI drafts follow (spec §14.9); its
-                // decisions wait in Analysis.
-                Label("Writing Guide", systemImage: "text.book.closed")
-                    .tag(AppModel.guideMailboxID)
-                    .hoverHelp("The rules and style your AI drafts follow")
+                .badge(model.analysis.rulesWaiting)
+                .tag(AppModel.guideMailboxID)
+                .hoverHelp("The rules and style your AI drafts follow, and the rules proposed for it")
+                // Facts AI drafts may use (spec §14.11), with those proposed.
+                Label {
+                    HStack(spacing: Space.s) {
+                        Text("Facts")
+                        if model.analysis.unseenFacts, !model.isFacts { NewDot() }
+                    }
+                } icon: {
+                    Image(systemName: "person.text.rectangle")
+                }
+                .badge(model.analysis.factProposals.count)
+                .tag(AppModel.factsMailboxID)
+                .hoverHelp("Facts about you that AI drafts may use, and the facts proposed from your mail")
             }
             Section(model.accountSectionTitle) {
                 ForEach(model.mailboxes.accountMailboxes, id: \.id) { mailbox in
@@ -89,7 +94,7 @@ struct SidebarView: View {
             keys.start { event in
                 // Tab (not ⇧Tab) from a mailbox: into its list of threads.
                 guard event.keyCode == 48, !event.modifierFlags.contains(.shift),
-                      !model.isGuide, !model.isTaskList, !model.isAnalysis else { return false }
+                      !model.isGuide, !model.isTaskList, !model.isFacts else { return false }
                 model.focusThreadList()
                 return true
             }

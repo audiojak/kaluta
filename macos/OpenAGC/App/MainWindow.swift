@@ -43,8 +43,11 @@ struct MainWindow: View {
             case .factCategories:
                 FactCategoriesSheet(store: model.facts) { model.guideSheet = nil }
             case .analysisSettings:
-                Dialog(title: "Analysis Settings") {
-                    AnalysisSettingsView().frame(width: 460, height: 320)
+                Dialog(title: "Learning Settings", width: Self.analysisSettingsWidth) {
+                    // The grouped form insets itself: no padding of its own on top of the dialog's.
+                    AnalysisSettingsView()
+                        .scrollDisabled(true)
+                        .frame(height: Self.analysisSettingsHeight)
                 } buttons: {
                     Button("Done") { model.guideSheet = nil }
                         .keyboardShortcut(.defaultAction)
@@ -146,7 +149,7 @@ struct MainWindow: View {
         if model.threads.searchQuery != nil { return "Search Results" }
         if model.isTaskList { return "Tasks" }
         if model.isGuide { return "Writing Guide" }
-        if model.isAnalysis { return "Analysis" }
+        if model.isFacts { return "Facts" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
     }
 
@@ -157,11 +160,16 @@ struct MainWindow: View {
         if model.isGuide {
             let accepted = model.guide.acceptedCount
             parts.append(accepted == 1 ? "1 entry" : "\(accepted.formatted()) entries")
+            let proposed = model.analysis.rulesWaiting
+            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
             return parts.joined(separator: " · ")
         }
-        if model.isAnalysis {
-            let waiting = model.analysis.waiting
-            return waiting == 0 ? "Nothing waiting" : waiting == 1 ? "1 waiting" : "\(waiting) waiting"
+        if model.isFacts {
+            let count = model.facts.facts.filter { $0.status == .accepted }.count
+            parts.append(count == 1 ? "1 fact" : "\(count.formatted()) facts")
+            let proposed = model.analysis.factProposals.count
+            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
+            return parts.joined(separator: " · ")
         }
         if model.isTaskList {
             if model.tasks.showsDone { return "Done" }
@@ -223,8 +231,8 @@ struct MainWindow: View {
                 }
                 if model.isGuide {
                     GuideView()
-                } else if model.isAnalysis {
-                    AnalysisView()
+                } else if model.isFacts {
+                    FactsList(store: model.facts)
                 } else if model.isTaskList {
                     TaskListView()
                 } else if model.threads.rows.isEmpty {
@@ -256,7 +264,7 @@ struct MainWindow: View {
             categoryTabs
             taskTabs
             if model.isGuide { GuideHeader() }
-            if model.isAnalysis { AnalysisHeader() }
+            if model.isFacts { FactsHeader() }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,
@@ -298,14 +306,17 @@ struct MainWindow: View {
     @ViewBuilder private var detail: some View {
         if model.isGuide {
             GuideDetailView()
-        } else if model.isAnalysis {
-            AnalysisDetailView()
+        } else if model.isFacts {
+            FactsDetailView()
         } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {
             ContentUnavailableView("No Message Selected", systemImage: "envelope.open")
         }
     }
+
+    private static let analysisSettingsWidth: CGFloat = 560
+    private static let analysisSettingsHeight: CGFloat = 340
 }
 
 /// Google rejected the stored credentials (revoked or expired).

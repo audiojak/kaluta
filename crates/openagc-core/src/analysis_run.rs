@@ -892,6 +892,14 @@ pub(crate) mod tests {
         .unwrap();
         settled(core);
         rt(core.analysis_tick_inner(now)).unwrap();
+        // The app's own scheduler may have taken the attempt: wait for the
+        // run that replaces the old one, not the old one cancelled.
+        for _ in 0..3000 {
+            if block_on(core.analysis_progress()).unwrap().run.is_some_and(|r| r.id != old) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         let today = wait_done(core);
         assert_ne!(today.id, old);
         assert_eq!(today.total, 1, "the pair the paused run had not reached");

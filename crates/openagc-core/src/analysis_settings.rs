@@ -72,8 +72,8 @@ impl Core {
         .await
     }
 
-    /// Accounts with proposals shown since the user last opened their
-    /// Analysis: the account menu's dots (spec §14.10).
+    /// Accounts with proposals shown since the user last looked at them:
+    /// the account menu's dots (spec §14.10).
     pub async fn accounts_with_unseen_analysis(&self) -> Vec<String> {
         let mut out = Vec::new();
         let open: Vec<String> =
@@ -135,7 +135,8 @@ mod tests {
         assert!(block_on(core.accounts_with_unseen_analysis()).is_empty());
         block_on(core.debug_seed_analysis()).unwrap();
         assert_eq!(block_on(core.accounts_with_unseen_analysis()), vec!["demo".to_owned()]);
-        block_on(core.analysis_seen()).unwrap();
+        block_on(core.analysis_seen(crate::analysis_queue::ProposalPage::Rules)).unwrap();
+        block_on(core.analysis_seen(crate::analysis_queue::ProposalPage::Facts)).unwrap();
         assert!(block_on(core.accounts_with_unseen_analysis()).is_empty());
     }
 }

@@ -22,7 +22,7 @@ struct FactsSettings: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Global facts: every account's AI drafts may use them. A fact an account has its own version of uses that instead. Make a fact global from Analysis › Facts.")
+            Text("Global facts: every account's AI drafts may use them. A fact an account has its own version of uses that instead. Make a fact global from the Facts page.")
                 .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

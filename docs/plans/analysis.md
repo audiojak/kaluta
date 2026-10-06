@@ -1,6 +1,8 @@
 # Plan: Analysis — learning from what you change in AI drafts, and Facts
 
-Status: built (2026-10-05), epic oagc-259, branch `analysis`, PR
+Status: the Analysis page is replaced by proposed rules in the Writing
+Guide and a Facts page (`docs/plans/rules-and-facts-pages.md`, 2026-10-06).
+Built (2026-10-05), epic oagc-259, branch `analysis`, PR
 audiojak/openagc#9. Spec §14.10 (Analysis) and §14.11 (Facts); ADRs 0012
 and 0013. Where the build departs from this plan, the spec says so:
 settings are in Settings › Analysis (there is no Settings › Writing

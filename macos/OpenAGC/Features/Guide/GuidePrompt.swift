@@ -66,9 +66,9 @@ extension AppModel {
         guideBannerAccount = nil
     }
 
-    /// The learning run's decisions wait in Analysis (spec §14.10).
+    /// The learning run's decisions wait in the Writing Guide (spec §14.10).
     func openGuideDecisionsNow() {
-        openAnalysis(learning: true)
+        openProposedRules(learning: true)
     }
 }
 

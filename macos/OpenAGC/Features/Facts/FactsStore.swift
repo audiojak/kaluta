@@ -45,7 +45,9 @@ final class FactsStore {
             self.error = error.message
         }
         loaded = true
-        if let selection, !facts.contains(where: { Self.tag($0) == selection }) { self.selection = nil }
+        // A proposed fact's selection is kept: Facts' list decides it.
+        if let selection, !AnalysisStore.isFactProposalTag(selection),
+           !facts.contains(where: { Self.tag($0) == selection }) { self.selection = nil }
     }
 
     var selected: FactInfo? { facts.first { Self.tag($0) == selection } }

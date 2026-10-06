@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Analysis settings (spec §14.10): the daily review, where facts are
 /// learned from, the daily cap, how long AI drafts are kept, and the
-/// notification. In Settings › Analysis and from the Analysis header.
+/// notification. In Settings › Learning and from the Writing Guide and Facts headers.
 struct AnalysisSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(NewMailNotifier.analysisKey, store: CoreClient.appDefaults()) private var notify = false
@@ -38,7 +38,7 @@ struct AnalysisSettingsView: View {
             } else if model.core != nil, model.openAccountID != nil {
                 ProgressView().controlSize(.small)
             } else {
-                Text("Open an account to change its Analysis settings.").foregroundStyle(.secondary)
+                Text("Open an account to change its learning settings.").foregroundStyle(.secondary)
             }
             Section {
                 Toggle("Notify me of new proposals", isOn: $notify)

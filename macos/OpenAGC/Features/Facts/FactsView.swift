@@ -1,22 +1,15 @@
 import SwiftUI
 
-/// The Facts tab's list (spec §14.11), in Analysis or (global facts) in
-/// Settings: facts by category, built-ins first then the user's own, a
-/// globe on global ones.
+/// The Facts page's list (spec §14.11), or (global facts) Settings ›
+/// Facts: facts by category, built-ins first then the user's own, a globe
+/// on global ones. Proposed facts are reviewed in the detail, from the
+/// header's *Review Proposed Facts*.
 struct FactsList: View {
     @Environment(AppModel.self) private var model
     @Bindable var store: FactsStore
 
     var body: some View {
         List(selection: $store.selection) {
-            // Proposed changes first (spec §14.11), decided here or in Proposals.
-            if store.scope == .account, !model.analysis.factProposals.isEmpty {
-                Section("Proposed") {
-                    ForEach(model.analysis.factProposals, id: \.id) { proposal in
-                        ProposedFactRow(proposal: proposal)
-                    }
-                }
-            }
             ForEach(store.sections, id: \.category.key) { section in
                 Section {
                     // Global and account ids overlap: rows are told apart by tag.
@@ -38,28 +31,11 @@ struct FactsList: View {
         .onDeleteCommand {
             if let fact = store.selected { Task { await model.deleteFact(fact) } }
         }
-        .task(id: model.factsRevision) { await store.load() }
-    }
-}
-
-private struct ProposedFactRow: View {
-    @Environment(AppModel.self) private var model
-    let proposal: AnalysisFactProposalInfo
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-            VStack(alignment: .leading, spacing: Space.hair) {
-                Text(proposal.subtitle).font(TypeRole.caption).foregroundStyle(.secondary)
-                Text(proposal.headline).lineLimit(2)
-            }
-            Spacer(minLength: Space.m)
-            Button("Accept") { Task { await model.decideFactProposals([proposal], accept: true) } }
-                .hoverHelp("Add it to your facts; Undo takes it back")
-            Button("Reject") { Task { await model.decideFactProposals([proposal], accept: false) } } // undoable
-                .hoverHelp("Leave it out; it will not be proposed again")
+        // A fact chosen: the review flow gives way to it.
+        .onChange(of: store.selection) { _, tag in
+            if let tag, !AnalysisStore.isFactProposalTag(tag) { model.analysis.reviewingFacts = false }
         }
-        .controlSize(.small)
-        .accessibilityElement(children: .contain)
+        .task(id: model.factsRevision) { await store.load() }
     }
 }
 

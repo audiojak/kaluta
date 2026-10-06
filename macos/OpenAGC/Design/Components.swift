@@ -228,8 +228,10 @@ struct CancelButton: View {
 
 /// A row of tabs as pills, for a column header (the Inbox's category
 /// tabs), as Mail draws them: equal pills with a symbol each; the chosen
-/// one widens to show its name. Counts are in the help tag and read by
-/// VoiceOver; the list's subtitle carries the chosen tab's.
+/// one widens to show its name. Two tabs whose names fit both show their
+/// names. The highlight slides to the chosen pill (none with Reduce
+/// Motion). Counts are in the help tag and read by VoiceOver; the list's
+/// subtitle carries the chosen tab's.
 struct CapsuleTabs: View {
     struct Tab: Identifiable, Equatable {
         let id: String
@@ -243,38 +245,125 @@ struct CapsuleTabs: View {
     @Binding var selection: String?
     /// Read after the count by VoiceOver and in the help tag ("unread").
     var countNoun = "unread"
+    @Namespace private var highlight
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        HStack(spacing: Space.s) {
-            ForEach(tabs) { tab in
-                let chosen = tab.id == selection
-                Button { selection = tab.id } label: {
-                    HStack(spacing: Space.xs) {
-                        Image(systemName: tab.symbol)
-                        if chosen { Text(tab.title).fontWeight(.medium) }
-                    }
-                    .lineLimit(1)
-                    .frame(minWidth: Self.pillWidth, maxWidth: chosen ? .infinity : nil)
-                    .padding(.horizontal, Space.m)
-                    .padding(.vertical, Space.s)
-                    .background(chosen ? Tone.highlight : Tone.controlFill, in: .capsule)
-                    .contentShape(.capsule)
+        Group {
+            if tabs.count <= Self.namedTabs {
+                // Every name when they fit; otherwise only the chosen one's.
+                ViewThatFits(in: .horizontal) {
+                    row(named: true)
+                    row(named: false)
                 }
-                .buttonStyle(.plain)
-                .hoverHelp(tab.count > 0 ? "\(tab.title), \(tab.count) \(countNoun)" : tab.title)
-                .accessibilityLabel(tab.title)
-                .accessibilityValue(tab.count > 0 ? "\(tab.count) \(countNoun)" : "")
-                .accessibilityAddTraits(chosen ? [.isSelected] : [])
+            } else {
+                row(named: false)
             }
         }
+        // Also when the selection changes from elsewhere (a key, a link).
+        .animation(reduceMotion ? nil : .snappy(duration: Self.duration), value: selection)
         .accessibilityElement(children: .contain)
+    }
+
+    private func row(named: Bool) -> some View {
+        HStack(spacing: Space.s) {
+            ForEach(tabs) { tab in
+                pill(tab, named: named)
+            }
+        }
+    }
+
+    private func pill(_ tab: Tab, named: Bool) -> some View {
+        let chosen = tab.id == selection
+        return Button {
+            selection = tab.id
+        } label: {
+            HStack(spacing: Space.xs) {
+                Image(systemName: tab.symbol)
+                if named || chosen {
+                    Text(tab.title).fontWeight(chosen ? .medium : .regular)
+                }
+            }
+            .lineLimit(1)
+            .frame(minWidth: Self.pillWidth, maxWidth: named || chosen ? .infinity : nil)
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.s)
+            .background {
+                if chosen {
+                    Capsule().fill(Tone.highlight).matchedGeometryEffect(id: "chosen", in: highlight)
+                } else {
+                    Capsule().fill(Tone.controlFill)
+                }
+            }
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .hoverHelp(tab.count > 0 ? "\(tab.title), \(tab.count) \(countNoun)" : tab.title)
+        .accessibilityLabel(tab.title)
+        .accessibilityValue(tab.count > 0 ? "\(tab.count) \(countNoun)" : "")
+        .accessibilityAddTraits(chosen ? [.isSelected] : [])
     }
 
     /// Unchosen pills are this wide at least, so they line up.
     static let pillWidth: CGFloat = 28
+    /// Up to this many tabs, every name shows when they fit.
+    static let namedTabs = 2
+    private static let duration: Double = 0.2
+}
+
+/// One answer to a question, as a large button that answers on click (the
+/// writing guide's questions): its title, a number key, and a check on the
+/// answer given before.
+struct AnswerButton: View {
+    let title: String
+    /// 1 to 9: the key that picks it.
+    let number: Int
+    var chosen = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Space.m) {
+                Text("\(number)")
+                    .font(TypeRole.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text(title).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Space.m)
+                if chosen {
+                    Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(chosen ? Tone.highlight : Tone.controlFill, in: .rect(cornerRadius: Radius.card))
+            .contentShape(.rect(cornerRadius: Radius.card))
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(KeyEquivalent(Character("\(number)")), modifiers: [])
+        .hoverHelp(chosen ? "Your answer; choose it to keep it and go on (\(number))" : "Answer this and go on (\(number))")
+        .accessibilityAddTraits(chosen ? [.isSelected] : [])
+    }
+}
+
+extension KeyEquivalent {
+    /// ⌫ as the keyboard sends it (DEL, U+007F; `.delete` is backspace,
+    /// U+0008, which macOS keyboards never send) and ⌦: for
+    /// `onKeyPress(keys:)`.
+    static let deleteKeys: Set<KeyEquivalent> = [.delete, .deleteForward, KeyEquivalent("\u{7F}")]
 }
 
 extension View {
+    /// What Return does, drawn prominent while it is (the current card in
+    /// a review flow); otherwise an ordinary button.
+    @ViewBuilder func defaultAction(_ isDefault: Bool) -> some View {
+        if isDefault {
+            buttonStyle(.borderedProminent)
+        } else {
+            buttonStyle(.bordered)
+        }
+    }
+
     /// `.help` that also shows where SwiftUI's own tool tips do not: in a
     /// `.columnHeader` bar (safe-area bars) on macOS 26 nothing appears on
     /// hover. Adds an AppKit tool tip over the control that lets every

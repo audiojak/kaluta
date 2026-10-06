@@ -1,9 +1,11 @@
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import OpenAGC
 
-/// The Analysis section (spec §14.10): its dot, the learning decisions it
-/// holds, and deciding proposals with Undo.
+/// Proposed rules in the Writing Guide (spec §14.10): its dot, the learning
+/// decisions beside the review's proposals, and deciding them with Undo.
 @MainActor
 struct AnalysisTests {
     /// The demo account after a learning run, with a day of reviews seeded.
@@ -13,7 +15,7 @@ struct AnalysisTests {
         await model.agent.loadProviders()
         model.undo.runsClock = false
         let core = try #require(model.core)
-        #expect(!model.showsAnalysis, "hidden until the guide has learned")
+        #expect(!model.reviewsAvailable, "no reviews until the guide has learned")
         _ = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 30,
                                                           filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
                                                           focus: nil, agent: model.agent.providerID))
@@ -32,16 +34,64 @@ struct AnalysisTests {
         return model
     }
 
-    @Test func theDotShowsUntilAnalysisIsOpened() async throws {
+    @Test func theWritingGuidesDotShowsUntilItIsOpened() async throws {
         let model = try await reviewed()
-        #expect(model.showsAnalysis)
-        #expect(model.analysis.unseen)
+        #expect(model.reviewsAvailable)
+        #expect(model.analysis.unseenRules)
         #expect(model.analysis.proposals.count >= 2 && !model.analysis.watching.isEmpty)
-        #expect(model.analysis.learningDecisions > 0, "the learning run's decisions wait here")
-        model.openAnalysis()
-        await model.analysisShown()
-        #expect(model.isAnalysis && !model.analysis.unseen)
-        #expect(model.analysis.selection == AnalysisStore.learningTag, "the first thing waiting is chosen")
+        #expect(model.analysis.learningDecisions > 0, "the learning run's decisions wait with them")
+        #expect(model.analysis.rulesWaiting == model.guide.decisions.count + model.analysis.proposals.count)
+        model.openProposedRules(learning: true)
+        await model.proposalsShown(.rules)
+        #expect(model.isGuide && model.analysis.reviewingRules && !model.analysis.unseenRules)
+        let first = try #require(model.guide.decisions.first)
+        #expect(model.analysis.selection == AnalysisStore.tag(first), "the first learning decision is chosen")
+        #expect(model.selectedDecision?.id == first.id)
+    }
+
+    /// The review flow's keys as the keyboard sends them: ⌫ is DEL
+    /// (U+007F), which `.onKeyPress(.delete)` never matched.
+    @Test func theDeleteKeyRejectsTheCurrentProposedRule() async throws {
+        let model = try await reviewed()
+        model.openProposedRules()
+        let first = try #require(model.guide.decisions.first)
+        model.analysis.selection = AnalysisStore.tag(first)
+        NSApp.activate()
+        let window = ReviewKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600), styleMask: [.titled],
+                                     backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: ProposedRulesView().environment(model))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        try await Task.sleep(for: .milliseconds(300))
+        let delete = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
+                                      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                      context: nil, characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
+                                      isARepeat: false, keyCode: 51)!
+        NSApp.postEvent(delete, atStart: false)
+        for _ in 0..<100 where model.guide.decisions.contains(where: { $0.id == first.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(!model.guide.decisions.contains { $0.id == first.id }, "⌫ rejected the current rule")
+        #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Reject Entry")
+    }
+
+    @Test func decidingAProposedRuleChoosesTheNext() async throws {
+        let model = try await reviewed()
+        model.openProposedRules()
+        let tags = model.proposedRuleTags
+        let first = try #require(model.guide.decisions.first)
+        model.analysis.selection = AnalysisStore.tag(first)
+        await model.decideProposedRule(reject: first)
+        #expect(!model.guide.decisions.contains { $0.id == first.id })
+        #expect(model.analysis.selection == tags[1], "the next proposed rule")
+        // A category chosen: the review flow gives way to it; the header's
+        // button brings it back.
+        #expect(model.analysis.reviewingRules)
+        model.showGuideCategory("A1")
+        #expect(!model.analysis.reviewingRules && model.guide.selectedCategory == "A1")
+        model.openProposedRules()
+        #expect(model.analysis.reviewingRules && model.analysis.selection == tags[1])
     }
 
     @Test func acceptingChangesTheGuideAndUndoPutsItBack() async throws {
@@ -95,6 +145,13 @@ struct AnalysisTests {
         #expect(after?.support == proposal.support - 1)
     }
 
+    @Test func aReviewWithNothingToCompareSaysSo() {
+        let run = AnalysisRunInfo(id: 1, day: "2026-10-05", daily: false, status: .done, matched: 0, unmatched: 0,
+                                  unchanged: 0, total: 0, done: 0, batches: 0, batchesDone: 0, agent: nil, error: nil,
+                                  startedAt: 0, finishedAt: Int64(Date().timeIntervalSince1970 * 1000), secondsLeft: nil)
+        #expect(ReviewStatus.summary(run, daily: false) == "Last reviewed today: no edited AI drafts to compare.")
+    }
+
     @Test func wordDiffKeepsTheTextAndMarksOnlyChanges() {
         let runs = WordDiff.runs(ai: "Hi Ann, Friday works well. Best regards, John", sent: "Hi Ann, Friday works. J")
         #expect(runs.ai.map(\.0).joined() == "Hi Ann, Friday works well. Best regards, John")
@@ -102,4 +159,9 @@ struct AnalysisTests {
         #expect(runs.sent.filter(\.1).map(\.0).joined().trimmingCharacters(in: .whitespaces) == "J")
         #expect(runs.ai.filter(\.1).map(\.0).joined().contains("regards"))
     }
+}
+
+/// A window the test host can make key without a user clicking it.
+private final class ReviewKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
 }

@@ -487,8 +487,9 @@ struct GuidePromptTests {
         }
         #expect(decisions > 0)
         model.openGuideDecisionsNow()
-        // The decisions wait in Analysis (spec §14.10).
-        #expect(model.isAnalysis && model.analysis.selection == AnalysisStore.learningTag && model.guidePrompt == nil)
+        // The decisions wait in the Writing Guide's Proposed section (spec §14.10).
+        let first = try #require(model.guide.decisions.first)
+        #expect(model.isGuide && model.analysis.selection == AnalysisStore.tag(first) && model.guidePrompt == nil)
     }
 }
 

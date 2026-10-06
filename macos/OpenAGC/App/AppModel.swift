@@ -166,7 +166,7 @@ final class AppModel {
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID,
-              id != Self.analysisMailboxID else { return nil }
+              id != Self.factsMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -326,7 +326,7 @@ final class AppModel {
     let tasks: TaskListStore
     /// The writing guide (spec §14.9).
     let guide: GuideStore
-    /// The Analysis section's queue (spec §14.10).
+    /// The proposals waiting (spec §14.10): rules in the Writing Guide, facts in Facts.
     let analysis: AnalysisStore
     /// The open account's facts, with the global ones (spec §14.11).
     let facts: FactsStore
@@ -394,7 +394,13 @@ final class AppModel {
             guard let self else { return }
             Task {
                 if let account, account != self.openAccountID { await self.switchAccount(to: account) }
-                self.openAnalysis()
+                await self.analysis.load()
+                // The page with something new: rules first.
+                if self.analysis.unseenRules || !self.analysis.unseenFacts {
+                    self.openProposedRules()
+                } else {
+                    self.openFacts(proposed: true)
+                }
             }
         }
         notifier.install()
@@ -1291,8 +1297,8 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
-        if isGuide { Task { await guide.load() } }
-        if isAnalysis { Task { await analysisShown() } }
+        if isGuide { Task { await guide.load(); await proposalsShown(.rules) } }
+        if isFacts { Task { await proposalsShown(.facts) } }
         guard case .open = accountState, let id = listMailboxID else { return }
         Task { await threads.show(mailboxID: id) }
     }
@@ -1403,7 +1409,7 @@ final class AppModel {
         case .guideChanged:
             guideRevision += 1
             await guide.load()
-            // Learning decisions are counted in Analysis.
+            // Learning decisions are counted with the proposed rules.
             await analysis.load()
         case let .guideProgress(progress):
             let finished = guideProgress?.run?.status == .running && progress.run?.status == .done
@@ -1412,10 +1418,10 @@ final class AppModel {
                 await guide.load()
                 let waiting = Int(progress.decisionsTotal) - Int(progress.decisionsDone)
                 notifier.announceGuide(decisions: waiting, accountID: tagged.accountID)
-                // The first finished run opens Analysis, where its decisions wait.
+                // Its decisions wait in the Writing Guide's Proposed section.
                 analysisProgress = try? await core?.analysisProgress()
                 await analysis.load()
-                if waiting > 0, guideSheet == nil, !isAnalysis {
+                if waiting > 0, guideSheet == nil, !isGuide {
                     guidePrompt = .finished(decisions: waiting)
                 }
             }
@@ -1433,7 +1439,7 @@ final class AppModel {
         case .factsChanged:
             factsRevision += 1
             await facts.load()
-            // Undoing a fact decision puts its proposal back in Analysis.
+            // Undoing a fact decision puts its proposal back in Facts.
             await analysisChanged()
         case .tasksChanged:
             tasksRevision += 1
