@@ -674,6 +674,15 @@ impl MailProvider for PrimitiveProvider {
         Ok(())
     }
 
+    fn labels_are_local(&self) -> bool {
+        true
+    }
+
+    /// Primitive may give a sent message its own Message-ID.
+    fn adopts_sent_copies(&self) -> bool {
+        true
+    }
+
     /// Labels are local only: the label exists on this Mac.
     async fn create_label(&self, name: &str, color: Option<(&str, &str)>) -> ProviderResult<Label> {
         let slug: String = name.chars().map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();

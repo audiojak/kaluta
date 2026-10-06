@@ -209,6 +209,13 @@ async fn send_freely(core: &Arc<Core>, session: &str, tool: Tool, arguments: Val
         },
         None => Outcome::error("failed", "no draft to send"),
     };
+    // A forward that could not go leaves no draft behind, as when declined.
+    if tool == Tool::Forward
+        && !matches!(outcome, Outcome::Ok { .. })
+        && let Some(draft) = proposal.draft_id
+    {
+        let _ = core.delete_draft(draft).await;
+    }
     let (state, summary) = match &outcome {
         Outcome::Ok { .. } => ("done", proposal.summary),
         _ => ("failed", super::approvals::outcome_summary(&outcome)),

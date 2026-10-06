@@ -208,4 +208,17 @@ pub trait MailProvider: Send + Sync {
     /// Create a user label. `color` is a `(background, text)` pair from the
     /// provider's palette.
     async fn create_label(&self, name: &str, color: Option<(&str, &str)>) -> ProviderResult<Label>;
+    /// Labels, read state, stars and trash live only on this Mac (an agent
+    /// mailbox, spec §7.9): a refetched message keeps what is stored, and
+    /// the provider's labels apply only to mail new to the store.
+    fn labels_are_local(&self) -> bool {
+        false
+    }
+    /// A sent message comes back under the id [`MailProvider::send`]
+    /// returned, but perhaps with another Message-ID: the optimistic local
+    /// copy takes that id at once rather than waiting to be matched by
+    /// Message-ID.
+    fn adopts_sent_copies(&self) -> bool {
+        false
+    }
 }

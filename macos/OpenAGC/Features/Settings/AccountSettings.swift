@@ -269,6 +269,8 @@ struct AccountRow: View {
                         if let key = try? model.core?.agentMailboxAPIKey(account.id) {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(key, forType: .string)
+                            // Clipboard managers leave concealed items out.
+                            NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
                         }
                     }
                 } message: {

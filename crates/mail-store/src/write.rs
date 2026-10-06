@@ -87,11 +87,35 @@ pub struct MailWriter<'t> {
     tx: &'t Transaction<'t>,
     /// Thread rowid → provider thread id, for everything touched.
     dirty: BTreeMap<i64, String>,
+    /// A stored message keeps its labels when upserted again (labels that
+    /// live only on this Mac, spec §7.9).
+    keep_labels: bool,
 }
 
 impl<'t> MailWriter<'t> {
     pub fn new(tx: &'t Transaction<'t>) -> Self {
-        Self { tx, dirty: BTreeMap::new() }
+        Self { tx, dirty: BTreeMap::new(), keep_labels: false }
+    }
+
+    /// Upserts keep a stored message's labels and flags.
+    pub fn keeping_labels(mut self, keep: bool) -> Self {
+        self.keep_labels = keep;
+        self
+    }
+
+    /// The optimistic copy of a sent message takes the id the provider
+    /// gave it, or goes if that message is already here.
+    pub fn adopt_local_copy(&mut self, local: &MessageId, sent: &MessageId) -> StoreResult<()> {
+        if self.message_rowid(sent)?.is_some() {
+            self.delete_message(local)?;
+            return Ok(());
+        }
+        if let Some((_, thread_rowid)) = self.message_rowid(local)? {
+            self.tx
+                .execute("UPDATE messages SET gmail_id = ?2 WHERE gmail_id = ?1", [local.as_str(), sent.as_str()])?;
+            self.mark_thread_rowid(thread_rowid)?;
+        }
+        Ok(())
     }
 
     /// Insert or update labels by provider id. Does not delete missing ones;
@@ -137,18 +161,24 @@ impl<'t> MailWriter<'t> {
     /// Insert or replace a message and everything hanging off it.
     pub fn upsert_message(&mut self, m: &IncomingMessage) -> StoreResult<()> {
         let thread_rowid = self.ensure_thread(&m.thread_id)?;
-        let has = |id: &str| m.label_ids.iter().any(|l| l.as_str() == id);
+        let existing: Option<(i64, i64, String)> = self
+            .tx
+            .prepare_cached("SELECT id, thread_id, body_state FROM messages WHERE gmail_id = ?1")?
+            .query_row([m.id.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()?;
+        let label_ids: Vec<LabelId> = match &existing {
+            Some((rowid, _, _)) if self.keep_labels => {
+                self.message_label_ids(*rowid)?.into_iter().map(LabelId).collect()
+            }
+            _ => m.label_ids.clone(),
+        };
+        let has = |id: &str| label_ids.iter().any(|l| l.as_str() == id);
         let is_read = !has(system_labels::UNREAD);
         let is_starred = has(system_labels::STARRED);
         let is_draft = has(system_labels::DRAFT);
         let is_sent_by_me = has(system_labels::SENT);
         let has_attachments = m.attachments.iter().any(|a| !a.is_inline);
 
-        let existing: Option<(i64, i64, String)> = self
-            .tx
-            .prepare_cached("SELECT id, thread_id, body_state FROM messages WHERE gmail_id = ?1")?
-            .query_row([m.id.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .optional()?;
         let body_state = match (&m.body, &existing) {
             (Some(_), _) => "full",
             (None, Some((_, _, state))) => state.as_str(),
@@ -234,7 +264,7 @@ impl<'t> MailWriter<'t> {
         };
 
         self.replace_participants(message_rowid, m)?;
-        self.replace_message_labels(message_rowid, &m.label_ids)?;
+        self.replace_message_labels(message_rowid, &label_ids)?;
         if let Some(body) = &m.body {
             self.tx
                 .prepare_cached(

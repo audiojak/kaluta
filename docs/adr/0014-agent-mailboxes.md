@@ -58,9 +58,9 @@ are all Gmail-shaped.
 - Sync and setup choose the provider by account kind instead of always
   building Gmail's.
 - `HttpClient` reads a service's own error body as well as Google's.
-- A service without labels loses local archive state if its change feed
-  expires and the account resyncs (Primitive keeps changes 7 days and an
-  idle cursor stays valid, so this needs a week of failed syncs).
+- The sync engine learns two things from a provider: its labels are local
+  (a refetched message keeps what is stored), and a sent message takes
+  the id the provider returned (it may carry another Message-ID).
 - Service limits show through as they are: Primitive sends to one
   recipient per message and, until verified, only replies to addresses
   that wrote first. The composer and the agent tools say so rather than

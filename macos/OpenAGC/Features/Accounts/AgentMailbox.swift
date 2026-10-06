@@ -31,9 +31,12 @@ extension AppModel {
     }
 
     /// Create the mailbox, then show it and sync it with the others.
-    func createAgentMailbox(name: String) async throws(CoreClientError) -> AgentMailboxCreated {
+    /// `requestID` stays the same across retries from one sheet, so a retry
+    /// never makes a second account at the service.
+    func createAgentMailbox(name: String, requestID: String = UUID().uuidString) async throws(CoreClientError)
+        -> AgentMailboxCreated {
         guard let core else { throw CoreClientError(kind: .notFound, message: "OpenAGC is still starting") }
-        let created = try await core.createAgentMailbox(service: .primitive, name: name)
+        let created = try await core.createAgentMailbox(service: .primitive, name: name, requestID: requestID)
         agentPlans[created.accountId] = created.plan
         await reloadAccounts()
         await switchAccount(to: created.accountId)
@@ -71,6 +74,8 @@ struct AgentMailboxSheet: View {
     let request: AgentMailboxRequest
 
     @State private var name = ""
+    /// One per sheet: retries after a failure reuse it.
+    @State private var requestID = UUID().uuidString
     @State private var busy = false
     @State private var error: String?
     /// Set once the mailbox exists (or when verifying an existing one).
@@ -133,7 +138,7 @@ struct AgentMailboxSheet: View {
         busy = true
         defer { busy = false }
         do {
-            let mailbox = try await model.createAgentMailbox(name: name)
+            let mailbox = try await model.createAgentMailbox(name: name, requestID: requestID)
             error = nil
             created = (mailbox.accountId, mailbox.address)
         } catch {
@@ -153,6 +158,8 @@ struct AgentVerificationForm: View {
     @State private var email = ""
     @State private var code = ""
     @State private var sentTo: String?
+    /// Bumped by each code sent, so the search for it starts again.
+    @State private var sends = 0
     @State private var resendAt: Date?
     @State private var foundCode: String?
     @State private var busy = false
@@ -201,7 +208,7 @@ struct AgentVerificationForm: View {
         .onAppear {
             if email.isEmpty { email = model.codeAccounts.first?.email ?? "" }
         }
-        .task(id: sentTo) { await watchForCode() }
+        .task(id: sends) { await watchForCode() }
     }
 
     private var message: String {
@@ -224,6 +231,8 @@ struct AgentVerificationForm: View {
             let started = try await core.startAgentMailboxVerification(accountID, email: email)
             error = nil
             sentTo = email.trimmingCharacters(in: .whitespaces)
+            foundCode = nil
+            sends += 1
             resendAt = Date().addingTimeInterval(TimeInterval(started.resendAfterSecs))
             // A sync now brings the code's message sooner.
             core.syncNow()

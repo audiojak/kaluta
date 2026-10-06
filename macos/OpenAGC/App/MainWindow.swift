@@ -326,15 +326,21 @@ struct MainWindow: View {
     private static let analysisSettingsHeight: CGFloat = 340
 }
 
-/// Google rejected the stored credentials (revoked or expired).
+/// Google rejected the stored credentials (revoked or expired); for an
+/// agent mailbox, its service key is missing or refused.
 private struct ReauthenticationBanner: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
-               intent: .attention) {
-            Button("Sign In") { Task { await model.signIn(with: .effective()) } }
-                .hoverHelp("Sign in to Google again to keep syncing this account")
+        if model.isAgentMailbox {
+            Banner("This agent mailbox's key is missing or was refused, so it isn't syncing.",
+                   systemImage: "key.slash", intent: .attention)
+        } else {
+            Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
+                   intent: .attention) {
+                Button("Sign In") { Task { await model.signIn(with: .effective()) } }
+                    .hoverHelp("Sign in to Google again to keep syncing this account")
+            }
         }
     }
 }

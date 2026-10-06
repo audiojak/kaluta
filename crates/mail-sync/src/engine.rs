@@ -795,10 +795,11 @@ impl SyncEngine {
         tracing::debug!(count = fetched.len(), "backfill batch: storing");
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let processed = ids.len();
+        let keep_labels = self.provider.labels_are_local();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -861,10 +862,11 @@ impl SyncEngine {
         let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
         let stored = incoming.len();
         let requested = ids.clone();
+        let keep_labels = self.provider.labels_are_local();
         let (changes, dropped) = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -921,10 +923,11 @@ impl SyncEngine {
         let fetched = self.fetch_bodies(&missing, Priority::Interactive).await?;
         let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
         let count = incoming.len();
+        let keep_labels = self.provider.labels_are_local();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1003,10 +1006,11 @@ impl SyncEngine {
         let downloaded = fetched.len();
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let pairs: Vec<(String, String)> = listed.into_iter().map(|(d, m)| (d, m.0)).collect();
+        let keep_labels = self.provider.labels_are_local();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1076,11 +1080,12 @@ impl SyncEngine {
         let new_cursor = set.cursor.0.clone();
         let changes_in = set.changes;
 
+        let keep_labels = self.provider.labels_are_local();
         let (changes, report) = self
             .db
             .write(move |tx| {
                 let mut report = IncrementalReport::default();
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
                 for m in &incoming {
                     let stored =
                         tx.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1")?.exists([m.id.as_str()])?;

@@ -1139,9 +1139,14 @@ the key as a Bearer token).
 - Changes: `GET /changes` (the cursor taken before the first listing, as
   §7.4 asks). `email.visible` and `sent_email.created` add a message,
   `email.deleted` and `sent_email.deleted` remove one, other kinds are
-  ignored. A `410 cursor_expired` resyncs; local archive state of mail the
-  resync brings back is lost then (changes are kept 7 days; an idle cursor
-  stays valid).
+  ignored. A `410 cursor_expired` resyncs (changes are kept 7 days; an
+  idle cursor stays valid). Mail already stored keeps its labels, read
+  state and stars through a resync or a refetch: the provider says its
+  labels are local (`labels_are_local`), and its labels apply only to
+  mail new to the store.
+- A sent message takes the id `/send-mail` returned at once
+  (`adopts_sent_copies`), since Primitive may give it a Message-ID of its
+  own: the optimistic copy is never left beside the real one.
 - Push: the same feed long-polls (`wait=20`) in place of IMAP IDLE, so new
   mail shows within a second or two while the app is open.
 - No drafts at the service: drafts stay on the Mac until sent. No server

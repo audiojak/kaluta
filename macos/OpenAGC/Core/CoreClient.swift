@@ -48,10 +48,12 @@ final class CoreClient: Sendable {
         }
     }
 
-    /// Agent mailboxes are created against an in-memory service.
+    /// Agent mailboxes are created against an in-memory service: always in
+    /// tests, and in scratch runs that ask for fakes. Never on the real data
+    /// directory, where a fake mailbox would mix with real ones.
     static var usesFakeAgentMail: Bool {
-        isRunningTests || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents")
-            || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgentMail")
+        isRunningTests || (isScratchRun && (UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents")
+            || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgentMail")))
     }
 
     /// The app's Keychain items, or a separate service when hosting tests
@@ -202,8 +204,10 @@ final class CoreClient: Sendable {
 
     /// Create a mailbox for an agent. Accepts the service's terms: only
     /// from the user's Agree and Create.
-    func createAgentMailbox(service: AgentService, name: String) async throws(CoreClientError) -> AgentMailboxCreated {
-        try await call { try await core.createAgentMailbox(service: service, name: name) }
+    /// `requestID` is the sheet's own: a retry returns the same mailbox.
+    func createAgentMailbox(service: AgentService, name: String,
+                            requestID: String) async throws(CoreClientError) -> AgentMailboxCreated {
+        try await call { try await core.createAgentMailbox(service: service, name: name, requestId: requestID) }
     }
 
     func agentMailboxPlan(_ accountID: String) async throws(CoreClientError) -> AgentMailboxPlan {

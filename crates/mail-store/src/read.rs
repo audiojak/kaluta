@@ -434,13 +434,15 @@ pub fn suggest_contacts(conn: &Connection, text: &str, limit: u32) -> StoreResul
 /// finding a verification code the user asked for (spec §7.9).
 pub fn recent_text_from_domain(conn: &Connection, domain: &str, since: i64, limit: u32) -> StoreResult<Vec<String>> {
     let domain = domain.to_lowercase();
+    // Narrowed by the address's end in SQL, so a busy inbox cannot hide
+    // the code; the exact host is checked below.
     let mut stmt = conn.prepare_cached(
         "SELECT m.from_email, m.subject, m.snippet, b.text_plain FROM messages m
          LEFT JOIN bodies b ON b.message_id = m.id
-         WHERE m.internal_date >= ?1 AND m.is_sent_by_me = 0 AND m.from_email IS NOT NULL
+         WHERE m.internal_date >= ?1 AND m.is_sent_by_me = 0 AND lower(m.from_email) LIKE ?2
          ORDER BY m.internal_date DESC LIMIT 50",
     )?;
-    let rows = stmt.query_map(params![since], |r| {
+    let rows = stmt.query_map(params![since, format!("%{domain}")], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?))
     })?;
     let mut out = Vec::new();

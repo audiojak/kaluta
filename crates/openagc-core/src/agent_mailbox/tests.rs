@@ -80,8 +80,12 @@ fn a_six_digit_code_is_found_on_its_own() {
 fn creating_a_mailbox_registers_an_agent_account_with_its_key_in_the_keychain() {
     let (_t, core, secrets) = core("create");
     core.debug_use_fake_agent_mail(true);
-    let created =
-        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "  Research   Scout ".into())).unwrap();
+    let created = block_on(core.clone().create_agent_mailbox(
+        AgentService::Primitive,
+        "  Research   Scout ".into(),
+        "req-1".into(),
+    ))
+    .unwrap();
     assert_eq!(created.address, "research-scout@demo.primitive.email");
     assert!(!created.plan.verified && created.plan.reply_only);
     let key = secrets.0.lock().unwrap().get(&keys::mailbox_api_key(&created.account_id)).cloned();
@@ -116,7 +120,8 @@ fn key_of(secrets: &crate::secrets::MemorySecrets, account: &str) -> String {
 fn a_lost_index_lists_the_agent_mailbox_again() {
     let (t, core, _secrets) = core("rescan");
     core.debug_use_fake_agent_mail(true);
-    let created = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let created =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-2".into())).unwrap();
     std::fs::remove_file(t.0.join("accounts").join("index.json")).unwrap();
     let accounts = block_on(core.list_accounts()).unwrap();
     assert_eq!(accounts.len(), 1);
@@ -129,7 +134,8 @@ fn a_lost_index_lists_the_agent_mailbox_again() {
 fn verifying_finds_the_code_in_the_users_own_mail_and_confirms_it() {
     let (_t, core, _secrets) = core("verify");
     core.debug_use_fake_agent_mail(true);
-    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-3".into())).unwrap();
     // Before a code is asked for, nothing is looked at.
     assert_eq!(block_on(core.find_agent_mailbox_code(agent.account_id.clone(), "me".into())).unwrap(), None);
     block_on(core.start_agent_mailbox_verification(agent.account_id.clone(), "me@example.com".into())).unwrap();
@@ -170,7 +176,8 @@ fn verifying_finds_the_code_in_the_users_own_mail_and_confirms_it() {
 fn an_agent_mailbox_syncs_with_the_other_accounts_and_sends_as_the_agent_to_one_recipient() {
     let (_t, core, _secrets) = core("sync");
     core.debug_use_fake_agent_mail(true);
-    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-4".into())).unwrap();
     block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
     assert!(block_on(core.clone().start_all_sync()).unwrap().is_empty(), "nothing needs a sign-in");
     core.debug_deliver_to_agent_mailbox(
@@ -262,7 +269,8 @@ fn a_primitive_mailbox_is_created_and_synced_over_its_api() {
 
     let (_t, core, secrets) = core("primitive");
     *core.agent_mail.base.lock().unwrap() = Some(server.uri());
-    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-5".into())).unwrap();
     assert_eq!(agent.address, "scout@abc.primitive.email");
     assert_eq!(key_of(&secrets, &agent.account_id), "prim_k");
     block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
@@ -296,7 +304,8 @@ fn an_agent_mailbox_that_sends_freely_sends_without_asking_and_flags_what_breaks
 
     let (_t, core, _secrets) = core("freely");
     core.debug_use_fake_agent_mail(true);
-    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-6".into())).unwrap();
     assert_eq!(core.agent_send_mode(agent.account_id.clone()).unwrap(), AgentSendMode::Freely, "the default");
     block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
     core.clone().start_sync().unwrap();
@@ -365,7 +374,8 @@ fn an_agent_mailbox_that_sends_freely_sends_without_asking_and_flags_what_breaks
 fn an_own_domain_is_added_checked_and_becomes_the_agents_address() {
     let (_t, core, _secrets) = core("domain");
     core.debug_use_fake_agent_mail(true);
-    let agent = block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into())).unwrap();
+    let agent =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-7".into())).unwrap();
     let id = agent.account_id.clone();
     assert!(block_on(core.agent_domains(id.clone())).unwrap().is_empty());
 
@@ -396,4 +406,23 @@ fn an_own_domain_is_added_checked_and_becomes_the_agents_address() {
     assert!(block_on(core.clone().set_agent_address(id.clone(), "scout@other.example.org".into())).is_err());
     block_on(core.clone().set_agent_address(id.clone(), agent.address.clone())).unwrap();
     assert_eq!(block_on(core.list_accounts()).unwrap()[0].email, agent.address);
+}
+
+#[test]
+fn retrying_a_creation_returns_the_same_mailbox() {
+    let (_t, core, _secrets) = core("retry");
+    core.debug_use_fake_agent_mail(true);
+    let first =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "sheet-1".into())).unwrap();
+    let again =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "sheet-1".into())).unwrap();
+    assert_eq!(
+        (first.account_id.as_str(), first.address.as_str()),
+        (again.account_id.as_str(), again.address.as_str())
+    );
+    assert_eq!(block_on(core.list_accounts()).unwrap().len(), 1);
+    assert!(
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "no spaces".into()))
+            .is_err()
+    );
 }

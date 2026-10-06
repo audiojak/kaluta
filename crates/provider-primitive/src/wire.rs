@@ -26,8 +26,8 @@ pub struct Limits {
     pub send_per_day: f64,
 }
 
-/// `POST /agent/accounts`.
-#[derive(Debug, Deserialize)]
+/// `POST /agent/accounts`. No `Debug`: it holds the API key.
+#[derive(Deserialize)]
 pub struct AgentAccount {
     pub api_key: String,
     #[serde(default)]

@@ -356,21 +356,26 @@ impl Core {
     /// Accepts the service's terms: call only from the user's *Agree and
     /// Create*. The account is registered and its key stored; the app
     /// then opens it and starts sync.
+    /// `request_id` is the sheet's own (a UUID): it becomes the account id
+    /// and the service's idempotency key, so a retry after a timeout or a
+    /// failure part way returns the same service account, never a second.
     pub async fn create_agent_mailbox(
         self: Arc<Self>,
         service: AgentService,
         name: String,
+        request_id: String,
     ) -> Result<AgentMailboxCreated, CoreError> {
         let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
         if name.is_empty() || name.chars().count() > 100 {
             return Err(CoreError::new(ErrorKind::InvalidInput, "give the agent a name of up to 100 characters"));
         }
+        if !crate::mail::valid_account_id(&request_id) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "request id must be 1-64 of [A-Za-z0-9-]"));
+        }
         let core = self.clone();
         runtime::run(async move {
             let client = core.mailbox_service(service)?;
-            let account_id = crate::account::new_account_id()?;
-            // The account id doubles as the idempotency key: a retried call
-            // returns the same service account.
+            let account_id = request_id;
             let SignedUp { api_key, address, plan } =
                 client.sign_up(&name, &account_id).await.map_err(service_error)?;
             core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
@@ -558,8 +563,19 @@ impl Core {
                 ));
             }
         }
+        let dir = accounts_dir(&self.data_path()).join(&account_id);
+        let previous = meta.clone();
         meta.address = address.clone();
-        write_meta(&accounts_dir(&self.data_path()).join(&account_id), &meta)?;
+        write_meta(&dir, &meta)?;
+        // The new provider before the old sync stops: if it cannot be made,
+        // nothing changes.
+        let sources = match self.agent_provider(&account_id) {
+            Ok(sources) => sources,
+            Err(e) => {
+                write_meta(&dir, &previous)?;
+                return Err(e);
+            }
+        };
         let db = self.store_for(&account_id).await?;
         let stored = address.clone();
         runtime::run(async move {
@@ -582,7 +598,7 @@ impl Core {
         // Sends go from the new address: restart its sync with it.
         if self.is_syncing(&account_id) {
             self.stop_sync_for(&account_id);
-            let (provider, push) = self.agent_provider(&account_id)?;
+            let (provider, push) = sources;
             crate::registry::SCOPED_ACCOUNT.sync_scope(account_id, || self.start_sync_with_backfill(provider, push))?;
         }
         Ok(())
@@ -710,8 +726,13 @@ impl MailboxService for FakeMailboxService {
             .trim_matches('-')
             .to_owned();
         let key = format!("fake_{idempotency_key}");
-        let plan = fake_plan(false, None);
-        self.accounts.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), plan.clone());
+        let plan = self
+            .accounts
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(key.clone())
+            .or_insert_with(|| fake_plan(false, None))
+            .clone();
         let local = if slug.is_empty() { "agent".to_owned() } else { slug };
         Ok(SignedUp { api_key: Redacted::new(key), address: format!("{local}@demo.primitive.email"), plan })
     }
