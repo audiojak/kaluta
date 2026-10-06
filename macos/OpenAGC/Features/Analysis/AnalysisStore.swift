@@ -32,10 +32,7 @@ final class AnalysisStore {
     var showsFacts = false
 
     @ObservationIgnored private let core: CoreClient?
-    /// One read at a time; a load asked for meanwhile reads once more after
-    /// it, and returns only when that read is applied.
-    @ObservationIgnored private var reading: Task<Void, Never>?
-    @ObservationIgnored private var readAgain = false
+    @ObservationIgnored private let reads = SerialReads()
 
     init(core: CoreClient?) {
         self.core = core
@@ -59,22 +56,7 @@ final class AnalysisStore {
     }
 
     func load() async {
-        if let reading {
-            readAgain = true
-            await reading.value
-            return
-        }
-        let task = Task {
-            repeat {
-                readAgain = false
-                await read()
-            } while readAgain
-            // Cleared here, not by the caller: a load asked for after the
-            // last read must start a new one.
-            reading = nil
-        }
-        reading = task
-        await task.value
+        await reads.run { [weak self] in await self?.read() }
     }
 
     private func read() async {

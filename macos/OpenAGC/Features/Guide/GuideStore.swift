@@ -19,25 +19,24 @@ final class GuideStore {
     private(set) var error: String?
 
     @ObservationIgnored private let core: CoreClient?
-    @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var applied = 0
+    @ObservationIgnored private let reads = SerialReads()
 
     init(core: CoreClient?) {
         self.core = core
     }
 
     func load() async {
+        await reads.run { [weak self] in await self?.read() }
+    }
+
+    private func read() async {
         guard let core else { return }
-        generation += 1
-        let mine = generation
         do {
             let categories = try await core.guideCategories()
             let entries = try await core.guideEntries([.accepted])
             let groups = try await core.audienceGroups()
             let decisions = try await core.guideDecisions()
             let health = (try? await core.guideEntryHealth()) ?? []
-            guard mine > applied else { return }
-            applied = mine
             self.categories = categories
             self.entries = entries
             self.groups = groups

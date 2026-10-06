@@ -17,6 +17,7 @@ final class FactsStore {
     var selection: String?
 
     @ObservationIgnored private let core: CoreClient?
+    @ObservationIgnored private let reads = SerialReads()
 
     init(core: CoreClient?, scope: FactScope = .account) {
         self.core = core
@@ -27,15 +28,18 @@ final class FactsStore {
     nonisolated static func tag(_ fact: FactInfo) -> String { "\(fact.scope == .global ? "g" : "a")\(fact.id)" }
 
     func load() async {
+        await reads.run { [weak self] in await self?.read() }
+    }
+
+    private func read() async {
         guard let core else { return }
         do {
-            if scope == .global {
-                facts = try await core.globalFacts()
-                categories = try await core.globalFactCategories()
-            } else {
-                facts = try await core.facts()
-                categories = try await core.factCategories()
-            }
+            // Both read before either is shown, so they always agree.
+            let (facts, categories) = scope == .global
+                ? (try await core.globalFacts(), try await core.globalFactCategories())
+                : (try await core.facts(), try await core.factCategories())
+            self.facts = facts
+            self.categories = categories
             error = nil
         } catch {
             self.error = error.message
