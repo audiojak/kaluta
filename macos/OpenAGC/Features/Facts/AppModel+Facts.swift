@@ -1,4 +1,6 @@
+import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// Facts (spec §14.11): changing them, each change on the account's undo
 /// stack (ADR 0006).
@@ -62,6 +64,48 @@ extension AppModel {
             try await core.decideFactProposals(proposals.map(\.id), accept: accept)
         }
         await analysisChanged()
+    }
+
+    /// Save this account's facts as Markdown or JSON (spec §14.11).
+    func exportFacts(json: Bool) {
+        Task {
+            guard let core, let text = try? await core.exportFacts(json: json) else { return }
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = json ? "Facts.json" : "Facts.md"
+            panel.allowedContentTypes = json ? [.json] : [UTType(filenameExtension: "md") ?? .plainText]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Merge another account's exported facts: new ones added (undoable),
+    /// differences proposed in Analysis.
+    func mergeFactsFromFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url, let json = try? String(contentsOf: url, encoding: .utf8)
+        else { return }
+        Task { await mergeFacts(json) }
+    }
+
+    func mergeFacts(_ json: String) async {
+        guard let core, let accountID = openAccountID else { return }
+        do {
+            let result = try await core.mergeFacts(json)
+            var parts = ["Added \(result.added) \(result.added == 1 ? "fact" : "facts")"]
+            if result.proposed > 0 { parts.append("\(result.proposed) that differ wait in Analysis") }
+            let notice = parts.joined(separator: "; ")
+            if result.changeId != 0 {
+                undo.record(accountID: accountID, actionName: "Merge Facts", noticeText: notice,
+                            undo: { try? await core.undoFactChange(result.changeId) },
+                            redo: { try? await core.redoFactChange(result.changeId) })
+            }
+            analysisError = nil
+            await facts.load()
+            await analysisChanged()
+        } catch {
+            analysisError = error.message
+        }
     }
 
     @discardableResult

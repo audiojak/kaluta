@@ -21,6 +21,7 @@ mod compositions;
 mod error;
 mod events;
 mod facts;
+mod facts_io;
 pub mod ffi;
 mod guide;
 mod guide_ai;

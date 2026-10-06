@@ -193,6 +193,7 @@ impl Core {
         if !self.analysis_available().await? {
             return Ok(());
         }
+        self.purge_if_due(&account, now).await?;
         let db = self.db()?;
         let today = day_of(now);
         let (active, ran, daily) = runtime::run(async move {
@@ -249,6 +250,25 @@ impl Core {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// Clear old AI drafts' texts, at most hourly (retention, ADR 0013).
+    async fn purge_if_due(&self, account: &str, now: Millis) -> Result<(), CoreError> {
+        {
+            let mut purged = self.agents.analysis_purged.lock().unwrap_or_else(|e| e.into_inner());
+            if purged.get(account).is_some_and(|at| now - at < RETRY_MS) {
+                return Ok(());
+            }
+            purged.insert(account.to_owned(), now);
+        }
+        self.purge_compositions(now).await.map(|_| ())
+    }
+
+    /// Clear the texts kept longer than the account's setting.
+    pub(crate) async fn purge_compositions(&self, now: Millis) -> Result<usize, CoreError> {
+        let keep = i64::from(self.analysis_settings().await?.keep_days) * 24 * 60 * 60 * 1000;
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.write(move |tx| mail_store::compositions::purge(tx, keep, now)).await?) }).await
     }
 
     /// Whether to try (again) now; records the try.

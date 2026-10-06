@@ -765,6 +765,15 @@ final class CoreClient: Sendable {
         try await call { try await core.redoFactChange(changeId: id) }
     }
 
+    /// Markdown to read or share, or JSON to merge into another account.
+    func exportFacts(json: Bool) async throws(CoreClientError) -> String {
+        try await call { try await core.exportFacts(json: json) }
+    }
+
+    func mergeFacts(_ json: String) async throws(CoreClientError) -> FactMergeResult {
+        try await call { try await core.mergeFacts(json: json) }
+    }
+
     // Global facts (ADR 0012)
 
     func globalFacts(_ statuses: [FactStatus] = [.accepted]) async throws(CoreClientError) -> [FactInfo] {
@@ -1220,6 +1229,7 @@ typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
 typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
 typealias FactInfo = OpenAGCCore.FactInfo
 typealias FactScope = OpenAGCCore.FactScope
+typealias FactMergeResult = OpenAGCCore.FactMergeResult
 typealias FactFields = OpenAGCCore.FactFields
 typealias FactEdit = OpenAGCCore.FactEdit
 typealias FactUse = OpenAGCCore.FactUse

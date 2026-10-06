@@ -73,6 +73,8 @@ pub(crate) struct AgentHub {
     pub(crate) analysis_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) analysis_attempts: Mutex<HashMap<String, i64>>,
     pub(crate) analysis_waiting: Mutex<HashMap<String, String>>,
+    /// When each account's old AI drafts were last purged.
+    pub(crate) analysis_purged: Mutex<HashMap<String, i64>>,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript

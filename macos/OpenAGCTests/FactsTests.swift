@@ -84,3 +84,26 @@ struct FactsTests {
         #expect(failure != nil, "a name like one there is already is refused")
     }
 }
+
+@MainActor
+struct FactsMergeTests {
+    @Test func mergingAnotherAccountsFactsIsUndoableAndDifferencesWaitInAnalysis() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        _ = try await core.applyFactEdits([.add(fields: FactFields(category: "work", label: "Occupation or role", value: "CTO",
+                                                                   use: .free, asOf: nil), status: .accepted, source: .you)],
+                                          reason: "test")
+        let json = """
+        {"openagc_facts": 1, "categories": [], "facts": [
+          {"category": "work", "label": "Occupation or role", "value": "CEO", "use": "free", "as_of": null},
+          {"category": "availability", "label": "Time zone", "value": "Pacific", "use": "free", "as_of": null}]}
+        """
+        await model.mergeFacts(json)
+        #expect(model.analysisError == nil)
+        #expect(model.facts.facts.map(\.label).sorted() == ["Occupation or role", "Time zone"])
+        #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Merge Facts")
+        #expect(try await core.analysisQueue().facts.map(\.value) == ["CEO"])
+    }
+}

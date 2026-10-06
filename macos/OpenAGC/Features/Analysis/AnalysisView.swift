@@ -226,11 +226,15 @@ struct AnalysisHeader: View {
                     }
                 }
                 Button("Categories…") { model.guideSheet = .factCategories } // no-help: menu
+                Divider() // menu
+                Button("Export as Markdown…") { model.exportFacts(json: false) } // no-help: menu
+                Button("Export for Another Account…") { model.exportFacts(json: true) } // no-help: menu
+                Button("Merge Facts from a File…") { model.mergeFactsFromFile() } // no-help: menu
             } label: {
                 Label("Categories", systemImage: "folder")
             }
             .fixedSize()
-            .hoverHelp("Add your own categories, or a starter set, and hide ones you do not need")
+            .hoverHelp("Categories, starter sets, export and merge")
             Spacer(minLength: 0)
         }
         .controlSize(.small)

@@ -341,6 +341,20 @@ pub fn list(conn: &Connection, status: Status, limit: u32) -> StoreResult<Vec<Co
         .collect::<Result<_, _>>()?)
 }
 
+/// Retention (spec §14.10, ADR 0013): full texts of records reviewed, or
+/// given up on, longer than `keep_ms` ago are cleared; the distance,
+/// status and proposal links stay. Returns how many were cleared.
+pub fn purge(tx: &Transaction<'_>, keep_ms: Millis, now: Millis) -> StoreResult<usize> {
+    Ok(tx
+        .prepare_cached(
+            "UPDATE ai_compositions SET ai_text = NULL, ai_html = NULL, sent_text = NULL, instruction = ''
+             WHERE (ai_text IS NOT NULL OR sent_text IS NOT NULL)
+               AND ((status = 'reviewed' AND reviewed_at < ?1)
+                 OR (status IN ('unmatched', 'discarded') AND updated_at < ?1))",
+        )?
+        .execute([now - keep_ms])?)
+}
+
 /// A message the user sent, as matching needs it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SentCandidate {

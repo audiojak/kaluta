@@ -750,6 +750,28 @@ mod tests {
     }
 
     #[test]
+    fn old_texts_are_purged_and_the_metrics_stay() {
+        let s = scratch("queue-purge");
+        let core = &s.1;
+        let day = 24 * 60 * 60 * 1000;
+        let old = pair(core, 0.3, 10 * day);
+        let fresh = pair(core, 0.2, day);
+        let now = mail_sync::now_millis();
+        let db = core.db().unwrap();
+        rt(db.write(move |tx| {
+            store::mark_reviewed(tx, &[old], now - 40 * day)?;
+            store::mark_reviewed(tx, &[fresh], now - day)
+        }))
+        .unwrap();
+        let before = block_on(core.analysis_metrics()).unwrap();
+        assert_eq!(rt(core.purge_compositions(now)).unwrap(), 1, "older than the 30 days kept");
+        let get = |id: i64| rt(db.read(move |c| compositions::get(c, id))).unwrap().unwrap();
+        assert_eq!((get(old).ai_text, get(old).sent_text, get(old).distance), (None, None, Some(0.3)));
+        assert!(get(fresh).ai_text.is_some());
+        assert_eq!(block_on(core.analysis_metrics()).unwrap(), before, "the metrics need only the distance");
+    }
+
+    #[test]
     fn metrics_take_the_median_change_by_week() {
         let s = scratch("queue-metrics");
         let core = &s.1;
