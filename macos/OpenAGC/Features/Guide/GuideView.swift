@@ -39,6 +39,7 @@ enum GuideSheet: Identifiable {
 /// reviewed in the detail, from the header's *Review Proposed Rules*.
 struct GuideView: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var focused: Bool
 
     var body: some View {
         @Bindable var guide = model.guide
@@ -49,11 +50,15 @@ struct GuideView: View {
                 Section(section.name) {
                     ForEach(section.categories, id: \.id) { category in
                         GuideCategoryRow(category: category).tag(category.id)
+                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
                     }
                 }
             }
         }
         .listStyle(.inset)
+        // Tab from the sidebar (the main window's loop, spec §14.3).
+        .focused($focused)
+        .onChange(of: model.threadListFocusRequests) { focused = true }
         .overlay {
             if model.guide.loaded, model.guide.categories.isEmpty {
                 ContentUnavailableView("No Writing Guide", systemImage: "text.book.closed")

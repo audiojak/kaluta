@@ -123,6 +123,7 @@
 		B46DC7164B626E812E646EDE /* ThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0633FEBD199D3028E73DAA /* ThreadListView.swift */; };
 		B739287D44855F0E839EDAB4 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D8D9EFB8321E02452EFCF26 /* AppDelegate.swift */; };
 		B79B36EDE217EE06866A9F40 /* MailUndo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04D52F53D78AD39AD9664700 /* MailUndo.swift */; };
+		BB76C0611950118D127763CE /* FocusCycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EC58EBC26F299D40F899296 /* FocusCycle.swift */; };
 		C9F5E1202A2849397390D3AC /* MailboxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD6458B52C0ABAB8AED1A828 /* MailboxStore.swift */; };
 		CB74E21E4FDF9E9140826A70 /* AgentStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17B53574C86CCC4F40FC00A1 /* AgentStore.swift */; };
 		CC89EB36D485FE29C268F72A /* ThreadRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF32A9AE2D35843656097005 /* ThreadRowView.swift */; };
@@ -238,6 +239,7 @@
 		4E7BC79E55C3878036548B29 /* FactsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsSettings.swift; sourceTree = "<group>"; };
 		4E9589E376D0608FB13DD219 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
 		4EA585BAABF5B7C3ACB5D84D /* WordDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WordDiff.swift; sourceTree = "<group>"; };
+		4EC58EBC26F299D40F899296 /* FocusCycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCycle.swift; sourceTree = "<group>"; };
 		50741EBE28CA752FB58116F8 /* InterviewSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterviewSheet.swift; sourceTree = "<group>"; };
 		50B962447EBAA57EEF146039 /* Tips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tips.swift; sourceTree = "<group>"; };
 		518CBF5035A38D8D0D16499C /* AgentSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestions.swift; sourceTree = "<group>"; };
@@ -428,6 +430,7 @@
 			children = (
 				3D8D9EFB8321E02452EFCF26 /* AppDelegate.swift */,
 				AB3DFF446CD804B9EB7984C8 /* AppModel.swift */,
+				4EC58EBC26F299D40F899296 /* FocusCycle.swift */,
 				1CF9BB1ABE76E11F4305E525 /* KeyboardShortcuts.swift */,
 				9036B10AEDC12CF3CF3416BD /* MainWindow.swift */,
 				88FDA6A53B22BE15E4B5B603 /* OpenAGCApp.swift */,
@@ -1026,6 +1029,7 @@
 				2C2E19408851E70A8019BFF6 /* FactsSettings.swift in Sources */,
 				555BD5531DFFB0B43A9F101E /* FactsStore.swift in Sources */,
 				725C3E4DBB3837154B78221A /* FactsView.swift in Sources */,
+				BB76C0611950118D127763CE /* FocusCycle.swift in Sources */,
 				A9A092AB2D6437DB76B2B6B9 /* FormattingBar.swift in Sources */,
 				3383C90F028074A9FDD81433 /* GoogleClientConfiguration.swift in Sources */,
 				DA5FB6BABA7700BB5A21EFA0 /* GuideAudiences.swift in Sources */,

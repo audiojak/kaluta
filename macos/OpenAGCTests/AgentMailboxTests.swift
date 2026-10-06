@@ -188,28 +188,37 @@ struct FailedSendTests {
 }
 
 @MainActor
-struct SidebarTabTests {
-    private func key(_ code: UInt16, shift: Bool = false) throws -> NSEvent {
-        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: shift ? [.shift] : [], timestamp: 0,
-                                      windowNumber: 0, context: nil, characters: "\t",
-                                      charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: code))
+struct FocusCycleTests {
+    typealias Region = FocusCycle.Region
+
+    @Test func tabWalksSidebarListReaderSearchAndBack() {
+        let shown = { (r: Region, back: Bool) in FocusCycle.next(from: r, backwards: back, readerShown: true) }
+        #expect(shown(.sidebar, false) == .list)
+        #expect(shown(.list, false) == .reader)
+        #expect(shown(.reader, false) == .search)
+        #expect(shown(.search, false) == .sidebar, "the loop closes")
+        #expect(shown(.sidebar, true) == .search)
+        #expect(shown(.reader, true) == .list)
+        // No message shown: the reader is skipped both ways.
+        #expect(FocusCycle.next(from: .list, backwards: false, readerShown: false) == .search)
+        #expect(FocusCycle.next(from: .search, backwards: true, readerShown: false) == .list)
     }
 
-    /// Tab from the sidebar moves into the list shown, the task list too;
-    /// nothing takes the keyboard from the sidebar on its own.
-    @Test func tabMovesIntoTheTaskListAndNothingElseDoes() async throws {
-        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
-        try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
-        await model.start(openDemo: false)
-        let before = model.threadListFocusRequests
-        model.selectedMailboxID = AppModel.tasksMailboxID
-        #expect(model.isTaskList)
-        #expect(model.threadListFocusRequests == before, "arriving at Tasks asks for no focus")
-        #expect(SidebarView.tabIntoList(try key(48), model: model))
-        #expect(model.threadListFocusRequests == before + 1)
-        #expect(!SidebarView.tabIntoList(try key(48, shift: true), model: model), "⇧Tab goes the other way")
-        #expect(!SidebarView.tabIntoList(try key(126), model: model), "arrows stay the sidebar's")
+    @Test func theKeyboardsRegionIsReadFromTheRegisteredViews() {
+        let cycle = FocusCycle()
+        let sidebar = NSTableView(), list = NSTableView(), reader = NSView()
+        let inList = NSView()
+        list.addSubview(inList)
+        cycle.register(sidebar, as: .sidebar)
+        cycle.register(list, as: .list)
+        cycle.register(reader, as: .reader)
+        #expect(cycle.region(of: sidebar) == .sidebar)
+        #expect(cycle.region(of: inList) == .list, "a row inside the list")
+        #expect(cycle.region(of: reader) == .reader)
+        #expect(cycle.region(of: NSView()) == nil, "somewhere else: Tab is left alone")
+        #expect(cycle.region(of: nil) == nil)
+        let field = NSSearchField()
+        #expect(cycle.region(of: field) == .search)
     }
 }
 

@@ -75,6 +75,7 @@ struct MainWindow: View {
         }
         .task { if model.accountState == .starting { await model.start() } }
         .onAppear {
+            model.focus.start(model: model)
             model.openComposer = { openWindow(id: "compose", value: $0) }
             model.openThreadWindow = { openWindow(id: "thread", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }

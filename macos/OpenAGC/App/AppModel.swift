@@ -616,6 +616,14 @@ final class AppModel {
         threadListFocusRequests += 1
     }
 
+    /// The main window's Tab loop (spec §14.3).
+    @ObservationIgnored let focus = FocusCycle()
+
+    /// A message is shown in the reader, so it is a stop in the Tab loop.
+    var readerShown: Bool {
+        selectedThreadID != nil && !isGuide && !isFacts
+    }
+
     /// Bumped when routines change, so their views reload.
     private(set) var routinesRevision = 0
     /// Bumped when a task was added, changed or removed (spec §14.8).

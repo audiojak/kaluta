@@ -7,6 +7,7 @@ import SwiftUI
 struct FactsList: View {
     @Environment(AppModel.self) private var model
     @Bindable var store: FactsStore
+    @FocusState private var focused: Bool
 
     var body: some View {
         List(selection: $store.selection) {
@@ -15,6 +16,7 @@ struct FactsList: View {
                     // Global and account ids overlap: rows are told apart by tag.
                     ForEach(section.facts, id: \.listTag) { fact in
                         FactRow(fact: fact).tag(FactsStore.tag(fact))
+                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
                     }
                 } header: {
                     Text(section.category.name)

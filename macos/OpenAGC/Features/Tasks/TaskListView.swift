@@ -18,6 +18,7 @@ struct TaskListView: View {
                     ForEach(section.tasks, id: \.id) { task in
                         TaskRow(task: task)
                             .background(TableProbe(keys: keys))
+                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
                             .tag(task.id)
                             .contextMenu { TaskMenu(task: task) }
                     }

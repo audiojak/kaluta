@@ -31,6 +31,7 @@ struct ThreadListView: NSViewRepresentable {
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.openClicked(_:))
         table.setAccessibilityLabel("Threads")
+        model.focus.register(table, as: .list)
 
         let scroll = NSScrollView()
         scroll.documentView = table
