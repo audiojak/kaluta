@@ -359,19 +359,13 @@ private struct EntryView: View {
                 .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
             }
-        case let .results(rows):
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(rows, id: \.id) { row in
-                    ResultRow(row: row, selected: model.selectedThreadID == row.id)
-                        .contentShape(.rect)
-                        .onTapGesture { model.selectedThreadID = row.id }
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction { model.selectedThreadID = row.id }
-                    if row.id != rows.last?.id { InsetRule(inset: Space.m) }
-                }
+        case let .results(title, rows):
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(AgentStore.resultsHeading(title, count: rows.count))
+                    .font(TypeRole.meta).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                ResultsCard(rows: rows)
             }
-            .background(.background, in: .rect(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
         case let .error(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(TypeRole.meta)
@@ -450,6 +444,28 @@ private struct ProposalCard: View {
         case "mail_delete": "trash"
         default: "hand.raised"
         }
+    }
+}
+
+/// The agent's results: a heading and the rows, like a slice of the main
+/// list.
+private struct ResultsCard: View {
+    let rows: [ThreadRow]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows, id: \.id) { row in
+                ResultRow(row: row, selected: model.selectedThreadID == row.id)
+                    .contentShape(.rect)
+                    .onTapGesture { model.selectedThreadID = row.id }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { model.selectedThreadID = row.id }
+                if row.id != rows.last?.id { InsetRule(inset: Space.m) }
+            }
+        }
+        .background(.background, in: .rect(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
     }
 }
 

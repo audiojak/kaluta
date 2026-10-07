@@ -106,12 +106,13 @@ fn spec(tool: Tool) -> ToolSpec {
             ),
         ),
         Tool::PresentThreads => (
-            "Show threads to the user as a list in OpenAGC. Use this to present results instead of \
-             pasting email content into your reply.",
+            "Show threads to the user as a list in OpenAGC. Call it whenever the answer is a set of \
+             messages (which emails, who wrote, what needs a reply), instead of pasting email content \
+             into your reply.",
             object(
                 json!({
                     "thread_ids": thread_ids("Threads to show, most relevant first."),
-                    "title": { "type": "string", "description": "A short heading for the list." },
+                    "title": { "type": "string", "description": "A short heading for the list, shown to the user." },
                 }),
                 &["thread_ids"],
             ),

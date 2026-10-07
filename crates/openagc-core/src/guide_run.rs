@@ -265,14 +265,8 @@ impl Core {
         let session = self.clone().start_read_only_agent_session(agent.to_owned(), vec![]).await?;
         self.agents.with_session(&session, |s| s.hidden = true);
         let answer = self.agents.watch_turn(&session);
-        let sent = self
-            .clone()
-            .send_agent_prompt(
-                session.clone(),
-                prompt,
-                crate::agents::PromptContextInfo { mailbox_id: None, selected_thread_ids: vec![], search_query: None },
-            )
-            .await;
+        let sent =
+            self.clone().send_agent_prompt(session.clone(), prompt, crate::agents::PromptContextInfo::default()).await;
         let result = match sent {
             Err(e) => Err(e),
             // On the core's runtime: callers may come from the app's own

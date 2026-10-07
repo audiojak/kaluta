@@ -945,8 +945,7 @@ final class CoreClient: Sendable {
     }
 
     func sendAgentPrompt(_ sessionID: String, _ prompt: String,
-                         context: PromptContextInfo = PromptContextInfo(mailboxId: nil, selectedThreadIds: [],
-                                                                         searchQuery: nil)) async throws(CoreClientError) {
+                         context: PromptContextInfo = .empty) async throws(CoreClientError) {
         try await call { try await core.sendAgentPrompt(sessionId: sessionID, prompt: prompt, context: context) }
     }
 
@@ -1288,6 +1287,12 @@ typealias AgentTranscriptItem = OpenAGCCore.AgentTranscriptItem
 typealias AgentStatusInfo = OpenAGCCore.AgentStatusInfo
 typealias AttachmentInfo = OpenAGCCore.AttachmentInfo
 typealias PromptContextInfo = OpenAGCCore.PromptContextInfo
+
+extension PromptContextInfo {
+    /// No references at all: the agent works from the prompt alone.
+    static let empty = PromptContextInfo(mailboxId: nil, listDescription: nil, visibleThreadIds: [],
+                                         selectedThreadIds: [], searchQuery: nil)
+}
 typealias RoutineHandoff = OpenAGCCore.RoutineHandoff
 typealias RoutineInfo = OpenAGCCore.RoutineInfo
 typealias RoutinePreviewRow = OpenAGCCore.RoutinePreviewRow

@@ -101,20 +101,37 @@ impl SessionConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptContext {
     pub mailbox: Option<String>,
+    /// One line on what the list on screen shows: "Inbox › Primary · 34
+    /// conversations · Important only".
+    pub list_description: Option<String>,
+    /// The rows on screen, top first, when nothing is selected: what
+    /// "these" means. At most `MAX_VISIBLE`.
+    pub visible_thread_ids: Vec<ThreadId>,
     pub selected_thread_ids: Vec<ThreadId>,
     pub search_query: Option<String>,
 }
 
 impl PromptContext {
+    /// The most rows a prompt names; the description carries the total.
+    pub const MAX_VISIBLE: usize = 100;
+
     /// A short preamble for the prompt. Ids and a query, never mail text.
+    /// A selection narrows the visible list, so the two are never both
+    /// named.
     pub fn render(&self) -> Option<String> {
         let mut lines = Vec::new();
         if let Some(m) = &self.mailbox {
             lines.push(format!("Current mailbox: {m}"));
         }
+        if let Some(d) = self.list_description.as_deref().filter(|d| !d.is_empty()) {
+            lines.push(format!("Showing: {d}"));
+        }
         if !self.selected_thread_ids.is_empty() {
             let ids: Vec<&str> = self.selected_thread_ids.iter().map(ThreadId::as_str).collect();
             lines.push(format!("Selected thread ids: {}", ids.join(", ")));
+        } else if !self.visible_thread_ids.is_empty() {
+            let ids: Vec<&str> = self.visible_thread_ids.iter().take(Self::MAX_VISIBLE).map(ThreadId::as_str).collect();
+            lines.push(format!("Visible thread ids (top first): {}", ids.join(", ")));
         }
         if let Some(q) = self.search_query.as_deref().filter(|q| !q.is_empty()) {
             lines.push(format!("Current search: {q}"));
@@ -185,9 +202,10 @@ pub enum AgentEvent {
         action_id: i64,
         approved: bool,
     },
-    /// Threads the agent wants shown as a list.
+    /// Threads the agent wants shown as a list, under its heading.
     ResultsAvailable {
         thread_ids: Vec<ThreadId>,
+        title: Option<String>,
     },
     TurnCompleted {
         usage: Option<Usage>,
@@ -312,17 +330,36 @@ mod tests {
             prompt: "What needs a reply?".into(),
             context: PromptContext {
                 mailbox: Some("INBOX".into()),
+                list_description: Some("Inbox · 3 conversations".into()),
+                visible_thread_ids: vec![ThreadId::new("t1"), ThreadId::new("t2"), ThreadId::new("t3")],
                 selected_thread_ids: vec![ThreadId::new("t1"), ThreadId::new("t2")],
                 search_query: Some("from:alex".into()),
             },
         };
         assert_eq!(
             turn.full_prompt(),
-            "[OpenAGC context]\nCurrent mailbox: INBOX\nSelected thread ids: t1, t2\nCurrent search: from:alex\n\
-             [/OpenAGC context]\n\nWhat needs a reply?"
+            "[OpenAGC context]\nCurrent mailbox: INBOX\nShowing: Inbox · 3 conversations\n\
+             Selected thread ids: t1, t2\nCurrent search: from:alex\n[/OpenAGC context]\n\nWhat needs a reply?"
         );
         let bare = TurnInput { prompt: "hi".into(), context: PromptContext::default() };
         assert_eq!(bare.full_prompt(), "hi");
+    }
+
+    #[test]
+    fn the_visible_list_is_the_context_when_nothing_is_selected() {
+        let ids: Vec<ThreadId> = (0..120).map(|i| ThreadId::new(format!("t{i}"))).collect();
+        let context = PromptContext {
+            mailbox: Some("INBOX".into()),
+            list_description: Some("Inbox › Primary · 120 conversations · Unread".into()),
+            visible_thread_ids: ids,
+            ..PromptContext::default()
+        };
+        let text = context.render().unwrap();
+        assert!(text.contains("Showing: Inbox › Primary · 120 conversations · Unread\n"));
+        assert!(text.contains("Visible thread ids (top first): t0, t1, "));
+        assert!(text.contains(", t99\n"), "capped at MAX_VISIBLE");
+        assert!(!text.contains("t100"));
+        assert!(!text.contains("Selected"));
     }
 
     #[test]

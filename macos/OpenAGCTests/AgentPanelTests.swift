@@ -44,7 +44,7 @@ struct AgentPanelTests {
         let model = try await demo()
         let agent = model.agent
         await agent.loadProviders()
-        await agent.send("find it", context: PromptContextInfo(mailboxId: nil, selectedThreadIds: [], searchQuery: nil))
+        await agent.send("find it", context: .empty)
         try await waitUntil { !agent.isRunning }
         let session = try #require(agent.sessionID)
         let thread = try #require(model.threads.rows.first)
@@ -55,19 +55,62 @@ struct AgentPanelTests {
             .toolCallFinished(callId: "c1", ok: true, summary: "{}"),
             .textDelta(text: "Here "),
             .textDelta(text: "they are."),
-            .resultsAvailable(threadIds: [thread.id, "missing"]),
+            .resultsAvailable(threadIds: [thread.id, "missing"], title: "Needs a reply"),
             .turnFailed(message: "Oops"),
         ])
         let kinds = agent.entries.dropFirst(2).map(\.kind)
         #expect(kinds[0] == .thinking("Hmm"))
         #expect(kinds[1] == .tool(name: "mail_search", arguments: "query: is:unread", state: .succeeded, summary: "{}"))
         #expect(kinds[2] == .reply("Here they are."))
-        if case let .results(rows) = kinds[3] { #expect(rows.map(\.id) == [thread.id]) } else { Issue.record("\(kinds[3])") }
+        if case let .results(title, rows) = kinds[3] {
+            #expect(rows.map(\.id) == [thread.id])
+            #expect(title == "Needs a reply")
+        } else {
+            Issue.record("\(kinds[3])")
+        }
         #expect(kinds[4] == .error("Oops"))
         #expect(!agent.isRunning)
         // Events for another session are ignored.
         await agent.apply(sessionID: "other", events: [.textDelta(text: "nope")])
         #expect(agent.entries.count == 7)
+    }
+
+    @Test func resultsAreHeadedByTheAgentsTitleAndTheCount() {
+        #expect(AgentStore.resultsHeading("Needs a reply", count: 12) == "Needs a reply · 12 conversations")
+        #expect(AgentStore.resultsHeading(nil, count: 1) == "1 conversation")
+        #expect(AgentStore.resultsHeading("", count: 3) == "3 conversations")
+    }
+
+    /// Spec §9.7: with nothing selected, the list on screen is the context;
+    /// a selection narrows it and the row ids are left out.
+    @Test func theVisibleListIsTheContextUntilSomethingIsSelected() async throws {
+        let model = try await demo()
+        try await waitUntil { !model.threads.rows.isEmpty }
+        model.selectedThreadID = nil
+        model.selectedThreadIDs = []
+        let whole = model.promptContext
+        #expect(whole.mailboxId == "INBOX")
+        #expect(whole.visibleThreadIds == model.threads.rows.prefix(AppModel.maxVisibleInPrompt).map(\.id))
+        #expect(whole.selectedThreadIds.isEmpty)
+        let description = try #require(whole.listDescription)
+        #expect(description.hasPrefix("Inbox"), "\(description)")
+        #expect(description.contains("\(model.threads.rows.count) conversations"), "\(description)")
+
+        model.listFilters = [.unread]
+        #expect(model.listDescription?.hasSuffix("Unread") == true, "\(model.listDescription ?? "")")
+        model.listFilters = []
+
+        let first = try #require(model.threads.rows.first)
+        model.selectedThreadID = first.id
+        let narrowed = model.promptContext
+        #expect(narrowed.selectedThreadIds == [first.id])
+        #expect(narrowed.visibleThreadIds.isEmpty, "a selection narrows the context")
+        #expect(narrowed.listDescription != nil, "the list is still described")
+
+        model.selectedThreadID = nil
+        model.selectedMailboxID = AppModel.tasksMailboxID
+        #expect(model.listDescription == nil, "the Tasks page shows no mail list")
+        #expect(model.promptContext.visibleThreadIds.isEmpty)
     }
 
     @Test func toolTitlesAreFriendly() {

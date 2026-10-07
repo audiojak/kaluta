@@ -16,7 +16,8 @@ final class AgentStore {
             case reply(String)
             case thinking(String)
             case tool(name: String, arguments: String, state: ToolState, summary: String)
-            case results([ThreadRow])
+            /// Threads the agent presented, under its heading.
+            case results(title: String?, rows: [ThreadRow])
             case error(String)
             /// Something the agent wants to do that the user decides.
             case proposal(actionID: Int64, tool: String, summary: String, draftID: Int64?, state: ProposalState)
@@ -288,9 +289,9 @@ final class AgentStore {
                 isPresented = true
             case let .actionResolved(actionID, approved):
                 decide(actionID, approved: approved)
-            case let .resultsAvailable(threadIDs):
+            case let .resultsAvailable(threadIDs, title):
                 let rows = await rows(for: threadIDs)
-                if !rows.isEmpty { append(.results(rows)) }
+                if !rows.isEmpty { append(.results(title: title, rows: rows)) }
             case let .turnCompleted(input, output, cost):
                 isRunning = false
                 lastUsage = Self.usageText(input: input, output: output, cost: cost)
@@ -342,6 +343,14 @@ final class AgentStore {
     }
 
     /// "Searched mail" rather than "mail_search".
+    /// Over the agent's results: its title and the count, "Needs a reply ·
+    /// 12 conversations"; the count alone without a title.
+    static func resultsHeading(_ title: String?, count: Int) -> String {
+        let conversations = count == 1 ? "1 conversation" : "\(count.formatted()) conversations"
+        guard let title, !title.isEmpty else { return conversations }
+        return "\(title) · \(conversations)"
+    }
+
     static func toolTitle(_ name: String) -> String {
         switch name {
         case "mail_search": "Searched mail"

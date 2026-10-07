@@ -53,6 +53,10 @@ pub struct AgentProviderInfo {
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct PromptContextInfo {
     pub mailbox_id: Option<String>,
+    /// One line on what the list shows (spec §9.7).
+    pub list_description: Option<String>,
+    /// The rows on screen, top first; the context when nothing is selected.
+    pub visible_thread_ids: Vec<String>,
     pub selected_thread_ids: Vec<String>,
     pub search_query: Option<String>,
 }
@@ -109,6 +113,7 @@ pub enum AgentEventInfo {
     },
     ResultsAvailable {
         thread_ids: Vec<String>,
+        title: Option<String>,
     },
     TurnCompleted {
         input_tokens: Option<u64>,
@@ -136,8 +141,8 @@ impl From<AgentEvent> for AgentEventInfo {
                 Self::ActionProposed { action_id, tool, summary, draft_id }
             }
             AgentEvent::ActionResolved { action_id, approved } => Self::ActionResolved { action_id, approved },
-            AgentEvent::ResultsAvailable { thread_ids } => {
-                Self::ResultsAvailable { thread_ids: thread_ids.into_iter().map(|t| t.0).collect() }
+            AgentEvent::ResultsAvailable { thread_ids, title } => {
+                Self::ResultsAvailable { thread_ids: thread_ids.into_iter().map(|t| t.0).collect(), title }
             }
             AgentEvent::TurnCompleted { usage, cost_usd } => Self::TurnCompleted {
                 input_tokens: usage.map(|u| u.input_tokens),
@@ -437,6 +442,8 @@ impl Core {
                 prompt,
                 context: PromptContext {
                     mailbox: context.mailbox_id,
+                    list_description: context.list_description,
+                    visible_thread_ids: context.visible_thread_ids.into_iter().map(ThreadId).collect(),
                     selected_thread_ids: context.selected_thread_ids.into_iter().map(ThreadId).collect(),
                     search_query: context.search_query,
                 },

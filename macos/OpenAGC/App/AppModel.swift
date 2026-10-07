@@ -694,13 +694,52 @@ final class AppModel {
 
     /// Ask the agent, with references to what the user is looking at.
     func askAgent(_ prompt: String) async {
-        let context = PromptContextInfo(mailboxId: selectedMailboxID, selectedThreadIds: actionTargets,
-                                        searchQuery: threads.searchQuery)
+        let context = promptContext
         if let id = openAccountID {
             RecentPrompts(defaults: defaults).record(prompt, for: id)
             recentPromptsRevision += 1
         }
         await agent.send(prompt, context: context)
+    }
+
+    /// What the user is looking at, as references (spec §9.7): the list on
+    /// screen is the context, and a selection narrows it.
+    var promptContext: PromptContextInfo {
+        let targets = actionTargets
+        let visible = targets.isEmpty && listDescription != nil
+            ? Array(threads.rows.prefix(Self.maxVisibleInPrompt).map(\.id)) : []
+        return PromptContextInfo(mailboxId: selectedMailboxID, listDescription: listDescription,
+                                 visibleThreadIds: visible, selectedThreadIds: targets, searchQuery: threads.searchQuery)
+    }
+
+    /// The most rows a prompt names; the description carries the total.
+    static let maxVisibleInPrompt = 100
+
+    /// One line on what the thread list shows, for the agent: "Inbox ›
+    /// Primary · 34 conversations · Important only". Nil for the Tasks,
+    /// Writing Guide and Facts pages, which show no mail list.
+    var listDescription: String? {
+        let searching = threads.searchQuery != nil
+        guard searching || listMailboxID != nil else { return nil }
+        var parts: [String] = []
+        if searching {
+            parts.append("Search results")
+        } else {
+            var name = mailboxes.mailboxes.first { $0.id == selectedMailboxID }.map { LabelTree.leafName($0.name) }
+                ?? "Mailbox"
+            if selectedMailboxID == "INBOX", let tab = activeInboxCategory { name += " › " + InboxCategories.title(tab) }
+            parts.append(name)
+        }
+        let count = threads.rows.count
+        var conversations = count == 1 ? "1 conversation" : "\(count.formatted()) conversations"
+        if threads.hasMore { conversations += " loaded so far" }
+        parts.append(conversations)
+        if !searching, selectedMailboxID == "INBOX" {
+            if inboxImportantOnly { parts.append("Important only") }
+            if hiddenTaskLabel != nil { parts.append("Tasks hidden") }
+        }
+        if !listFilters.isEmpty { parts.append(ListFilter.ordered(listFilters).map(\.title).joined(separator: ", ")) }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Agent suggestions (spec §14.6b)

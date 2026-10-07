@@ -69,14 +69,14 @@ Extract the text of an attachment (text files, PDF, .docx), at most 100 KB. Neve
 
 ## `mail_present_threads`
 
-Show threads to the user as a list in OpenAGC. Use this to present results instead of pasting email content into your reply.
+Show threads to the user as a list in OpenAGC. Call it whenever the answer is a set of messages (which emails, who wrote, what needs a reply), instead of pasting email content into your reply.
 
 **Risk:** Read-only — always allowed
 
 | Argument | Type | Required | Notes |
 |---|---|---|---|
 | `thread_ids` | array of string | yes | Threads to show, most relevant first. At most 200. |
-| `title` | string |  | A short heading for the list. |
+| `title` | string |  | A short heading for the list, shown to the user. |
 
 ## `mail_create_draft`
 
