@@ -1985,7 +1985,15 @@ Every target in §1.3 traces to one of these rules.
   message; one document avoids measuring each web view's height and costs
   one load per selection.)* Attachments strip with Quick Look
   (`QLPreviewPanel`) and drag-out.
-- Agent prompt: "Ask Claude…"/"Ask Codex…" with the provider switcher.
+- Agent prompt: "Ask Claude…"/"Ask Codex…" with the provider switcher. The
+  field is never disabled, so ⌘K always lands in it and words can be typed
+  ahead; *Send* (and Return) wait for a ready agent, and a line under the
+  field says why it is not ("Claude Code isn't installed", "needs you to
+  sign in", "couldn't be checked: …") with *Agent Settings…*. Focusing the
+  field, or trying to send, looks for the agent again; the core does not
+  cache a probe that failed, only its settled answers *(amended
+  2026-10-06: a probe that failed at launch left the bar disabled for the
+  whole run while the composer, which checks nothing, kept working)*.
   *(Amended 2026-09-27: a glass capsule floating over the bottom of the
   reader column, inset like the macOS 26 sidebar, rather than a bar pinned
   under the thread list. The list column has a header: the Inbox's

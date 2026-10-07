@@ -395,3 +395,34 @@ struct AgentPromptFocusTests {
         #expect(main.firstResponder !== other, "the field that had the keyboard lost it to the prompt")
     }
 }
+
+@MainActor
+struct AgentReadinessTests {
+    private func provider(_ id: String, _ status: AgentStatusInfo) -> AgentProviderInfo {
+        AgentProviderInfo(id: id, name: id == "codex" ? "Codex" : "Claude Code", status: status)
+    }
+
+    /// The prompt field is never disabled; the line under it says why the
+    /// agent cannot be asked yet.
+    @Test func whyTheAgentCannotBeAskedIsSaidInALine() {
+        let store = AgentStore(core: nil, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        #expect(store.notReadyReason == "Looking for Claude…", "nothing loaded yet")
+        let reason = { (p: AgentProviderInfo?) in AgentStore.notReadyReason(for: p, named: "Claude", loaded: true) }
+        #expect(reason(nil) == "Claude isn't set up")
+        #expect(reason(provider("claude-code", .error(message: "timed out"))) == "Claude Code couldn't be checked: timed out")
+        #expect(reason(provider("claude-code", .notInstalled)) == "Claude Code isn't installed")
+        #expect(reason(provider("claude-code", .notAuthenticated(version: "2.1"))) == "Claude Code needs you to sign in")
+        #expect(reason(provider("claude-code", .ready(version: "2.1"))) == nil)
+    }
+
+    /// With a real core the fake agent is ready; a store that never loaded
+    /// looks again when asked, and stops looking once it is ready.
+    @Test func lookingAgainFindsTheAgent() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        let store = AgentStore(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        #expect(!store.isProviderReady)
+        await store.ensureReady()
+        #expect(store.isProviderReady)
+        #expect(store.notReadyReason == nil)
+    }
+}

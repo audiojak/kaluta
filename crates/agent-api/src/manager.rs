@@ -74,7 +74,12 @@ impl AgentManager {
                 Some(s) => s,
                 None => {
                     let s = p.detect().await;
-                    self.statuses.lock().await.insert(p.id(), s.clone());
+                    // A probe that failed (a timeout, a process that could
+                    // not start) says nothing lasting: the next look probes
+                    // again. The other answers hold for the launch.
+                    if !matches!(s, AgentStatus::Error { .. }) {
+                        self.statuses.lock().await.insert(p.id(), s.clone());
+                    }
                     s
                 }
             };
@@ -165,6 +170,21 @@ mod tests {
             resume: None,
             env: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn a_probe_that_failed_is_tried_again_and_a_settled_answer_is_kept() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let failing = Arc::new(FakeAgent::with_status(
+            ProviderId::ClaudeCode,
+            AgentStatus::Error { message: "timed out".into() },
+        ));
+        let missing = Arc::new(FakeAgent::with_status(ProviderId::Codex, AgentStatus::NotInstalled));
+        let manager = AgentManager::new(vec![failing.clone(), missing.clone()], "s", tx);
+        manager.statuses(false).await;
+        manager.statuses(false).await;
+        assert_eq!(failing.detections(), 2, "an error is not an answer: probed again");
+        assert_eq!(missing.detections(), 1, "not installed holds for the launch");
     }
 
     #[tokio::test]

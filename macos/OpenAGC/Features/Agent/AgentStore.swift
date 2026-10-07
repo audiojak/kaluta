@@ -91,6 +91,33 @@ final class AgentStore {
         }
     }
 
+    /// When the last look found no agent ready, look again, afresh: the
+    /// answer was taken once at launch and may have been a bad moment. At
+    /// most every few seconds.
+    func ensureReady() async {
+        guard !isProviderReady, Date().timeIntervalSince(lastReadyCheck) > 5 else { return }
+        lastReadyCheck = Date()
+        await loadProviders(refresh: true)
+    }
+
+    @ObservationIgnored private var lastReadyCheck = Date.distantPast
+
+    /// Why the agent cannot be asked yet, in a line; nil when it can.
+    var notReadyReason: String? {
+        Self.notReadyReason(for: provider, named: providerName, loaded: !providers.isEmpty)
+    }
+
+    static func notReadyReason(for provider: AgentProviderInfo?, named name: String, loaded: Bool) -> String? {
+        guard let provider else { return loaded ? "\(name) isn't set up" : "Looking for \(name)…" }
+        switch provider.status {
+        case .ready: return nil
+        case .notInstalled: return "\(provider.name) isn't installed"
+        case .notAuthenticated: return "\(provider.name) needs you to sign in"
+        case .updateRequired: return "\(provider.name) needs an update"
+        case let .error(message): return "\(provider.name) couldn't be checked: \(message)"
+        }
+    }
+
     // MARK: Prompts
 
     func send(_ prompt: String, context: PromptContextInfo) async {
