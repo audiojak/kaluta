@@ -49,7 +49,7 @@ pub fn fixture(root: &Path, messages: u32, force: bool) -> Result<PathBuf> {
 }
 
 struct Measure {
-    name: &'static str,
+    name: String,
     budget: Duration,
     samples: Vec<Duration>,
 }
@@ -81,7 +81,7 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
 
     // Cold launch: open (migrations are a no-op) and read the first page.
     results.push(Measure {
-        name: "open store + first inbox page",
+        name: "open store + first inbox page".into(),
         budget: Duration::from_millis(60),
         samples: time(10, |_| {
             let db = Db::open(&path)?;
@@ -96,12 +96,12 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
     anyhow::ensure!(!inbox.rows.is_empty(), "fixture inbox is empty");
 
     results.push(Measure {
-        name: "sidebar mailboxes with counts",
+        name: "sidebar mailboxes with counts".into(),
         budget: Duration::from_millis(3),
         samples: time(runs, |_| db.read_blocking(read::list_mailboxes).map_err(Into::into))?,
     });
     results.push(Measure {
-        name: "inbox first page (150 rows)",
+        name: "inbox first page (150 rows)".into(),
         budget: Duration::from_millis(8),
         samples: time(runs, |_| db.read_blocking(|c| read::list_threads(c, "INBOX", None, 150)).map_err(Into::into))?,
     });
@@ -125,7 +125,7 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
         }
     }
     results.push(Measure {
-        name: "archive page at any depth (150 rows)",
+        name: "archive page at any depth (150 rows)".into(),
         budget: Duration::from_millis(8),
         samples: time(runs, |i| {
             let c = cursors[i * 7 % cursors.len()].clone();
@@ -136,7 +136,7 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
 
     let ids: Vec<ThreadId> = inbox.rows.iter().map(|t| t.id.clone()).collect();
     results.push(Measure {
-        name: "open thread: detail + all bodies",
+        name: "open thread: detail + all bodies".into(),
         budget: Duration::from_millis(5),
         samples: time(runs, |i| {
             let id = ids[i % ids.len()].clone();
@@ -161,13 +161,51 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
         let expr = mail_store::search::parse(query)?;
         let now = inbox.rows[0].last_message_at;
         results.push(Measure {
-            name,
+            name: name.into(),
             budget: Duration::from_millis(20),
             samples: time(20, |_| {
                 db.read_blocking(|c| mail_store::search::search(c, &expr, now, None, 100)).map_err(Into::into)
             })?,
         });
     }
+
+    // Clean Up (spec §14.12): every view's groups in both scopes, then
+    // the largest sender's first page of messages and its count.
+    use mail_store::cleanup::{self, Query, Scope, View};
+    let now = inbox.rows[0].last_message_at;
+    for (view, label) in [
+        (View::Sender, "sender"),
+        (View::People, "people"),
+        (View::Subject, "subject"),
+        (View::MailingList, "mailing lists"),
+        (View::Time, "time"),
+        (View::Social, "social"),
+        (View::Promotions, "promotions"),
+        (View::Size, "size"),
+    ] {
+        for (scope, scope_label) in [(Scope::Inbox, "inbox"), (Scope::AllMail, "all mail")] {
+            let q = Query { view, scope, now, utc_offset_secs: 0 };
+            let groups = db.read_blocking(|c| cleanup::groups(c, &q, ""))?;
+            anyhow::ensure!(!groups.is_empty(), "no {label} groups in {scope_label}");
+            results.push(Measure {
+                name: format!("clean up: {label} groups ({scope_label}, {})", groups.len()),
+                budget: Duration::from_millis(200),
+                samples: time(10, |_| db.read_blocking(|c| cleanup::groups(c, &q, "")).map_err(Into::into))?,
+            });
+        }
+    }
+    let q = Query { view: View::Sender, scope: Scope::AllMail, now, utc_offset_secs: 0 };
+    let biggest = vec![db.read_blocking(|c| cleanup::groups(c, &q, ""))?[0].key.clone()];
+    results.push(Measure {
+        name: "clean up: biggest sender's first 200 messages".into(),
+        budget: Duration::from_millis(50),
+        samples: time(20, |_| db.read_blocking(|c| cleanup::messages(c, &q, &biggest, 0, 200)).map_err(Into::into))?,
+    });
+    results.push(Measure {
+        name: "clean up: biggest sender's count".into(),
+        budget: Duration::from_millis(50),
+        samples: time(20, |_| db.read_blocking(|c| cleanup::count(c, &q, &biggest)).map_err(Into::into))?,
+    });
 
     let (total_threads, total_messages): (i64, i64) = db.read_blocking(|c| {
         Ok(c.query_row("SELECT (SELECT COUNT(*) FROM threads), (SELECT COUNT(*) FROM messages)", [], |r| {
@@ -178,13 +216,13 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
         "\nperf: {total_messages} messages, {total_threads} threads, {archive_rows} archived threads, {} inbox rows",
         inbox.rows.len()
     );
-    println!("{:<40} {:>9} {:>9} {:>9}  result", "operation", "p50", "p95", "budget");
+    println!("{:<52} {:>9} {:>9} {:>9}  result", "operation", "p50", "p95", "budget");
     let mut failed = 0;
     for m in &results {
         let ok = m.p(0.95) <= m.budget;
         failed += usize::from(!ok);
         println!(
-            "{:<40} {:>7.2}ms {:>7.2}ms {:>7.2}ms  {}",
+            "{:<52} {:>7.2}ms {:>7.2}ms {:>7.2}ms  {}",
             m.name,
             m.p(0.5).as_secs_f64() * 1e3,
             m.p(0.95).as_secs_f64() * 1e3,

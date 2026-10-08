@@ -51,6 +51,7 @@ pub fn to_incoming(m: FetchedMessage) -> IncomingMessage {
         size_estimate: m.size_estimate,
         body,
         attachments,
+        list: m.list,
         headers_json: None,
     }
 }

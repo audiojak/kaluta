@@ -11,7 +11,7 @@ pub mod rate_limit;
 pub mod token;
 
 use async_trait::async_trait;
-use mail_domain::{EmailAddress, Label, LabelId, MessageId, Millis, ThreadId};
+use mail_domain::{EmailAddress, Label, LabelId, ListHeaders, MessageId, Millis, ThreadId};
 
 pub use error::{ProviderError, ProviderResult};
 pub use http::{HttpClient, RetryPolicy};
@@ -74,6 +74,8 @@ pub struct FetchedMessage {
     pub subject: String,
     /// The `Date` header, if parseable.
     pub date: Option<Millis>,
+    /// Mailing-list headers, when the fetch included them.
+    pub list: ListHeaders,
     /// `None` when only metadata was fetched.
     pub body: Option<FetchedBody>,
 }

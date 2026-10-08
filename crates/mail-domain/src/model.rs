@@ -45,6 +45,27 @@ impl EmailAddress {
     }
 }
 
+/// A message's mailing-list headers (RFC 2919, 2369, 8058), for Clean Up's
+/// Mailing Lists view and Unsubscribe (spec §14.12).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ListHeaders {
+    /// The id inside `List-Id`'s angle brackets, lower-cased
+    /// (`news.example.com`).
+    pub id: Option<String>,
+    /// `List-Id`'s phrase, decoded (`Example News`).
+    pub name: Option<String>,
+    /// `List-Unsubscribe` as sent, unfolded: `<mailto:…>, <https://…>`.
+    pub unsubscribe: Option<String>,
+    /// `List-Unsubscribe-Post` as sent (`List-Unsubscribe=One-Click`).
+    pub unsubscribe_post: Option<String>,
+}
+
+impl ListHeaders {
+    pub fn is_empty(&self) -> bool {
+        self.id.is_none() && self.unsubscribe.is_none() && self.unsubscribe_post.is_none()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LabelKind {

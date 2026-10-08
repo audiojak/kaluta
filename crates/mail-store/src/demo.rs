@@ -2,7 +2,7 @@
 //! (spec §13 rule 10) and UI development. All content is invented: names
 //! are generic and every address is under `example.com`/`.org`/`.net`.
 
-use mail_domain::{Body, EmailAddress, Label, LabelColor, LabelId, LabelKind, MessageId, ThreadId};
+use mail_domain::{Body, EmailAddress, Label, LabelColor, LabelId, LabelKind, ListHeaders, MessageId, ThreadId};
 
 use crate::db::Db;
 use crate::error::StoreResult;
@@ -63,6 +63,14 @@ const SERVICES: &[(&str, &str)] = &[
     ("Weekly Digest", "digest@example.org"),
     ("Events", "events@example.org"),
     ("Careers", "careers@example.com"),
+];
+/// Services that send as mailing lists (Clean Up's Mailing Lists view):
+/// address, list id. Chosen by sender, so the generator's random choices
+/// stay the same.
+const LISTS: &[(&str, &str)] = &[
+    ("digest@example.org", "weekly-digest.example.org"),
+    ("events@example.org", "events.example.org"),
+    ("careers@example.com", "careers.example.com"),
 ];
 const TOPICS: &[&str] = &[
     "Q3 planning",
@@ -267,6 +275,7 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
                     has_remote_images: false,
                 }),
                 attachments,
+                list: list_headers(&sender, from_me),
                 ..Default::default()
             });
             stats.messages += 1;
@@ -278,6 +287,18 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
     }
     flush(db, &mut pending)?;
     Ok(stats)
+}
+
+fn list_headers(sender: &EmailAddress, from_me: bool) -> ListHeaders {
+    match LISTS.iter().find(|(email, _)| !from_me && sender.email == *email) {
+        Some((_, id)) => ListHeaders {
+            id: Some((*id).to_owned()),
+            name: sender.name.clone(),
+            unsubscribe: Some(format!("<https://{id}/unsubscribe>")),
+            unsubscribe_post: Some("List-Unsubscribe=One-Click".to_owned()),
+        },
+        None => ListHeaders::default(),
+    }
 }
 
 fn flush(db: &Db, pending: &mut Vec<IncomingMessage>) -> StoreResult<()> {

@@ -6,7 +6,7 @@
 //! helpers feed small synthetic snippets through the same parser so there is
 //! one decoder for encoded words, address lists, dates and charsets.
 
-use mail_domain::{EmailAddress, Millis};
+use mail_domain::{EmailAddress, ListHeaders, Millis};
 use mail_parser::{Address, Encoding, HeaderValue, MessageParser, MessagePart, MimeHeaders, PartType};
 
 /// A message as parsed from MIME. `html` is the original, unsanitized HTML.
@@ -31,6 +31,7 @@ pub struct ParsedHeaders {
     pub reply_to: Vec<EmailAddress>,
     pub subject: String,
     pub date: Option<Millis>,
+    pub list: ListHeaders,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -254,7 +255,39 @@ fn headers_of(msg: &mail_parser::Message<'_>) -> ParsedHeaders {
         reply_to: msg.reply_to().map(addresses).unwrap_or_default(),
         subject: msg.subject().unwrap_or_default().trim().to_owned(),
         date: msg.date().map(|d| d.to_timestamp() * 1000),
+        list: list_headers(msg),
     }
+}
+
+/// `List-Id`, `List-Unsubscribe` and `List-Unsubscribe-Post`. The id is
+/// what sits in `List-Id`'s angle brackets (the whole value when a sender
+/// leaves them out), lower-cased; its phrase is decoded like any other.
+fn list_headers(msg: &mail_parser::Message<'_>) -> ListHeaders {
+    let raw = |name: &str| msg.header_raw(name).map(unfold).filter(|v| !v.is_empty());
+    let (id, name) = match raw("List-Id") {
+        Some(value) => match (value.rfind('<'), value.rfind('>')) {
+            (Some(open), Some(close)) if open < close => {
+                let id = value[open + 1..close].trim().to_lowercase();
+                let decoded = match msg.header("List-Id") {
+                    Some(HeaderValue::Address(a)) => a.first().and_then(|a| a.name.as_deref()).map(str::to_owned),
+                    _ => None,
+                };
+                let phrase = decoded.unwrap_or_else(|| value[..open].trim().trim_matches('"').to_owned());
+                let phrase = phrase.trim().to_owned();
+                ((!id.is_empty()).then_some(id), (!phrase.is_empty()).then_some(phrase))
+            }
+            _ if !value.contains(char::is_whitespace) => (Some(value.to_lowercase()), None),
+            _ => (None, None),
+        },
+        None => (None, None),
+    };
+    ListHeaders { id, name, unsubscribe: raw("List-Unsubscribe"), unsubscribe_post: raw("List-Unsubscribe-Post") }
+}
+
+/// A raw header value on one line: folding and runs of white space become
+/// one space.
+fn unfold(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn addresses(a: &Address<'_>) -> Vec<EmailAddress> {

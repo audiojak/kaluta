@@ -319,6 +319,7 @@ fn inbound_message(record: &wire::Inbound, raw: Option<&[u8]>) -> FetchedMessage
                 reply_to: h.reply_to,
                 subject: h.subject,
                 date: h.date.or(Some(received)),
+                list: h.list,
                 body: Some(FetchedBody {
                     text: parsed.text,
                     html: parsed.html,
@@ -363,6 +364,8 @@ fn inbound_message(record: &wire::Inbound, raw: Option<&[u8]>) -> FetchedMessage
                 reply_to: vec![],
                 subject: record.subject.clone().unwrap_or_default(),
                 date: Some(received),
+                // No raw message: no list headers.
+                list: Default::default(),
                 body: Some(FetchedBody { text, html: record.body_html.clone(), attachments: vec![] }),
             }
         }
@@ -404,6 +407,7 @@ fn outbound_message(record: &wire::Sent) -> FetchedMessage {
         reply_to: vec![],
         subject: record.subject.clone(),
         date: Some(created),
+        list: Default::default(),
         body: Some(FetchedBody {
             text,
             html: record.body_html.clone(),

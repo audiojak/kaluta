@@ -5,6 +5,7 @@
 
 pub mod agents;
 pub mod analysis;
+pub mod cleanup;
 pub mod compositions;
 pub mod consistency;
 mod db;

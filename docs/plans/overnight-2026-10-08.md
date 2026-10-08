@@ -227,6 +227,12 @@ year, so it is not in the main window.
   and full fetch paths (IMAP header block, REST `metadataHeaders`, MIME);
   `inbox_history` (day, count at midnight) and `cleanup_meta` (the Inbox
   count when Clean Up was first opened, the progress baseline).
+  *(as built, C1: §14.11 was taken by Facts, so Clean Up is §14.12, and
+  the store is §6.2, not §8. A `list_name` column holds List-Id's phrase.
+  REST fetches only `format=full`, which carries every header, so there
+  was no `metadataHeaders` list to extend. The indexes are covering
+  (`from_email, from_name, date` and so on). The 20,000-message apply
+  bench belongs with the apply, C2.)*
 - **Core API (FFI):** `cleanup_groups(view, scope, filter)` → rows (key,
   title, aka, count), by count; `cleanup_messages(view, scope, keys,
   offset, limit)` → message rows (sender, subject, date, size);
@@ -259,13 +265,13 @@ year, so it is not in the main window.
     (⌘Z). Long applies show progress in the toolbar.
   - Empty states (`ContentUnavailableView`) for a view with no groups,
     Mailing Lists before any list mail arrives, and no ticked groups.
-- **Spec:** a new §14.11 *Clean Up*; §8 gains the columns and tables;
+- **Spec:** a new §14.12 *Clean Up*; §6.2 gains the columns and tables;
   §7.4 notes that Clean Up widens the sync window. No ADR needed unless
   message-level actions conflict with an existing one (check ADR 0006).
 
 ### Issues, in order
 
-C1. **Spec §14.11 and the store** (oagc-merk.1) — migration `0018_cleanup`, the list
+C1. **Spec §14.12 and the store** (oagc-merk.1) — migration `0018_cleanup`, the list
     headers on every fetch path, grouping queries and indexes, benches.
 C2. **Core: groups, messages and apply** (oagc-merk.2) — the FFI above, message-level
     `LabelOp`s, one undo entry per apply, progress events. Tests against

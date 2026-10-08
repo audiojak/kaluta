@@ -533,6 +533,22 @@ title, notes, category, due day as `YYYY-MM-DD` or none, action `reply`,
 `task_categories` (name, unique in any case, and position; seeded with the
 starting set) and `task_meta` (the id of the account's `Task` label).
 
+**Clean Up (Amendment 2026-10-08, migration `0018_cleanup`).** For the
+Clean Up window (§14.12): `messages` gains `list_id` (the id inside
+`List-Id`'s angle brackets, lower-cased, or the whole value without
+them), `list_name` (its phrase, decoded), `list_unsubscribe` and
+`list_unsubscribe_post` (as sent, unfolded), written by every fetch path
+that sees the headers (IMAP header blocks and whole messages, the REST
+API's `format=full`, mbox import) and kept when a later fetch lacks them.
+`headers_json` stays unused. Covering indexes serve the grouping:
+`(from_email COLLATE NOCASE, from_name, date)`, `(subject, date)`,
+`(date)`, `(size_estimate, date)` and `(list_id, list_name, date)` where
+`list_id` is set; Spam, Trash and drafts are left out through one small
+set of message ids rather than per-row lookups. `inbox_history` (day as
+`YYYY-MM-DD`, the Inbox's message count at its start) and `cleanup_meta`
+(key/value: the progress baseline and when it was taken) back the
+progress card.
+
 ### 6.3 Full-text search **(Verified)**
 
 Two FTS5 tables *(amended in M1)*:
@@ -690,6 +706,8 @@ background" with a progress figure from the queue depth.
   queues the extra mail; narrowing drops queued fetches beyond the window and
   keeps what is stored. Mail outside the window stays on the server and is
   not searchable locally (server-side search is a follow-up).
+  *(Amended 2026-10-08: opening Clean Up, §14.12, sets the window to
+  everything, headers only, and says so; without IMAP it asks first.)*
 - *Order.* The queue drains in listing order within a priority, i.e. newest
   first (`backfill_queue.seq`); it used to order by Gmail id, which is oldest
   first. Fetches triggered by history (mail the user touched elsewhere) go to
@@ -2899,6 +2917,92 @@ interview's fact questions and writing help's
 kept answers (each question carrying a category and label) write facts.
 Settings › Facts lists the global facts with the same editing; its
 changes go on the open account's undo stack.
+
+### 14.12 Clean Up **(Amendment 2026-10-08)**
+
+A window for clearing a mailbox in bulk, used once a quarter or a year
+rather than every day: the account's mail grouped by sender, subject,
+time, size and so on; tick groups and archive, move, trash or mark as
+spam thousands of messages at once, with one undo. Plan
+`docs/plans/overnight-2026-10-08.md`, feature 2.
+
+**Where.** Its own window (`Window("Clean Up", id: "cleanup")`, like
+Routines), opened from *Mailbox › Clean Up Mailbox…* and from *Settings ›
+Accounts › Clean Up…*. It cleans the open account. A one-time tip in the
+Inbox suggests it when the Inbox holds more than 1,000 messages. Nothing
+is added to the main sidebar.
+
+**Scope.** *Inbox* (messages carrying `INBOX`) by default; an *All Mail*
+toggle widens it to every message except Spam, Trash and drafts.
+
+**Views**, the window's left column. Each groups the messages in scope;
+a group shows a title, an "aka" line where the view has one, and its
+message count. Groups are ordered by count, largest first; Time and Size
+keep their own order.
+
+| View | Groups by | Title, aka |
+| --- | --- | --- |
+| Sender | `from_email`, ignoring case | the most used name (else the address); the other names as aka; the address below |
+| People I've Emailed | as Sender, for senders the user has written to (`contacts.sent_count > 0`) | as Sender |
+| Subject | identical subject, as stored (`Re:` kept) | the subject, or "(no subject)" |
+| Mailing Lists | `List-Id` | the list's most used name (else its id); other names as aka; the id below |
+| Time | Today, Yesterday, This Week, Last Week, then calendar months, newest first | "Today" … "September 2026" |
+| Social | sender domain, among messages with `CATEGORY_SOCIAL` | the domain; the senders' names as aka |
+| Promotions | sender domain, among messages with `CATEGORY_PROMOTIONS` | as Social |
+| Size | Tiny < 1 KB, Small 1–10 KB, Medium 10–100 KB, Large 100 KB–1 MB, Extra Large 1–10 MB, Jumbo > 10 MB | the bucket, smallest first |
+
+Time uses the user's calendar: weeks start on Monday; a day belongs to
+the first bucket it fits (on a Monday, yesterday is Last Week's); months
+hold what is older than Last Week; mail dated in the future is Today's.
+Sizes are the provider's (Gmail's `sizeEstimate`, IMAP's `RFC822.SIZE`),
+in decimal units as macOS shows them. Social and Promotions use Gmail's
+own categories; there is no list of brands. A filter field above the
+groups ("Type a sender…") keeps groups whose title, aka, address or key
+contains what is typed.
+
+**Messages, not threads.** Groups count messages, and actions change
+those messages only: archiving the "Amazon" group leaves the replies of
+real people in a mixed thread where they are.
+
+**Actions.** The toolbar's *Archive*, *Move…* (a label), *Trash* and
+*Spam* apply to every message in the ticked groups. The set is resolved
+when the action runs, so a group that grew since it was shown is acted
+on as it is now. One action is one undo entry with per-message diffs
+(ADR 0006); the changes go to the provider through the outbox in chunks
+of 1,000 (`batchModify`'s limit), with progress shown in the toolbar.
+Optimistic local copies of sent mail are left out.
+
+**Loading every header.** Clean Up needs the whole mailbox, so opening it
+sets the account's sync window to *Everything* when it is narrower
+(headers only; the body window is unchanged, §7.4) and shows the header
+load's progress; the window says the setting changed, and Settings ›
+Accounts shows it. Without IMAP, where headers cost as much as whole
+messages, the window states the message count and how long the download
+will take, and asks before starting.
+
+**Mailing lists from new mail only.** `List-Id`, `List-Unsubscribe` and
+`List-Unsubscribe-Post` are stored from 2026-10-08 on (§6.2), on every
+fetch path; old mail is not fetched again for them. The Mailing Lists
+view fills as mail arrives and says so while it is empty.
+
+**Progress card.** Under the views: Inbox Zero as a percentage of the
+Inbox when Clean Up was first opened (the baseline), a sparkline of the
+Inbox's daily count, and four numbers: At Midnight, Received Today,
+Removed Today, Now. The daily count is recorded at the first sync after
+midnight and when Clean Up opens.
+
+**Not in scope** (2026-10-08): Block, Chill and Expire (standing local
+rules; perhaps built-in routines later) and Forward. *Unsubscribe* for
+groups whose messages carry `List-Unsubscribe` comes with the Mailing
+Lists view: the one-click POST (RFC 8058) after a confirmation naming the
+sender and the URL's host, or a `mailto:` opened in the composer for the
+user to send; never automatic, never an agent's.
+
+*(Implemented 2026-10-08, store: migration `0018_cleanup`, the list
+headers on the IMAP, REST and MIME paths, and `mail_store::cleanup`:
+groups, a group's messages (paged), their count and ids, the Inbox's
+daily counts and the baseline. Groups for a 131,826-message store answer
+in 1–45 ms per view in a release build (docs/performance.md).)*
 
 ---
 

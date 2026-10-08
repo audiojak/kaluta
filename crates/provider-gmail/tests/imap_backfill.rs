@@ -221,6 +221,29 @@ async fn headers_come_without_bodies_for_a_browsable_list() {
     assert!(refused.fetch_headers(&[hex(MSG_A)]).await.is_err(), "no cheap headers without IMAP");
 }
 
+#[tokio::test]
+async fn headers_carry_the_mailing_list_headers() {
+    let (server, _rest, source) = setup("good-token").await;
+    server.add(FakeImapMessage {
+        uid: 30,
+        msgid: 0x3001,
+        thrid: 0x3001,
+        labels: vec!["\\Inbox".into()],
+        flags: vec![],
+        raw: headed(
+            "List-Id: Weekly Digest <digest.example.org>\nList-Unsubscribe: <mailto:u@example.org>,\n <https://example.org/u>\n\
+             List-Unsubscribe-Post: List-Unsubscribe=One-Click\nContent-Type: text/plain\n",
+            "Issue 3\n",
+        ),
+    });
+    let headers = source.fetch_headers(&[hex(0x3001)]).await.unwrap().expect("IMAP can");
+    let list = &headers[0].list;
+    assert_eq!(list.id.as_deref(), Some("digest.example.org"));
+    assert_eq!(list.name.as_deref(), Some("Weekly Digest"));
+    assert_eq!(list.unsubscribe.as_deref(), Some("<mailto:u@example.org>, <https://example.org/u>"));
+    assert_eq!(list.unsubscribe_post.as_deref(), Some("List-Unsubscribe=One-Click"));
+}
+
 fn crlf(s: &str) -> Vec<u8> {
     s.replace("\r\n", "\n").replace('\n', "\r\n").into_bytes()
 }

@@ -214,6 +214,7 @@ fn convert(raw: &[u8], mine: &HashSet<String>) -> Option<(IncomingMessage, Vec<L
             html_sanitized: sanitized.map(|s| s.html),
         }),
         attachments,
+        list: headers.list.clone(),
         headers_json: None,
     };
     Some((incoming, user_labels))

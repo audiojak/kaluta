@@ -7,7 +7,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mail_domain::{Body, EmailAddress, Label, LabelId, LabelKind, MessageId, Millis, ThreadId, system_labels};
+use mail_domain::{
+    Body, EmailAddress, Label, LabelId, LabelKind, ListHeaders, MessageId, Millis, ThreadId, system_labels,
+};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
 
@@ -47,6 +49,8 @@ pub struct IncomingMessage {
     pub body: Option<Body>,
     /// Replaced only when `body` is `Some` (a full fetch).
     pub attachments: Vec<IncomingAttachment>,
+    /// Mailing-list headers; a fetch without them keeps stored ones.
+    pub list: ListHeaders,
     pub headers_json: Option<String>,
 }
 
@@ -200,7 +204,10 @@ impl<'t> MailWriter<'t> {
                            date = ?10, internal_date = ?11, size_estimate = ?12, body_state = ?13,
                            is_read = ?14, is_starred = ?15, is_draft = ?16, is_sent_by_me = ?17,
                            has_attachments = CASE WHEN ?18 THEN ?19 ELSE has_attachments END,
-                           headers_json = COALESCE(?20, headers_json)
+                           headers_json = COALESCE(?20, headers_json),
+                           list_id = COALESCE(?21, list_id), list_name = COALESCE(?22, list_name),
+                           list_unsubscribe = COALESCE(?23, list_unsubscribe),
+                           list_unsubscribe_post = COALESCE(?24, list_unsubscribe_post)
                          WHERE id = ?1",
                     )?
                     .execute(params![
@@ -224,6 +231,10 @@ impl<'t> MailWriter<'t> {
                         m.body.is_some(),
                         has_attachments,
                         m.headers_json,
+                        m.list.id,
+                        m.list.name,
+                        m.list.unsubscribe,
+                        m.list.unsubscribe_post,
                     ])?;
                 rowid
             }
@@ -232,8 +243,10 @@ impl<'t> MailWriter<'t> {
                     .prepare_cached(
                         "INSERT INTO messages (thread_id, gmail_id, rfc822_message_id, in_reply_to, references_json,
                            from_name, from_email, subject, snippet, date, internal_date, size_estimate, body_state,
-                           is_read, is_starred, is_draft, is_sent_by_me, has_attachments, headers_json)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                           is_read, is_starred, is_draft, is_sent_by_me, has_attachments, headers_json,
+                           list_id, list_name, list_unsubscribe, list_unsubscribe_post)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+                           ?20, ?21, ?22, ?23)",
                     )?
                     .execute(params![
                         thread_rowid,
@@ -255,6 +268,10 @@ impl<'t> MailWriter<'t> {
                         is_sent_by_me,
                         has_attachments,
                         m.headers_json,
+                        m.list.id,
+                        m.list.name,
+                        m.list.unsubscribe,
+                        m.list.unsubscribe_post,
                     ])?;
                 let rowid = self.tx.last_insert_rowid();
                 self.record_contacts(m, is_sent_by_me)?;
