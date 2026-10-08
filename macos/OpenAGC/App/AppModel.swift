@@ -369,10 +369,9 @@ final class AppModel {
     let core: CoreClient?
 
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
-    private var eventTask: Task<Void, Never>?
+    /// The event loop, observers and network monitor, ended with the model.
+    @ObservationIgnored private let subscriptions = Subscriptions()
     private var signInSession: String?
-    private var lifecycleObservers: [NSObjectProtocol] = []
-    private let networkMonitor = NWPathMonitor()
 
     /// The app's preferences; tests pass a throwaway suite so they never
     /// touch the real app's (the test host *is* the app).
@@ -1361,20 +1360,25 @@ final class AppModel {
     /// Poll faster while active; sync at once on activation, wake from
     /// sleep, and when the network comes back (spec §7.4).
     private func observeLifecycle() {
-        guard lifecycleObservers.isEmpty, let core else { return }
+        guard subscriptions.observers.isEmpty, let core else { return }
         let center = NotificationCenter.default
-        lifecycleObservers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            core.setAppActive(true)
-        })
-        lifecycleObservers.append(center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            core.setAppActive(false)
-        })
-        lifecycleObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in core.syncNow() })
-        networkMonitor.pathUpdateHandler = { path in
-            if path.status == .satisfied { core.syncNow() }
+        let workspace = NSWorkspace.shared.notificationCenter
+        // Weakly: the notification centres and the monitor outlive the
+        // model, and must not keep its core (and stores) open after it.
+        subscriptions.observers.append((center, center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak core] _ in
+            core?.setAppActive(true)
+        }))
+        subscriptions.observers.append((center, center.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak core] _ in
+            core?.setAppActive(false)
+        }))
+        subscriptions.observers.append((workspace, workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core] _ in core?.syncNow() }))
+        subscriptions.network.pathUpdateHandler = { [weak core] path in
+            if path.status == .satisfied { core?.syncNow() }
         }
-        networkMonitor.start(queue: DispatchQueue(label: "ai.actual.openagc.network"))
+        subscriptions.network.start(queue: DispatchQueue(label: "ai.actual.openagc.network"))
     }
 
     /// Set the mailbox without loading it (a switch loads the new account's).
@@ -1411,9 +1415,13 @@ final class AppModel {
         Task { await threads.show(mailboxID: id) }
     }
 
+    /// The loop holds the stream, not the core: holding the core kept every
+    /// `CoreClient` (and its open stores) alive for good, since its stream
+    /// ends only when the core goes away (oagc-4rrl). It ends with the model.
     private func listenForEvents(from core: CoreClient) {
-        eventTask = Task { [weak self] in
-            for await tagged in core.events {
+        let events = core.events
+        subscriptions.events = Task { [weak self] in
+            for await tagged in events {
                 guard let self else { return }
                 await self.handle(tagged)
             }
@@ -1579,5 +1587,22 @@ private func model_chipLabels(_ mailboxes: MailboxStore) -> [String: ThreadRowVi
     mailboxes.labels.reduce(into: [:]) { acc, m in
         guard let id = m.labelId else { return }
         acc[id] = ThreadRowView.Chip(path: m.name, color: mailboxes.labelColors[id])
+    }
+}
+
+/// What a model subscribed to: its event loop, notification observers and
+/// network monitor. A main-actor class's deinit cannot reach its own
+/// state, so this holder's does the unsubscribing when the model goes away
+/// (tests make hundreds of models; each kept its core's stores open before,
+/// oagc-4rrl).
+private final class Subscriptions {
+    var events: Task<Void, Never>?
+    var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    let network = NWPathMonitor()
+
+    deinit {
+        events?.cancel()
+        for (center, token) in observers { center.removeObserver(token) }
+        network.cancel()
     }
 }

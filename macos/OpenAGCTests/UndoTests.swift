@@ -76,6 +76,9 @@ struct UndoModelTests {
                              defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
         model.undo.runsClock = false
         await model.start(openDemo: true)
+        // Say so, rather than crash at rows[0], if the demo did not open.
+        try #require(model.accountState == .open(accountID: AppModel.demoAccountID), "\(model.accountState)")
+        try #require(!model.threads.rows.isEmpty, "the demo Inbox is listed")
         return model
     }
 
