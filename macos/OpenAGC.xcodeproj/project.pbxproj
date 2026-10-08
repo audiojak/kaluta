@@ -79,6 +79,7 @@
 		725C3E4DBB3837154B78221A /* FactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64F73A4B5ED3C79A0962F2D5 /* FactsView.swift */; };
 		72B799A4785C73464A0783BC /* AgentSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6106757A4B6B179819362741 /* AgentSettingsTests.swift */; };
 		73F5C2F69C703EED929AAA94 /* LinkSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F2806227B342184B9664E7D /* LinkSafety.swift */; };
+		751E90942619C16E79B3EE14 /* ServiceAccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AA69C73ECEB38EB2B8141AD /* ServiceAccountSettings.swift */; };
 		751F75594BDFE0DB89944569 /* OpenAGCApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FDA6A53B22BE15E4B5B603 /* OpenAGCApp.swift */; };
 		77B3B3168E8CB3B3135A1612 /* ListFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6A5BA2DB76BB7475F5832B8 /* ListFilterTests.swift */; };
 		78D61A7A773B45CDCCA3093F /* AgentMailboxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB08FE620A715A55214FF84 /* AgentMailboxTests.swift */; };
@@ -218,6 +219,7 @@
 		190E7BE352B8FB1A5BC8078E /* RoutinesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesWindow.swift; sourceTree = "<group>"; };
 		193E818A019441CED9A40B4F /* AnalysisSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisSettingsView.swift; sourceTree = "<group>"; };
 		19F04E00E0E6BE9B7678CEDB /* GoogleOAuth.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = GoogleOAuth.plist; sourceTree = "<group>"; };
+		1AA69C73ECEB38EB2B8141AD /* ServiceAccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceAccountSettings.swift; sourceTree = "<group>"; };
 		1CD3817AE3B32FC2F3B89845 /* MessageWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWebView.swift; sourceTree = "<group>"; };
 		1CF9BB1ABE76E11F4305E525 /* KeyboardShortcuts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcuts.swift; sourceTree = "<group>"; };
 		212FA365E028835C07006A70 /* CleanUpTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanUpTests.swift; sourceTree = "<group>"; };
@@ -609,6 +611,7 @@
 			children = (
 				601938BEED9E6F66CF748199 /* AccountSettings.swift */,
 				4E7BC79E55C3878036548B29 /* FactsSettings.swift */,
+				1AA69C73ECEB38EB2B8141AD /* ServiceAccountSettings.swift */,
 				E4C676A513B753ECEBB6FF97 /* SettingsView.swift */,
 				A37A35E8490CA1B5A41B9410 /* TaskSettings.swift */,
 			);
@@ -1105,6 +1108,7 @@
 				3D209E9A5161913A2BFD1C6A /* RoutinesWindow.swift in Sources */,
 				0C3A1E2BB1395CFE3826E5C0 /* SchemeHandlers.swift in Sources */,
 				A102AF25FEDB6889C713E8DC /* SerialReads.swift in Sources */,
+				751E90942619C16E79B3EE14 /* ServiceAccountSettings.swift in Sources */,
 				116A2EC55EB66E0F8E5ACCF0 /* SettingsView.swift in Sources */,
 				1EE4D994E6332B9D2D7B1772 /* SidebarView.swift in Sources */,
 				290545266B859DE81481C714 /* Snapshot.swift in Sources */,

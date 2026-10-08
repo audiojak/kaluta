@@ -873,6 +873,38 @@ fn two_primitive_agents_sync_only_their_own_mail_and_one_keeps_syncing_when_the_
 }
 
 #[test]
+fn agentmails_code_sent_at_sign_up_is_found_in_the_users_mail() {
+    let (_t, core, _secrets) = core("agentmail-code");
+    core.debug_use_fake_agent_mail(true);
+    let agent = block_on(core.clone().create_agent_mailbox(
+        AgentService::AgentMail,
+        "Scout".into(),
+        Some("me@example.com".into()),
+        "am-code".into(),
+    ))
+    .unwrap();
+    // No Send Code: AgentMail sent it with the sign-up.
+    block_on(core.clone().open_account("me".into())).unwrap();
+    let fake = Arc::new(provider_api::fake::FakeProvider::new("me@example.com", mail_sync::now_millis(), 50));
+    fake.seed(FetchedMessage {
+        id: MessageId::new("code"),
+        thread_id: ThreadId::new("code"),
+        label_ids: vec![LabelId::new("INBOX"), LabelId::new("UNREAD")],
+        internal_date: mail_sync::now_millis(),
+        from: Some(EmailAddress::new(None, "no-reply@agentmail.to")),
+        subject: "Verify your email".into(),
+        snippet: "Your code is 654321".into(),
+        body: Some(FetchedBody { text: Some("Your code is 654321.".into()), html: None, attachments: vec![] }),
+        ..Default::default()
+    });
+    core.start_sync_with(fake).unwrap();
+    wait_for("the code to arrive", || inbox_rows(&core) == 1);
+    let code = block_on(core.find_agent_mailbox_code(agent.account_id, "me".into())).unwrap();
+    assert_eq!(code.as_deref(), Some("654321"));
+    core.stop_sync();
+}
+
+#[test]
 fn an_agentmail_service_account_is_created_with_the_human_email_and_never_signed_up_for_twice() {
     let (_t, core, secrets) = core("agentmail");
     core.debug_use_fake_agent_mail(true);

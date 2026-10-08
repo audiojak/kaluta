@@ -168,6 +168,8 @@ is only for "approved". Orange is text or a band's fill, never an error.
   (the writing guide's questions): a number key (1 to 9), the answer, and
   a check on the answer given before. Choosing it answers and goes on, so
   such a question has no Save; *Back* returns to the question before.
+  `detail:` adds a secondary caption line under the answer, for choices
+  that need a sentence each (the agent-mail services).
 - **Review mode** (proposed rules, proposed facts; `ReviewModeView`):
   deciding takes the whole window, entered only from the page's
   `ReviewBand` (the count in `TypeRole.display`, one prominent *Review*
@@ -297,6 +299,46 @@ done over thousands of messages at once.
   the messages, the view's own ("No Senders", "No One You've Written To")
   over the groups, and the search one when the filter matches nothing.
   Errors are a `Tone.failure` line under the filter.
+
+### Agent mailboxes and service accounts
+
+Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
+`Features/Settings/ServiceAccountSettings.swift`.
+
+- **Create an Agent Mailbox is a `Dialog` in steps** (`AgentMailboxFlow`):
+  the service first, as `AnswerButton`s with a `detail` line each (what
+  it is and its free tier; 1 and 2 pick); then, when a service account
+  for it exists, *Add to <service account>* (its agents and whether it is
+  verified as the detail) or *New Service Account…*; then the name. Every
+  step after the first has *Back* leading. Adding asks for the name only,
+  with the address it will have as a `LabeledContent` (and, on Primitive,
+  a *Domain* picker when the service account has verified own domains);
+  its button is *Add Agent*, with no terms. A new service account shows
+  the service, its terms as a link and *Agree and Create*; AgentMail's
+  also asks for *Your email* above the service, prefilled from the open
+  Gmail account (a menu beside the field picks another of the user's),
+  with one caption sentence on why. After AgentMail's sign-up the sheet
+  goes straight to the code (it was emailed at sign-up).
+- **The account switcher's sections:** the user's own accounts first,
+  untitled; then one menu `Section` per service account, titled
+  "AgentMail · you@example.com" (AgentMail by the user's email) or
+  "Primitive · jade-emu.primitive.email" (Primitive by its subdomain).
+  ⌃1–⌃9 count down the menu as shown. (An AppKit menu does not
+  self-snapshot; `-OpenAGCSnapshotAgentMailbox switcher` prints the
+  sections instead.)
+- **Settings › Accounts:** a section per service account under the same
+  title, below the user's own accounts: first what its agents share
+  (`ServiceAccountPane`: *Service* and plan, *Verified* with *Verify…*,
+  *Limits* as a caption paragraph under its label, on Primitive *Can
+  write to* and *Domains* with *Add Domain…*; then *Add Agent…*, *Copy
+  API Key…* and *Open <service>…*), then its agents' rows (name, address,
+  *When agents send*, *Remove…*). *Copy API Key…* asks first and says the
+  key reaches every agent named; on verified AgentMail it offers *Copy
+  Key for <agent> Only* first, as the safer choice.
+- **Limits** are the core's words (`serviceAccountLimits`): the unverified
+  banner takes their first sentence for AgentMail (its plan has no hourly
+  numbers) and the plan's numbers for Primitive; the composer of an agent
+  mailbox shows them in full in an info `Banner`.
 
 ### Rows with a due day
 
@@ -483,7 +525,12 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
 | ![Reviewing proposed facts, light](design/facts-proposed-light.png) | ![Reviewing proposed facts, dark](design/facts-proposed-dark.png) |
 | ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |
-| ![Create an Agent Mailbox, light](design/agent-create-light.png) | ![Create an Agent Mailbox, dark](design/agent-create-dark.png) |
+| ![Create an Agent Mailbox: the service first, light](design/agent-create-light.png) | ![Create an Agent Mailbox: the service first, dark](design/agent-create-dark.png) |
+| ![A new AgentMail service account asks for your email, light](design/agent-agentmail-light.png) | ![A new AgentMail service account asks for your email, dark](design/agent-agentmail-dark.png) |
+| ![Add to the Primitive service account or make another, light](design/agent-path-light.png) | ![Add to the Primitive service account or make another, dark](design/agent-path-dark.png) |
+| ![Adding an agent: the name only, light](design/agent-add-light.png) | ![Adding an agent: the name only, dark](design/agent-add-dark.png) |
+| ![Settings › Accounts: service accounts and their agents, light](design/agent-service-account-light.png) | ![Settings › Accounts: service accounts and their agents, dark](design/agent-service-account-dark.png) |
+| ![An unverified AgentMail mailbox's banner, light](design/agent-agentmail-banner-light.png) | ![An unverified AgentMail mailbox's banner, dark](design/agent-agentmail-banner-dark.png) |
 | ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
 | ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
 | ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |

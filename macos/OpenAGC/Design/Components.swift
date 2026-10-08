@@ -316,6 +316,8 @@ struct CapsuleTabs: View {
 /// answer given before.
 struct AnswerButton: View {
     let title: String
+    /// A line under the answer, secondary (what a service is).
+    var detail: String?
     /// 1 to 9: the key that picks it.
     let number: Int
     var chosen = false
@@ -323,11 +325,17 @@ struct AnswerButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Space.m) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                 Text("\(number)")
                     .font(TypeRole.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Text(title).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: Space.hair) {
+                    Text(title).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    if let detail {
+                        Text(detail).font(TypeRole.caption).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 Spacer(minLength: Space.m)
                 if chosen {
                     Image(systemName: "checkmark").foregroundStyle(.tint).accessibilityHidden(true)

@@ -69,9 +69,13 @@ struct AgentMailboxTests {
         #expect(model.codeAccounts.map(\.email) == ["work@example.com"])
         _ = try await core.startAgentMailboxVerification(created.accountId, email: "work@example.com")
         await #expect(throws: CoreClientError.self) { try await core.verifyAgentMailbox(created.accountId, code: "1") }
-        model.agentPlans[created.accountId] = try await core.verifyAgentMailbox(created.accountId, code: "123456")
+        let verified = try await core.verifyAgentMailbox(created.accountId, code: "123456")
+        await model.serviceAccountVerified(created.accountId, plan: verified)
         #expect(model.unverifiedAgentPlan == nil, "verified: no banner")
-        #expect(AccountRow.planText(model.agentPlans[created.accountId]) .hasPrefix("Primitive · verified with work@example.com"))
+        #expect(ServiceAccountPane.planText(model.servicePlans[created.accountId], service: .primitive)
+            .contains("writes to you, people who wrote first"))
+        #expect(ServiceAccountPane.verifiedText(verified: true, email: verified.email) == "With work@example.com")
+        #expect(model.serviceAccounts.first?.verified == true, "the list knows too")
     }
 
     @Test func theKeyCanBeCopiedAndRemovingTheMailboxForgetsIt() async throws {
@@ -131,6 +135,196 @@ struct AgentMailboxTests {
         #expect(model.agentMailboxSheet == .create)
         model.beginAgentVerification("x")
         #expect(model.agentMailboxSheet == .verify(accountID: "x"))
+    }
+}
+
+/// Records what the create sheet asks of the core, then asks it: adding an
+/// agent must never sign up (ADR 0015).
+private final class RecordingCalls: AgentMailboxCalls, @unchecked Sendable {
+    let core: CoreClient
+    private let lock = NSLock()
+    private var recorded: [String] = []
+
+    init(_ core: CoreClient) { self.core = core }
+
+    var calls: [String] { lock.withLock { recorded } }
+    private func record(_ call: String) { lock.withLock { recorded.append(call) } }
+
+    func createAgentMailbox(service: AgentService, name: String, humanEmail: String?,
+                            requestID: String) async throws(CoreClientError) -> AgentMailboxCreated {
+        record("signUp \(service) \(humanEmail ?? "-")")
+        return try await core.createAgentMailbox(service: service, name: name, humanEmail: humanEmail, requestID: requestID)
+    }
+
+    func addAgent(toServiceAccount serviceAccountID: String, name: String, domain: String?,
+                  requestID: String) async throws(CoreClientError) -> AgentAdded {
+        record("addAgent \(serviceAccountID)")
+        return try await core.addAgent(toServiceAccount: serviceAccountID, name: name, domain: domain, requestID: requestID)
+    }
+
+    func serviceAccountPlan(_ serviceAccountID: String) async throws(CoreClientError) -> AgentMailboxPlan {
+        record("plan \(serviceAccountID)")
+        return try await core.serviceAccountPlan(serviceAccountID)
+    }
+}
+
+/// Create an Agent Mailbox with service accounts (spec §7.9, ADR 0015):
+/// the service first, AgentMail's email before Agree and Create, adding to
+/// a service account without a sign-up, the switcher's sections, and plans
+/// kept per service account. Against the core's in-memory services.
+@MainActor
+@Suite(.serialized)
+struct ServiceAccountFlowTests {
+    private func modelWithAnAccount() async throws -> (AppModel, CoreClient, RecordingCalls) {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 4)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        let calls = RecordingCalls(core)
+        model.agentMailboxCallsOverride = calls
+        return (model, core, calls)
+    }
+
+    @Test func theServiceComesFirstAndChoosesTheFlow() async throws {
+        let (model, _, _) = try await modelWithAnAccount()
+        model.beginAgentMailbox()
+        #expect(model.agentMailboxSheet == .create)
+        let flow = try #require(model.agentMailboxFlow)
+        #expect(flow.step == .service)
+        #expect(!flow.canSubmit)
+
+        flow.choose(.primitive)
+        #expect(flow.step == .new, "no Primitive service account yet: a new one")
+        #expect(!flow.asksForEmail, "Primitive asks for the email when verifying")
+        flow.name = "Scout"
+        #expect(flow.canSubmit)
+        flow.back()
+        #expect(flow.step == .service)
+
+        flow.choose(.agentMail)
+        #expect(flow.step == .new)
+        #expect(flow.asksForEmail)
+        #expect(flow.humanEmail == "work@example.com", "prefilled from the open Gmail account")
+        #expect(flow.addressPreview == "scout@agentmail.to")
+    }
+
+    @Test func agentMailAsksForTheEmailFirstAndGoesStraightToTheCode() async throws {
+        let (model, _, calls) = try await modelWithAnAccount()
+        model.beginAgentMailbox()
+        let flow = try #require(model.agentMailboxFlow)
+        flow.choose(.agentMail)
+        flow.name = "Scout"
+        flow.humanEmail = ""
+        #expect(!flow.canSubmit, "no Agree and Create without the email")
+        flow.humanEmail = "work@example.com"
+        #expect(flow.canSubmit)
+
+        let outcome = try await model.submitAgentMailbox(flow)
+        guard case let .created(accountID, address, codeSentTo) = outcome else {
+            Issue.record("expected a new service account, got \(outcome)")
+            return
+        }
+        #expect(address == "scout@agentmail.to")
+        #expect(codeSentTo == "work@example.com", "the code was sent at sign-up: the sheet waits for it")
+        #expect(calls.calls == ["signUp agentMail work@example.com"])
+        #expect(model.openAccountID == accountID)
+        let service = try #require(model.serviceAccounts.first)
+        #expect(service.service == .agentMail)
+        #expect(service.humanEmail == "work@example.com")
+        // AgentMail's plan has no hourly numbers: its banner is the core's words.
+        let limits = try #require(model.unverifiedAgentLimits)
+        #expect(limits.contains("can write only to work@example.com"), "\(limits)")
+        #expect(!limits.contains("0 an hour"))
+        #expect(model.agentLimits(accountID)?.contains("3,000 messages a month") == true, "the composer's line")
+    }
+
+    @Test func addingToAServiceAccountNeverSignsUp() async throws {
+        let (model, _, calls) = try await modelWithAnAccount()
+        let scout = try await model.createAgentMailbox(name: "Scout")
+        model.beginAgentMailbox()
+        let flow = try #require(model.agentMailboxFlow)
+        flow.choose(.primitive)
+        #expect(flow.step == .path, "a Primitive service account exists: add to it or make another")
+        let existing = flow.existing(.primitive)
+        #expect(existing.map(\.id) == [scout.accountId])
+        flow.add(to: try #require(existing.first))
+        #expect(flow.step == .add)
+        flow.name = "Writer"
+        #expect(flow.addressPreview == "writer@demo.primitive.email")
+        #expect(flow.canSubmit, "a name is all it takes")
+
+        let outcome = try await model.submitAgentMailbox(flow)
+        #expect(outcome == .added(accountID: try #require(model.openAccountID), address: "writer@demo.primitive.email"))
+        #expect(calls.calls.filter { $0.hasPrefix("signUp") } == ["signUp primitive -"], "only the first agent signed up")
+        #expect(calls.calls.contains("addAgent \(scout.accountId)"))
+        #expect(model.serviceAccounts.map(\.agentAccountIds.count) == [2])
+
+        // Settings' Add Agent… opens at the name.
+        model.beginAddAgent(to: scout.accountId)
+        #expect(model.agentMailboxFlow?.step == .add)
+        #expect(model.agentMailboxFlow?.target?.id == scout.accountId)
+        flow.newServiceAccount()
+        #expect(flow.step == .new, "a new service account stays possible")
+    }
+
+    @Test func theSwitcherGroupsAgentsUnderTheirServiceAccount() async throws {
+        let (model, _, _) = try await modelWithAnAccount()
+        let scout = try await model.createAgentMailbox(name: "Scout")
+        let writer = try await model.addAgent(to: scout.accountId, name: "Writer")
+        _ = try await model.createAgentMailbox(service: .agentMail, name: "Clerk", humanEmail: "work@example.com")
+        let groups = model.accountMenuGroups
+        #expect(groups.map(\.title) == [nil, "Primitive · demo.primitive.email", "AgentMail · work@example.com"])
+        #expect(groups.map { $0.accounts.map { $0.displayName ?? $0.email } } == [["Work Me"], ["Scout", "Writer"], ["Clerk"]])
+        // ⌃3 is the third account as the menu shows it.
+        await model.switchAccount(position: 0)
+        await model.switchAccount(position: 2)
+        #expect(model.openAccountID == writer.accountId)
+    }
+
+    @Test func plansAreReadOncePerServiceAccountAndSharedByItsAgents() async throws {
+        let (model, core, calls) = try await modelWithAnAccount()
+        let scout = try await model.createAgentMailbox(name: "Scout")
+        let writer = try await model.addAgent(to: scout.accountId, name: "Writer")
+        // Forget what creating it learned, as a new run would.
+        model.servicePlans = [:]
+        model.fetchedServicePlans = []
+        await model.refreshAgentPlan(scout.accountId)
+        await model.refreshAgentPlan(writer.accountId)
+        #expect(calls.calls.filter { $0.hasPrefix("plan") } == ["plan \(scout.accountId)"], "one read for both agents")
+        #expect(Array(model.servicePlans.keys) == [scout.accountId], "kept by service account")
+        #expect(model.openAccountID == writer.accountId)
+        #expect(model.unverifiedAgentPlan != nil, "the writer's banner reads its service account's plan")
+        #expect(model.unverifiedAgentLimits?.contains("10 an hour") == true)
+
+        _ = try await core.startAgentMailboxVerification(writer.accountId, email: "work@example.com")
+        let plan = try await core.verifyAgentMailbox(writer.accountId, code: "123456")
+        await model.serviceAccountVerified(writer.accountId, plan: plan)
+        #expect(model.unverifiedAgentPlan == nil)
+        await model.switchAccount(to: scout.accountId)
+        #expect(model.unverifiedAgentPlan == nil, "verifying one agent verified its service account")
+    }
+
+    @Test func removingOneOfSeveralAgentsSaysTheKeyStays() async throws {
+        let (model, _, _) = try await modelWithAnAccount()
+        let scout = try await model.createAgentMailbox(name: "Scout")
+        _ = try await model.addAgent(to: scout.accountId, name: "Writer")
+        let agent = try #require(model.accounts.first { $0.id == scout.accountId })
+        #expect(AccountSettings.removeAgentMessage(agent, service: model.serviceAccount(of: scout.accountId))
+            .contains("stay for its other agents"))
+        #expect(AccountSettings.removeAgentMessage(agent, service: nil).contains("forgets the mailbox's key"))
+    }
+
+    @Test func theCopyConfirmationSaysWhatTheKeyReaches() throws {
+        let agentMail = ServiceAccountSummary(id: "a", service: .agentMail, humanEmail: "me@example.com", verified: true,
+                                              plan: nil, managedDomain: "agentmail.to", agentAccountIds: ["a", "b"])
+        #expect(ServiceAccountPane.offersInboxKeys(agentMail), "verified AgentMail: a key per inbox")
+        #expect(ServiceAccountPane.copyMessage(agentMail, agents: ["Scout", "Writer"])
+            .contains("reaches every agent in it (Scout and Writer)"))
+        var unverified = agentMail
+        unverified.verified = false
+        #expect(!ServiceAccountPane.offersInboxKeys(unverified))
+        #expect(AppModel.serviceAccountTitle(agentMail) == "AgentMail · me@example.com")
+        #expect(AppModel.firstSentence("Until verified, it writes to you. Then more.") == "Until verified, it writes to you.")
     }
 }
 
@@ -243,14 +437,14 @@ struct SendRulesTextTests {
     private func rule(_ kind: String, _ value: String? = nil) -> AgentSendRule { AgentSendRule(kind: kind, value: value) }
 
     @Test func whereTheMailboxMayWriteReadsAsOneLine() {
-        #expect(AccountRow.sendRulesText(nil) == "Checking…")
-        #expect(AccountRow.sendRulesText([rule("any_recipient"), rule("managed_zone", "primitive.email")]) == "Anyone")
-        #expect(AccountRow.sendRulesText([rule("managed_zone", "primitive.email")]) == "other Primitive mailboxes")
-        #expect(AccountRow.sendRulesText([
+        #expect(ServiceAccountPane.sendRulesText(nil) == "Checking…")
+        #expect(ServiceAccountPane.sendRulesText([rule("any_recipient"), rule("managed_zone", "primitive.email")]) == "Anyone")
+        #expect(ServiceAccountPane.sendRulesText([rule("managed_zone", "primitive.email")]) == "other Primitive mailboxes")
+        #expect(ServiceAccountPane.sendRulesText([
             rule("managed_zone", "primitive.email"), rule("your_domain", "agents.example.com"),
             rule("address", "a@example.com"), rule("address", "b@example.com"),
         ]) == "2 addresses that wrote to it · anyone at agents.example.com · other Primitive mailboxes")
-        #expect(AccountRow.sendRulesText([]) == "Nobody yet")
+        #expect(ServiceAccountPane.sendRulesText([]) == "Nobody yet")
     }
 
     @Test func thePauseSaysWhy() {
@@ -266,8 +460,8 @@ struct DashboardLinkTests {
     @Test func theDashboardHelpNamesTheVerifiedEmail() throws {
         let verified = AgentMailboxPlan(name: "developer", verified: true, replyOnly: false, sendPerHour: 1000,
                                         sendPerDay: 10000, email: "info@example.com")
-        #expect(AccountRow.dashboardHelp(verified).contains("sign in as info@example.com"))
-        #expect(AccountRow.dashboardHelp(nil).contains("verify the mailbox first"))
+        #expect(ServiceAccountPane.dashboardHelp(verified, service: .primitive).contains("sign in as info@example.com"))
+        #expect(ServiceAccountPane.dashboardHelp(nil, service: .agentMail).contains("verify the service account first"))
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         #expect(core.agentServiceDashboardURL(.primitive)?.host() == "www.primitive.dev")
     }

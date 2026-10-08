@@ -183,6 +183,12 @@ The managed subdomain "can receive at any local-part".
    choice, human email for AgentMail, *Add to <service account>*, the
    switcher groups, the settings pane, limits text. Tests, snapshots light
    and dark, design-system entries.
+   *(as built: the settings pane is a section of Settings › Accounts per
+   service account, its agents' rows inside it; Primitive's group title is
+   its subdomain (no email before verifying); *Rotate Key* is not shown,
+   since neither service implements it; AgentMail's sign-up now counts as
+   asking for the code, so *Fill Code* finds it; the composer of an agent
+   mailbox shows the limits.)*
 6. *(Optional)* **AgentMail WebSocket push** (oagc-uys.15) as the account's push
    source, falling back to polling.
 

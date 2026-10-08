@@ -339,8 +339,18 @@ final class AppModel {
     /// How each decided item went, by tag; an item back in the stores
     /// (Undo) waits again whatever this says.
     var reviewOutcomes: [String: ReviewItem.Outcome] = [:]
-    /// Agent mailboxes' plans as the service last reported them.
-    var agentPlans: [String: AgentMailboxPlan] = [:]
+    /// Service accounts (spec §7.9, ADR 0015) with their agents, in the
+    /// accounts' order.
+    var serviceAccounts: [ServiceAccountSummary] = []
+    /// Service accounts' plans as the service last reported them, by
+    /// service account: its agents share one.
+    var servicePlans: [String: AgentMailboxPlan] = [:]
+    /// Service accounts whose plan was read (or is being read) this run.
+    @ObservationIgnored var fetchedServicePlans: Set<String> = []
+    /// The steps of Create an Agent Mailbox while its sheet is open.
+    var agentMailboxFlow: AgentMailboxFlow?
+    /// Tests: record what the create sheet asks of the core.
+    @ObservationIgnored var agentMailboxCallsOverride: (any AgentMailboxCalls)?
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
@@ -829,6 +839,9 @@ final class AppModel {
     func reloadAccounts() async {
         guard let core else { return }
         if let fresh = try? await core.accounts(), fresh != accounts { accounts = fresh }
+        // Agents came or went: their service accounts too.
+        let agents = Set(accounts.filter { $0.kind == .agent }.map(\.id))
+        if agents != Set(serviceAccounts.flatMap(\.agentAccountIds)) { await reloadServiceAccounts() }
         updateBadge()
     }
 
@@ -956,10 +969,12 @@ final class AppModel {
         }
     }
 
-    /// Switch to the account at `position` in the list (⌃1–⌃9).
+    /// Switch to the account at `position` in the switcher, as its sections
+    /// show them (⌃1–⌃9).
     func switchAccount(position: Int) async {
-        guard accounts.indices.contains(position) else { return }
-        await switchAccount(to: accounts[position].id)
+        let shown = accountMenuGroups.flatMap(\.accounts)
+        guard shown.indices.contains(position) else { return }
+        await switchAccount(to: shown[position].id)
     }
 
     /// Show a thread from a notification: switch to its account if need

@@ -699,11 +699,21 @@ impl Core {
             self.refuse_second_sign_up(email, &request_id)?;
         }
         let core = self.clone();
+        // AgentMail emails the code at sign-up: mail from then on may carry
+        // it (*Fill Code from <address>*), as after *Send Code*.
+        let asked = mail_sync::now_millis();
         runtime::run(async move {
             let client = core.mailbox_service(service)?;
             let account_id = request_id;
             let SignedUp { api_key, address, plan, inbox_id } =
                 client.sign_up(&name, &account_id, human_email.as_deref()).await.map_err(service_error)?;
+            if service == AgentService::AgentMail && !plan.verified {
+                core.agent_mail
+                    .verifications
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(account_id.clone(), asked);
+            }
             let address = mailbox_address(&address, &name);
             let mut plan: AgentMailboxPlan = plan.into();
             if service == AgentService::AgentMail {

@@ -1197,6 +1197,21 @@ possible (Primitive refuses to verify it with an email already used).
 - AgentMail: a new inbox in the organisation (`POST /v0/inboxes`), whose
   `inbox_id` the agent keeps.
 
+*(Implemented 2026-10-08, oagc-uys.14, app: `Features/Accounts/AgentMailbox.swift`
+(`AgentMailboxFlow`). The sheet's first step is the service (Primitive,
+AgentMail, a line each on what it is and its free tier); with a service
+account for it, *Add to <service account>* (one per service account) or
+*New Service Account…*; then the name. Adding shows the address it will
+have (`name@<managed subdomain>`, or on Primitive a picker of the service
+account's verified own domains; `name@agentmail.to`) and calls only
+`add_agent`. A new AgentMail account asks for *Your email* (prefilled from
+the open Gmail account, else the first; a menu picks another of the
+user's accounts) above *Agree and Create*, and after the sign-up the sheet
+is at the code step, since AgentMail emailed it: the core now notes the
+sign-up as the moment a code was asked for, so *Fill Code from <address>*
+finds it (from `agentmail.to`) as after *Send Code*. Settings' *Add
+Agent…* opens the sheet at the name on that service account.)*
+
 **AgentMail.** The second service (`https://api.agentmail.to`). Its
 sign-up takes the agent's name and the user's email together, so the
 sheet asks for the email before *Agree and Create* (prefilled from the
@@ -1409,7 +1424,28 @@ an agent's own settings keep its name, address, *When Agents Send* and
 account, "Primitive · you@example.com". On AgentMail, once verified,
 *Copy API Key* offers a key scoped to the agent's inbox and says the
 organisation's key reaches every agent in it. *Rotate Key* replaces the
-service account's key for all its agents at once.)* Service, address,
+service account's key for all its agents at once.)*
+*(Implemented 2026-10-08, oagc-uys.14: the switcher's sections are the
+user's own accounts, then one per service account, titled "AgentMail ·
+<the user's email>" or "Primitive · <its subdomain>" (an unverified
+Primitive account has no email, and its subdomain names it); ⌃1–⌃9 follow
+the menu's order. The service-account pane is a section of Settings ›
+Accounts per service account, under the same title, holding what is
+shared (service and plan, verified email or *Verify…*, the limits in the
+core's words (`service_account_limits`), on Primitive *Can write to* and
+*Domains* with *Add Domain…*, *Add Agent…*, *Copy API Key…*, *Open
+<service>…*), followed by its agents' rows (name, address with *Use Your
+Own Domain…* on Primitive, *When Agents Send*, *Remove…*). *Copy API
+Key…* names the agents the key reaches; on verified AgentMail it offers
+*Copy Key for <agent> Only* (`agent_inbox_api_key`) first. *Rotate Key*
+is not shown: neither service implements it (Primitive has no endpoint
+wired; AgentMail rotates only on a repeated sign-up, which the core never
+makes), and it returns when one does. The app keeps plans by service
+account (`servicePlans`), read once per service account per run; the
+unverified banner reads its agent's service account's plan: Primitive's
+line is from the plan's hourly and daily numbers, AgentMail's is the
+first sentence of the core's limits (its plan reports 0 an hour and 0 a
+day), and the composer of an agent mailbox shows the limits in full.)* Service, address,
 plan and verification state with *Verify…*, *Can write to* (the service's send rules, `GET
 /send-permissions`: anyone, addresses that wrote first, the user's own
 domains, other Primitive mailboxes; sending to anyone is an entitlement

@@ -299,6 +299,47 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// The service account an agent mailbox belongs to.
+    func agentServiceAccount(_ accountID: String) -> String? {
+        try? core.agentServiceAccount(accountId: accountID)
+    }
+
+    /// The service account's plan now, from the service.
+    func serviceAccountPlan(_ serviceAccountID: String) async throws(CoreClientError) -> AgentMailboxPlan {
+        try await call { try await core.serviceAccountPlan(serviceAccountId: serviceAccountID) }
+    }
+
+    /// What the service account's agents may do, in words (the agents'
+    /// prompts say the same).
+    func serviceAccountLimits(_ serviceAccountID: String) -> String? {
+        try? core.serviceAccountLimits(serviceAccountId: serviceAccountID)
+    }
+
+    /// The same words for a service account not made yet.
+    func agentServiceLimits(_ service: AgentService, verified: Bool, humanEmail: String?) -> String {
+        core.agentServiceLimits(service: service, verified: verified, humanEmail: humanEmail)
+    }
+
+    /// The service account's key: it reaches every agent in it.
+    func serviceAccountAPIKey(_ serviceAccountID: String) throws(CoreClientError) -> String {
+        try callSync { try core.serviceAccountApiKey(serviceAccountId: serviceAccountID) }
+    }
+
+    /// AgentMail, once verified: a new key for this agent's inbox only.
+    func agentInboxAPIKey(_ accountID: String) async throws(CoreClientError) -> String {
+        try await call { try await core.agentInboxApiKey(accountId: accountID) }
+    }
+
+    /// Where the service account's agents may send now.
+    func serviceAccountSendRules(_ serviceAccountID: String) async throws(CoreClientError) -> [AgentSendRule] {
+        try await call { try await core.serviceAccountSendRules(serviceAccountId: serviceAccountID) }
+    }
+
+    /// The user's own domains on the service account.
+    func serviceAccountDomains(_ serviceAccountID: String) async throws(CoreClientError) -> [AgentDomain] {
+        try await call { try await core.serviceAccountDomains(serviceAccountId: serviceAccountID) }
+    }
+
     /// Tests: deliver a message into a fake agent mailbox.
     func deliverToAgentMailbox(_ accountID: String, from: String, subject: String, body: String) throws(CoreClientError) {
         try callSync { try core.debugDeliverToAgentMailbox(accountId: accountID, from: from, subject: subject, body: body) }
@@ -1401,6 +1442,8 @@ typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
 typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
 typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
 typealias AgentVerification = OpenAGCCore.AgentVerification
+typealias ServiceAccountSummary = OpenAGCCore.ServiceAccountSummary
+typealias AgentAdded = OpenAGCCore.AgentAdded
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus
 typealias OrphanedStore = OpenAGCCore.OrphanedStore

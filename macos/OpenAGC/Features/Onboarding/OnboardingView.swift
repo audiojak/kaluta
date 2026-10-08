@@ -47,7 +47,7 @@ struct OnboardingView: View {
                             .hoverHelp("Try OpenAGC with made-up mail; nothing leaves this Mac")
                             .controlSize(.large)
                         Button("Create an Agent Mailbox…") { model.beginAgentMailbox() }
-                            .hoverHelp("Give one of your agents an address of its own on Primitive")
+                            .hoverHelp("Give one of your agents an address of its own on Primitive or AgentMail")
                             .controlSize(.large)
                     }
                     if !client.isUsable {

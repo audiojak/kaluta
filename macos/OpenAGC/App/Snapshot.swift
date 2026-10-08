@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import os
 
 /// Headless UI verification without Screen Recording permission: launched
@@ -42,10 +43,16 @@ import os
 ///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
-///   -OpenAGCSnapshotAgentMailbox create|verify|banner|domain|domain-ready|two
-///                                       the Create an Agent Mailbox sheet, or a
+///   -OpenAGCSnapshotAgentMailbox create|agentmail|path|add|switcher|pane|verify|banner|agentmail-banner|domain|domain-ready|two
+///                                       the Create an Agent Mailbox sheet (its
+///                                       service step; AgentMail's email step;
+///                                       with a service account: add or new, and
+///                                       the add step), the switcher's sections
+///                                       (printed to stderr) and the service-account
+///                                       settings (a window of their own), or a
 ///                                       new mailbox (fake service) with its
-///                                       verify sheet, its limits banner, its
+///                                       verify sheet, its limits banner (or an
+///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
@@ -246,6 +253,50 @@ enum Snapshot {
                let core = model.core {
                 if agent == "create" {
                     model.beginAgentMailbox()
+                } else if agent == "agentmail" {
+                    // A new AgentMail service account: the email is asked first.
+                    model.beginAgentMailbox()
+                    try? await Task.sleep(for: .milliseconds(300))
+                    model.agentMailboxFlow?.choose(.agentMail)
+                    model.agentMailboxFlow?.name = "Research Scout"
+                    if model.agentMailboxFlow?.humanEmail.isEmpty == true {
+                        model.agentMailboxFlow?.humanEmail = "you@example.com"
+                    }
+                } else if agent == "agentmail-banner", CoreClient.usesFakeAgentMail,
+                          let created = try? await model.createAgentMailbox(service: .agentMail, name: "Research Scout",
+                                                                           humanEmail: "you@example.com") {
+                    // AgentMail's banner: the core's words, not a plan's numbers.
+                    try? core.deliverToAgentMailbox(created.accountId, from: "Ada Lovelace <ada@example.com>",
+                                                    subject: "Your library card",
+                                                    body: "Welcome! Your card number is on the attached sheet.")
+                } else if ["path", "add", "switcher", "pane"].contains(agent), CoreClient.usesFakeAgentMail,
+                          let scout = try? await model.createAgentMailbox(name: "Research Scout") {
+                    // A service account to add to (ADR 0015).
+                    if agent == "switcher" || agent == "pane" {
+                        _ = try? await model.addAgent(to: scout.accountId, name: "Writer")
+                        _ = try? await model.createAgentMailbox(service: .agentMail, name: "Clerk",
+                                                                humanEmail: "you@example.com")
+                        await model.switchAccount(to: scout.accountId)
+                    }
+                    if agent == "path" || agent == "add" {
+                        model.beginAgentMailbox()
+                        try? await Task.sleep(for: .milliseconds(300))
+                        model.agentMailboxFlow?.choose(.primitive)
+                        if agent == "add", let flow = model.agentMailboxFlow, let target = flow.existing(.primitive).first {
+                            flow.add(to: target)
+                            flow.name = "Writer"
+                        }
+                    }
+                    if agent == "switcher" {
+                        // AppKit menus do not snapshot: the sections as text.
+                        for group in model.accountMenuGroups {
+                            let names = group.accounts.map { $0.displayName ?? $0.email }.joined(separator: ", ")
+                            FileHandle.standardError.write(Data("switcher section \(group.title ?? "(own)"): \(names)\n".utf8))
+                        }
+                    }
+                    if agent == "pane" {
+                        window = Self.serviceAccountWindow(model)
+                    }
                 } else if CoreClient.usesFakeAgentMail,
                           let created = try? await model.createAgentMailbox(name: "Research Scout") {
                     try? core.deliverToAgentMailbox(created.accountId, from: "Ada Lovelace <ada@example.com>",
@@ -273,7 +324,8 @@ enum Snapshot {
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(1200))
-                if agent != "banner", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                if !["banner", "agentmail-banner", "switcher", "pane"].contains(agent),
+                   let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
                     window = sheet
                 }
             }
@@ -334,6 +386,32 @@ enum Snapshot {
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)
         }
+    }
+
+    /// Settings › Accounts' service-account sections, in a window of their own
+    /// (the Settings scene cannot be opened from here).
+    private static func serviceAccountWindow(_ model: AppModel) -> NSWindow {
+        let form = Form {
+            ForEach(model.serviceAccounts, id: \.id) { service in
+                Section {
+                    ServiceAccountPane(service: service)
+                    ForEach(service.agentAccountIds.compactMap { id in model.accounts.first { $0.id == id } }, id: \.id) {
+                        AccountRow(account: $0, onRemove: {})
+                    }
+                } header: {
+                    Text(AppModel.serviceAccountTitle(service))
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 640, height: 900)
+        .environment(model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 900), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: form)
+        window.makeKeyAndOrderFront(nil)
+        return window
     }
 
     private static func isOpen(_ state: AppModel.AccountState?) -> Bool {
