@@ -97,13 +97,18 @@ pub fn event_change(label: &str, added: bool) -> Option<(Vec<LabelId>, Vec<Label
 
 /// The AgentMail labels to add and to remove for a change made in the
 /// app; empty when nothing goes to AgentMail (trash, spam and the store's
-/// own labels stay on this Mac).
+/// own labels stay on this Mac). A change that moves mail to Trash or Spam
+/// (Clean Up's Trash and Spam, Mark as Junk) leaves the Inbox on this Mac
+/// only: archiving it at AgentMail would act there for an action that
+/// stays here, as the trash endpoints do (ADR 0014).
 pub fn to_server(add: &[LabelId], remove: &[LabelId]) -> (Vec<String>, Vec<String>) {
     let (mut plus, mut minus) = (Vec::<String>::new(), Vec::<String>::new());
+    let local_only = add.iter().any(|l| l.as_str() == system_labels::TRASH || l.as_str() == system_labels::SPAM);
     for (ids, adding) in [(add, true), (remove, false)] {
         for id in ids {
             let (on, off) = if adding { (&mut plus, &mut minus) } else { (&mut minus, &mut plus) };
             match id.as_str() {
+                system_labels::INBOX if local_only => {}
                 system_labels::INBOX => off.push(ARCHIVED.into()),
                 system_labels::UNREAD => {
                     on.push("unread".into());
@@ -182,7 +187,18 @@ mod tests {
             to_server(&ids(&["billing", "STARRED", "TRASH", "SPAM", "CATEGORY_SOCIAL"]), &ids(&["receipts"])),
             (strings(&["billing", "starred"]), strings(&["receipts"]))
         );
-        assert_eq!(to_server(&ids(&["TRASH"]), &ids(&["INBOX", "SENT"])), (strings(&["archived"]), vec![]));
+        // Trash and spam leave the Inbox on this Mac only (Clean Up's
+        // Trash and Spam, Mark as Junk): nothing is archived at AgentMail,
+        // as the trash endpoints send nothing (ADR 0014).
+        assert_eq!(to_server(&ids(&["TRASH"]), &ids(&["INBOX", "SENT"])), (vec![], vec![]));
+        assert_eq!(to_server(&ids(&["SPAM"]), &ids(&["INBOX"])), (vec![], vec![]));
+        assert_eq!(
+            to_server(&ids(&["SPAM", "billing"]), &ids(&["INBOX", "UNREAD"])),
+            (strings(&["billing", "read"]), strings(&["unread"]))
+        );
+        // Undoing them may take `archived` off: harmless, and it repairs
+        // mail archived there by an older version.
+        assert_eq!(to_server(&ids(&["INBOX"]), &ids(&["TRASH"])), (vec![], strings(&["archived"])));
     }
 
     #[test]

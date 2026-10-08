@@ -279,13 +279,12 @@ impl SyncEngine {
                 OutboxOp::ModifyLabels { message_ids, add, remove } => {
                     // Before the call: history may report it before we return.
                     self.remember_own(message_ids, add, remove);
-                    self.provider()
-                        .modify_labels(&LabelOp {
-                            message_ids: message_ids.clone(),
-                            add: add.clone(),
-                            remove: remove.clone(),
-                        })
-                        .await
+                    self.modify_labels_present(LabelOp {
+                        message_ids: message_ids.clone(),
+                        add: add.clone(),
+                        remove: remove.clone(),
+                    })
+                    .await
                 }
                 OutboxOp::Trash { message_ids, .. } => {
                     self.remember_own(
@@ -295,9 +294,13 @@ impl SyncEngine {
                     );
                     let mut result = Ok(());
                     for m in message_ids {
-                        if let Err(e) = self.provider().move_to_trash(m).await {
-                            result = Err(e);
-                            break;
+                        match self.provider().move_to_trash(m).await {
+                            // Deleted on the server: the others still go.
+                            Ok(()) | Err(ProviderError::NotFound(_)) => {}
+                            Err(e) => {
+                                result = Err(e);
+                                break;
+                            }
                         }
                     }
                     result
@@ -306,9 +309,12 @@ impl SyncEngine {
                     self.remember_own(message_ids, &[], &[LabelId::new(system_labels::TRASH)]);
                     let mut result = Ok(());
                     for m in message_ids {
-                        if let Err(e) = self.provider().restore_from_trash(m).await {
-                            result = Err(e);
-                            break;
+                        match self.provider().restore_from_trash(m).await {
+                            Ok(()) | Err(ProviderError::NotFound(_)) => {}
+                            Err(e) => {
+                                result = Err(e);
+                                break;
+                            }
                         }
                     }
                     result
@@ -354,6 +360,8 @@ impl SyncEngine {
                     }
                 }
                 // A message deleted on the server: nothing left to change.
+                // Multi-message ops only get here once every present id
+                // was changed ([`Self::modify_labels_present`]).
                 Err(ProviderError::NotFound(_)) if !matches!(queued.op, OutboxOp::Send { .. }) => {
                     self.db().write(move |tx| outbox::complete(tx, id)).await?;
                     report.sent += 1;
@@ -382,6 +390,32 @@ impl SyncEngine {
                 }
             }
         }
+    }
+
+    /// One label change for many messages, where a message deleted on the
+    /// server must not cost the others their change. Whether Gmail's
+    /// `batchModify` fails as a whole when one id is gone is a hand-check
+    /// (plan 2026-10-08), so a `NotFound` for several ids is split in
+    /// halves and each retried, down to the single missing ids, which are
+    /// dropped: a batch of 1,000 with one missing id takes about 20 calls.
+    /// Label changes are idempotent, so a half sent twice changes nothing.
+    async fn modify_labels_present(&self, op: LabelOp) -> Result<(), ProviderError> {
+        let mut pending = vec![op];
+        while let Some(op) = pending.pop() {
+            match self.provider().modify_labels(&op).await {
+                Ok(()) => {}
+                Err(ProviderError::NotFound(id)) if op.message_ids.len() > 1 => {
+                    tracing::debug!(%id, count = op.message_ids.len(), "a message in the batch is gone; splitting it");
+                    let mut first = op.clone();
+                    let second = first.message_ids.split_off(op.message_ids.len() / 2);
+                    pending.push(LabelOp { message_ids: second, ..op });
+                    pending.push(first);
+                }
+                Err(ProviderError::NotFound(id)) => tracing::debug!(%id, "gone on the server; its change is dropped"),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
     }
 
     /// Create or replace a draft's server copy. A draft deleted or being
