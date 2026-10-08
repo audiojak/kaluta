@@ -1168,3 +1168,177 @@ fn agentmail_agents_share_one_websocket_and_an_event_makes_its_agent_poll() {
     assert_eq!(lists("scout@agentmail.to"), scout_before, "the scout was not woken");
     core.stop_sync();
 }
+
+/// Where the index is written next to: a directory in its way makes the
+/// write fail, as a full disk would.
+fn block_index(t: &Temp, blocked: bool) {
+    let tmp = t.0.join("accounts").join("index.json.tmp");
+    if blocked {
+        std::fs::create_dir_all(&tmp).unwrap();
+    } else {
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+}
+
+fn listed(core: &Core) -> Vec<String> {
+    block_on(core.list_accounts()).unwrap().into_iter().map(|a| a.id).collect()
+}
+
+fn account_email(core: &Arc<Core>, account: &str) -> Option<String> {
+    let (core, account) = (core.clone(), account.to_owned());
+    block_on(crate::runtime::run(async move {
+        let db = core.store_for(&account).await?;
+        Ok(db.read(|c| mail_store::read::sync_state(c, "account_email")).await?)
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_creation_that_failed_after_its_agent_was_written_is_finished_by_the_retry() {
+    let (t, core, _secrets) = core("finish-create");
+    core.debug_use_fake_agent_mail(true);
+    std::fs::create_dir_all(t.0.join("accounts")).unwrap();
+    block_index(&t, true);
+    let email = || Some("me@example.com".to_owned());
+    let failed =
+        block_on(core.clone().create_agent_mailbox(AgentService::AgentMail, "Scout".into(), email(), "fc-1".into()));
+    assert!(failed.is_err(), "the index could not be written");
+    assert!(core.agent_meta("fc-1").is_some(), "the agent was written before it");
+    block_index(&t, false);
+    let retry =
+        block_on(core.clone().create_agent_mailbox(AgentService::AgentMail, "Scout".into(), email(), "fc-1".into()))
+            .unwrap();
+    assert_eq!(retry.account_id, "fc-1");
+    assert_eq!(listed(&core), ["fc-1"], "the retry registered it");
+    assert_eq!(account_email(&core, "fc-1").as_deref(), Some("scout@agentmail.to"));
+
+    // The same for an agent added to it.
+    block_index(&t, true);
+    assert!(block_on(core.clone().add_agent("fc-1".into(), "Writer".into(), None, "fc-2".into())).is_err());
+    block_index(&t, false);
+    let writer = block_on(core.clone().add_agent("fc-1".into(), "Writer".into(), None, "fc-2".into())).unwrap();
+    assert_eq!(listed(&core), ["fc-1", "fc-2"]);
+    assert_eq!(account_email(&core, &writer.account_id).as_deref(), Some("writer@agentmail.to"));
+}
+
+#[test]
+fn an_agentmail_sign_up_that_failed_after_its_key_was_kept_is_finished_with_that_key() {
+    let (t, core, secrets) = core("finish-sign-up");
+    core.debug_use_fake_agent_mail(true);
+    // The service account's record cannot be written: the sign-up went
+    // through and its key is in the Keychain, nothing else.
+    let blocked = t.0.join("services").join("fs-1").join("service.json.tmp");
+    std::fs::create_dir_all(&blocked).unwrap();
+    let email = || Some("me@example.com".to_owned());
+    let failed =
+        block_on(core.clone().create_agent_mailbox(AgentService::AgentMail, "Scout".into(), email(), "fs-1".into()));
+    assert!(failed.is_err());
+    let key = key_of(&secrets, "fs-1");
+    std::fs::remove_dir_all(&blocked).unwrap();
+
+    // The retry finishes with that key and never signs up again (which
+    // would rotate it).
+    let retry =
+        block_on(core.clone().create_agent_mailbox(AgentService::AgentMail, "Scout".into(), email(), "fs-1".into()))
+            .unwrap();
+    assert_eq!(retry.address, "scout@agentmail.to");
+    assert_eq!(key_of(&secrets, "fs-1"), key, "the same key");
+    let fake = core.agent_mail.fake_services.lock().unwrap().get(&AgentService::AgentMail).cloned().unwrap();
+    assert_eq!(fake.repeated_sign_ups.load(Ordering::SeqCst), 0, "never signed up twice");
+    assert_eq!(listed(&core), ["fs-1"]);
+    assert_eq!(core.agent_meta("fs-1").unwrap().inbox_id.as_deref(), Some("scout@agentmail.to"));
+    assert_eq!(core.service_meta("fs-1").unwrap().human_email.as_deref(), Some("me@example.com"));
+}
+
+/// Secrets whose deletes of one key fail, as a locked Keychain would.
+struct StuckSecrets(crate::secrets::MemorySecrets, std::sync::Mutex<Option<String>>);
+impl crate::secrets::SecretStore for StuckSecrets {
+    fn get(&self, key: String) -> Result<Option<String>, CoreError> {
+        self.0.get(key)
+    }
+    fn set(&self, key: String, value: String) -> Result<(), CoreError> {
+        self.0.set(key, value)
+    }
+    fn delete(&self, key: String) -> Result<(), CoreError> {
+        if self.1.lock().unwrap().as_deref() == Some(key.as_str()) {
+            return Err(CoreError::new(ErrorKind::Storage, "the Keychain is locked"));
+        }
+        self.0.delete(key)
+    }
+}
+
+#[test]
+fn a_failed_removal_does_not_let_a_sibling_take_the_shared_key_with_it() {
+    let dir = std::env::temp_dir().join(format!("openagc-agent-stuck-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let _t = Temp(dir.clone());
+    let secrets = Arc::new(StuckSecrets(Default::default(), Default::default()));
+    let core = Core::new(
+        CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+        secrets.clone(),
+        Arc::new(Silent),
+    )
+    .unwrap();
+    core.debug_use_fake_agent_mail(true);
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), None, "st-1".into()))
+            .unwrap();
+    let writer =
+        block_on(core.clone().add_agent(scout.account_id.clone(), "Writer".into(), None, "st-2".into())).unwrap();
+    // Removing the scout fails part way: it stays listed, with its store.
+    *secrets.1.lock().unwrap() = Some(crate::secrets::keys::refresh_token("st-1"));
+    assert!(block_on(core.remove_account(scout.account_id.clone())).is_err());
+    *secrets.1.lock().unwrap() = None;
+    assert!(listed(&core).contains(&scout.account_id));
+    // Removing the writer leaves the key for the scout, which is still here.
+    block_on(core.remove_account(writer.account_id.clone())).unwrap();
+    let key = keys::mailbox_api_key(&scout.account_id);
+    assert!(secrets.0.0.lock().unwrap().contains_key(&key), "the scout keeps the key");
+    // And the scout can be removed after all, taking the key with it.
+    block_on(core.remove_account(scout.account_id.clone())).unwrap();
+    assert!(!secrets.0.0.lock().unwrap().contains_key(&key));
+}
+
+#[test]
+fn removing_the_last_agent_while_another_is_added_keeps_the_key_for_the_new_one() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    let plain = |body: serde_json::Value| ResponseTemplate::new(200).set_body_json(body);
+    rt.block_on(
+        Mock::given(method("POST"))
+            .and(path("/v0/agent/sign-up"))
+            .respond_with(plain(json!({ "organization_id": "o", "inbox_id": "scout@agentmail.to", "api_key": "am_k" })))
+            .mount(&server),
+    );
+    // Making the writer's inbox takes a while.
+    rt.block_on(
+        Mock::given(method("POST"))
+            .and(path("/v0/inboxes"))
+            .respond_with(
+                plain(json!({ "inbox_id": "writer@agentmail.to", "email": "writer@agentmail.to" }))
+                    .set_delay(Duration::from_millis(600)),
+            )
+            .mount(&server),
+    );
+    let (_t, core, secrets) = core("race");
+    *core.agent_mail.base.lock().unwrap() = Some(server.uri());
+    let scout = block_on(core.clone().create_agent_mailbox(
+        AgentService::AgentMail,
+        "Scout".into(),
+        Some("me@example.com".into()),
+        "rc-1".into(),
+    ))
+    .unwrap();
+    let adding = {
+        let core = core.clone();
+        let service = scout.account_id.clone();
+        std::thread::spawn(move || block_on(core.add_agent(service, "Writer".into(), None, "rc-2".into())))
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    // The scout goes while the writer's inbox is being made.
+    block_on(core.remove_account(scout.account_id.clone())).unwrap();
+    let writer = adding.join().unwrap().unwrap();
+    assert_eq!(writer.address, "writer@agentmail.to");
+    assert_eq!(key_of(&secrets, &scout.account_id), "am_k", "the writer has its service account's key");
+    assert!(core.service_meta(&scout.account_id).is_ok(), "and its record");
+}

@@ -30,7 +30,7 @@ use super::{
     AgentDomain, AgentMailboxPlan, AgentMeta, AgentSendMode, AgentSendRule, AgentService, AgentVerification,
     CODE_SLACK_MS, find_code, limits_text, local_part, read_meta, service_error, write_meta,
 };
-use crate::registry::{AccountKind, DEMO_ACCOUNT_ID, IndexEntry, accounts_dir, load_index};
+use crate::registry::{AccountKind, DEMO_ACCOUNT_ID, accounts_dir, load_index};
 use crate::secrets::{self, keys};
 use crate::{Core, CoreError, ErrorKind, runtime};
 
@@ -119,7 +119,7 @@ pub(crate) fn read_service(data_dir: &Path, id: &str) -> Option<ServiceMeta> {
     })
 }
 
-fn service_written(data_dir: &Path, id: &str) -> bool {
+pub(crate) fn service_written(data_dir: &Path, id: &str) -> bool {
     services_dir(data_dir).join(id).join(SERVICE_FILE).is_file()
 }
 
@@ -219,8 +219,11 @@ impl Core {
 
     /// `leaving` is removed from this Mac: with no other agent left on its
     /// service account `id`, forget the account's record and key; else keep
-    /// both, writing the record if it was only read from `leaving`.
-    pub(crate) fn release_service_account(&self, id: &str, leaving: &str) -> Result<(), CoreError> {
+    /// both, writing the record if it was only read from `leaving`. Waits
+    /// for an agent being added ([`Self::add_agent`]), so the key never goes
+    /// while one is added to it; that one is then on disk and counted.
+    pub(crate) async fn release_service_account(&self, id: &str, leaving: &str) -> Result<(), CoreError> {
+        let _adding = self.agent_mail.adding.lock().await;
         let data_dir = self.data_path();
         let removed = self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).removed.clone();
         let others = agents_on_disk(&data_dir)
@@ -317,12 +320,18 @@ impl Core {
         }
         let data_dir = self.data_path();
         let dir = accounts_dir(&data_dir).join(&request_id);
-        // A retry: the agent is already there.
+        // A retry: the agent is already there; finish what an earlier
+        // attempt may have left undone (its store, the index).
         if let Some(existing) = read_meta(&dir) {
             if existing.service_account != service_account_id {
                 return Err(CoreError::new(ErrorKind::InvalidInput, "that request made another agent"));
             }
-            return Ok(AgentAdded { account_id: request_id, address: existing.address, service_account_id });
+            let core = self.clone();
+            return runtime::run(async move {
+                core.finish_agent(&request_id, &existing).await?;
+                Ok(AgentAdded { account_id: request_id, address: existing.address, service_account_id })
+            })
+            .await;
         }
         let service = self.service_meta(&service_account_id)?;
         let managed = service.managed_domain.clone();
@@ -349,8 +358,14 @@ impl Core {
         let address = format!("{local}@{domain}");
         let managed_address = managed.as_ref().map(|m| format!("{local}@{m}"));
 
-        // One addition at a time per Mac, so two agents cannot take one address.
+        // One addition at a time per Mac, so two agents cannot take one
+        // address, and none while an agent's removal releases the service
+        // account ([`Self::release_service_account`]).
         let _adding = self.agent_mail.adding.lock().await;
+        // Its last agent may have been removed meanwhile, with the key.
+        if crate::secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(&service_account_id))?.is_none() {
+            return Err(CoreError::new(ErrorKind::NotFound, "that service account is no longer on this Mac"));
+        }
         let taken = agents_on_disk(&data_dir).into_iter().find(|(_, a)| {
             a.service_account == service_account_id
                 && (a.address == address
@@ -385,39 +400,23 @@ impl Core {
         if !service_written(&data_dir, &service_account_id) {
             self.update_service(&service_account_id, |_| {})?;
         }
-        write_meta(
-            &dir,
-            &AgentMeta {
-                kind: "agent".into(),
-                service: service.service,
-                address: address.clone(),
-                name: name.clone(),
-                created_at: mail_sync::now_millis(),
-                send_mode: AgentSendMode::default(),
-                managed_address,
-                service_account: service_account_id.clone(),
-                inbox_id,
-            },
-        )?;
+        let meta = AgentMeta {
+            kind: "agent".into(),
+            service: service.service,
+            address: address.clone(),
+            name,
+            created_at: mail_sync::now_millis(),
+            send_mode: AgentSendMode::default(),
+            managed_address,
+            service_account: service_account_id.clone(),
+            inbox_id,
+        };
+        write_meta(&dir, &meta)?;
         drop(_adding);
         let core = self.clone();
         let account_id = request_id;
         runtime::run(async move {
-            let db = core.store_for(&account_id).await?;
-            let stored = address.clone();
-            db.write(move |tx| mail_store::read::set_sync_state(tx, "account_email", &stored)).await?;
-            core.register_account(IndexEntry {
-                id: account_id.clone(),
-                kind: AccountKind::Agent,
-                email: address.clone(),
-                display_name: Some(name),
-                avatar_file: None,
-                added_at: mail_sync::now_millis(),
-                imap: None,
-                named_by_user: true,
-                service: Some(service.service),
-            })
-            .await?;
+            core.finish_agent(&account_id, &meta).await?;
             tracing::info!(account = %account_id, service_account = %service_account_id, "agent added");
             Ok(AgentAdded { account_id, address, service_account_id })
         })

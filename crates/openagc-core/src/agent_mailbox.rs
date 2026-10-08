@@ -229,6 +229,40 @@ fn write_meta(dir: &Path, meta: &AgentMeta) -> Result<(), CoreError> {
     std::fs::rename(tmp, dir.join(META_FILE)).map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))
 }
 
+/// What an AgentMail sign-up answered, kept in `services/<id>/` before its
+/// key is stored and removed once the agent is registered: a creation that
+/// fails after the key was stored is finished with it by the retry, which
+/// must never sign up again (that would rotate the key, ADR 0015).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingSignUp {
+    address: String,
+    #[serde(default)]
+    inbox_id: Option<String>,
+    plan: AgentMailboxPlan,
+    /// When the code was emailed (with the sign-up), for *Fill Code*.
+    asked: i64,
+}
+
+const PENDING_FILE: &str = "sign-up.json";
+
+fn pending_path(data_dir: &Path, id: &str) -> std::path::PathBuf {
+    service_account::services_dir(data_dir).join(id).join(PENDING_FILE)
+}
+
+fn read_pending(data_dir: &Path, id: &str) -> Option<PendingSignUp> {
+    serde_json::from_slice(&std::fs::read(pending_path(data_dir, id)).ok()?).ok()
+}
+
+fn write_pending(data_dir: &Path, id: &str, pending: &PendingSignUp) -> Result<(), CoreError> {
+    let path = pending_path(data_dir, id);
+    let storage = |e: std::io::Error| CoreError::new(ErrorKind::Storage, e.to_string());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(storage)?;
+    }
+    let bytes = serde_json::to_vec_pretty(pending).map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+    std::fs::write(path, bytes).map_err(storage)
+}
+
 pub(crate) fn rename_meta(dir: &Path, name: &str) -> Result<(), CoreError> {
     let mut meta =
         read_meta(dir).ok_or_else(|| CoreError::new(ErrorKind::NotFound, "the mailbox's details are missing"))?;
@@ -668,13 +702,42 @@ impl Core {
                 ),
             ));
         }
-        if crate::secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(request_id))?.is_some() {
+        // A key for this request: the sign-up went through. With its answer
+        // kept, the retry finishes with it (`create_agent_mailbox`); without,
+        // it cannot, and signing up again would rotate the key.
+        if crate::secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(request_id))?.is_some()
+            && read_pending(&data_dir, request_id).is_none()
+        {
             return Err(CoreError::new(
                 ErrorKind::InvalidInput,
                 "this AgentMail sign-up already went through once; signing up again would replace its key",
             ));
         }
         Ok(())
+    }
+
+    /// The last steps of making an agent, safe to repeat, so a retry after
+    /// a failure part way finishes them: its service account's record is
+    /// written, its store knows its address, and the index lists it.
+    pub(crate) async fn finish_agent(&self, account_id: &str, meta: &AgentMeta) -> Result<(), CoreError> {
+        if !service_account::service_written(&self.data_path(), &meta.service_account) {
+            self.update_service(&meta.service_account, |_| {})?;
+        }
+        let db = self.store_for(account_id).await?;
+        let stored = meta.address.clone();
+        db.write(move |tx| mail_store::read::set_sync_state(tx, "account_email", &stored)).await?;
+        self.register_account(IndexEntry {
+            id: account_id.to_owned(),
+            kind: AccountKind::Agent,
+            email: meta.address.clone(),
+            display_name: Some(meta.name.clone()),
+            avatar_file: None,
+            added_at: mail_sync::now_millis(),
+            imap: None,
+            named_by_user: true,
+            service: Some(meta.service),
+        })
+        .await
     }
 
     /// The limits text for an agent mailbox (see [`limits_text`]).
@@ -730,17 +793,24 @@ impl Core {
             if !email.contains('@') {
                 return Err(CoreError::new(ErrorKind::InvalidInput, "enter an email address"));
             }
-            // A retry of a creation that finished on this Mac.
+            // A retry of a creation that got as far as its agent on this
+            // Mac: finish what an earlier attempt left undone.
             if let Some(existing) = read_meta(&accounts_dir(&self.data_path()).join(&request_id)) {
-                return Ok(AgentMailboxCreated {
-                    account_id: request_id.clone(),
-                    address: existing.address,
-                    plan: self
-                        .service_meta(&existing.service_account)
-                        .ok()
-                        .and_then(|s| s.plan)
-                        .unwrap_or_else(|| provider_agentmail_plan(false)),
-                });
+                let core = self.clone();
+                return runtime::run(async move {
+                    core.finish_agent(&request_id, &existing).await?;
+                    let _ = std::fs::remove_file(pending_path(&core.data_path(), &request_id));
+                    Ok(AgentMailboxCreated {
+                        account_id: request_id.clone(),
+                        address: existing.address,
+                        plan: core
+                            .service_meta(&existing.service_account)
+                            .ok()
+                            .and_then(|s| s.plan)
+                            .unwrap_or_else(|| provider_agentmail_plan(false)),
+                    })
+                })
+                .await;
             }
             self.refuse_second_sign_up(email, &request_id)?;
         }
@@ -751,8 +821,38 @@ impl Core {
         runtime::run(async move {
             let client = core.mailbox_service(service)?;
             let account_id = request_id;
-            let SignedUp { api_key, address, plan, inbox_id } =
-                client.sign_up(&name, &account_id, human_email.as_deref()).await.map_err(service_error)?;
+            let data_dir = core.data_path();
+            // AgentMail: a sign-up whose key was stored before a failure is
+            // finished with it, never signed up for again.
+            let has_key = || -> Result<bool, CoreError> {
+                Ok(crate::secrets::get_redacted(core.secrets.as_ref(), &keys::mailbox_api_key(&account_id))?.is_some())
+            };
+            let resumed = match read_pending(&data_dir, &account_id) {
+                Some(pending) if service == AgentService::AgentMail && has_key()? => Some(pending),
+                _ => None,
+            };
+            let PendingSignUp { address, inbox_id, plan, asked } = match resumed {
+                Some(pending) => {
+                    tracing::info!(account = %account_id, "finishing an AgentMail sign-up that went through before");
+                    pending
+                }
+                None => {
+                    let SignedUp { api_key, address, plan, inbox_id } =
+                        client.sign_up(&name, &account_id, human_email.as_deref()).await.map_err(service_error)?;
+                    let address = mailbox_address(&address, &name);
+                    let mut plan: AgentMailboxPlan = plan.into();
+                    if service == AgentService::AgentMail {
+                        plan.email = plan.email.or_else(|| human_email.clone());
+                    }
+                    let pending = PendingSignUp { address, inbox_id, plan, asked };
+                    if service == AgentService::AgentMail {
+                        write_pending(&data_dir, &account_id, &pending)?;
+                    }
+                    // The service account takes the id of its first agent.
+                    core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
+                    pending
+                }
+            };
             if service == AgentService::AgentMail && !plan.verified {
                 core.agent_mail
                     .verifications
@@ -760,13 +860,6 @@ impl Core {
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(account_id.clone(), asked);
             }
-            let address = mailbox_address(&address, &name);
-            let mut plan: AgentMailboxPlan = plan.into();
-            if service == AgentService::AgentMail {
-                plan.email = plan.email.or_else(|| human_email.clone());
-            }
-            // The service account takes the id of its first agent.
-            core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
             {
                 let _guard = core.agent_mail.records.lock().unwrap_or_else(|e| e.into_inner());
                 let mut record = service_account::read_service(&core.data_path(), &account_id).unwrap_or(
@@ -786,35 +879,20 @@ impl Core {
                 service_account::write_service(&core.data_path(), &account_id, &record)?;
             }
             let dir = accounts_dir(&core.data_path()).join(&account_id);
-            write_meta(
-                &dir,
-                &AgentMeta {
-                    kind: "agent".into(),
-                    service,
-                    address: address.clone(),
-                    name: name.clone(),
-                    created_at: mail_sync::now_millis(),
-                    send_mode: AgentSendMode::default(),
-                    managed_address: Some(address.clone()),
-                    service_account: account_id.clone(),
-                    inbox_id,
-                },
-            )?;
-            let db = core.store_for(&account_id).await?;
-            let stored = address.clone();
-            db.write(move |tx| mail_store::read::set_sync_state(tx, "account_email", &stored)).await?;
-            core.register_account(IndexEntry {
-                id: account_id.clone(),
-                kind: AccountKind::Agent,
-                email: address.clone(),
-                display_name: Some(name),
-                avatar_file: None,
-                added_at: mail_sync::now_millis(),
-                imap: None,
-                named_by_user: true,
-                service: Some(service),
-            })
-            .await?;
+            let meta = AgentMeta {
+                kind: "agent".into(),
+                service,
+                address: address.clone(),
+                name,
+                created_at: mail_sync::now_millis(),
+                send_mode: AgentSendMode::default(),
+                managed_address: Some(address.clone()),
+                service_account: account_id.clone(),
+                inbox_id,
+            };
+            write_meta(&dir, &meta)?;
+            core.finish_agent(&account_id, &meta).await?;
+            let _ = std::fs::remove_file(pending_path(&data_dir, &account_id));
             tracing::info!(account = %account_id, service = client.name(), "agent mailbox created");
             Ok(AgentMailboxCreated { account_id, address, plan })
         })
