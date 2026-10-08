@@ -374,6 +374,35 @@ fn local_copies_of_sent_mail_are_neither_counted_nor_acted_on() {
 }
 
 #[test]
+fn spam_leaves_the_users_own_sent_mail_alone() {
+    let db = open("spam-sent");
+    store(
+        &db,
+        vec![
+            msg("sent-only", ("Me", "me@example.com"), "s", NOW - DAY, &["SENT"]),
+            msg("to-self", ("Me", "me@example.com"), "s", NOW - DAY, &["SENT", "INBOX"]),
+            msg("forged", ("Me", "me@example.com"), "s", NOW, &["INBOX"]),
+        ],
+    );
+    let q = query(View::Sender, Scope::AllMail);
+    let applied = db
+        .write_blocking(move |tx| {
+            cleanup::apply(tx, &q, &keys(&["me@example.com"]), &[LabelId::new("SPAM")], &[LabelId::new("INBOX")])
+        })
+        .unwrap();
+    let changed: Vec<&str> = applied.diffs.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(changed, ["forged"], "mail the user sent is not spam: never marked so");
+    // Trash still takes it.
+    let q = query(View::Sender, Scope::AllMail);
+    let applied = db
+        .write_blocking(move |tx| {
+            cleanup::apply(tx, &q, &keys(&["me@example.com"]), &[LabelId::new("TRASH")], &[LabelId::new("INBOX")])
+        })
+        .unwrap();
+    assert_eq!(applied.diffs.len(), 2, "the two sent ones (the spam one is out of scope)");
+}
+
+#[test]
 fn messages_page_newest_first_and_resolve_as_they_are_now() {
     let db = open("messages");
     store(&db, (0..5).map(|i| msg(&format!("m{i}"), ("A", "a@example.com"), "s", NOW - i * DAY, &["INBOX"])).collect());
@@ -469,6 +498,39 @@ fn progress_counts_today_in_the_users_calendar() {
     );
     let p = db.read_blocking(move |c| cleanup::progress(c, NOW, offset)).unwrap();
     assert_eq!((p.at_midnight, p.received_today, p.removed_today, p.now), (4, 3, 3, 4));
+}
+
+#[test]
+fn the_day_is_not_recorded_while_the_inbox_is_filling() {
+    let db = open("progress-filling");
+    store(&db, vec![msg("a", ("A", "a@example.com"), "s", NOW - DAY, &["INBOX"])]);
+    // The Inbox phases are listed (priorities 0 and 1) but "b" is not fetched yet.
+    let (filling, recorded, today) = db
+        .write_blocking(|tx| {
+            mail_store::queue::enqueue(tx, 1, &[MessageId::new("a"), MessageId::new("b")], false)?;
+            let filling = mail_store::queue::inbox_filling(tx)?;
+            let recorded = cleanup::record_today(tx, NOW, 0)?;
+            Ok((filling, recorded, cleanup::today_recorded(tx, NOW, 0)?))
+        })
+        .unwrap();
+    assert!(filling && !recorded && !today, "a partial Inbox is not today's count");
+    // The card still shows a live count meanwhile.
+    let p = db.read_blocking(|c| cleanup::progress(c, NOW, 0)).unwrap();
+    assert_eq!(p.at_midnight, 1);
+
+    // Mail queued further back (priority 2 and on) does not hold it up.
+    store(&db, vec![msg("b", ("B", "b@example.com"), "s", NOW - DAY, &["INBOX"])]);
+    let (filling, recorded, today) = db
+        .write_blocking(|tx| {
+            mail_store::queue::remove(tx, &[MessageId::new("b")])?;
+            mail_store::queue::enqueue(tx, 2, &[MessageId::new("c")], false)?;
+            let filling = mail_store::queue::inbox_filling(tx)?;
+            let recorded = cleanup::record_today(tx, NOW, 0)?;
+            Ok((filling, recorded, cleanup::today_recorded(tx, NOW, 0)?))
+        })
+        .unwrap();
+    assert!(!filling && recorded && today);
+    assert_eq!(db.read_blocking(|c| cleanup::inbox_days(c, "2026-10-01")).unwrap(), [("2026-10-08".to_owned(), 2)]);
 }
 
 #[test]

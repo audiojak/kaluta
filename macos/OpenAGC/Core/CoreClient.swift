@@ -1262,11 +1262,16 @@ final class CoreClient: Sendable {
         }
     }
 
-    /// The one-click unsubscribes (RFC 8058) of the ticked groups, after
-    /// the user confirmed; mailto targets are the composer's.
+    /// The one-click unsubscribes (RFC 8058) of the targets the user
+    /// confirmed, as `cleanupUnsubscribeTargets` gave them: a list whose
+    /// newest message changed since is not posted to. Mailto targets are
+    /// the composer's.
     func cleanupUnsubscribe(accountID: String, view: CleanupView, scope: CleanupScope,
-                            keys: [String]) async throws(CoreClientError) -> [CleanupUnsubscribeResult] {
-        try await call { try await core.cleanupUnsubscribe(accountId: accountID, view: view, scope: scope, keys: keys) }
+                            targets: [CleanupUnsubscribeTarget]) async throws(CoreClientError)
+        -> [CleanupUnsubscribeResult] {
+        try await call {
+            try await core.cleanupUnsubscribe(accountId: accountID, view: view, scope: scope, targets: targets)
+        }
     }
 
     /// The Inbox Zero card's numbers; also records today's count at
@@ -1287,9 +1292,11 @@ final class CoreClient: Sendable {
     }
 
     /// Set the account's sync window to Everything, keeping bodies where
-    /// they were; false when it was Everything already.
-    func cleanupLoadEveryHeader(accountID: String) async throws(CoreClientError) -> Bool {
-        try await call { try await core.cleanupLoadEveryHeader(accountId: accountID) }
+    /// they were. `expectCheap`: widening without asking because headers
+    /// were cheap; if they are not by now, nothing changes (`.needsAsk`).
+    func cleanupLoadEveryHeader(accountID: String, expectCheap: Bool) async throws(CoreClientError)
+        -> CleanupLoadOutcome {
+        try await call { try await core.cleanupLoadEveryHeader(accountId: accountID, expectCheap: expectCheap) }
     }
 
     /// Without IMAP: how many messages loading all mail would download, and

@@ -275,6 +275,10 @@ pub struct Applied {
 /// messages of a mixed thread stay where they are, while the thread's
 /// labels, counts and mailboxes follow through [`MailWriter`]. Queueing
 /// `ops` and recording `diffs` for undo are the caller's.
+///
+/// Marking as spam leaves the user's own sent mail (`SENT`) alone: it is
+/// not spam, and whether Gmail accepts `SPAM` on a sent message is
+/// unchecked, so a refusal would roll back a whole batch of 1,000.
 pub fn apply(
     tx: &Transaction<'_>,
     q: &Query,
@@ -283,10 +287,15 @@ pub fn apply(
     remove: &[LabelId],
 ) -> StoreResult<Applied> {
     let ids = message_ids(tx, q, keys)?;
+    let sent = LabelId::new(system_labels::SENT);
+    let spam = add.iter().any(|l| l.as_str() == system_labels::SPAM);
     let mut diffs = Vec::new();
     let mut w = MailWriter::new(tx);
     for message in ids {
         let before = crate::outbox::current_labels(tx, &message)?;
+        if spam && before.contains(&sent) {
+            continue;
+        }
         let added: Vec<LabelId> = add.iter().filter(|l| !before.contains(l)).cloned().collect();
         let removed: Vec<LabelId> = remove.iter().filter(|l| before.contains(l) && !add.contains(l)).cloned().collect();
         if added.is_empty() && removed.is_empty() {
@@ -417,17 +426,26 @@ fn midnight_now(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreRe
 
 /// Record the Inbox's count at the start of today unless it is recorded:
 /// at the first sync after local midnight, and when Clean Up opens.
+/// Not while the Inbox is still filling ([`crate::queue::inbox_filling`]):
+/// the first record of a day stands, so a partial count would stand all
+/// day; a later call records it instead, and [`progress`] works the
+/// count out live meanwhile.
 /// Returns whether this was the day's first record.
 pub fn record_today(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreResult<bool> {
-    let day = day_key(now, utc_offset_secs);
-    let known: bool = conn
-        .prepare_cached("SELECT EXISTS (SELECT 1 FROM inbox_history WHERE day = ?1)")?
-        .query_row([&day], |r| r.get(0))?;
-    if known {
+    if today_recorded(conn, now, utc_offset_secs)? || crate::queue::inbox_filling(conn)? {
         return Ok(false);
     }
+    let day = day_key(now, utc_offset_secs);
     let count = midnight_now(conn, now, utc_offset_secs)?;
     record_inbox_day(conn, &day, count)
+}
+
+/// Whether today's count at midnight is recorded.
+pub fn today_recorded(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreResult<bool> {
+    let day = day_key(now, utc_offset_secs);
+    Ok(conn
+        .prepare_cached("SELECT EXISTS (SELECT 1 FROM inbox_history WHERE day = ?1)")?
+        .query_row([&day], |r| r.get(0))?)
 }
 
 /// The Inbox Zero card's numbers (spec §14.12).
@@ -539,6 +557,8 @@ pub fn unsubscribed(conn: &Connection) -> StoreResult<std::collections::HashSet<
 pub struct ListHeadersOf {
     /// The group's key.
     pub key: String,
+    /// The newest message, whose headers these are.
+    pub message_id: MessageId,
     pub list_id: Option<String>,
     pub list_name: Option<String>,
     pub from: Option<EmailAddress>,
@@ -556,7 +576,8 @@ pub fn newest_list_headers(conn: &Connection, q: &Query, keys: &[String]) -> Sto
         let mut params = Vec::new();
         let filter = selection_sql(conn, q, std::slice::from_ref(key), &mut params)?;
         let sql = format!(
-            "SELECT m.list_id, m.list_name, m.from_name, m.from_email, m.list_unsubscribe, m.list_unsubscribe_post
+            "SELECT m.list_id, m.list_name, m.from_name, m.from_email, m.list_unsubscribe, m.list_unsubscribe_post,
+                    m.gmail_id
              FROM messages m WHERE {filter} ORDER BY m.date DESC, m.id DESC LIMIT 1"
         );
         let row = conn
@@ -566,6 +587,7 @@ pub fn newest_list_headers(conn: &Connection, q: &Query, keys: &[String]) -> Sto
                 let email: Option<String> = r.get(3)?;
                 Ok(ListHeadersOf {
                     key: key.clone(),
+                    message_id: MessageId(r.get(6)?),
                     list_id: r.get(0)?,
                     list_name: r.get(1)?,
                     from: email.map(|e| EmailAddress::new(name.as_deref(), &e)),

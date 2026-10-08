@@ -9,7 +9,12 @@
 //! The POST carries nothing of the user's: no cookies (the client keeps
 //! none), no credentials (an address with a user name is refused), no
 //! redirects followed, and a short timeout. Its address is read from the
-//! store when the user acts, never taken from the caller.
+//! store when the user acts, never taken from the caller, and only from
+//! the very messages the confirmation was made from: if newer mail of the
+//! list arrived since, nothing is posted and the user is asked to look
+//! again. One-click is offered only to an address on the list's own site
+//! (the same registrable domain as its `List-Id` or its sender), so a
+//! message cannot send the POST to an unrelated host.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -41,6 +46,9 @@ pub struct CleanupUnsubscribeTarget {
     /// The ticked groups it covers: groups that share a list are one
     /// target, so each list is asked once.
     pub keys: Vec<String>,
+    /// For each key, in order, the newest message whose headers this was
+    /// read from. Unsubscribing checks they are still the newest.
+    pub message_ids: Vec<String>,
     /// The list's name, else the sender's name, else its id or address.
     pub name: String,
     pub method: CleanupUnsubscribeMethod,
@@ -49,6 +57,8 @@ pub struct CleanupUnsubscribeTarget {
 /// What one one-click unsubscribe did.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct CleanupUnsubscribeResult {
+    /// The groups it covered (the target's keys).
+    pub keys: Vec<String>,
     pub name: String,
     pub host: String,
     /// Why it failed, in words for the window; none when the list
@@ -147,13 +157,50 @@ pub(crate) fn parse_mailto(uri: &str) -> Option<Mailto> {
     (!m.to.is_empty()).then_some(m)
 }
 
+/// Second-level labels under a two-letter country code that are
+/// registries' own (`example.co.uk`), so the registrable domain takes one
+/// more label. A short list, not the Public Suffix List: a miss makes a
+/// one-click address look foreign (not offered), never the reverse for a
+/// different `.com` or `.org` site.
+const COUNTRY_SECOND_LEVELS: &[&str] = &["ac", "co", "com", "edu", "gov", "ne", "net", "or", "org", "go"];
+
+/// A host's registrable domain, roughly: its last two labels, or three
+/// under a country's own second level (`co.uk`). IP addresses are their
+/// own.
+pub(crate) fn registrable(host: &str) -> String {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return host;
+    }
+    let labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+    let n = labels.len();
+    let take = if n >= 3 && labels[n - 1].len() == 2 && COUNTRY_SECOND_LEVELS.contains(&labels[n - 2]) { 3 } else { 2 };
+    labels[n.saturating_sub(take)..].join(".")
+}
+
+/// The domains a list's mail says it is from: its `List-Id` (`name.domain`)
+/// and its sender's address.
+pub(crate) fn owners(list_id: Option<&str>, from_email: Option<&str>) -> Vec<String> {
+    let from = from_email.and_then(|e| e.rsplit_once('@')).map(|(_, domain)| domain);
+    list_id.into_iter().chain(from).map(registrable).filter(|d| !d.is_empty()).collect()
+}
+
 /// How to leave a list from its headers: the one-click POST when offered
-/// over https, else a mailto; none when neither is there (a web page
-/// alone is not offered: it would mean opening it).
-pub(crate) fn method(unsubscribe: &str, post: Option<&str>) -> Option<Method> {
+/// over https to the list's own site (`owners`: the registrable domains of
+/// its `List-Id` and sender), else a mailto; none when neither is there.
+/// A web page alone is not offered (it would mean opening it), nor a
+/// one-click address on another site: the confirmation names the host,
+/// but a message from one sender should not make the Mac post to an
+/// unrelated one.
+pub(crate) fn method(unsubscribe: &str, post: Option<&str>, owners: &[String]) -> Option<Method> {
     let uris = uris(unsubscribe);
     if is_one_click(post)
-        && let Some(url) = uris.iter().find_map(|u| Url::parse(u).ok().filter(postable))
+        && let Some(url) = uris.iter().find_map(|u| {
+            Url::parse(u)
+                .ok()
+                .filter(postable)
+                .filter(|url| url.host_str().is_some_and(|h| owners.contains(&registrable(h))))
+        })
     {
         return Some(Method::OneClick(url));
     }
@@ -176,7 +223,9 @@ pub(crate) fn resolve(view: CleanupView, rows: Vec<ListHeadersOf>) -> Vec<Resolv
     let mut by_list: BTreeMap<String, Resolved> = BTreeMap::new();
     let mut order = Vec::new();
     for row in rows {
-        let Some(method) = row.unsubscribe.as_deref().and_then(|h| method(h, row.unsubscribe_post.as_deref())) else {
+        let owners = owners(row.list_id.as_deref(), row.from.as_ref().map(|f| f.email.as_str()));
+        let Some(method) = row.unsubscribe.as_deref().and_then(|h| method(h, row.unsubscribe_post.as_deref(), &owners))
+        else {
             continue;
         };
         let list = match (&row.list_id, &method) {
@@ -190,6 +239,7 @@ pub(crate) fn resolve(view: CleanupView, rows: Vec<ListHeadersOf>) -> Vec<Resolv
         }
         if let Some(existing) = by_list.get_mut(&list) {
             existing.target.keys.push(row.key);
+            existing.target.message_ids.push(row.message_id.0);
             existing.identities.extend(identities);
             continue;
         }
@@ -215,7 +265,12 @@ pub(crate) fn resolve(view: CleanupView, rows: Vec<ListHeadersOf>) -> Vec<Resolv
         by_list.insert(
             list,
             Resolved {
-                target: CleanupUnsubscribeTarget { keys: vec![row.key], name, method: shown },
+                target: CleanupUnsubscribeTarget {
+                    keys: vec![row.key],
+                    message_ids: vec![row.message_id.0],
+                    name,
+                    method: shown,
+                },
                 method,
                 identities,
             },
@@ -224,10 +279,15 @@ pub(crate) fn resolve(view: CleanupView, rows: Vec<ListHeadersOf>) -> Vec<Resolv
     order.into_iter().filter_map(|k| by_list.remove(&k)).collect()
 }
 
+/// Why a confirmed target is not posted to: the list's newest message is
+/// not the one the confirmation showed.
+pub(crate) const REVIEW_AGAIN: &str = "New mail arrived from this list; review it again";
+
 /// The one-click POST (RFC 8058): the fixed body, no cookies, no
-/// credentials, no redirects followed, a short timeout. A 2xx or 3xx
-/// answer is taken as done (a redirect to a "you are unsubscribed" page
-/// is common, and is not followed).
+/// credentials, no redirects followed, a short timeout. Only a 2xx answer
+/// is done. A redirect is not followed and not taken as done: the list
+/// wants a page opened to finish, which is the user's to do, so the
+/// answer names where it points.
 pub(crate) async fn post_one_click(url: &Url) -> Result<(), String> {
     let host = url.host_str().unwrap_or("the list").to_owned();
     if !postable(url) {
@@ -247,7 +307,19 @@ pub(crate) async fn post_one_click(url: &Url) -> Result<(), String> {
         .send()
         .await;
     match answer {
-        Ok(r) if r.status().is_success() || r.status().is_redirection() => Ok(()),
+        Ok(r) if r.status().is_success() => Ok(()),
+        Ok(r) if r.status().is_redirection() => {
+            let to = r
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|l| l.to_str().ok())
+                .and_then(|l| url.join(l).ok())
+                .and_then(|l| l.host_str().map(str::to_owned));
+            Err(match to {
+                Some(to) => format!("the list wants you to open a page at {to} to finish"),
+                None => "the list wants you to open a page to finish".to_owned(),
+            })
+        }
         Ok(r) => Err(format!("{host} answered {}", r.status())),
         Err(e) if e.is_timeout() => Err(format!("{host} did not answer in time")),
         Err(_) => Err(format!("{host} could not be reached")),
@@ -275,28 +347,56 @@ impl Core {
         .await
     }
 
-    /// Unsubscribe from the one-click lists among the groups named by
-    /// `keys`, once each, after the user confirmed: the addresses are read
-    /// from the store now. Mailto targets are the composer's and are left
-    /// out. Successes are remembered, so the groups say "Unsubscribed".
+    /// Unsubscribe from the one-click lists among `targets`, the ones the
+    /// user confirmed (as [`Self::cleanup_unsubscribe_targets`] gave them),
+    /// once each. Each address is read from the store again, from the same
+    /// messages the confirmation was made from: if a group's newest message
+    /// is another one now (new mail of the list arrived), or the address no
+    /// longer leads to the host shown, nothing is posted and the result
+    /// says to review it again. Mailto targets are the composer's and are
+    /// left out. Successes are remembered, so the groups say "Unsubscribed".
     pub async fn cleanup_unsubscribe(
         &self,
         account_id: String,
         view: CleanupView,
         scope: CleanupScope,
-        keys: Vec<String>,
+        targets: Vec<CleanupUnsubscribeTarget>,
     ) -> Result<Vec<CleanupUnsubscribeResult>, CoreError> {
-        if keys.is_empty() {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "no groups given"));
+        let targets: Vec<CleanupUnsubscribeTarget> =
+            targets.into_iter().filter(|t| matches!(t.method, CleanupUnsubscribeMethod::OneClick { .. })).collect();
+        if targets.is_empty() || targets.iter().any(|t| t.keys.is_empty() || t.keys.len() != t.message_ids.len()) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "no one-click lists given"));
         }
         let db = self.store_for(&account_id).await?;
         let q = query(view, scope);
         runtime::run(async move {
-            let rows = db.read(move |c| cleanup::newest_list_headers(c, &q, &keys)).await?;
             let mut results = Vec::new();
             let mut done = Vec::new();
-            for resolved in resolve(view, rows) {
-                let Method::OneClick(url) = &resolved.method else { continue };
+            for confirmed in targets {
+                let CleanupUnsubscribeMethod::OneClick { host: shown } = &confirmed.method else { continue };
+                let keys = confirmed.keys.clone();
+                let rows = db.read(move |c| cleanup::newest_list_headers(c, &q, &keys)).await?;
+                let newest: Vec<&str> = rows.iter().map(|r| r.message_id.as_str()).collect();
+                let still = newest == confirmed.message_ids.iter().map(String::as_str).collect::<Vec<_>>();
+                let resolved = if still { resolve(view, rows) } else { vec![] };
+                let url = match resolved.as_slice() {
+                    [one] => match &one.method {
+                        Method::OneClick(url) if url.host_str() == Some(shown.as_str()) => Some((url.clone(), one)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some((url, resolved)) = url else {
+                    tracing::info!(host = %shown, "one-click unsubscribe not sent: the list's newest mail changed");
+                    results.push(CleanupUnsubscribeResult {
+                        keys: confirmed.keys.clone(),
+                        name: confirmed.name.clone(),
+                        host: shown.clone(),
+                        error: Some(REVIEW_AGAIN.to_owned()),
+                    });
+                    continue;
+                };
+                let url = &url;
                 let error = post_one_click(url).await.err();
                 if let Some(e) = &error {
                     tracing::info!(host = url.host_str().unwrap_or(""), error = %e, "one-click unsubscribe failed");
@@ -304,6 +404,7 @@ impl Core {
                     done.extend(resolved.identities.iter().cloned());
                 }
                 results.push(CleanupUnsubscribeResult {
+                    keys: resolved.target.keys.clone(),
                     name: resolved.target.name.clone(),
                     host: url.host_str().unwrap_or("").to_owned(),
                     error,

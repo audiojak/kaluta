@@ -295,8 +295,8 @@ struct CleanUpTests {
         #expect(store.canUnsubscribe, "the sender's newest message is list mail")
         store.askUnsubscribe()
         #expect(store.unsubscribeQuestion?.untargeted == 1)
-        #expect(store.unsubscribeQuestion?.message.hasSuffix("One ticked group has no unsubscribe link and is left as it is.")
-            == true)
+        #expect(store.unsubscribeQuestion?.message.hasSuffix(
+            "One ticked group has no unsubscribe link Clean Up can use and is left as it is.") == true)
         store.unsubscribeQuestion = nil
         store.view = .subject
         await store.reload()
@@ -305,11 +305,70 @@ struct CleanUpTests {
         #expect(!store.canUnsubscribe, "a subject is no list")
     }
 
+    @Test func archiveThemTooLeavesTheGroupsThatWereNotLeft() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        store.openComposer = { _ in }
+        let person = try #require(store.groups.first { !$0.key.hasSuffix("example.org") && $0.title.contains(" ") })
+        store.view = .mailingList
+        await store.reload()
+        let careers = try #require(store.groups.first { $0.key == "careers.example.com" })
+        // A list left by mail, and (back in Sender) a person's group with no link.
+        store.toggle(careers.key)
+        await store.refreshMessages()
+        store.askUnsubscribe()
+        #expect(CleanUpUnsubscribeQuestion.archiveNote.hasPrefix("Archives only the lists that take you off"))
+        await store.confirmUnsubscribe(archiveToo: true)
+        #expect(!store.groups.contains { $0.key == careers.key }, "the list whose message opened: archived")
+
+        store.view = .sender
+        await store.reload()
+        let digest = try #require(store.groups.first { $0.key == "digest@example.org" })
+        store.setTicked(true, keys: [person.key, digest.key])
+        await store.refreshMessages()
+        let before = try #require(store.groups.first { $0.key == person.key }).count
+        store.askUnsubscribe()
+        try #require(store.unsubscribeQuestion?.untargeted == 1)
+        // Only the person's group, which has no link: nothing to leave,
+        // nothing archived (the digest's one-click is not confirmed here:
+        // tests never post to a real address).
+        store.unsubscribeQuestion = CleanUpUnsubscribeQuestion(targets: [], untargeted: 1)
+        await store.confirmUnsubscribe(archiveToo: true)
+        #expect(store.groups.first { $0.key == person.key }?.count == before, "not left, so not archived")
+        #expect(store.isTicked(person.key), "still ticked")
+    }
+
+    @Test func changingTheViewDropsItsGroupsAndIgnoresTicksUntilTheNewOnesLoad() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        let old = try #require(store.groups.first)
+        store.view = .size
+        #expect(store.groups.isEmpty && !store.groupsLoaded, "the sender groups go at once")
+        store.toggle(old.key)
+        #expect(!store.hasTicks, "a sender's key never ticks under Size")
+        await store.reload()
+        #expect(store.groupsLoaded && !store.groups.isEmpty)
+        #expect(!store.groups.contains { $0.key == old.key })
+        store.scope = .allMail
+        #expect(store.groups.isEmpty && !store.groupsLoaded, "a scope change too")
+        await store.reload()
+        #expect(store.groupsLoaded)
+    }
+
+    @Test func theBandSaysWhenTheBodyWindowChanged() {
+        let plain = CleanUpHeaderLoad(total: 10, remaining: 10, widened: true)
+        #expect(plain.note == CleanUpHeaderLoad.note)
+        let kept = CleanUpHeaderLoad(total: 10, remaining: 10, widened: true, keptBodies: .halfYear)
+        #expect(kept.note == CleanUpHeaderLoad.note
+            + " Full messages still download for the last 6 months only (Full messages for, in the same place).")
+    }
+
     @Test func theNoteAndTheMailtoDraft() {
         let note = CleanUpUnsubscribeNote.of([
-            CleanupUnsubscribeResult(name: "Weekly Digest", host: "a.example", error: nil),
-            CleanupUnsubscribeResult(name: "Events", host: "b.example", error: nil),
-            CleanupUnsubscribeResult(name: "Deals", host: "c.example", error: "c.example answered 500 Internal Server Error"),
+            CleanupUnsubscribeResult(keys: ["a"], name: "Weekly Digest", host: "a.example", error: nil),
+            CleanupUnsubscribeResult(keys: ["b"], name: "Events", host: "b.example", error: nil),
+            CleanupUnsubscribeResult(keys: ["c"], name: "Deals", host: "c.example",
+                                     error: "c.example answered 500 Internal Server Error"),
         ], mailed: [])
         #expect(note.lines == [
             .init(text: "Unsubscribed from Weekly Digest and Events", failed: false),

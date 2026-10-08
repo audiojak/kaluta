@@ -10,6 +10,7 @@ use mail_domain::{EmailAddress, Label, LabelId, LabelKind, MessageId, ThreadId};
 use provider_api::fake::FakeProvider;
 use provider_api::{FetchedBody, FetchedMessage};
 
+use super::load::CleanupLoadOutcome;
 use super::*;
 use crate::account::SyncWindow;
 use crate::{CoreConfig, CoreEvent, EventListener};
@@ -482,7 +483,11 @@ fn opening_clean_up_over_imap_loads_every_header_and_no_body_beyond_the_body_win
         assert_eq!(status.window, SyncWindow::HalfYear);
 
         // Opening Clean Up: every header, no body.
-        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        assert_eq!(
+            core.cleanup_load_every_header("acct".into(), true).await.unwrap(),
+            CleanupLoadOutcome::Widened { body_window: None },
+            "a month of bodies already: the body window is left alone"
+        );
         settled(&core, 5).await;
         assert_eq!(core.cleanup_load_status("acct".into()).await.unwrap().window, SyncWindow::Everything);
         assert_eq!(core.body_window_for("acct".into()).await.unwrap(), crate::account::BodyWindow::Month, "unchanged");
@@ -490,7 +495,11 @@ fn opening_clean_up_over_imap_loads_every_header_and_no_body_beyond_the_body_win
         assert_eq!(body_state(&core, &imap_hex(4)).as_deref(), Some("metadata"));
         assert_eq!(server.body_fetches(), bodies, "no body downloaded for the older mail");
         assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "nothing over the API");
-        assert!(!core.cleanup_load_every_header("acct".into()).await.unwrap(), "already everything");
+        assert_eq!(
+            core.cleanup_load_every_header("acct".into(), true).await.unwrap(),
+            CleanupLoadOutcome::Unchanged,
+            "already everything"
+        );
     });
     core.stop_sync();
 }
@@ -511,7 +520,10 @@ fn imap_refused_mid_load_pauses_clean_ups_headers_until_load_all_mail() {
         // Clean Up widens while the account is between syncs, then Gmail
         // refuses IMAP as the header load starts.
         core.stop_sync();
-        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        assert!(matches!(
+            core.cleanup_load_every_header("acct".into(), true).await.unwrap(),
+            CleanupLoadOutcome::Widened { .. }
+        ));
         server.refuse_logins();
         start_imap(&core, &server, &rest, Duration::from_secs(3600));
         let status = status_until(&core, "the header load to wait", |s| s.headers_paused).await;
@@ -548,7 +560,10 @@ fn imap_coming_back_resumes_clean_ups_headers() {
         settled(&core, 3).await;
         let bodies = server.body_fetches();
         core.stop_sync();
-        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        assert!(matches!(
+            core.cleanup_load_every_header("acct".into(), true).await.unwrap(),
+            CleanupLoadOutcome::Widened { .. }
+        ));
         server.refuse_logins();
         // A refusal that lasts a moment, so IMAP is tried again soon.
         start_imap(&core, &server, &rest, Duration::from_millis(200));
@@ -592,8 +607,18 @@ fn without_imap_clean_up_can_say_how_much_older_mail_there_is_and_how_long_it_ta
     assert_eq!(estimate.seconds, Some(1), "250 a minute");
     assert_eq!(provider_gmail::rest_download_seconds(43_000), 10_320, "about 2.9 hours for a large mailbox");
 
-    // Load All Mail: every message, whole.
-    assert!(block_on(core.cleanup_load_every_header("acct".into())).unwrap());
+    // Widening without asking needs cheap headers: here it asks instead.
+    block_on(core.set_body_window_for("acct".into(), crate::account::BodyWindow::Window)).unwrap();
+    assert_eq!(block_on(core.cleanup_load_every_header("acct".into(), true)).unwrap(), CleanupLoadOutcome::NeedsAsk);
+    assert_eq!(block_on(core.cleanup_load_status("acct".into())).unwrap().window, SyncWindow::Month, "unchanged");
+
+    // Load All Mail: every message, whole; the body window, moot over the
+    // API, is left as the user set it.
+    assert_eq!(
+        block_on(core.cleanup_load_every_header("acct".into(), false)).unwrap(),
+        CleanupLoadOutcome::Widened { body_window: None }
+    );
+    assert_eq!(block_on(core.body_window_for("acct".into())).unwrap(), crate::account::BodyWindow::Window);
     wait_until("all mail downloaded", || all_mail_count(&core) == 5);
     assert_eq!(body_state(&core, "old0").as_deref(), Some("full"), "over the API a header costs a whole message");
     core.stop_sync();
@@ -606,7 +631,7 @@ fn imported_and_demo_mailboxes_have_nothing_to_load() {
     block_on(core.clone().open_account("demo".into())).unwrap();
     let status = block_on(core.cleanup_load_status("demo".into())).unwrap();
     assert!(!status.has_sync_window);
-    assert!(block_on(core.cleanup_load_every_header("demo".into())).is_err());
+    assert!(block_on(core.cleanup_load_every_header("demo".into(), true)).is_err());
 }
 
 #[test]
@@ -666,6 +691,33 @@ fn progress_at_a_fixed_moment_and_offset() {
 }
 
 #[test]
+fn opening_while_the_inbox_fills_records_nothing() {
+    let (_temp, core, _events) = core("progress-filling");
+    block_on(core.clone().open_account("demo".into())).unwrap();
+    block_on(core.debug_seed_demo_mailbox(40)).unwrap();
+    let db = block_on(core.store_for("demo")).unwrap();
+    let offset = 0;
+    let (p, days, baseline) = db
+        .write_blocking(move |tx| {
+            mail_store::queue::enqueue(tx, 0, &[MessageId::new("not-fetched-yet")], false)?;
+            let p = progress_at(tx, NOW + 1, offset)?;
+            Ok((p, mail_store::cleanup::inbox_days(tx, "2000-01-01")?, mail_store::cleanup::baseline(tx)?))
+        })
+        .unwrap();
+    assert!(days.is_empty() && baseline.is_none(), "nothing stands from a partial Inbox");
+    assert_eq!(p.baseline, p.now, "the card still has live numbers");
+    let (days, baseline) = db
+        .write_blocking(move |tx| {
+            mail_store::queue::remove(tx, &[MessageId::new("not-fetched-yet")])?;
+            progress_at(tx, NOW + 2, offset)?;
+            Ok((mail_store::cleanup::inbox_days(tx, "2000-01-01")?, mail_store::cleanup::baseline(tx)?))
+        })
+        .unwrap();
+    assert_eq!(days.len(), 1);
+    assert!(baseline.is_some());
+}
+
+#[test]
 fn the_first_sync_of_the_day_records_the_inbox() {
     let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 500));
     for i in 0..3 {
@@ -674,11 +726,10 @@ fn the_first_sync_of_the_day_records_the_inbox() {
     let (_temp, core, _events) = synced("history", &fake, 3);
     let db = block_on(core.store_for("acct")).unwrap();
     let today = mail_store::cleanup::day_key(mail_sync::now_millis(), utc_offset_now());
+    // The whole Inbox, never a count taken while it was still filling.
+    let want = vec![(today.clone(), 3)];
     wait_until("today's count recorded", || {
-        let today = today.clone();
-        db.read_blocking(move |c| mail_store::cleanup::inbox_days(c, &today)).unwrap().len() == 1
+        db.read_blocking(|c| mail_store::cleanup::inbox_days(c, "2000-01-01")).unwrap() == want
     });
-    let days = db.read_blocking(|c| mail_store::cleanup::inbox_days(c, "2000-01-01")).unwrap();
-    assert_eq!(days, [(today, 3)]);
     assert_eq!(db.read_blocking(mail_store::cleanup::baseline).unwrap(), None, "only opening Clean Up sets it");
 }

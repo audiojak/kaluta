@@ -412,7 +412,9 @@ impl SyncService {
 
     /// The first sync after local midnight records the Inbox's count at the
     /// start of the day, for Clean Up's progress card (spec §14.12). Not
-    /// before the first listing is done, when the Inbox is still filling.
+    /// before the first listing is done, nor while the Inbox phases are
+    /// still being fetched (the listing marks the account bootstrapped
+    /// before the backfill stores them).
     async fn record_inbox_day(&self) {
         let now = mail_sync::now_millis();
         let offset = crate::cleanup::utc_offset_now();
@@ -422,8 +424,19 @@ impl SyncService {
         {
             return;
         }
-        match self.engine.db().write(move |tx| mail_store::cleanup::record_today(tx, now, offset)).await {
-            Ok(_) => *self.inbox_day.lock().unwrap_or_else(|e| e.into_inner()) = day,
+        // While the Inbox phases are still being fetched nothing is
+        // recorded and `inbox_day` stays unset, so a later poll tries again.
+        let recorded = self
+            .engine
+            .db()
+            .write(move |tx| {
+                mail_store::cleanup::record_today(tx, now, offset)?;
+                mail_store::cleanup::today_recorded(tx, now, offset)
+            })
+            .await;
+        match recorded {
+            Ok(true) => *self.inbox_day.lock().unwrap_or_else(|e| e.into_inner()) = day,
+            Ok(false) => tracing::debug!("the Inbox is still filling; today's count waits"),
             Err(e) => tracing::warn!(error = %e, "the Inbox's count for today was not recorded"),
         }
     }

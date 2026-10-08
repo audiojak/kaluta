@@ -178,15 +178,20 @@ pub struct CleanupProgress {
 /// The card's numbers at `now`: also what opening Clean Up records,
 /// today's count at midnight (if the first sync after midnight has not
 /// recorded it) and the baseline (set once; raised, never lowered).
+/// While the Inbox is still filling (its phases listed, not yet fetched)
+/// nothing is recorded: the numbers are worked out live, and a later call
+/// records them.
 pub(crate) fn progress_at(
     tx: &mail_store::Transaction<'_>,
     now: i64,
     utc_offset_secs: i64,
 ) -> mail_store::StoreResult<CleanupProgress> {
-    cleanup::record_today(tx, now, utc_offset_secs)?;
-    let inbox = cleanup::inbox_count(tx)?;
-    if !cleanup::set_baseline_once(tx, inbox, now)? {
-        cleanup::raise_baseline(tx, inbox)?;
+    if !mail_store::queue::inbox_filling(tx)? {
+        cleanup::record_today(tx, now, utc_offset_secs)?;
+        let inbox = cleanup::inbox_count(tx)?;
+        if !cleanup::set_baseline_once(tx, inbox, now)? {
+            cleanup::raise_baseline(tx, inbox)?;
+        }
     }
     let p = cleanup::progress(tx, now, utc_offset_secs)?;
     Ok(CleanupProgress {

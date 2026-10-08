@@ -6,7 +6,7 @@
 //! If IMAP is refused part way, the headers Clean Up asked for wait for it
 //! and the window asks the same question before loading the rest whole.
 
-use crate::account::SyncWindow;
+use crate::account::{BodyWindow, SyncWindow};
 use crate::registry::AccountKind;
 use crate::{Core, CoreError, ErrorKind, runtime};
 
@@ -30,6 +30,35 @@ pub struct CleanupLoadStatus {
     /// first (`cleanup_load_waiting_headers`). Accounts whose window was
     /// *Everything* before Clean Up download it whole without asking.
     pub headers_paused: bool,
+}
+
+/// What `cleanup_load_every_header` did.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum CleanupLoadOutcome {
+    /// The sync window was *Everything* already: nothing changed.
+    Unchanged,
+    /// The sync window is *Everything* now. `body_window` is the body
+    /// window Clean Up set so bodies stay where they were ("the whole
+    /// window" pinned to the old window's span), when it changed it; the
+    /// band says so. Only with cheap headers: over the API every message
+    /// comes whole and the body window is left alone.
+    Widened { body_window: Option<BodyWindow> },
+    /// Called expecting cheap headers, but IMAP was refused since the
+    /// window looked: nothing changed. Ask before loading all mail over
+    /// the API.
+    NeedsAsk,
+}
+
+impl From<mail_sync::EveryHeader> for CleanupLoadOutcome {
+    fn from(o: mail_sync::EveryHeader) -> Self {
+        match o {
+            mail_sync::EveryHeader::Unchanged => Self::Unchanged,
+            mail_sync::EveryHeader::Widened { body_window } => {
+                Self::Widened { body_window: body_window.map(Into::into) }
+            }
+            mail_sync::EveryHeader::NeedsAsk => Self::NeedsAsk,
+        }
+    }
 }
 
 /// What loading all mail without IMAP would take.
@@ -83,11 +112,18 @@ impl Core {
         .await
     }
 
-    /// Set `account_id`'s sync window to *Everything*, keeping bodies
-    /// where they were (`BodyWindow::kept_from`): with IMAP the older mail
-    /// is queued for headers only. Returns false when the window was
-    /// *Everything* already.
-    pub async fn cleanup_load_every_header(&self, account_id: String) -> Result<bool, CoreError> {
+    /// Set `account_id`'s sync window to *Everything*. With IMAP the older
+    /// mail is queued for headers only and the body window keeps bodies
+    /// where they were (`BodyWindow::kept_from`). `expect_cheap`: the
+    /// window widens without asking because `cleanup_load_status` said
+    /// headers are cheap; if they are not by now, nothing changes and the
+    /// answer is `NeedsAsk`. False after the user agreed to load all mail
+    /// over the API.
+    pub async fn cleanup_load_every_header(
+        &self,
+        account_id: String,
+        expect_cheap: bool,
+    ) -> Result<CleanupLoadOutcome, CoreError> {
         let entry = crate::registry::load_index(&self.data_path())
             .into_iter()
             .find(|e| e.id == account_id && e.kind == AccountKind::Gmail);
@@ -101,11 +137,13 @@ impl Core {
         runtime::run(async move {
             match service {
                 Some(service) => {
-                    let widened = service.engine().load_every_header().await?;
-                    service.sync_now();
-                    Ok(widened)
+                    let outcome = service.engine().load_every_header(expect_cheap).await?;
+                    if matches!(outcome, mail_sync::EveryHeader::Widened { .. }) {
+                        service.sync_now();
+                    }
+                    Ok(outcome.into())
                 }
-                None => Ok(mail_sync::load_every_header_stored(&db, imap).await?),
+                None => Ok(mail_sync::load_every_header_stored(&db, imap, expect_cheap).await?.into()),
             }
         })
         .await

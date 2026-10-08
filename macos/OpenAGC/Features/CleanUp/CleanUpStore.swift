@@ -111,23 +111,32 @@ final class CleanUpStore {
     static let pageSize = 200
 
     private(set) var accountID: String?
+    /// Changing the view or the scope drops the groups shown at once:
+    /// until the new ones load nothing can be ticked, so a tick cannot land
+    /// on a key of the old view under the new one.
     var view: CleanUpViewKind = .sender {
         didSet {
             guard view != oldValue else { return }
             filter = ""
             unsubscribeNote = nil
+            dropGroups()
             clearTicks()
             Task { await reload() }
         }
     }
     var scope: CleanupScope = .inbox {
-        didSet { if scope != oldValue { Task { await reload() } } }
+        didSet {
+            guard scope != oldValue else { return }
+            dropGroups()
+            Task { await reload() }
+        }
     }
     var filter = "" {
         didSet { if filter != oldValue { Task { await loadGroups() } } }
     }
 
     private(set) var groups: [CleanupGroup] = []
+    /// The groups shown are the current view's and scope's.
     private(set) var groupsLoaded = false
     /// Social or Promotions is empty because the account has no mail in
     /// that category at all (no Gmail categories: IMAP-only and agent
@@ -258,7 +267,10 @@ final class CleanUpStore {
                                                             filter: "").isEmpty
                     }
                 }
-                guard isCurrent(), accountID == self.accountID else { return }
+                // A load for a view or scope left meanwhile is dropped.
+                guard isCurrent(), accountID == self.accountID, view == self.view, scope == self.scope else {
+                    return
+                }
                 groups = loaded
                 noCategoryMail = none
                 groupsLoaded = true
@@ -340,6 +352,9 @@ final class CleanUpStore {
     }
 
     func setTicked(_ on: Bool, keys: [String]) {
+        // The groups shown are another view's (a load is pending): ticks
+        // would name keys of that view.
+        guard groupsLoaded || !on else { return }
         let byKey = Dictionary(groups.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         var changed = false
         for key in keys {
@@ -355,6 +370,13 @@ final class CleanUpStore {
         if changed { Task { await refreshMessages() } }
     }
 
+    /// The groups belong to a view or scope just left.
+    private func dropGroups() {
+        groups = []
+        groupsLoaded = false
+        noCategoryMail = false
+    }
+
     func clearTicks() {
         guard hasTicks else { return }
         tickedKeys = []
@@ -367,17 +389,27 @@ final class CleanUpStore {
     /// Apply `action` to every message in the ticked groups: one undoable
     /// action, acknowledged in the window's undo notice.
     func apply(_ action: CleanupAction) async {
-        guard let core, let accountID, canAct else { return }
-        let keys = tickedKeys
+        await apply(action, keys: tickedKeys)
+    }
+
+    /// `action` on the groups named by `keys` (some of the ticked ones).
+    func apply(_ action: CleanupAction, keys: [String]) async {
+        guard let core, let accountID, canAct, !keys.isEmpty else { return }
         let (view, scope) = (view, scope)
-        working = Self.workingText(action, count: messageCount)
+        var count = messageCount
+        if Set(keys) != ticked {
+            count = (try? await core.cleanupCount(accountID: accountID, view: view.core, scope: scope, keys: keys))
+                .map(Int.init) ?? 0
+        }
+        working = Self.workingText(action, count: count)
         error = nil
         defer { working = nil }
         do {
             let result = try await core.cleanupApply(accountID: accountID, view: view.core, scope: scope, keys: keys,
                                                      action: action)
-            tickedKeys = []
-            tickedGroups = [:]
+            let acted = Set(keys)
+            tickedKeys.removeAll { acted.contains($0) }
+            for key in acted { tickedGroups.removeValue(forKey: key) }
             await reload()
             if let token = result.undo {
                 undo.record(accountID: accountID, actionName: result.actionName, noticeText: result.description,
@@ -488,6 +520,9 @@ struct CleanUpHeaderLoad: Equatable {
     var widened = false
     /// The headers wait for IMAP, refused since the load began.
     var paused = false
+    /// The body window Clean Up set so bodies stay where they were ("the
+    /// whole window" pinned to the old window's span), when it changed it.
+    var keptBodies: BodyWindow?
 
     var done: Bool { !listing && remaining == 0 }
     var fraction: Double { total == 0 ? 1 : Double(total - min(remaining, total)) / Double(total) }
@@ -504,6 +539,25 @@ struct CleanUpHeaderLoad: Equatable {
     }
 
     static let note = "This account's sync window is now Everything; change it in Settings › Accounts."
+
+    /// The band's note: the sync window, and the body window if Clean Up
+    /// changed it.
+    var note: String {
+        guard let keptBodies else { return Self.note }
+        return Self.note + " " + Self.bodyNote(keptBodies)
+    }
+
+    /// "Full messages still download for the last 6 months only (Full
+    /// messages for, in the same place)."
+    static func bodyNote(_ window: BodyWindow) -> String {
+        let span = switch window {
+        case .month: "the last 30 days"
+        case .halfYear: "the last 6 months"
+        case .year: "the last year"
+        case .window: "everything"
+        }
+        return "Full messages still download for \(span) only (Full messages for, in the same place)."
+    }
 }
 
 /// The question asked before loading all mail without IMAP.
@@ -632,7 +686,8 @@ extension CleanUpStore {
             guard accountID == self.accountID else { return }
             let waiting = status.headersWaiting + status.bodiesWaiting
             headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: true,
-                                           widened: headerLoad?.widened ?? widenedLoads.contains(accountID))
+                                           widened: headerLoad?.widened ?? widenedLoads.contains(accountID),
+                                           keptBodies: headerLoad?.keptBodies)
         } catch {
             logger.error("loading the waiting headers failed: \(error.message, privacy: .private)")
             self.error = error.message
@@ -640,16 +695,34 @@ extension CleanUpStore {
     }
 
     /// Widen the sync window to Everything and follow the download.
+    /// `whole`: the user agreed to download all mail over the API. Without
+    /// it the widening counts on cheap headers; if IMAP was refused since
+    /// the window looked, nothing changes and the user is asked instead.
     func loadAllMail(whole: Bool) async {
         guard let core, let accountID else { return }
         headerLoad = CleanUpHeaderLoad(listing: true, whole: whole, widened: true)
         do {
-            _ = try await core.cleanupLoadEveryHeader(accountID: accountID)
+            let outcome = try await core.cleanupLoadEveryHeader(accountID: accountID, expectCheap: !whole)
+            var kept: BodyWindow?
+            switch outcome {
+            case .needsAsk:
+                headerLoad = nil
+                let estimate = try? await core.cleanupLoadEstimate(accountID: accountID)
+                guard accountID == self.accountID, !declinedLoads.contains(accountID) else { return }
+                loadQuestion = CleanUpLoadQuestion(accountID: accountID, messages: estimate?.messages,
+                                                   seconds: estimate?.seconds)
+                return
+            case let .widened(bodyWindow):
+                kept = bodyWindow
+            case .unchanged:
+                break
+            }
             widenedLoads.insert(accountID)
             let status = try await core.cleanupLoadStatus(accountID: accountID)
             guard accountID == self.accountID else { return }
             let waiting = whole ? status.headersWaiting + status.bodiesWaiting : status.headersWaiting
-            headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: whole, widened: true)
+            headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: whole, widened: true,
+                                           keptBodies: kept)
         } catch {
             logger.error("loading every header failed: \(error.message, privacy: .private)")
             headerLoad = nil
@@ -737,13 +810,18 @@ struct CleanUpUnsubscribeQuestion: Identifiable, Equatable {
             parts.append("Lists that unsubscribe by email open a message each, for you to read and send.")
         }
         if untargeted > 0 {
-            parts.append(untargeted == 1 ? "One ticked group has no unsubscribe link and is left as it is."
-                : "\(untargeted) ticked groups have no unsubscribe link and are left as they are.")
+            parts.append(untargeted == 1
+                ? "One ticked group has no unsubscribe link Clean Up can use and is left as it is."
+                : "\(untargeted) ticked groups have no unsubscribe link Clean Up can use and are left as they are.")
         }
         return parts.joined(separator: " ")
     }
 
     /// "one click at weekly-digest.example.org", "a message to leave@list.example".
+    /// Under *Archive Them Too*: what it archives.
+    static let archiveNote = "Archives only the lists that take you off, and those whose message opens for you to "
+        + "send; one Undo brings them back."
+
     static func how(_ method: CleanupUnsubscribeMethod) -> String {
         switch method {
         case let .oneClick(host): "one click at \(host)"
@@ -816,37 +894,41 @@ extension CleanUpStore {
                                                          untargeted: tickedKeys.filter { !covered.contains($0) }.count)
     }
 
-    /// The answer: one POST per one-click list from the core (addresses
-    /// read from the store again), a filled-in composer per mailto list,
-    /// what happened shown over the groups; then, if asked, the ticked
-    /// groups archived as one undoable action.
+    /// The answer: one POST per one-click list from the core (each from
+    /// the very messages the question showed; a list with newer mail since
+    /// is not posted to), a filled-in composer per mailto list, what
+    /// happened shown over the groups; then, if asked, the groups that
+    /// were unsubscribed or whose message opened archived as one undoable
+    /// action. Groups that failed, or had no way to leave, stay.
     func confirmUnsubscribe(archiveToo: Bool) async {
         guard let question = unsubscribeQuestion, let core, let accountID else { return }
         unsubscribeQuestion = nil
         let (view, scope) = (view, scope)
-        let oneClickKeys = question.targets.filter { if case .oneClick = $0.method { true } else { false } }
-            .flatMap(\.keys)
+        let oneClick = question.targets.filter { if case .oneClick = $0.method { true } else { false } }
         var mailed: [String] = []
+        var left: [String] = []
         for target in question.targets {
             if case let .mailto(to, cc, subject, body) = target.method {
                 openComposer?(.prefilled(to: to, cc: cc, subject: subject, body: body))
                 mailed.append(target.name)
+                left += target.keys
             }
         }
         var results: [CleanupUnsubscribeResult] = []
-        if !oneClickKeys.isEmpty {
-            working = oneClickKeys.count == 1 ? "Unsubscribing…" : "Unsubscribing from \(oneClickKeys.count) lists…"
+        if !oneClick.isEmpty {
+            working = oneClick.count == 1 ? "Unsubscribing…" : "Unsubscribing from \(oneClick.count) lists…"
             do {
                 results = try await core.cleanupUnsubscribe(accountID: accountID, view: view.core, scope: scope,
-                                                            keys: oneClickKeys)
+                                                            targets: oneClick)
             } catch {
                 self.error = error.message
             }
             working = nil
         }
+        left += results.filter { $0.error == nil }.flatMap(\.keys)
         unsubscribeNote = CleanUpUnsubscribeNote.of(results, mailed: mailed)
-        if archiveToo {
-            await apply(.archive)
+        if archiveToo, !left.isEmpty {
+            await apply(.archive, keys: tickedKeys.filter(Set(left).contains))
         } else {
             await loadGroups()
         }

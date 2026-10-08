@@ -31,6 +31,8 @@ fn a_header_lists_its_uris_in_order() {
 fn one_click_needs_the_post_header_and_https() {
     let both = "<mailto:leave@list.example>, <https://list.example/u/1>";
     let post = Some("List-Unsubscribe=One-Click");
+    let site = owners(Some("news.list.example"), None);
+    let method = |header: &str, post: Option<&str>| method(header, post, &site);
     assert_eq!(method(both, post), Some(Method::OneClick(Url::parse("https://list.example/u/1").unwrap())));
     assert_eq!(
         method(both, Some("  list-unsubscribe=one-click ")).map(|m| matches!(m, Method::OneClick(_))),
@@ -45,6 +47,28 @@ fn one_click_needs_the_post_header_and_https() {
     assert_eq!(method("<https://user:pw@list.example/u>", post), None);
     assert_eq!(method("<https://list.example/u>", None), None, "a web page alone is not offered");
     assert_eq!(method("", post), None);
+}
+
+#[test]
+fn one_click_only_to_the_lists_own_site() {
+    let post = Some("List-Unsubscribe=One-Click");
+    // The List-Id's domain or the sender's, subdomains included.
+    let shop = owners(Some("offers.shop.example.com"), Some("news@mail.shop.example.com"));
+    assert_eq!(shop, ["example.com", "example.com"]);
+    assert!(matches!(method("<https://u.example.com/x>", post, &shop), Some(Method::OneClick(_))));
+    let sender_only = owners(None, Some("deals@brand.example.co.uk"));
+    assert_eq!(sender_only, ["example.co.uk"]);
+    assert!(matches!(method("<https://unsub.example.co.uk/x>", post, &sender_only), Some(Method::OneClick(_))));
+    // Another site: not posted to; the mailto if there is one, else nothing.
+    assert_eq!(method("<https://tracker.example.net/x>", post, &shop), None);
+    assert_eq!(method("<https://other.co.uk/x>", post, &sender_only), None, "co.uk is no one's site");
+    assert!(matches!(
+        method("<https://tracker.example.net/x>, <mailto:leave@shop.example.com>", post, &shop),
+        Some(Method::Mailto(_))
+    ));
+    assert_eq!(registrable("Weekly-Digest.Example.ORG."), "example.org");
+    assert_eq!(registrable("127.0.0.1"), "127.0.0.1");
+    assert_eq!(registrable("localhost"), "localhost");
 }
 
 #[test]
@@ -146,8 +170,9 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
         "post",
         vec![
             // Two messages of one list: one POST.
-            list_mail("d1", "digest@example.org", Some("digest.example.org"), &header, true, NOW - 1000),
-            list_mail("d2", "digest@example.org", Some("digest.example.org"), &header, true, NOW),
+            // The local server stands in for the list's own site.
+            list_mail("d1", "digest@127.0.0.1", Some("digest.example.org"), &header, true, NOW - 1000),
+            list_mail("d2", "digest@127.0.0.1", Some("digest.example.org"), &header, true, NOW),
             // A mailto-only list: the composer's, not posted.
             list_mail(
                 "e1",
@@ -180,12 +205,18 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
         }
     );
 
+    assert_eq!(targets[0].message_ids, ["d2"], "read from the newest message");
     let results = rt
-        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, keys))
+        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, targets))
         .unwrap();
     assert_eq!(
         results,
-        [CleanupUnsubscribeResult { name: "Weekly Digest".into(), host: "127.0.0.1".into(), error: None }]
+        [CleanupUnsubscribeResult {
+            keys: vec!["digest.example.org".into()],
+            name: "Weekly Digest".into(),
+            host: "127.0.0.1".into(),
+            error: None
+        }]
     );
     let received = rt.block_on(server.received_requests()).unwrap();
     assert_eq!(received.len(), 1, "one POST, the mailto left to the composer");
@@ -202,7 +233,7 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
 }
 
 #[test]
-fn a_failure_is_reported_in_words_and_not_recorded_and_redirects_are_not_followed() {
+fn a_failure_or_a_redirect_is_reported_in_words_and_not_recorded() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let server = rt.block_on(MockServer::start());
     rt.block_on(
@@ -211,7 +242,7 @@ fn a_failure_is_reported_in_words_and_not_recorded_and_redirects_are_not_followe
     rt.block_on(
         Mock::given(http_method("POST"))
             .and(path("/moved"))
-            .respond_with(ResponseTemplate::new(302).insert_header("location", format!("{}/landing", server.uri())))
+            .respond_with(ResponseTemplate::new(302).insert_header("location", "https://landing.example.org/finish"))
             .mount(&server),
     );
     let broken = format!("<{}/broken>", server.uri());
@@ -219,35 +250,97 @@ fn a_failure_is_reported_in_words_and_not_recorded_and_redirects_are_not_followe
     let (_temp, core) = account(
         "fail",
         vec![
-            list_mail("b1", "broken@example.org", None, &broken, true, NOW),
-            list_mail("m1", "moved@example.org", None, &moved, true, NOW),
+            list_mail("b1", "broken@127.0.0.1", None, &broken, true, NOW),
+            list_mail("m1", "moved@127.0.0.1", None, &moved, true, NOW),
         ],
     );
     // From the Sender view: groups keyed by address, no list id.
+    let keys = vec!["broken@127.0.0.1".to_owned(), "moved@127.0.0.1".to_owned()];
+    let targets =
+        block_on(core.cleanup_unsubscribe_targets("acct".into(), CleanupView::Sender, CleanupScope::Inbox, keys))
+            .unwrap();
     let results = rt
-        .block_on(core.cleanup_unsubscribe(
-            "acct".into(),
-            CleanupView::Sender,
-            CleanupScope::Inbox,
-            vec!["broken@example.org".into(), "moved@example.org".into()],
-        ))
+        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::Sender, CleanupScope::Inbox, targets))
         .unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].error.as_deref(), Some("127.0.0.1 answered 500 Internal Server Error"));
-    assert_eq!(results[1].error, None, "a redirect answer counts as done");
+    assert_eq!(
+        results[1].error.as_deref(),
+        Some("the list wants you to open a page at landing.example.org to finish"),
+        "a redirect is not done: it wants a page opened"
+    );
     let paths: Vec<String> =
         rt.block_on(server.received_requests()).unwrap().iter().map(|r| r.url.path().to_owned()).collect();
     assert_eq!(paths, ["/broken", "/moved"], "the redirect is not followed");
     let senders = groups(&core, CleanupView::Sender);
-    assert!(!senders.iter().find(|g| g.key == "broken@example.org").unwrap().unsubscribed);
-    assert!(senders.iter().find(|g| g.key == "moved@example.org").unwrap().unsubscribed);
+    assert!(!senders.iter().any(|g| g.unsubscribed), "neither is recorded");
+}
+
+#[test]
+fn new_mail_since_the_confirmation_is_never_posted_to() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    rt.block_on(Mock::given(http_method("POST")).respond_with(ResponseTemplate::new(200)).mount(&server));
+    let shown = format!("<{}/u/shown>", server.uri());
+    let (_temp, core) =
+        account("newer", vec![list_mail("d1", "digest@127.0.0.1", Some("digest.example.org"), &shown, true, NOW)]);
+    let keys = vec!["digest.example.org".to_owned()];
+    let targets =
+        block_on(core.cleanup_unsubscribe_targets("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, keys))
+            .unwrap();
+    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: "127.0.0.1".into() });
+
+    // While the sheet is open, newer mail of the list arrives with another address.
+    let db = block_on(core.store_for("acct")).unwrap();
+    let newer = list_mail(
+        "d2",
+        "digest@127.0.0.1",
+        Some("digest.example.org"),
+        &format!("<{}/u/unseen>", server.uri()),
+        true,
+        NOW + 1000,
+    );
+    db.write_blocking(move |tx| {
+        let mut w = MailWriter::new(tx);
+        w.upsert_message(&newer)?;
+        w.finish()?;
+        Ok(())
+    })
+    .unwrap();
+    let results = rt
+        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, targets))
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].error.as_deref(), Some(REVIEW_AGAIN));
+    assert!(rt.block_on(server.received_requests()).unwrap().is_empty(), "nothing posted");
+    assert!(!groups(&core, CleanupView::MailingList)[0].unsubscribed);
+
+    // A target the caller made up (a host never shown) is refused too.
+    let forged = vec![CleanupUnsubscribeTarget {
+        keys: vec!["digest.example.org".into()],
+        message_ids: vec!["d2".into()],
+        name: "Weekly Digest".into(),
+        method: CleanupUnsubscribeMethod::OneClick { host: "elsewhere.example".into() },
+    }];
+    let results = rt
+        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, forged))
+        .unwrap();
+    assert_eq!(results[0].error.as_deref(), Some(REVIEW_AGAIN));
+    assert!(rt.block_on(server.received_requests()).unwrap().is_empty(), "still nothing posted");
 }
 
 #[test]
 fn views_without_a_list_or_sender_offer_nothing() {
     let (_temp, core) = account(
         "views",
-        vec![list_mail("d1", "digest@example.org", Some("digest.example.org"), "<https://list.example/u>", true, NOW)],
+        vec![list_mail(
+            "d1",
+            "digest@example.org",
+            Some("digest.example.org"),
+            "<https://list.example.org/u>",
+            true,
+            NOW,
+        )],
     );
     let targets = block_on(core.cleanup_unsubscribe_targets(
         "acct".into(),
@@ -264,7 +357,7 @@ fn views_without_a_list_or_sender_offer_nothing() {
         vec!["digest@example.org".into()],
     ))
     .unwrap();
-    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: "list.example".into() });
+    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: "list.example.org".into() });
     assert!(
         block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::Sender, CleanupScope::Inbox, vec![])).is_err()
     );

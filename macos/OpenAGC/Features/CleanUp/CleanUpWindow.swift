@@ -171,10 +171,10 @@ struct CleanUpLoadBand: View {
             VStack(alignment: .leading, spacing: Space.hair) {
                 Text(load.text)
                 if load.widened {
-                    Text(CleanUpHeaderLoad.note)
+                    Text(load.note)
                         .font(TypeRole.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
             }
             Spacer(minLength: 0)
@@ -249,7 +249,11 @@ struct CleanUpUnsubscribeDialog: View {
                     .card(.neutral, padding: Space.m)
                 }
                 Toggle("Archive Them Too", isOn: $archiveToo)
-                    .hoverHelp("Also archive every message in the ticked groups; one Undo brings them back")
+                    .hoverHelp("Also archive the messages of the lists you leave; one Undo brings them back")
+                Text(CleanUpUnsubscribeQuestion.archiveNote)
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } buttons: {
             CancelButton { model.cleanUp.unsubscribeQuestion = nil }

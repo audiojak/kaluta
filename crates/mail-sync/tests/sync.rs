@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use mail_domain::{EmailAddress, Label, LabelId, LabelKind, MessageId, ThreadId};
 use mail_store::{ARCHIVE_LABEL, Db, ThreadChanges, consistency, queue, read};
-use mail_sync::{BodyWindow, SyncEngine, SyncError, SyncObserver, SyncPhase, SyncProgress, SyncWindow};
+use mail_sync::{BodyWindow, EveryHeader, SyncEngine, SyncError, SyncObserver, SyncPhase, SyncProgress, SyncWindow};
 use provider_api::fake::FakeProvider;
 use provider_api::{FetchedBody, FetchedMessage};
 
@@ -292,6 +292,10 @@ async fn with_cheap_headers_only_the_inbox_and_the_body_window_get_bodies() {
     assert_consistent(&db);
 }
 
+fn widened(outcome: EveryHeader) -> bool {
+    matches!(outcome, EveryHeader::Widened { .. })
+}
+
 /// Clean Up (spec §14.12) loads every header: the window becomes
 /// Everything, and older mail comes down as headers only, whatever the
 /// body window was.
@@ -315,9 +319,13 @@ async fn loading_every_header_widens_the_window_without_bodies_beyond_the_body_w
         assert_eq!(body_state(&db, "ancient"), None, "outside the six months: not listed");
         let fetched = source.bodies();
 
-        assert!(engine.load_every_header().await.unwrap());
-        assert_eq!(engine.window().await.unwrap(), SyncWindow::Everything);
         let kept = if body == BodyWindow::Window { BodyWindow::HalfYear } else { body };
+        assert_eq!(
+            engine.load_every_header(true).await.unwrap(),
+            EveryHeader::Widened { body_window: (kept != body).then_some(kept) },
+            "the body window changes only to keep bodies where they were, and says so"
+        );
+        assert_eq!(engine.window().await.unwrap(), SyncWindow::Everything);
         assert_eq!(engine.body_window().await.unwrap(), kept, "bodies stay where they were");
         assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "the older mail is queued for headers only");
         assert_eq!(recorder.progress.lock().unwrap().last().map(|p| p.headers), Some(1), "reported");
@@ -339,7 +347,11 @@ async fn loading_every_header_widens_the_window_without_bodies_beyond_the_body_w
         want.sort();
         assert_eq!(full, want, "bodies for the Inbox and the body window only");
 
-        assert!(!engine.load_every_header().await.unwrap(), "already everything: nothing to do");
+        assert_eq!(
+            engine.load_every_header(true).await.unwrap(),
+            EveryHeader::Unchanged,
+            "already everything: nothing to do"
+        );
         assert_consistent(&db);
     }
 }
@@ -475,7 +487,7 @@ async fn six_months_over_imap(name: &str) -> (Arc<FakeProvider>, Db, Arc<Recorde
 async fn clean_ups_headers_wait_for_imap_when_it_is_refused_mid_load() {
     let (_fake, db, recorder, engine, source) = six_months_over_imap("cleanup-refused").await;
     let fetched = source.0.bodies();
-    assert!(engine.load_every_header().await.unwrap());
+    assert!(widened(engine.load_every_header(true).await.unwrap()));
     assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "the older mail: headers only");
     assert!(!engine.headers_paused().await.unwrap(), "IMAP is fine");
 
@@ -486,6 +498,8 @@ async fn clean_ups_headers_wait_for_imap_when_it_is_refused_mid_load() {
     assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "not promoted");
     assert!(engine.headers_paused().await.unwrap());
     assert_eq!(recorder.progress.lock().unwrap().len(), reports + 1, "reported once, so the window asks");
+    let last = *recorder.progress.lock().unwrap().last().unwrap();
+    assert_eq!((last.phase, last.headers), (SyncPhase::Idle, 1), "waiting is idle, with the count for the band");
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
     assert_eq!(recorder.progress.lock().unwrap().len(), reports + 1, "not again while it waits");
     assert_eq!(engine.backfill_all().await.unwrap(), 0, "no whole download");
@@ -506,7 +520,7 @@ async fn clean_ups_headers_wait_for_imap_when_it_is_refused_mid_load() {
 #[tokio::test]
 async fn load_all_mail_downloads_clean_ups_waiting_headers_whole() {
     let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-load-all").await;
-    assert!(engine.load_every_header().await.unwrap());
+    assert!(widened(engine.load_every_header(true).await.unwrap()));
     source.refuse(true);
     assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
     assert!(engine.headers_paused().await.unwrap());
@@ -524,7 +538,7 @@ async fn load_all_mail_downloads_clean_ups_waiting_headers_whole() {
 #[tokio::test]
 async fn a_window_the_user_chose_still_promotes_when_imap_is_refused() {
     let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-user-window").await;
-    assert!(engine.load_every_header().await.unwrap());
+    assert!(widened(engine.load_every_header(true).await.unwrap()));
     // The user picks Everything in Settings afterwards: the tier is theirs.
     engine.set_window(SyncWindow::Everything).await.unwrap();
     source.refuse(true);
@@ -534,7 +548,7 @@ async fn a_window_the_user_chose_still_promotes_when_imap_is_refused() {
 
     // Widened while not syncing, the account to sync over IMAP: Clean Up's.
     let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-stored").await;
-    assert!(mail_sync::load_every_header_stored(&db, true).await.unwrap());
+    assert!(widened(mail_sync::load_every_header_stored(&db, true, true).await.unwrap()));
     source.refuse(true);
     engine.ensure_tiers().await.unwrap();
     assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "listed headers only, waiting");
@@ -977,4 +991,31 @@ async fn a_thread_you_replied_in_is_marked_replied() {
     assert!(!replied("t3"));
     let summary = db.read(|c| read::get_thread_summary(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
     assert!(summary.replied);
+}
+
+/// The window decided to widen without asking because headers were cheap;
+/// IMAP was refused before the call: nothing changes, and the answer says
+/// to ask, so no whole download over the API starts unasked.
+#[tokio::test]
+async fn a_widening_decided_on_cheap_headers_asks_if_imap_was_refused_since() {
+    let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-refused-before").await;
+    engine.set_body_window(BodyWindow::Window).await.unwrap();
+    let before = db.read(queue::counts).await.unwrap();
+    source.refuse(true);
+    assert_eq!(engine.load_every_header(true).await.unwrap(), EveryHeader::NeedsAsk);
+    assert_eq!(engine.window().await.unwrap(), SyncWindow::HalfYear, "unchanged");
+    assert_eq!(engine.body_window().await.unwrap(), BodyWindow::Window, "unchanged");
+    assert_eq!(db.read(queue::counts).await.unwrap(), before, "nothing listed");
+
+    // The user answered Load All Mail: the whole download, and the body
+    // window, moot over the API, stays as the user set it.
+    assert_eq!(engine.load_every_header(false).await.unwrap(), EveryHeader::Widened { body_window: None });
+    assert_eq!(engine.window().await.unwrap(), SyncWindow::Everything);
+    assert_eq!(engine.body_window().await.unwrap(), BodyWindow::Window);
+    assert!(!engine.headers_paused().await.unwrap(), "not Clean Up's waiting tier: the user agreed");
+
+    // Not syncing: the same, with the account's IMAP grant.
+    let (_fake, db, _recorder, engine, _source) = six_months_over_imap("cleanup-refused-stored").await;
+    assert_eq!(mail_sync::load_every_header_stored(&db, false, true).await.unwrap(), EveryHeader::NeedsAsk);
+    assert_eq!(engine.window().await.unwrap(), SyncWindow::HalfYear);
 }

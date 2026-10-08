@@ -204,29 +204,60 @@ pub async fn load_waiting_headers_stored(db: &Db) -> SyncResult<usize> {
         .await?)
 }
 
+/// What loading every header did (Clean Up, spec §14.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EveryHeader {
+    /// The window was *Everything* already: nothing changed.
+    Unchanged,
+    /// The window is *Everything* now. `body_window` is the body window
+    /// set to keep bodies where they were, when it changed (only with
+    /// cheap headers: over the API every message comes whole anyway).
+    Widened { body_window: Option<BodyWindow> },
+    /// The caller decided on cheap headers, but they are not cheap now
+    /// (IMAP refused in between): nothing changed, so the caller asks
+    /// before a whole download over the API.
+    NeedsAsk,
+}
+
+/// The stored writes of loading every header, in one transaction.
+fn widen_stored(
+    tx: &mail_store::Transaction<'_>,
+    cheap: bool,
+    expect_cheap: bool,
+) -> mail_store::StoreResult<EveryHeader> {
+    let window = read::sync_state(tx, KEY_WINDOW)?.as_deref().and_then(SyncWindow::parse).unwrap_or_default();
+    if window == SyncWindow::Everything {
+        return Ok(EveryHeader::Unchanged);
+    }
+    if expect_cheap && !cheap {
+        return Ok(EveryHeader::NeedsAsk);
+    }
+    let body = read::sync_state(tx, KEY_BODY_WINDOW)?.as_deref().and_then(BodyWindow::parse).unwrap_or_default();
+    // Without cheap headers the body window is moot (every message comes
+    // whole) and is left as the user set it.
+    let kept = if cheap { body.kept_from(window) } else { body };
+    if kept != body {
+        read::set_sync_state(tx, KEY_BODY_WINDOW, kept.as_str())?;
+    }
+    read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
+    read::set_sync_state(tx, KEY_CLEANUP_HEADERS, if cheap { CLEANUP_ASK } else { CLEANUP_NO })?;
+    Ok(EveryHeader::Widened { body_window: (kept != body).then_some(kept) })
+}
+
 /// [`SyncEngine::load_every_header`] for an account that is not syncing:
 /// the window and body window are stored, and the queue's tiering is
 /// marked stale so the next start lists the wider window
 /// ([`SyncEngine::ensure_tiers`]). `cheap_headers`: the account will sync
-/// over IMAP, so the older mail is Clean Up's headers-only tier. Returns
-/// false when the window was *Everything* already.
-pub async fn load_every_header_stored(db: &Db, cheap_headers: bool) -> SyncResult<bool> {
+/// over IMAP, so the older mail is Clean Up's headers-only tier.
+/// `expect_cheap` as for [`SyncEngine::load_every_header`].
+pub async fn load_every_header_stored(db: &Db, cheap_headers: bool, expect_cheap: bool) -> SyncResult<EveryHeader> {
     Ok(db
         .write(move |tx| {
-            let window = read::sync_state(tx, KEY_WINDOW)?.as_deref().and_then(SyncWindow::parse).unwrap_or_default();
-            if window == SyncWindow::Everything {
-                return Ok(false);
+            let outcome = widen_stored(tx, cheap_headers, expect_cheap)?;
+            if matches!(outcome, EveryHeader::Widened { .. }) {
+                read::set_sync_state(tx, KEY_TIERS, "stale")?;
             }
-            let body = read::sync_state(tx, KEY_BODY_WINDOW)?
-                .as_deref()
-                .and_then(BodyWindow::parse)
-                .unwrap_or_default()
-                .kept_from(window);
-            read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
-            read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
-            read::set_sync_state(tx, KEY_CLEANUP_HEADERS, if cheap_headers { CLEANUP_ASK } else { CLEANUP_NO })?;
-            read::set_sync_state(tx, KEY_TIERS, "stale")?;
-            Ok(true)
+            Ok(outcome)
         })
         .await?)
 }
@@ -824,28 +855,24 @@ impl SyncEngine {
     }
 
     /// Download every header (Clean Up, spec §14.12): the window becomes
-    /// *Everything* and the body window keeps bodies where they were
-    /// ([`BodyWindow::kept_from`]), so with cheap headers the older mail
-    /// is listed for headers only, and that tier is Clean Up's
+    /// *Everything*. With cheap headers the body window keeps bodies where
+    /// they were ([`BodyWindow::kept_from`]), so the older mail is listed
+    /// for headers only, and that tier is Clean Up's
     /// ([`KEY_CLEANUP_HEADERS`]): it waits rather than becoming whole
-    /// downloads if IMAP is refused. Returns false when the window was
-    /// *Everything* already (nothing changes).
-    pub async fn load_every_header(&self) -> SyncResult<bool> {
-        let window = self.window().await?;
-        if window == SyncWindow::Everything {
-            return Ok(false);
+    /// downloads if IMAP is refused. Without them every message comes
+    /// whole and the body window is left alone.
+    ///
+    /// `expect_cheap`: the caller decided not to ask because headers were
+    /// cheap when it looked. If they are not now, nothing changes and the
+    /// answer is [`EveryHeader::NeedsAsk`], so a whole download over the
+    /// API never starts unasked.
+    pub async fn load_every_header(&self, expect_cheap: bool) -> SyncResult<EveryHeader> {
+        let cheap = self.cheap_headers();
+        let outcome = self.db.write(move |tx| widen_stored(tx, cheap, expect_cheap)).await?;
+        if matches!(outcome, EveryHeader::Widened { .. }) {
+            self.relist_window().await?;
         }
-        let body = self.body_window().await?.kept_from(window);
-        let cleanup = if self.cheap_headers() { CLEANUP_ASK } else { CLEANUP_NO };
-        self.db
-            .write(move |tx| {
-                read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
-                read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
-                read::set_sync_state(tx, KEY_CLEANUP_HEADERS, cleanup)
-            })
-            .await?;
-        self.relist_window().await?;
-        Ok(true)
+        Ok(outcome)
     }
 
     /// Which part of the window gets full messages when headers are cheap.
@@ -1446,7 +1473,15 @@ impl SyncEngine {
 
     async fn report(&self, phase: SyncPhase) {
         let (queued, headers) = self.db.read(queue::counts).await.unwrap_or((0, 0));
-        let phase = if queued + headers == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
+        // Clean Up's headers waiting for IMAP (the user said Not Now, or
+        // has not answered) are not work under way: the account is idle,
+        // and the count still goes out for Clean Up's band.
+        let waiting = queued == 0
+            && headers > 0
+            && !self.cheap_headers()
+            && self.db.read(cleanup_tier_waits).await.unwrap_or(false);
+        let phase =
+            if (queued + headers == 0 || waiting) && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
         self.observer.progress(SyncProgress { phase, queued, headers });
     }
 }
