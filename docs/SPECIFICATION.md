@@ -714,7 +714,10 @@ background" with a progress figure from the queue depth.
   year*), then re-lists the window's phases, so with IMAP the older mail
   lands in the headers-only tier and the body backfill never fetches it.
   An account not syncing stores both and marks its queue's tiering stale,
-  so the next start lists the wider window.)*
+  so the next start lists the wider window. Amended 2026-10-08: the body
+  window changes only when headers are cheap (over the API it is moot and
+  stays as the user set it), and a widening decided on cheap headers
+  changes nothing if IMAP was refused since, so the window asks first.)*
 - *Order.* The queue drains in listing order within a priority, i.e. newest
   first (`backfill_queue.seq`); it used to order by Gmail id, which is oldest
   first. Fetches triggered by history (mail the user touched elsewhere) go to
@@ -1272,7 +1275,9 @@ and limits are specified with its provider.
   `spam` → `SPAM`; any other label is a user label whose id is its name.
   Changes go out through the outbox as `PATCH …/messages/{id}
   {add_labels, remove_labels}`, or `…/messages/batch-update` for up to 50
-  messages. Trash, spam and delete stay on this Mac. The provider's labels
+  messages. Trash, spam and delete stay on this Mac, including the Inbox
+  removal that goes with them (no `archived` label for mail moved to
+  Trash or Spam; amended 2026-10-08). The provider's labels
   are the store's (`labels_are_local`): a refetch keeps stored labels and
   user labels survive the label refresh (there is no label listing at
   AgentMail).
@@ -3413,14 +3418,15 @@ address may have expired, so it is not used. Each list is asked once
 means one POST from the core with RFC 8058's body, `application/x-www-
 form-urlencoded`, after the confirmation: no cookies, no credentials (an
 address with a user name is refused), no redirect followed, 5 s to
-connect and 10 s in all; a 2xx or 3xx answer counts as done. The address
-is read from the store again when the user confirms, never passed in by
-the app. Otherwise a `mailto:` URI (RFC 6068: To, Cc, Subject and Body,
+connect and 10 s in all; a 2xx answer counts as done *(amended below: a
+3xx is not)*. The address is read from the store again when the user
+confirms, never passed in by the app *(amended below: from the very
+messages the confirmation showed)*. Otherwise a `mailto:` URI (RFC 6068: To, Cc, Subject and Body,
 `+` kept) opens the composer filled in for the user to send; a web page
 alone is not offered. The confirmation names each list and the host (or
 the address), says ticked groups without a link are left alone, and
 offers *Archive Them Too*, off, which archives the ticked groups as one
-undoable action afterwards. What happened shows over the groups. A
+undoable action afterwards *(amended below: only the lists left)*. What happened shows over the groups. A
 one-click success is remembered (`cleanup_meta`, `unsubscribed:list:<id>`
 and, from Sender or People, `unsubscribed:from:<address>`), and the
 group's second line then starts "Unsubscribed"; a mailto is not, since
@@ -3428,6 +3434,66 @@ sending it is the user's. Not an agent tool, and never automatic. The
 Inbox tip suggesting Clean Up shows when the Inbox holds more than 1,000
 conversations (the sidebar's count; so more than 1,000 messages), before
 the other tips, until put away or until Clean Up is opened.)*
+
+*(Amended 2026-10-08, review fixes, oagc-merk.9–19.)*
+
+- *The day's count waits for the Inbox.* The first sync of a day, and
+  `cleanup_progress`, record the count at midnight (and set or raise the
+  baseline) only once the Inbox phases are fetched: while an id queued at
+  an Inbox priority (0 or 1, which new mail also uses) has no row yet,
+  nothing is recorded and the card works its numbers out live; a later
+  poll or opening records them. The listing marks an account bootstrapped
+  before the backfill stores what it listed, so a first sync could
+  otherwise record a partial Inbox that stood all day.
+- *Unsubscribe from what was shown.* Each target carries, per group, the
+  id of the newest message its address was read from.
+  `cleanup_unsubscribe` takes the confirmed targets, reads those groups'
+  newest messages again and posts only if they are still the same
+  messages and the address still leads to the host shown; otherwise
+  nothing is sent for that list and its line says "New mail arrived from
+  this list; review it again". A one-click address is offered only on the
+  list's own site: the URL's registrable domain (its last two labels, or
+  three under a country's own second level such as `co.uk`; a short list,
+  not the Public Suffix List, erring towards "foreign") must be the
+  `List-Id`'s or the sender's. Otherwise the list's mailto is offered, or,
+  without one, the group counts as having no link Clean Up can use. A
+  link the user would open in the browser is not offered.
+- *Only a 2xx is done.* A redirect is not followed and not recorded: the
+  line says "the list wants you to open a page at *host* to finish".
+- *Archive Them Too* archives only the groups whose one-click succeeded or
+  whose message opened in the composer; the sheet says so ("Archives only
+  the lists that take you off, and those whose message opens for you to
+  send"). Groups that failed or had no link stay, still ticked.
+- *Spam leaves the user's own sent mail alone* (`SENT`): it is not spam,
+  and whether Gmail accepts `SPAM` on a sent message is a hand-check (a
+  refusal would roll back a batch of 1,000). Trash still takes it.
+- *A message gone from the server costs only its own change.* A
+  `NotFound` for a label change on several messages is split in halves
+  and retried down to the missing ids, which are dropped (about 20 calls
+  for one missing id among 1,000); per-message trash calls go on past a
+  missing one. What `batchModify` answers when one id is gone is a
+  hand-check.
+- *Widening without asking re-checks.* `cleanup_load_every_header`
+  takes `expect_cheap`: the window widens unasked because
+  `cleanup_load_status` said headers are cheap; if IMAP was refused in
+  between, nothing changes and the answer is `NeedsAsk`, so the window
+  asks *Load All Mail* / *Not Now* as without IMAP. *Load All Mail*
+  passes false.
+- *The body window changes only with cheap headers.* Over the API every
+  message comes whole, so the body window is left as the user set it.
+  When Clean Up does pin it (`Widened { body_window }`), the band adds
+  one sentence: "Full messages still download for the last 6 months only
+  (Full messages for, in the same place)."
+- *Waiting is idle.* While Clean Up's headers-only tier waits for IMAP and
+  nothing else is queued, sync reports the account idle (the header count
+  still goes out for the band), so the main window does not show it
+  syncing for ever after *Not Now*.
+- *The window drops a view's groups when the view or scope changes,* and
+  ignores ticks until the new groups load, so a tick cannot name a key of
+  the view just left.
+- *AgentMail:* moving mail to Trash or Spam (Clean Up's actions, Mark as
+  Junk) leaves the Inbox on this Mac only; no `archived` label is added at
+  the service (§7.9, ADR 0014).
 
 ---
 

@@ -228,6 +228,16 @@ The managed subdomain "can receive at any local-part".
   finds its parent at `…/{In-Reply-To}/reply` (else it falls back to
   `…/send`); what `GET /v0/organizations` gives before and after
   verifying; and whether label events include arrivals.
+- Gmail, Clean Up (review fixes, oagc-merk.11 and .16): that `batchModify`
+  accepts `TRASH` and `SPAM` as labels to add (Clean Up's Trash and Spam
+  and their undo go that way, not through `messages.trash`), and that
+  mail so trashed empties from Trash after 30 days like any other; what
+  `batchModify` answers when one id of the batch was deleted on the
+  server (a 404 for the whole call, a 400, or success that skips it: the
+  outbox now splits a batch on `NotFound` and drops only the missing ids,
+  but a 400 would roll back the batch); and whether adding `SPAM` to a
+  message the user sent (`SENT` only) is refused (Clean Up's Spam now
+  leaves sent mail alone, so this only matters for Mark as Junk).
 
 ## Feature 2: Clean Up (epic oagc-merk)
 
