@@ -34,10 +34,10 @@ The short version. Everything below elaborates on these.
 | MIME | `mail-parser` (read), `mail-builder` (write) |
 | HTML email | Sanitized in Rust with `ammonia` at sync time, cached; rendered in a locked-down `WKWebView` |
 | Gmail | Hand-written `reqwest` client over the REST API; `history.list` polling; no push |
-| Agent mailboxes | Accounts on an agent-mail service (Primitive first), created in the app through its sign-up API; REST provider (§7.9, ADR 0014) |
+| Agent mailboxes | Accounts on an agent-mail service (Primitive first, AgentMail second), created in the app through its sign-up API; several agents share one service account and its key; REST provider (§7.9, ADR 0014, ADR 0015) |
 | OAuth | Desktop-app flow with PKCE and loopback redirect; shipped client ID with bring-your-own override |
 | Scope | `gmail.modify` only (plus `userinfo.email`) |
-| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent mailboxes' API keys) through a foreign trait |
+| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent-mail service accounts' API keys, one per service account) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
@@ -1095,24 +1095,47 @@ provider (UIDVALIDITY/MODSEQ) fits later.
 ### 7.9 Agent mailboxes **(Amendment 2026-10-06)**
 
 An *agent mailbox* is an address that belongs to one of the user's agents,
-hosted by an agent-mail service (Primitive first; AgentMail later). Agents
+hosted by an agent-mail service (Primitive first; AgentMail second). Agents
 use it to sign up for services and to correspond on the user's behalf as
 themselves. It is an account in every sense of §7.7 (its own directory,
 store, writing guide, facts, routines, undo and entry behind the avatar
 button), shown with an agent marker. The user reads it and can send as the
-agent. ADR 0014; plan `docs/plans/agent-mailboxes.md`.
+agent. ADR 0014, ADR 0015; plans `docs/plans/agent-mailboxes.md`,
+`docs/plans/overnight-2026-10-08.md`.
+
+**Service accounts (Amendment 2026-10-08, ADR 0015).** Agent mailboxes
+belong to a *service account*: what the service calls an organisation
+(AgentMail) or an account (Primitive). One service account holds the API
+key, the human email it was verified with, the plan and its limits, and
+the user's own domains; it has one agent or several, each an account of
+its own. Neither service allows one account per mailbox: Primitive
+refuses to verify a second account with an email that verified one
+(`email_in_use`), and AgentMail keeps one organisation per human email
+and rotates its key when the sign-up is repeated.
 
 **Model.**
-- The index (§7.7) gains the kind `agent` with `service` (`primitive`).
-  `display_name` is the agent's name; it is the From display name.
-- The service's API key lives in the Keychain as `mailbox.api_key.<id>`
-  (§12); removing the account deletes it. Nothing else is stored about
-  the service account: its plan, limits and verification state are read
-  from the service (`GET /account`) when the account opens and after
-  verifying.
+- The index (§7.7) gains the kind `agent` with `service` (`primitive`,
+  later `agentmail`). `display_name` is the agent's name; it is the From
+  display name.
+- A service account is `services/<id>/service.json` in the data directory
+  (service, human email, verified, the plan as last read, the managed
+  domain agents take addresses on, own domains as last read). Its id is
+  the account id of the agent it was created with. The plan, limits and
+  verification state are read again from the service (`GET /account`)
+  when an agent opens and after verifying; the record keeps the last
+  answer.
+- An agent's `agent.json` names its `service_account` and, on AgentMail,
+  its `inbox_id`.
+- The service account's API key lives in the Keychain as
+  `mailbox.api_key.<service account id>` (§12). Removing an agent removes
+  its account on the Mac; removing the last agent of a service account
+  also deletes the record and the key.
+- Mailboxes created before 2026-10-08 have no `service_account`: each is
+  read as a service account of one agent whose id is the agent's account
+  id, so the Keychain item keeps its name and nothing is re-keyed.
 - The core holds a `MailboxService` per service (sign up, start and finish
-  verification, plan and limits) beside the account's `MailProvider`, and
-  chooses the provider by kind.
+  verification, plan and limits, add a mailbox) beside each agent's
+  `MailProvider`, and chooses the provider by kind.
 
 **Creating one.** *Accounts › Create an Agent Mailbox…*, also on the
 welcome screen and in Settings › Accounts. A sheet:
@@ -1129,9 +1152,36 @@ welcome screen and in Settings › Accounts. A sheet:
    later from a banner in the mailbox and from its settings.
 
 No agent is involved: setup is a fixed sequence of calls in the core.
+Signing up makes a new service account with its first agent.
 
-**Verification.** Until verified, a Primitive account is on its `agent`
-plan: it can only reply to addresses that have already sent it
+**Adding an agent to a service account.** When a service account for
+the chosen service exists, the sheet offers *Add to <service account>*:
+the agent's name only, with no terms, sign-up or code, since the service
+account already agreed and verified. A new service account stays
+possible (Primitive refuses to verify it with an email already used).
+- Primitive: no API call. The agent's address is its name as a local
+  part on the service account's managed subdomain
+  (`writer@jade-emu.primitive.email`), or on one of its verified own
+  domains; the subdomain receives at any local part, and the account
+  sends from any of its verified domains. An address another agent of the
+  service account has is refused.
+- AgentMail: a new inbox in the organisation (`POST /v0/inboxes`), whose
+  `inbox_id` the agent keeps.
+
+**AgentMail.** The second service (`https://api.agentmail.to`). Its
+sign-up takes the agent's name and the user's email together, so the
+sheet asks for the email before *Agree and Create* (prefilled from the
+open account): without it the inbox only receives, and a lost key cannot
+be recovered. The code is emailed at sign-up and *Fill Code from
+<address>* works as for Primitive. Signing up again with the same email
+would rotate the organisation's key, so the app never does it for a
+service account it has. Labels sync both ways (read state, archive and
+user labels, through the outbox); deleting stays local. Its sync, sending
+and limits are specified with its provider.
+
+**Verification.** Verification belongs to the service account: once
+verified, every agent in it is. Until verified, a Primitive account is on
+its `agent` plan: it can only reply to addresses that have already sent it
 authenticated mail, at most 10 sends an hour and 50 a day. Verifying moves
 it to the free `developer` plan, which still sends only to: people who
 wrote to it first, the email it was verified with, its own verified
@@ -1217,16 +1267,24 @@ are unchanged. The setting lives in the mailbox's `agent.json`
 prompt whose mailbox it is, the name it sends as, and the service's
 limits (one recipient per message).
 
-**Account settings.** Service, address, plan and verification state with
-*Verify…*, *Can write to* (the service's send rules, `GET
+**Account settings.** *(Amended 2026-10-08, ADR 0015: what is shared moves
+to a service-account settings pane, reached from each agent's settings;
+an agent's own settings keep its name, address, *When Agents Send* and
+*Remove…*. The account switcher groups agents under their service
+account, "Primitive · you@example.com". On AgentMail, once verified,
+*Copy API Key* offers a key scoped to the agent's inbox and says the
+organisation's key reaches every agent in it. *Rotate Key* replaces the
+service account's key for all its agents at once.)* Service, address,
+plan and verification state with *Verify…*, *Can write to* (the service's send rules, `GET
 /send-permissions`: anyone, addresses that wrote first, the user's own
 domains, other Primitive mailboxes; sending to anyone is an entitlement
 Primitive grants on request), *Open at primitive.dev…* (the dashboard's
 sign-in; the help names the verified email to sign in as), *When Agents
 Send*, *Copy API Key* (a confirmation says that
 whoever holds the key can read and send the mailbox's mail), *Remove…*.
-Removing deletes the account and its key on the Mac; the service account
-stays (the sheet says so).
+Removing deletes the account on the Mac, and the key with the service
+account's last agent; the service account stays at the service (the
+sheet says so).
 
 **Own domains.** *Use Your Own Domain…* in the mailbox's settings puts
 the agent on a domain the user owns:
@@ -1246,9 +1304,10 @@ the agent on a domain the user owns:
   address) and *Use This Address*. The mailbox then sends and receives as
   that address (`agent.json` keeps the service's own address too, and the
   agent can go back to it); sync restarts with it.
-- A domain belongs to one agent mailbox: each mailbox is its own account
-  at Primitive, and Primitive lists everything sent to an account's
-  domains as one inbox.
+- A domain belongs to the service account *(amended 2026-10-08, ADR
+  0015)*: every agent in it may take an address on it, and Primitive
+  lists everything sent to an account's domains as one inbox, which each
+  agent's provider splits by recipient.
 
 **Testing.** Every test runs against a wiremock fake of the service's API.
 Nothing in automation calls a real service: each sign-up creates a real
@@ -1256,8 +1315,9 @@ account.
 
 **Not in scope.** Agents outside the app sending through a local MCP
 without the app open (`docs/plans/headless-mcp.md`), sending to several
-recipients by splitting a message, deleting mail at the service, and
-services other than Primitive until their own step.
+recipients by splitting a message, deleting mail at the service, a
+combined inbox of all agents, and services other than Primitive and
+AgentMail.
 
 ---
 
@@ -1910,7 +1970,10 @@ pub trait SecretStore: Send + Sync {
 
 Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
 `oauth.client_secret.custom` (BYO only), `anthropic.api_key` (optional),
-`mailbox.api_key.<account>` (an agent mailbox's service key, §7.9).
+`mailbox.api_key.<service account>` (an agent-mail service account's key,
+shared by its agents, §7.9; for mailboxes created before 2026-10-08 the
+service account's id is the agent's account id, so the name is
+unchanged).
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens

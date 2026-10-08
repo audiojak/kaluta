@@ -22,3 +22,4 @@ stay in the spec's dated amendments and the nightly plans in `docs/plans/`.
 | [0012](0012-global-facts-store.md) | One global store for facts the user makes global | 2026-10-05 |
 | [0013](0013-recording-ai-compositions.md) | Every AI composition is recorded, then compared with what was sent | 2026-10-05 |
 | [0014](0014-agent-mailboxes.md) | Agent mailboxes are accounts on an agent-mail service, created in the app | 2026-10-06 |
+| [0015](0015-service-accounts.md) | Agent mailboxes belong to service accounts | 2026-10-08 |
