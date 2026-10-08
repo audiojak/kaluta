@@ -156,6 +156,9 @@ const KEY_TIERS: &str = "queue_tiers";
 pub trait SyncObserver: Send + Sync {
     fn threads_changed(&self, changes: &ThreadChanges);
     fn progress(&self, _progress: SyncProgress) {}
+    /// An outbox op reached the provider and more are waiting (a bulk
+    /// change goes out as many ops, spec §14.12).
+    fn outbox_progress(&self, _counts: mail_store::outbox::OutboxCounts) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,7 +225,7 @@ pub struct SyncEngine {
     /// Where backfill gets bodies; REST unless a bulk source is set.
     backfill: std::sync::RwLock<Arc<dyn BackfillSource>>,
     db: Db,
-    observer: Arc<dyn SyncObserver>,
+    pub(crate) observer: Arc<dyn SyncObserver>,
     /// Serializes outbox drains so one op is never sent twice.
     pub(crate) drain_lock: tokio::sync::Mutex<()>,
     /// Label changes OpenAGC itself pushed recently, so history sync can
@@ -1157,22 +1160,22 @@ impl SyncEngine {
         let now = crate::outbox::now_millis();
         let mut own = self.own_changes.lock().unwrap_or_else(|e| e.into_inner());
         own.retain(|c| now - c.at < OWN_CHANGE_WINDOW);
+        // Sets, not scans: a bulk change (Clean Up) comes back from history
+        // as tens of thousands of label changes.
+        let ours: std::collections::HashSet<(&MessageId, &LabelId, bool)> =
+            own.iter().map(|c| (&c.message, &c.label, c.added)).collect();
         let mut out: Vec<ExternalLabelChange> = Vec::new();
+        let mut index: std::collections::HashMap<MessageId, usize> = std::collections::HashMap::new();
         for (message, thread, labels, added) in labeled {
-            let theirs: Vec<LabelId> = labels
-                .into_iter()
-                .filter(|l| !own.iter().any(|c| c.message == message && c.label == *l && c.added == added))
-                .collect();
+            let theirs: Vec<LabelId> = labels.into_iter().filter(|l| !ours.contains(&(&message, l, added))).collect();
             if theirs.is_empty() {
                 continue;
             }
-            let entry = match out.iter_mut().position(|e| e.message == message) {
-                Some(i) => &mut out[i],
-                None => {
-                    out.push(ExternalLabelChange { message: message.clone(), thread, added: vec![], removed: vec![] });
-                    out.last_mut().expect("just pushed")
-                }
-            };
+            let i = *index.entry(message.clone()).or_insert_with(|| {
+                out.push(ExternalLabelChange { message, thread, added: vec![], removed: vec![] });
+                out.len() - 1
+            });
+            let entry = &mut out[i];
             if added { entry.added.extend(theirs) } else { entry.removed.extend(theirs) }
         }
         out

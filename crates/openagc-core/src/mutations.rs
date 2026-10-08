@@ -40,36 +40,45 @@ fn threads(ids: Vec<String>) -> Result<Vec<ThreadId>, CoreError> {
 
 impl Core {
     /// Apply a change to the account this work acts on. With `record`, it
-    /// is kept as an undoable action of that kind and its token returned.
-    async fn apply(&self, change: LocalChange, record: Option<&str>) -> Result<Option<UndoToken>, CoreError> {
+    /// is kept as an undoable action of that kind and its token returned,
+    /// with the number of messages it changed.
+    pub(crate) async fn apply(
+        &self,
+        change: LocalChange,
+        record: Option<&str>,
+    ) -> Result<(Option<UndoToken>, usize), CoreError> {
         let service = self.sync_service();
         let db = self.db()?;
         let events = self.account_events();
         let account_id = self.effective_account_id();
         let record = record.map(str::to_owned);
-        let action = runtime::run(async move {
-            let action = match service {
+        let applied = runtime::run(async move {
+            let applied = match service {
                 Some(service) => {
-                    let (_, action) = service.engine().apply_change_recorded(change, record).await?;
+                    let applied = service.engine().apply_change_recorded(change, record).await?;
                     service.outbox_changed();
-                    action
+                    applied
                 }
                 // No provider (the demo mailbox): local only.
                 None => {
-                    let (changes, action) = mail_sync::apply_local_change_recorded(&db, change, false, record).await?;
-                    mail_sync::SyncObserver::threads_changed(&EventObserver { events, settled: None }, &changes);
-                    action
+                    let applied = mail_sync::apply_local_change_recorded(&db, change, false, record).await?;
+                    mail_sync::SyncObserver::threads_changed(
+                        &EventObserver { events, settled: None },
+                        &applied.changes,
+                    );
+                    applied
                 }
             };
-            Ok(action)
+            Ok(applied)
         })
         .await?;
-        Ok(action.zip(account_id).map(|(action_id, account_id)| UndoToken { account_id, action_id }))
+        let token = applied.action.zip(account_id).map(|(action_id, account_id)| UndoToken { account_id, action_id });
+        Ok((token, applied.messages))
     }
 
     /// A user's action: recorded for undo.
     async fn mutate(&self, change: LocalChange, kind: &str) -> Result<Option<UndoToken>, CoreError> {
-        self.apply(change, Some(kind)).await
+        self.apply(change, Some(kind)).await.map(|(token, _)| token)
     }
 
     /// An agent's or a routine's action: not on the user's undo stack
@@ -88,7 +97,9 @@ impl Core {
                 .await?
                 .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "that action can no longer be undone"))?;
             let diffs = if inverse { action.diffs.iter().map(|d| d.inverse()).collect() } else { action.diffs };
-            self.apply(LocalChange::Exact { diffs }, None).await.map(|_| ())
+            // A bulk action is undone in batches, as it was applied.
+            let batched = crate::cleanup::is_cleanup_action(&action.kind);
+            self.apply(LocalChange::Exact { diffs, batched }, None).await.map(|_| ())
         })
         .await
     }

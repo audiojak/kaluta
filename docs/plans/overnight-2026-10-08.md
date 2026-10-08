@@ -277,6 +277,10 @@ C2. **Core: groups, messages and apply** (oagc-merk.2) — the FFI above, messag
     `LabelOp`s, one undo entry per apply, progress events. Tests against
     `FakeProvider`, including undo of a 2,500-message trash (three
     batches) and a group that changes between showing and acting.
+    *(as built: the calls take the account id; Trash and Spam go out
+    as `batchModify` label changes, undo and redo too, rather than a
+    trash call per message; progress is `OutboxStatus` after each
+    batch; `cleanup_progress` moves to C5.)*
 C3. **The Clean Up window** (oagc-merk.3) — the menu item and Settings button, the
     three columns, the five ready views (Sender, People I've Emailed,
     Subject, Time, Size), toolbar actions, keys, undo, empty states.

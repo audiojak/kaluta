@@ -25,6 +25,8 @@ pub struct FakeProvider {
     pub fetched_messages: AtomicU64,
     /// Errors to return from the next write calls (modify, trash, send).
     write_failures: Mutex<Vec<ProviderError>>,
+    /// Every accepted `modify_labels` call, in order.
+    label_ops: Mutex<Vec<LabelOp>>,
 }
 
 #[derive(Default)]
@@ -55,7 +57,13 @@ impl FakeProvider {
             fetch_calls: AtomicU64::new(0),
             fetched_messages: AtomicU64::new(0),
             write_failures: Mutex::new(Vec::new()),
+            label_ops: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The `modify_labels` calls accepted so far, one per call (a batch).
+    pub fn label_ops(&self) -> Vec<LabelOp> {
+        self.label_ops.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Make the next `errors.len()` write calls fail, in order.
@@ -236,6 +244,7 @@ impl MailProvider for FakeProvider {
 
     async fn modify_labels(&self, op: &LabelOp) -> ProviderResult<()> {
         self.injected_failure()?;
+        self.label_ops.lock().unwrap_or_else(|e| e.into_inner()).push(op.clone());
         let mut s = self.state();
         for id in &op.message_ids {
             apply_labels(&mut s, id, &op.add, &op.remove);

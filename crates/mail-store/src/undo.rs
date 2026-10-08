@@ -16,6 +16,10 @@ use crate::outbox::OutboxOp;
 /// Actions kept per account.
 pub const KEEP: i64 = 50;
 
+/// Messages per provider call in [`batched_ops`]: Gmail's `batchModify`
+/// accepts at most 1,000 ids.
+pub const BATCH: usize = 1_000;
+
 /// What one action changed on one message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageDiff {
@@ -90,4 +94,28 @@ pub fn provider_ops(tx: &Transaction<'_>, diffs: &[MessageDiff]) -> StoreResult<
         }
     }
     Ok(ops)
+}
+
+/// Provider ops for per-message diffs as label changes only, Trash and
+/// Spam included (`batchModify` adds and removes `TRASH` like any other
+/// label): messages with the same change share an op of at most [`BATCH`]
+/// messages, so each op is one call and a failed one rolls back exactly
+/// its own messages. For bulk actions (Clean Up, spec §14.12), where the
+/// trash endpoints' call per message would take minutes.
+pub fn batched_ops(diffs: &[MessageDiff]) -> Vec<OutboxOp> {
+    let mut groups: BTreeMap<(&[LabelId], &[LabelId]), Vec<MessageId>> = BTreeMap::new();
+    for d in diffs.iter().filter(|d| !d.added.is_empty() || !d.removed.is_empty()) {
+        groups.entry((&d.added, &d.removed)).or_default().push(d.message.clone());
+    }
+    let mut ops = Vec::new();
+    for ((add, remove), message_ids) in groups {
+        for chunk in message_ids.chunks(BATCH) {
+            ops.push(OutboxOp::ModifyLabels {
+                message_ids: chunk.to_vec(),
+                add: add.to_vec(),
+                remove: remove.to_vec(),
+            });
+        }
+    }
+    ops
 }

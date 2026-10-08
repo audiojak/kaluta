@@ -1,0 +1,345 @@
+//! Clean Up's apply against `FakeProvider`: message-level changes, one undo
+//! entry per apply, batches of 1,000 at the provider, and groups resolved
+//! when the action runs.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use futures::executor::block_on;
+use mail_domain::{EmailAddress, Label, LabelId, LabelKind, MessageId, ThreadId};
+use provider_api::fake::FakeProvider;
+use provider_api::{FetchedBody, FetchedMessage};
+
+use super::*;
+use crate::{CoreConfig, CoreEvent, EventListener};
+
+const NOW: i64 = 1_790_000_000_000;
+
+#[derive(Default)]
+struct Recorder(Mutex<Vec<CoreEvent>>);
+impl EventListener for Recorder {
+    fn on_event(&self, _account: Option<String>, event: CoreEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+struct Temp(std::path::PathBuf);
+impl Drop for Temp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn core(name: &str) -> (Temp, Arc<Core>, Arc<Recorder>) {
+    let dir = std::env::temp_dir().join(format!("openagc-cleanup-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let events = Arc::new(Recorder::default());
+    let core = Core::new(
+        CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+        Arc::new(crate::secrets::MemorySecrets::default()),
+        events.clone(),
+    )
+    .unwrap();
+    (Temp(dir), core, events)
+}
+
+fn message(id: &str, thread: &str, from: &str, labels: &[&str]) -> FetchedMessage {
+    FetchedMessage {
+        id: MessageId::new(id),
+        thread_id: ThreadId::new(thread),
+        label_ids: labels.iter().map(|l| LabelId::new(*l)).collect(),
+        internal_date: NOW,
+        from: Some(EmailAddress::new(None, from)),
+        subject: format!("from {from}"),
+        body: Some(FetchedBody { text: Some("hi".into()), html: None, attachments: vec![] }),
+        ..Default::default()
+    }
+}
+
+/// A synced account "acct" over `fake`, once `messages` are stored.
+fn synced(name: &str, fake: &Arc<FakeProvider>, messages: u64) -> (Temp, Arc<Core>, Arc<Recorder>) {
+    let (temp, core, events) = core(name);
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    core.start_sync_with(fake.clone()).unwrap();
+    wait_until("the mailbox synced", || all_mail_count(&core) == messages);
+    (temp, core, events)
+}
+
+fn all_mail_count(core: &Core) -> u64 {
+    let groups = block_on(core.cleanup_groups("acct".into(), CleanupView::Size, CleanupScope::AllMail, String::new()));
+    groups.map(|g| g.iter().map(|g| g.count).sum()).unwrap_or(0)
+}
+
+fn sender(email: &str) -> Vec<String> {
+    vec![email.to_owned()]
+}
+
+fn apply(core: &Core, scope: CleanupScope, keys: Vec<String>, action: CleanupAction) -> CleanupResult {
+    block_on(core.cleanup_apply("acct".into(), CleanupView::Sender, scope, keys, action)).unwrap()
+}
+
+fn labels_of(fake: &FakeProvider, id: &str) -> Vec<String> {
+    let mut labels: Vec<String> =
+        fake.message(&MessageId::new(id)).unwrap().label_ids.into_iter().map(|l| l.0).collect();
+    labels.sort();
+    labels
+}
+
+fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
+    for _ in 0..1_500 {
+        if ok() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("timed out waiting for {what}");
+}
+
+#[test]
+fn a_trash_of_2500_messages_goes_out_in_three_batches_and_comes_back_in_three() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 500));
+    for i in 0..2_500 {
+        fake.seed(message(&format!("m{i:04}"), &format!("t{i:04}"), "deals@shop.example", &["INBOX", "UNREAD"]));
+    }
+    fake.seed(message("keep", "tkeep", "friend@example.com", &["INBOX"]));
+    let (_temp, core, events) = synced("trash", &fake, 2_501);
+    let groups =
+        block_on(core.cleanup_groups("acct".into(), CleanupView::Sender, CleanupScope::Inbox, String::new())).unwrap();
+    assert_eq!((groups[0].key.as_str(), groups[0].count), ("deals@shop.example", 2_500));
+
+    let done = apply(&core, CleanupScope::Inbox, sender("deals@shop.example"), CleanupAction::Trash);
+    assert_eq!(done.changed, 2_500);
+    assert_eq!(done.description, "Moved 2,500 messages from deals@shop.example to the Trash");
+    assert_eq!(done.action_name, "Move to Trash");
+    let token = done.undo.expect("one undo entry");
+    let inbox = |core: &Core| {
+        block_on(core.cleanup_count(
+            "acct".into(),
+            CleanupView::Sender,
+            CleanupScope::Inbox,
+            sender("deals@shop.example"),
+        ))
+        .unwrap()
+    };
+    assert_eq!(inbox(&core), 0, "local at once");
+
+    let sent = |ops: Vec<provider_api::LabelOp>| ops.iter().map(|op| op.message_ids.len()).sum::<usize>();
+    wait_until("the server trashed them", || sent(fake.label_ops()) == 2_500);
+    assert!((0..2_500).all(|i| labels_of(&fake, &format!("m{i:04}")) == ["TRASH", "UNREAD"]));
+    let sizes = |ops: &[provider_api::LabelOp]| ops.iter().map(|op| op.message_ids.len()).collect::<Vec<_>>();
+    let ops = fake.label_ops();
+    assert_eq!(sizes(&ops), [1_000, 1_000, 500], "batchModify's limit, one call per batch");
+    assert!(ops.iter().all(|op| op.add == [LabelId::new("TRASH")] && op.remove == [LabelId::new("INBOX")]));
+    assert_eq!(labels_of(&fake, "keep"), ["INBOX"], "other senders untouched");
+    assert!(
+        events.0.lock().unwrap().iter().any(|e| matches!(e, CoreEvent::OutboxStatus { pending: 1.., .. })),
+        "progress between batches"
+    );
+
+    block_on(core.undo_action(token.clone())).unwrap();
+    assert_eq!(inbox(&core), 2_500, "undo is local at once too");
+    wait_until("the server untrashed them", || sent(fake.label_ops()) == 5_000);
+    let undo_ops = fake.label_ops()[3..].to_vec();
+    assert_eq!(sizes(&undo_ops), [1_000, 1_000, 500]);
+    assert!(undo_ops.iter().all(|op| op.add == [LabelId::new("INBOX")] && op.remove == [LabelId::new("TRASH")]));
+    assert!((0..2_500).all(|i| labels_of(&fake, &format!("m{i:04}")) == ["INBOX", "UNREAD"]));
+
+    // Redo trashes them again, in batches as well.
+    block_on(core.redo_action(token)).unwrap();
+    wait_until("the server trashed them again", || sent(fake.label_ops()) == 7_500);
+    assert!((0..2_500).all(|i| labels_of(&fake, &format!("m{i:04}")) == ["TRASH", "UNREAD"]));
+    assert_eq!(sizes(&fake.label_ops()[6..]), [1_000, 1_000, 500]);
+    core.stop_sync();
+}
+
+#[test]
+fn archive_then_undo_restores_the_inbox_exactly() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    fake.seed(message("a1", "ta1", "news@paper.example", &["INBOX", "UNREAD"]));
+    fake.seed(message("a2", "ta2", "news@paper.example", &["INBOX", "STARRED"]));
+    // Already archived: in All Mail, not in the Inbox.
+    fake.seed(message("a3", "ta3", "News@Paper.example", &["Label_7"]));
+    let (_temp, core, _events) = synced("archive", &fake, 3);
+
+    let done = apply(&core, CleanupScope::AllMail, sender("news@paper.example"), CleanupAction::Archive);
+    assert_eq!(done.changed, 2, "the archived one changed nothing");
+    assert_eq!(done.description, "Archived 2 messages from news@paper.example");
+    wait_until("the server archived them", || labels_of(&fake, "a1") == ["UNREAD"]);
+    assert_eq!(labels_of(&fake, "a2"), ["STARRED"]);
+
+    block_on(core.undo_action(done.undo.unwrap())).unwrap();
+    wait_until("the server has them back", || labels_of(&fake, "a1") == ["INBOX", "UNREAD"]);
+    assert_eq!(labels_of(&fake, "a2"), ["INBOX", "STARRED"]);
+    assert_eq!(labels_of(&fake, "a3"), ["Label_7"], "undo does not put the archived one in the Inbox");
+    let inbox = block_on(core.cleanup_count(
+        "acct".into(),
+        CleanupView::Sender,
+        CleanupScope::Inbox,
+        sender("news@paper.example"),
+    ))
+    .unwrap();
+    assert_eq!(inbox, 2);
+
+    // Nothing left to change: no undo entry.
+    let again = apply(&core, CleanupScope::Inbox, sender("nobody@example.com"), CleanupAction::Archive);
+    assert_eq!((again.changed, again.undo), (0, None));
+    core.stop_sync();
+}
+
+#[test]
+fn spam_and_its_undo_reach_the_server() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    fake.seed(message("s1", "ts1", "spammy@bulk.example", &["INBOX", "UNREAD"]));
+    fake.seed(message("s2", "ts2", "spammy@bulk.example", &["INBOX"]));
+    let (_temp, core, _events) = synced("spam", &fake, 2);
+
+    let done = apply(&core, CleanupScope::Inbox, sender("spammy@bulk.example"), CleanupAction::Spam);
+    assert_eq!(done.description, "Moved 2 messages from spammy@bulk.example to Spam");
+    let spam = block_on(core.list_threads("SPAM".into(), None, 10)).unwrap().rows.len();
+    assert_eq!(spam, 2);
+    wait_until("the server marked them spam", || labels_of(&fake, "s1") == ["SPAM", "UNREAD"]);
+
+    block_on(core.undo_action(done.undo.unwrap())).unwrap();
+    assert!(block_on(core.list_threads("SPAM".into(), None, 10)).unwrap().rows.is_empty());
+    wait_until("the server undid it", || labels_of(&fake, "s1") == ["INBOX", "UNREAD"]);
+    assert_eq!(labels_of(&fake, "s2"), ["INBOX"]);
+    core.stop_sync();
+}
+
+#[test]
+fn a_group_is_acted_on_as_it_is_when_the_action_runs() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    for i in 0..3 {
+        fake.seed(message(&format!("g{i}"), &format!("tg{i}"), "promo@store.example", &["INBOX"]));
+    }
+    let (_temp, core, _events) = synced("changes", &fake, 3);
+    let shown =
+        block_on(core.cleanup_groups("acct".into(), CleanupView::Sender, CleanupScope::Inbox, String::new())).unwrap();
+    assert_eq!(shown[0].count, 3);
+
+    // Between showing and acting: one more arrives, one is archived on the web.
+    fake.deliver(message("g3", "tg3", "promo@store.example", &["INBOX"]));
+    fake.relabel(&MessageId::new("g0"), &[], &[LabelId::new("INBOX")]);
+    core.sync_now();
+    wait_until("the changes synced", || {
+        block_on(core.cleanup_messages(
+            "acct".into(),
+            CleanupView::Sender,
+            CleanupScope::Inbox,
+            sender("promo@store.example"),
+            0,
+            10,
+        ))
+        .unwrap()
+        .iter()
+        .map(|m| m.id.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+            == ["g1", "g2", "g3"].map(String::from).into()
+    });
+
+    let done = apply(&core, CleanupScope::Inbox, sender("promo@store.example"), CleanupAction::Archive);
+    assert_eq!(done.changed, 3, "the new one is in, the archived one is not");
+    let token = done.undo.unwrap();
+    let action_id = token.action_id;
+    let recorded = core.db().unwrap().read_blocking(|c| mail_store::undo::get(c, action_id)).unwrap().unwrap();
+    let mut ids: Vec<&str> = recorded.diffs.iter().map(|d| d.message.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, ["g1", "g2", "g3"], "the undo entry records exactly what changed");
+    assert!(recorded.diffs.iter().all(|d| d.added.is_empty() && d.removed == [LabelId::new("INBOX")]));
+    assert_eq!(recorded.kind, "cleanup_archive");
+    wait_until("the server archived them", || labels_of(&fake, "g3").is_empty());
+
+    block_on(core.undo_action(token)).unwrap();
+    wait_until("the server has them back", || labels_of(&fake, "g3") == ["INBOX"]);
+    assert_eq!(labels_of(&fake, "g0"), Vec::<String>::new(), "the one archived elsewhere stays archived");
+    core.stop_sync();
+}
+
+#[test]
+fn only_the_groups_messages_change_in_a_mixed_thread() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    fake.set_labels(vec![Label {
+        id: LabelId::new("Label_1"),
+        name: "Receipts".into(),
+        kind: LabelKind::User,
+        color: None,
+        visible: true,
+    }]);
+    fake.seed(message("order", "mixed", "orders@shop.example", &["INBOX"]));
+    let mut reply = message("reply", "mixed", "friend@example.com", &["INBOX", "UNREAD"]);
+    reply.internal_date = NOW + 1;
+    fake.seed(reply);
+    let (_temp, core, _events) = synced("mixed", &fake, 2);
+
+    let done = apply(
+        &core,
+        CleanupScope::Inbox,
+        sender("orders@shop.example"),
+        CleanupAction::Move { label_id: "Label_1".into() },
+    );
+    assert_eq!(done.changed, 1);
+    assert_eq!(done.description, "Moved 1 message from orders@shop.example to “Receipts”");
+    // The thread stays in the Inbox for the reply, and is under Receipts too.
+    let inbox = block_on(core.list_threads("INBOX".into(), None, 10)).unwrap().rows;
+    assert_eq!(inbox.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["mixed"]);
+    let receipts = block_on(core.list_threads("Label_1".into(), None, 10)).unwrap().rows;
+    assert_eq!(receipts.len(), 1);
+    wait_until("the server moved it", || labels_of(&fake, "order") == ["Label_1"]);
+    assert_eq!(labels_of(&fake, "reply"), ["INBOX", "UNREAD"], "the person's reply stays where it is");
+
+    // Labels that are not places to move to are refused.
+    for label in ["TRASH", "SENT", "UNREAD"] {
+        let err = block_on(core.cleanup_apply(
+            "acct".into(),
+            CleanupView::Sender,
+            CleanupScope::AllMail,
+            sender("friend@example.com"),
+            CleanupAction::Move { label_id: label.into() },
+        ))
+        .unwrap_err();
+        assert!(matches!(err.kind(), crate::ErrorKind::InvalidInput | crate::ErrorKind::NotFound), "{label}");
+    }
+    core.stop_sync();
+}
+
+#[test]
+fn the_notice_names_the_group_or_counts_them() {
+    assert_eq!(which(CleanupView::Sender, 813, 1, Some("Amazon")), "813 messages from Amazon");
+    assert_eq!(which(CleanupView::Sender, 12_345, 3, Some("ignored")), "12,345 messages from 3 groups");
+    assert_eq!(which(CleanupView::Size, 20, 1, Some("Extra Large")), "20 extra large messages");
+    assert_eq!(which(CleanupView::Size, 1, 1, Some("Tiny")), "1 tiny message");
+    assert_eq!(which(CleanupView::Subject, 2, 1, Some("Weekly digest")), "2 messages with the subject “Weekly digest”");
+    assert_eq!(which(CleanupView::Subject, 2, 1, Some("(no subject)")), "2 messages with no subject");
+    assert_eq!(
+        which(CleanupView::Time, 1_000_000, 1, Some("September 2026")),
+        "1,000,000 messages from September 2026"
+    );
+}
+
+#[test]
+fn the_demo_mailbox_cleans_up_locally() {
+    let (_temp, core, _events) = core("demo");
+    block_on(core.clone().open_account("demo".into())).unwrap();
+    block_on(core.debug_seed_demo_mailbox(80)).unwrap();
+    let groups =
+        block_on(core.cleanup_groups("demo".into(), CleanupView::Sender, CleanupScope::Inbox, String::new())).unwrap();
+    let biggest = groups[0].clone();
+    let done = block_on(core.cleanup_apply(
+        "demo".into(),
+        CleanupView::Sender,
+        CleanupScope::Inbox,
+        vec![biggest.key.clone()],
+        CleanupAction::Archive,
+    ))
+    .unwrap();
+    assert_eq!(done.changed, biggest.count);
+    assert_eq!(done.description, format!("Archived {} from {}", messages(biggest.count as usize), biggest.title));
+    let count = |core: &Core| {
+        block_on(core.cleanup_count("demo".into(), CleanupView::Sender, CleanupScope::Inbox, vec![biggest.key.clone()]))
+            .unwrap()
+    };
+    assert_eq!(count(&core), 0);
+    assert_eq!(block_on(core.outbox_status()).unwrap().pending, 0, "no provider, no outbox");
+    block_on(core.undo_action(done.undo.unwrap())).unwrap();
+    assert_eq!(count(&core), biggest.count);
+}

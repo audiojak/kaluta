@@ -51,6 +51,13 @@ leaves out Spam, Trash and drafts through one small set of ids; the
 Inbox is driven from its label. A debug build takes about three times as
 long, still under budget.
 
+**Clean Up's apply (Rust, release; 2026-10-08).** Trashing 20,000
+messages (the biggest senders that fit, in All Mail) in one transaction,
+as `cleanup_apply` does: the labels, every touched thread's mailboxes and
+counts, 20 outbox batches of 1,000 and the one undo record: p50 593 ms,
+p95 866 ms over 3 runs (budget 2 s); 44,685 messages took 1.15 s. The
+bench puts the messages back after each run.
+
 The same run found two older measures over budget, unchanged with or
 without Clean Up's indexes: sidebar mailboxes with counts, 24.6 ms
 (budget 3 ms; the Inbox categories' unread count added since 2026-09-24),

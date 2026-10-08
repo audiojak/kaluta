@@ -9,11 +9,14 @@
 
 use std::collections::BTreeMap;
 
-use mail_domain::{EmailAddress, MessageId, Millis, ThreadId, civil_from_days, system_labels};
+use mail_domain::{EmailAddress, LabelId, MessageId, Millis, ThreadId, civil_from_days, system_labels};
 use rusqlite::types::Value;
-use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_iter};
 
 use crate::error::StoreResult;
+use crate::outbox::OutboxOp;
+use crate::undo::{self, MessageDiff};
+use crate::write::{MailWriter, ThreadChanges};
 
 /// How groups are formed (the window's left column).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -240,6 +243,49 @@ pub fn message_ids(conn: &Connection, q: &Query, keys: &[String]) -> StoreResult
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(&params), |r| Ok(MessageId(r.get(0)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// What [`apply`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Applied {
+    /// Per message, the labels it really gained and lost: the undo record.
+    /// Messages the change left as they were are not in it.
+    pub diffs: Vec<MessageDiff>,
+    /// The same changes for the provider, in batches ([`undo::batched_ops`]).
+    pub ops: Vec<OutboxOp>,
+    /// The threads that changed, for the UI.
+    pub changes: ThreadChanges,
+}
+
+/// Add `add` and remove `remove` on every message in the groups named by
+/// `keys`, resolved now, in the caller's transaction: a group that grew
+/// since it was shown is acted on as it is now. Message-level: the other
+/// messages of a mixed thread stay where they are, while the thread's
+/// labels, counts and mailboxes follow through [`MailWriter`]. Queueing
+/// `ops` and recording `diffs` for undo are the caller's.
+pub fn apply(
+    tx: &Transaction<'_>,
+    q: &Query,
+    keys: &[String],
+    add: &[LabelId],
+    remove: &[LabelId],
+) -> StoreResult<Applied> {
+    let ids = message_ids(tx, q, keys)?;
+    let mut diffs = Vec::new();
+    let mut w = MailWriter::new(tx);
+    for message in ids {
+        let before = crate::outbox::current_labels(tx, &message)?;
+        let added: Vec<LabelId> = add.iter().filter(|l| !before.contains(l)).cloned().collect();
+        let removed: Vec<LabelId> = remove.iter().filter(|l| before.contains(l) && !add.contains(l)).cloned().collect();
+        if added.is_empty() && removed.is_empty() {
+            continue;
+        }
+        w.modify_message_labels(&message, &added, &removed)?;
+        diffs.push(MessageDiff { message, added, removed });
+    }
+    let changes = w.finish()?;
+    let ops = undo::batched_ops(&diffs);
+    Ok(Applied { diffs, ops, changes })
 }
 
 /// Messages in the Inbox now.

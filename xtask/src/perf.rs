@@ -207,6 +207,8 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
         samples: time(20, |_| db.read_blocking(|c| cleanup::count(c, &q, &biggest)).map_err(Into::into))?,
     });
 
+    results.push(clean_up_apply(&db, now)?);
+
     let (total_threads, total_messages): (i64, i64) = db.read_blocking(|c| {
         Ok(c.query_row("SELECT (SELECT COUNT(*) FROM threads), (SELECT COUNT(*) FROM messages)", [], |r| {
             Ok((r.get(0)?, r.get(1)?))
@@ -234,4 +236,59 @@ pub fn perf(root: &Path, messages: u32) -> Result<()> {
         bail!("{failed} operation(s) over budget");
     }
     Ok(())
+}
+
+/// Clean Up's apply (spec §14.12): trash about 20,000 messages of the
+/// biggest senders in All Mail as the core does, in one transaction (labels, the
+/// threads' mailboxes and counts, the outbox's batches, the undo record),
+/// then put everything back so the fixture is unchanged.
+fn clean_up_apply(db: &Db, now: mail_domain::Millis) -> Result<Measure> {
+    use mail_domain::LabelId;
+    use mail_store::cleanup::{self, Query, Scope, View};
+    use mail_store::{MailWriter, outbox, undo};
+
+    const MESSAGES: u64 = 20_000;
+    let q = Query { view: View::Sender, scope: Scope::AllMail, now, utc_offset_secs: 0 };
+    let mut keys = Vec::new();
+    let mut total = 0;
+    // The biggest groups that fit: as if the user ticked a few dozen.
+    for g in db.read_blocking(|c| cleanup::groups(c, &q, ""))? {
+        if total + g.count <= MESSAGES {
+            total += g.count;
+            keys.push(g.key);
+        }
+    }
+    anyhow::ensure!(total >= MESSAGES * 9 / 10, "the fixture's senders give only {total} messages");
+    let mut samples = Vec::new();
+    for _ in 0..3 {
+        let k = keys.clone();
+        let started = Instant::now();
+        let (diffs, first_op, action) = db.write_blocking(move |tx| {
+            let applied = cleanup::apply(tx, &q, &k, &[LabelId::new("TRASH")], &[LabelId::new("INBOX")])?;
+            let mut first_op = None;
+            for op in &applied.ops {
+                let id = outbox::enqueue(tx, op, now)?;
+                first_op.get_or_insert(id);
+            }
+            let action = undo::record(tx, "cleanup_trash", &applied.diffs, now)?;
+            Ok((applied.diffs, first_op, action))
+        })?;
+        samples.push(started.elapsed());
+        anyhow::ensure!(diffs.len() as u64 == total, "{} of {total} messages changed", diffs.len());
+        db.write_blocking(move |tx| {
+            let mut w = MailWriter::new(tx);
+            for d in &diffs {
+                w.modify_message_labels(&d.message, &d.removed, &d.added)?;
+            }
+            w.finish()?;
+            tx.execute("DELETE FROM outbox WHERE id >= ?1", [first_op.unwrap_or(i64::MAX)])?;
+            tx.execute("DELETE FROM undo_actions WHERE id = ?1", [action])?;
+            Ok(())
+        })?;
+    }
+    Ok(Measure {
+        name: format!("clean up: trash {total} messages (local write)"),
+        budget: Duration::from_secs(2),
+        samples,
+    })
 }

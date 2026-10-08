@@ -3004,6 +3004,35 @@ groups, a group's messages (paged), their count and ids, the Inbox's
 daily counts and the baseline. Groups for a 131,826-message store answer
 in 1–45 ms per view in a release build (docs/performance.md).)*
 
+*(Implemented 2026-10-08, core: `cleanup_groups`, `cleanup_messages`,
+`cleanup_count` and `cleanup_apply` take the account's id, since the
+window cleans one account whatever the main window shows, and use the
+real clock and the Mac's offset from UTC for the Time view. All four are
+`async` (§4.2): the apply writes every message in one transaction, about
+0.6 s for 20,000 in a release build (docs/performance.md), which must
+not run on the main thread. Actions: Archive (out of the Inbox), Move
+(the label added and out of the Inbox, as the mail list's Move; only a
+user label or the Inbox), Trash, Spam (to Spam and out of the Inbox).
+The set is resolved inside the apply's transaction; messages already so
+are not counted and not recorded, and an apply that changes nothing
+returns no undo token. The result carries the count changed, the token
+(undone with `undo_action`/`redo_action` like any mail action), the
+notice ("Archived 813 messages from Amazon"; "from N groups" when
+several are ticked; "20 large messages" in Size, "with the subject …" in
+Subject) and Edit › Undo's name. Provider ops: the messages are grouped
+by their exact change and queued as `ModifyLabels` outbox rows of at
+most 1,000 ids, one `batchModify` each; a row could hold more (the Gmail
+provider chunks), but one row per call means a retry repeats one batch
+and a failure rolls back exactly its own messages. Trash and Spam go
+the same way, adding `TRASH` or `SPAM` as labels, rather than through
+`messages.trash`'s call per message; undo and redo of a Clean Up action
+are batched alike (its undo record's kind starts `cleanup_`), while
+conversation actions keep the trash endpoints (§14.6a). Progress: the
+outbox emits `OutboxStatus` after each batch while more are waiting, so
+the toolbar can show what is left to reach Gmail; the local write needs
+no progress of its own. `cleanup_progress` (the card's numbers) is left
+for the progress card's issue.)*
+
 ---
 
 ## 15. Security Model and Threat Model

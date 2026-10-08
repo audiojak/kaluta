@@ -1,8 +1,10 @@
 //! Local mutations and the outbox drain (spec §7.4).
 
+use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mail_domain::{EmailAddress, LabelId, MessageId, Millis, ThreadId, system_labels};
+use mail_store::cleanup;
 use mail_store::drafts::{self, DraftState};
 use mail_store::outbox::{self, OutboxCounts, OutboxOp};
 use mail_store::undo::{self, MessageDiff};
@@ -28,8 +30,22 @@ pub enum LocalChange {
     },
     /// Exactly these per-message changes: undoing or redoing a recorded
     /// action (spec §14.6a). Applied as recorded, whatever changed since.
+    /// `batched` sends them as label changes in batches of 1,000, Trash
+    /// included ([`undo::batched_ops`]), as the bulk action did.
     Exact {
         diffs: Vec<MessageDiff>,
+        batched: bool,
+    },
+    /// Clean Up (spec §14.12): these labels on every message in the groups
+    /// named by `keys`, resolved in the change's own transaction, so a
+    /// group that grew since it was shown is acted on as it is now.
+    /// Message-level: a mixed thread's other messages stay where they are.
+    /// Reaches the provider in batches of 1,000 (`batchModify`).
+    Cleanup {
+        query: cleanup::Query,
+        keys: Vec<String>,
+        add: Vec<LabelId>,
+        remove: Vec<LabelId>,
     },
 }
 
@@ -75,6 +91,16 @@ impl LocalChange {
     }
 }
 
+/// What a recorded change did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AppliedChange {
+    pub changes: ThreadChanges,
+    /// The undoable action's id, when one was recorded.
+    pub action: Option<i64>,
+    /// Messages whose labels changed.
+    pub messages: usize,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DrainReport {
     pub sent: usize,
@@ -103,18 +129,18 @@ fn diff_for(message: &MessageId, before: &[LabelId], add: &[LabelId], remove: &[
 /// is set, in one transaction. Used directly for accounts with no provider
 /// (the demo mailbox) and through [`SyncEngine::apply_change`] otherwise.
 pub async fn apply_local_change(db: &Db, change: LocalChange, queue: bool) -> SyncResult<ThreadChanges> {
-    Ok(apply_local_change_recorded(db, change, queue, None).await?.0)
+    Ok(apply_local_change_recorded(db, change, queue, None).await?.changes)
 }
 
 /// [`apply_local_change`], recording what it changed per message as an
-/// undoable action of `record` kind ("archive", …) when given. Returns the
-/// action's id, or `None` when nothing changed or nothing was recorded.
+/// undoable action of `record` kind ("archive", …) when given. The
+/// action's id is `None` when nothing changed or nothing was recorded.
 pub async fn apply_local_change_recorded(
     db: &Db,
     change: LocalChange,
     queue: bool,
     record: Option<String>,
-) -> SyncResult<(ThreadChanges, Option<i64>)> {
+) -> SyncResult<AppliedChange> {
     let now = now_millis();
     Ok(db
         .write(move |tx| {
@@ -147,8 +173,8 @@ pub async fn apply_local_change_recorded(
                     let op = (!message_ids.is_empty()).then_some(OutboxOp::Trash { message_ids, previous: affected });
                     (op.into_iter().collect(), diffs, changes)
                 }
-                LocalChange::Exact { diffs } => {
-                    let ops = undo::provider_ops(tx, &diffs)?;
+                LocalChange::Exact { diffs, batched } => {
+                    let ops = if batched { undo::batched_ops(&diffs) } else { undo::provider_ops(tx, &diffs)? };
                     let mut w = MailWriter::new(tx);
                     let mut applied = Vec::with_capacity(diffs.len());
                     for d in diffs {
@@ -158,9 +184,13 @@ pub async fn apply_local_change_recorded(
                         }
                     }
                     let changes = w.finish()?;
-                    let kept: Vec<&MessageId> = applied.iter().map(|d| &d.message).collect();
+                    let kept: HashSet<&MessageId> = applied.iter().map(|d| &d.message).collect();
                     let ops = ops.into_iter().filter_map(|op| retain_messages(op, &kept)).collect();
                     (ops, applied, changes)
+                }
+                LocalChange::Cleanup { query, keys, add, remove } => {
+                    let applied = cleanup::apply(tx, &query, &keys, &add, &remove)?;
+                    (applied.ops, applied.diffs, applied.changes)
                 }
             };
             if queue {
@@ -168,18 +198,18 @@ pub async fn apply_local_change_recorded(
                     outbox::enqueue(tx, op, now)?;
                 }
             }
-            let changed = diffs.iter().any(|d| !d.added.is_empty() || !d.removed.is_empty());
-            let token = match record {
-                Some(kind) if changed => Some(undo::record(tx, &kind, &diffs, now)?),
+            let messages = diffs.iter().filter(|d| !d.added.is_empty() || !d.removed.is_empty()).count();
+            let action = match record {
+                Some(kind) if messages > 0 => Some(undo::record(tx, &kind, &diffs, now)?),
                 _ => None,
             };
-            Ok((changes, token))
+            Ok(AppliedChange { changes, action, messages })
         })
         .await?)
 }
 
 /// `op` limited to `kept` messages, or `None` if none is left.
-fn retain_messages(op: OutboxOp, kept: &[&MessageId]) -> Option<OutboxOp> {
+fn retain_messages(op: OutboxOp, kept: &HashSet<&MessageId>) -> Option<OutboxOp> {
     let keep = |ids: Vec<MessageId>| ids.into_iter().filter(|m| kept.contains(&m)).collect::<Vec<_>>();
     let op = match op {
         OutboxOp::ModifyLabels { message_ids, add, remove } => {
@@ -218,10 +248,10 @@ impl SyncEngine {
         &self,
         change: LocalChange,
         record: Option<String>,
-    ) -> SyncResult<(ThreadChanges, Option<i64>)> {
-        let (changes, token) = apply_local_change_recorded(self.db(), change, true, record).await?;
-        self.publish_changes(&changes);
-        Ok((changes, token))
+    ) -> SyncResult<AppliedChange> {
+        let applied = apply_local_change_recorded(self.db(), change, true, record).await?;
+        self.publish_changes(&applied.changes);
+        Ok(applied)
     }
 
     /// Send every ready op to the provider, oldest first. Transient failures
@@ -317,6 +347,11 @@ impl SyncEngine {
                         .await?;
                     self.publish_changes(&changes);
                     report.sent += 1;
+                    // Bulk changes go out as many ops: say how many are left.
+                    let counts = self.db().read(outbox::counts).await?;
+                    if counts.pending > 0 {
+                        self.observer.outbox_progress(counts);
+                    }
                 }
                 // A message deleted on the server: nothing left to change.
                 Err(ProviderError::NotFound(_)) if !matches!(queued.op, OutboxOp::Send { .. }) => {

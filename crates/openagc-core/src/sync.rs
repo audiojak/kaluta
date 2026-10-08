@@ -73,6 +73,12 @@ impl SyncObserver for EventObserver {
             message: None,
         });
     }
+
+    /// Between the ops of a bulk change (Clean Up's batches), so a long
+    /// apply shows how much is still to reach the provider.
+    fn outbox_progress(&self, counts: mail_store::outbox::OutboxCounts) {
+        self.events.emit(CoreEvent::OutboxStatus { pending: counts.pending, failed: counts.failed });
+    }
 }
 
 /// Told about label changes made outside OpenAGC (spec §11.6).
