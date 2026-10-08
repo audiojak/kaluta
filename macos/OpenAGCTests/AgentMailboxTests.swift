@@ -314,6 +314,26 @@ struct ServiceAccountFlowTests {
         #expect(AccountSettings.removeAgentMessage(agent, service: nil).contains("forgets the mailbox's key"))
     }
 
+    @Test func removingTheLastAgentMailAgentSaysAKeyHandedOutWillStopWorking() {
+        let agent = AccountSummary(id: "a", kind: .agent, email: "scout@agentmail.to", displayName: "Scout",
+                                   avatarPath: nil, position: 0, inboxUnread: 0, imapEnabled: false, service: .agentMail)
+        let alone = ServiceAccountSummary(id: "a", service: .agentMail, humanEmail: "me@example.com", verified: true,
+                                          plan: nil, managedDomain: "agentmail.to", agentAccountIds: ["a"])
+        let message = AccountSettings.removeAgentMessage(agent, service: alone)
+        #expect(message.contains("forgets the mailbox's key"))
+        #expect(message.contains("a new key"), "signing up again with that email rotates it: \(message)")
+        #expect(message.contains("Copy API Key"))
+        // With other agents the key stays, so nothing rotates.
+        let shared = ServiceAccountSummary(id: "a", service: .agentMail, humanEmail: "me@example.com", verified: true,
+                                           plan: nil, managedDomain: "agentmail.to", agentAccountIds: ["a", "b"])
+        #expect(!AccountSettings.removeAgentMessage(agent, service: shared).contains("a new key"))
+        // Primitive's last agent: no such sentence.
+        let primitive = AccountSummary(id: "p", kind: .agent, email: "scout@x.primitive.email", displayName: "Scout",
+                                       avatarPath: nil, position: 0, inboxUnread: 0, imapEnabled: false,
+                                       service: .primitive)
+        #expect(!AccountSettings.removeAgentMessage(primitive, service: nil).contains("a new key"))
+    }
+
     @Test func theCopyConfirmationSaysWhatTheKeyReaches() throws {
         let agentMail = ServiceAccountSummary(id: "a", service: .agentMail, humanEmail: "me@example.com", verified: true,
                                               plan: nil, managedDomain: "agentmail.to", agentAccountIds: ["a", "b"])

@@ -152,13 +152,18 @@ extension AccountSettings {
     }
 
     /// What removing an agent does: its key goes only with the last agent
-    /// of its service account.
+    /// of its service account. On AgentMail that key is the organisation's,
+    /// and making the account again with the same email gives it a new one
+    /// (spec §7.9), so a key handed out stops working.
     static func removeAgentMessage(_ agent: AccountSummary, service: ServiceAccountSummary?) -> String {
-        let name = AppModel.serviceName(service?.service ?? agent.service ?? .primitive)
+        let kind = service?.service ?? agent.service ?? .primitive
+        let name = AppModel.serviceName(kind)
         if let service, service.agentAccountIds.count > 1 {
             return "OpenAGC deletes the mail it downloaded for this agent. The service account and its key stay for its other agents, and the mailbox itself stays at \(name)."
         }
-        return "OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at \(name)."
+        let message = "OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at \(name)."
+        guard kind == .agentMail else { return message }
+        return message + " Creating it again here with the same email gives it a new key, so a key shared with Copy API Key or used on another Mac stops working."
     }
 
     /// The demo mailbox is open: Gmail replaces it rather than joining it.

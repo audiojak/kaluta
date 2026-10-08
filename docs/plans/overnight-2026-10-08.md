@@ -174,8 +174,10 @@ The managed subdomain "can receive at any local-part".
    headers. Label changes for many messages use `batch-update` (50).
    Resend is `POST /v0/agent/human` with the same email only. The
    organisation does not say whether it is verified: the core keeps it.
-   AgentMail's provider keeps the store's labels (`labels_are_local`), so
-   oagc-hvv9's fix keeps its user labels too. `add_inbox` passes the
+   AgentMail's labels sync both ways (`LabelSync::Both`, review fix
+   oagc-uys.17): a refetch or resync takes AgentMail's and keeps the
+   Mac's Trash, Spam and labels AgentMail cannot carry; user labels
+   survive the label refresh as oagc-hvv9 has it for Primitive. `add_inbox` passes the
    request id as `client_id`. FFI: `create_agent_mailbox` gains
    `human_email`; new `agent_inbox_api_key`, `agent_service_limits`,
    `service_account_limits`.)*
@@ -200,7 +202,10 @@ The managed subdomain "can receive at any local-part".
    our own `tokio-rustls` TLS. Tested against a local fake only. Not
    checked against the real service: whether the key in the query and
    the header together are accepted, ping/pong (undocumented), and
-   whether `message.sent` arrives for sends through the API.)*
+   whether `message.sent` arrives for sends through the API. Review
+   fixes: a drop within 30 s of subscribing counts as a failure and any
+   drop waits the first backoff; tungstenite's records are always off in
+   the log filter (it traces the handshake, key included).)*
 
 ### Left for the maintainer to check by hand (real accounts; never in automation)
 
@@ -227,7 +232,14 @@ The managed subdomain "can receive at any local-part".
   without it); whether `message_id` is the RFC Message-ID, so a reply
   finds its parent at `…/{In-Reply-To}/reply` (else it falls back to
   `…/send`); what `GET /v0/organizations` gives before and after
-  verifying; and whether label events include arrivals.
+  verifying; and whether label events include arrivals (the provider
+  now reads past events without a message id or label); whether `spam`
+  and `trash` reach the event list as `label.added`/`label.removed` (the
+  provider takes them out of the Inbox and back, reading the message);
+  whether a server closes a second socket on one key at once (counted
+  as a failure, so it rests after five); and whether the WebSocket takes
+  the key from the `Authorization` header alone (the docs give only
+  `?api_key=`, which is what tungstenite would trace).
 - Gmail, Clean Up (review fixes, oagc-merk.11 and .16): that `batchModify`
   accepts `TRASH` and `SPAM` as labels to add (Clean Up's Trash and Spam
   and their undo go that way, not through `messages.trash`), and that

@@ -1173,8 +1173,12 @@ default says the service adds none) and `rotate_key` (default
 unavailable: no Primitive endpoint is wired, so *Rotate Key* works only
 where a service implements it). Removing an agent, or an orphaned store,
 deletes the key only when no other agent on disk names its service
-account. A new service account takes the id of its first agent, as a
-migrated one does.)*
+account; it waits for an agent being added, which checks the key is
+still there once it may proceed, and a removal that fails part way
+leaves its agent counted (amended 2026-10-08 after review, oagc-uys.23).
+A retry of `add_agent` whose agent is on disk finishes its store and
+index entry (oagc-uys.21). A new service account takes the id of its
+first agent, as a migrated one does.)*
 
 **Creating one.** *Accounts › Create an Agent Mailbox…*, also on the
 welcome screen and in Settings › Accounts. A sheet:
@@ -1241,8 +1245,12 @@ and limits are specified with its provider.
   `agent.json`. `create_agent_mailbox(service, name, human_email,
   request_id)` refuses AgentMail without an email, an email that already
   has an AgentMail service account on this Mac, and a request id that
-  already holds a key; a retry of a finished creation returns it. So the
-  core never signs up twice for one organisation.
+  already holds a key without the sign-up's answer. The answer (address,
+  inbox, plan) is kept in `services/<id>/sign-up.json` before the key is
+  stored, so a retry after a failure part way finishes with that key, and
+  a retry of a creation that got as far as its agent finishes its store
+  and index entry (the file goes once registered; oagc-uys.21, .22). So
+  the core never signs up twice for one organisation.
 - **Verification.** The code is sent at sign-up. *Resend* is
   `POST /v0/agent/human` with the same email only (another email would
   replace the human, which AgentMail allows twice per organisation; the
@@ -1277,21 +1285,39 @@ and limits are specified with its provider.
   {add_labels, remove_labels}`, or `…/messages/batch-update` for up to 50
   messages. Trash, spam and delete stay on this Mac, including the Inbox
   removal that goes with them (no `archived` label for mail moved to
-  Trash or Spam; amended 2026-10-08). The provider's labels
-  are the store's (`labels_are_local`): a refetch keeps stored labels and
-  user labels survive the label refresh (there is no label listing at
-  AgentMail).
+  Trash or Spam; amended 2026-10-08). Labels sync both ways
+  (`LabelSync::Both`, amended 2026-10-08 after review, oagc-uys.17): a
+  stored message fetched again (a resync, a refetch) takes AgentMail's
+  read state, Inbox, Sent, stars and user labels, so changes the event
+  list missed are repaired, and keeps what is only this Mac's: Trash and
+  Spam (mail in either stays out of the Inbox) and store labels AgentMail
+  cannot carry (`DRAFT`, `IMPORTANT`, categories). User labels survive the
+  label refresh (there is no label listing at AgentMail). Gmail's labels
+  stay the provider's (`LabelSync::Provider`) and Primitive's this Mac's
+  (`LabelSync::Local`).
 - **Changes.** The sync cursor holds the newest message time seen, the
   messages seen within an hour of it, and the newest label event seen. A
   poll (every 30 s while active, and at once on a push, below) lists
   `messages?after=<newest − 1 h>` and reports what it had not seen, then
   reads `…/events` newest first, page by page, down to the last event
-  seen, and applies `label.added`/`label.removed` oldest first. Not
-  reaching it within 20 pages is an expired cursor (a full resync).
+  seen, and applies `label.added`/`label.removed` oldest first; other
+  events in the list (`message.received`, …, without a top-level message
+  id or label) are read past. `spam` or `trash` added also takes the
+  message out of the Inbox, as the labels read when it is fetched; taken
+  off, the Inbox comes back if AgentMail has the message there (one read
+  of it, since archived or sent mail stays out). Not reaching the last
+  event seen within 20 pages is an expired cursor (a full resync), and so
+  is more than 20 pages of new mail since the last poll (the listing is
+  newest first: stopping there would lose the older ones; amended
+  2026-10-08 after review, oagc-uys.16, .18, .25).
 - **Push** *(implemented 2026-10-08, oagc-uys.15; docs.agentmail.to
   websockets and its AsyncAPI, read that day)*. One WebSocket per
   organisation, `wss://ws.agentmail.to/v0?api_key=<key>` (the key also as
-  `Authorization: Bearer`, never logged), shared by every agent of it
+  `Authorization: Bearer`; AgentMail's AsyncAPI documents only the query,
+  re-read 2026-10-08, so it stays), never logged: errors are redacted and
+  `tungstenite`/`tokio_tungstenite` records are off in the log filter
+  whatever `OPENAGC_LOG` asks, since tungstenite traces the handshake
+  request (oagc-uys.20). It is shared by every agent of it
   that syncs: it sends `{"type":"subscribe","inbox_ids":[…],
   "event_types":["message.received","message.sent"]}` for every agent's
   inbox, ten to a message, and one more for an agent that starts later;
@@ -1305,8 +1331,12 @@ and limits are specified with its provider.
   (mail may have arrived meanwhile). It pings every minute and
   reconnects after 150 s without a frame; failures back off from 1 s to
   a minute, and five in a row (a refused key, an `error` answer, no
-  network) rest it for 15 minutes, during which `watch` fails and the
-  agents poll only. TLS is `tokio-rustls` with the webpki roots, as for
+  network, or a connection dropped within 30 s of subscribing) rest it
+  for 15 minutes, during which `watch` fails and the agents poll only. A
+  connection dropped after that reconnects after the first backoff, not
+  at once (every reconnection wakes every agent; oagc-uys.19). Inboxes
+  added while it connects are subscribed: the queue of added inboxes is
+  emptied before the list is read (oagc-uys.24). TLS is `tokio-rustls` with the webpki roots, as for
   IMAP (`tokio-tungstenite` without TLS features); plain `ws://` only to
   the loopback address. Spam, blocked and unauthenticated mail events
   need permissions a key may lack, which would fail the subscription, so
@@ -1379,8 +1409,8 @@ the key as a Bearer token).
   ignored. A `410 cursor_expired` resyncs (changes are kept 7 days; an
   idle cursor stays valid). Mail already stored keeps its labels, read
   state and stars through a resync or a refetch: the provider says its
-  labels are local (`labels_are_local`), and its labels apply only to
-  mail new to the store.
+  labels are local (`label_sync` is `LabelSync::Local`), and its labels
+  apply only to mail new to the store.
 - A sent message takes the id `/send-mail` returned at once
   (`adopts_sent_copies`), since Primitive may give it a Message-ID of its
   own: the optimistic copy is never left beside the real one.
@@ -1492,7 +1522,10 @@ Send*, *Copy API Key* (a confirmation says that
 whoever holds the key can read and send the mailbox's mail), *Remove…*.
 Removing deletes the account on the Mac, and the key with the service
 account's last agent; the service account stays at the service (the
-sheet says so).
+sheet says so). For the last agent of an AgentMail service account the
+sheet also says that creating it again with the same email gives the
+organisation a new key, so a key shared with *Copy API Key* or used on
+another Mac stops working (amended 2026-10-08 after review, oagc-uys.26).
 
 **Own domains.** *Use Your Own Domain…* in the mailbox's settings puts
 the agent on a domain the user owns:
