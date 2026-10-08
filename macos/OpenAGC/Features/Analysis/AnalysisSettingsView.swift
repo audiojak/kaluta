@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Analysis settings (spec §14.10): the daily review, where facts are
 /// learned from, the daily cap, how long AI drafts are kept, and the
-/// notification. In Settings › Learning and from the Writing Guide and Facts headers.
+/// notification, and what the last review found. In Settings › Learning
+/// and from the Writing Guide's and Facts' toolbars.
 struct AnalysisSettingsView: View {
     @Environment(AppModel.self) private var model
     @AppStorage(NewMailNotifier.analysisKey, store: CoreClient.appDefaults()) private var notify = false
@@ -43,6 +44,25 @@ struct AnalysisSettingsView: View {
             Section {
                 Toggle("Notify me of new proposals", isOn: $notify)
                     .hoverHelp("Once a day, when a review finds something and OpenAGC is not in front")
+            }
+            if model.openAccountID != nil, model.reviewsAvailable {
+                Section("Last review") {
+                    if let run = model.analysisProgress?.run {
+                        Text(ReviewStatus.summary(run, daily: model.analysisDaily)).foregroundStyle(.secondary)
+                    } else if !model.analysisDaily {
+                        Text("Daily reviews are off. Run Review Now looks at the AI drafts you sent since the last review.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("The first review runs today, once mail has synced.").foregroundStyle(.secondary)
+                    }
+                    if let metrics = model.analysis.metrics, metrics.compared > 0 {
+                        Text(ReviewStatus.metricsText(metrics)).foregroundStyle(.secondary)
+                    }
+                    Button("Run Review Now") { Task { await model.runAnalysisNow() } }
+                        .disabled(model.analysisRunActive)
+                        .hoverHelp(model.analysisRunActive ? "A review is in progress"
+                            : "Compare the AI drafts you sent since the last review now")
+                }
             }
             if let error {
                 Label(error, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.failure)

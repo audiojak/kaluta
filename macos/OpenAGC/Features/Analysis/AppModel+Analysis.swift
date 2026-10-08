@@ -6,20 +6,38 @@ extension AppModel {
     /// The daily review runs once the account has finished a learning run.
     var reviewsAvailable: Bool { analysisProgress?.available == true }
 
+    /// "Reviewed today" or "Reviewed 6 Oct": the list's subtitle, in place
+    /// of a sentence over the list (spec §14.10). Nil before the first review.
+    var reviewedLine: String? {
+        guard reviewsAvailable, let run = analysisProgress?.run, run.status == .done else { return nil }
+        return "Reviewed \(Self.dayWord(run.finishedAt))"
+    }
+
+    /// "Learned today" or "Learned 6 Oct" (spec §14.9). Nil until a run is done.
+    var guideLearnedLine: String? {
+        guard let run = guideProgress?.run, run.status == .done else { return nil }
+        return "Learned \(Self.dayWord(run.finishedAt))"
+    }
+
+    /// "today", "yesterday" or a short date.
+    static func dayWord(_ millis: Int64?) -> String {
+        let when = millis.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? Date()
+        if Calendar.current.isDateInToday(when) { return "today" }
+        if Calendar.current.isDateInYesterday(when) { return "yesterday" }
+        return when.formatted(.dateTime.day().month(.abbreviated))
+    }
+
     /// A daily review in progress (running or paused).
     var analysisRunActive: Bool {
         guard let status = analysisProgress?.run?.status else { return false }
         return status == .running || status == .paused
     }
 
-    /// Open the Writing Guide's review flow on its first proposed rule (the
-    /// learning decisions first when asked).
+    /// Open Review mode on the Writing Guide's proposed rules (the first
+    /// learning decision current when asked).
     func openProposedRules(learning: Bool = false) {
-        guidePrompt = nil
-        selectedMailboxID = Self.guideMailboxID
-        analysis.reviewingRules = true
-        let first = learning ? guide.decisions.first.map(AnalysisStore.tag) : nil
-        analysis.selection = first ?? proposedRuleTags.first
+        enterReview(.rules)
+        if learning, let first = guide.decisions.first { analysis.selection = AnalysisStore.tag(first) }
     }
 
     /// The Writing Guide's proposed rules, in list order.

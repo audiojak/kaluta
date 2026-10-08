@@ -141,6 +141,7 @@
 		DC0A64AF7A98D3161548C79D /* GuideEntryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C7A6A37E38A82DB0A1B08D /* GuideEntryEditor.swift */; };
 		DD32FB186EAB5F8A98110A01 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9036B10AEDC12CF3CF3416BD /* MainWindow.swift */; };
 		DDDC17F9FCF6F1E7462D3B7D /* UndoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E8DBF47559E5EC82041284 /* UndoTests.swift */; };
+		DF3E5E5D5BEB80C4C51CBE43 /* ReviewMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48183D18795A1BEC600BCC03 /* ReviewMode.swift */; };
 		DF53A7536F3E679277D3C187 /* BulkTaskSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CD73699F481A160A310E527 /* BulkTaskSheet.swift */; };
 		E44E3F9A96EE57A2B8F018CF /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CF9BB1ABE76E11F4305E525 /* KeyboardShortcuts.swift */; };
 		E65B21770ED2B172D35054C7 /* SyncStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5846BE9A95C68C7383B2B7C /* SyncStatusView.swift */; };
@@ -235,6 +236,7 @@
 		4372C03A0DB7F78DF414F892 /* PerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceTests.swift; sourceTree = "<group>"; };
 		448D8466905D410325058CE5 /* OpenAGC.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OpenAGC.entitlements; sourceTree = "<group>"; };
 		46BFDFDE09CC5207A0A048D0 /* ReaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStore.swift; sourceTree = "<group>"; };
+		48183D18795A1BEC600BCC03 /* ReviewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewMode.swift; sourceTree = "<group>"; };
 		4DDB93FB62EC374B26B2264A /* GuideProposals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideProposals.swift; sourceTree = "<group>"; };
 		4E7BC79E55C3878036548B29 /* FactsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsSettings.swift; sourceTree = "<group>"; };
 		4E9589E376D0608FB13DD219 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
@@ -462,6 +464,14 @@
 			path = Undo;
 			sourceTree = "<group>";
 		};
+		660492F20D0A6F64C5BE086B /* Review */ = {
+			isa = PBXGroup;
+			children = (
+				48183D18795A1BEC600BCC03 /* ReviewMode.swift */,
+			);
+			path = Review;
+			sourceTree = "<group>";
+		};
 		69C4720C0FA23E101118BEBF /* Sidebar */ = {
 			isa = PBXGroup;
 			children = (
@@ -672,6 +682,7 @@
 				1256AAEC04D116859F4845BE /* MessageView */,
 				ACB56B1D93EAD3FFE3A9A111 /* Notifications */,
 				F02A9018A33830637A9E3504 /* Onboarding */,
+				660492F20D0A6F64C5BE086B /* Review */,
 				0D3F6879D8FD7DD1B2FFD214 /* Routines */,
 				8A7408779DD1060A1ED75B09 /* Settings */,
 				69C4720C0FA23E101118BEBF /* Sidebar */,
@@ -1062,6 +1073,7 @@
 				751F75594BDFE0DB89944569 /* OpenAGCApp.swift in Sources */,
 				F1C67B7F56BB5793575AA7DB /* ReaderStore.swift in Sources */,
 				A469FDD2983D0CFA9FBD5AB6 /* RecipientField.swift in Sources */,
+				DF3E5E5D5BEB80C4C51CBE43 /* ReviewMode.swift in Sources */,
 				88673ED52C4D12D394C1642C /* RichTextCommands.swift in Sources */,
 				DB3DC4EECF705D9820BC3B1E /* RichTextEditor.swift in Sources */,
 				AC828BE403824E10996A8DC8 /* RoutineModel.swift in Sources */,

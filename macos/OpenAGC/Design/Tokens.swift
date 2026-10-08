@@ -45,6 +45,11 @@ enum Radius {
 enum TypeRole {
     /// A column's or sheet's title.
     static let title = Font.title3.weight(.semibold)
+    /// The one thing a page is about, read at arm's length: a decision's
+    /// statement in Review mode, the count on its band.
+    static let display = Font.title.weight(.semibold)
+    /// Reading text beside `display`: quotes, explanations, scopes.
+    static let reading = Font.title3
     /// Section headings in panels.
     static let heading = Font.headline
     /// Group labels inside a panel ("Find and summarise").

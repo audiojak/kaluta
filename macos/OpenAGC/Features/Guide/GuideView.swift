@@ -35,17 +35,15 @@ enum GuideSheet: Identifiable {
 }
 
 /// The Writing Guide section's list column (spec §14.9): every category
-/// by group with how much of the guide covers it. Proposed rules are
-/// reviewed in the detail, from the header's *Review Proposed Rules*.
+/// by group with how much of the guide covers it. What waits for a
+/// decision is counted on the band over it and decided in Review mode.
 struct GuideView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
 
     var body: some View {
         @Bindable var guide = model.guide
-        // While reviewing, no category is shown as chosen.
-        List(selection: Binding(get: { model.analysis.reviewingRules ? nil : model.guide.selectedCategory },
-                                set: { model.showGuideCategory($0) })) {
+        List(selection: Binding(get: { model.guide.selectedCategory }, set: { model.showGuideCategory($0) })) {
             ForEach(guide.sections, id: \.group) { section in
                 Section(section.name) {
                     ForEach(section.categories, id: \.id) { category in
@@ -68,76 +66,20 @@ struct GuideView: View {
     }
 }
 
-/// The header over the category list: progress and the section's actions.
-struct GuideHeader: View {
+/// Over the category list while something runs (spec §14.9, §14.10): the
+/// learning run's progress bars, or the daily review's; nothing otherwise.
+/// The section's actions are in the toolbar (`ListToolbar`), its
+/// explanation a tip, and the last run's summary in Learning Settings.
+struct GuideActivityStrip: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            // While learning runs; afterwards Review Proposed Rules counts what waits.
-            if let progress = model.guideProgress, model.guideRunActive {
-                GuideProgressBars(progress: progress)
-            }
-            if let run = model.guideProgress?.run, run.status == .done, let finished = run.finishedAt {
-                Text("Last learned \(Date(timeIntervalSince1970: TimeInterval(finished) / 1000).formatted(date: .abbreviated, time: .omitted)) from \(run.total.formatted()) messages")
-                    .font(TypeRole.caption)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: Space.m) {
-                Button("Learn from Sent Mail…") { model.guideSheet = .learn }
-                    .disabled(model.guideRunActive)
-                    .hoverHelp(model.guideRunActive ? "A learning run is in progress"
-                        : "Analyse your sent mail to propose rules and guidelines")
-                Spacer(minLength: 0)
-                Menu {
-                    Button("Ask \(model.agent.providerName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
-                    Button("Answer Questions…") { model.guideSheet = .interview(only: nil) } // no-help: menu
-                    Divider() // menu
-                    Button("Merge a Guide…") { model.guideSheet = .merge } // no-help: menu
-                    Button("Export as Markdown…") { model.exportGuide(json: false) } // no-help: menu
-                    Button("Export for Another Account…") { model.exportGuide(json: true) } // no-help: menu
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
-                }
-                .labelStyle(.iconOnly)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .hoverHelp("Change, merge or export the guide")
-            }
-            .controlSize(.small)
-            // The daily review proposes rules from how AI drafts get edited.
-            if model.reviewsAvailable {
-                ReviewStatus()
-            }
-            reviewButton
-        }
-        .padding(.horizontal, Space.l)
-        .padding(.vertical, Space.m)
-    }
-}
-
-extension GuideHeader {
-    /// Opens the review flow in the detail: the proposed rules, else the
-    /// patterns still collecting evidence.
-    @ViewBuilder var reviewButton: some View {
-        let waiting = model.analysis.rulesWaiting
-        let watching = model.analysis.watching.count
-        if waiting > 0 {
-            Button {
-                model.openProposedRules()
-            } label: {
-                Label(waiting == 1 ? "Review 1 Proposed Rule" : "Review \(waiting) Proposed Rules", systemImage: "checklist")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .hoverHelp("Go through the rules proposed for your guide: Return accepts, ⌫ rejects, e edits")
-        } else if watching > 0 {
-            Button(watching == 1 ? "1 pattern collecting evidence" : "\(watching) patterns collecting evidence") {
-                model.openProposedRules()
-            }
-            .buttonStyle(.link)
-            .controlSize(.small)
-            .hoverHelp("Patterns in your edits not yet seen often enough to propose")
+        if let progress = model.guideProgress, model.guideRunActive {
+            GuideProgressBars(progress: progress)
+                .padding(.horizontal, Space.l)
+                .padding(.vertical, Space.m)
+        } else if model.reviewsAvailable {
+            ReviewStatus()
         }
     }
 }

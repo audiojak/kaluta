@@ -318,6 +318,13 @@ final class AppModel {
     /// Create an Agent Mailbox, or verify one, while its sheet is open
     /// (spec §7.9).
     var agentMailboxSheet: AgentMailboxRequest?
+    /// Review mode (spec §14.10, §14.11): deciding in the whole window.
+    var reviewMode: ReviewMode?
+    /// What the mode opened on, decided ones included, until Done.
+    var reviewItems: [ReviewItem] = []
+    /// How each decided item went, by tag; an item back in the stores
+    /// (Undo) waits again whatever this says.
+    var reviewOutcomes: [String: ReviewItem.Outcome] = [:]
     /// Agent mailboxes' plans as the service last reported them.
     var agentPlans: [String: AgentMailboxPlan] = [:]
     /// The task dialog, while open (spec §14.8).
@@ -677,24 +684,69 @@ final class AppModel {
     /// Bumped to move focus to the agent prompt (⌘K).
     private(set) var agentFocusRequests = 0
 
-    /// ⌘K from any window: the mail window comes forward first.
+    /// ⌘K from any window: the mail window comes forward first. As it
+    /// becomes key, AppKit gives the keyboard back to whatever had it there
+    /// (the message list), so the prompt's turn comes just after that.
     func focusAgentPrompt() {
         if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }),
-           !main.isKeyWindow {
+           let key = NSApp.keyWindow, key !== main {
             main.makeKeyAndOrderFront(nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+                self?.agentFocusRequests += 1
+            }
+            return
         }
         agentFocusRequests += 1
     }
 
     /// Ask the agent, with references to what the user is looking at.
     func askAgent(_ prompt: String) async {
-        let context = PromptContextInfo(mailboxId: selectedMailboxID, selectedThreadIds: actionTargets,
-                                        searchQuery: threads.searchQuery)
+        let context = promptContext
         if let id = openAccountID {
             RecentPrompts(defaults: defaults).record(prompt, for: id)
             recentPromptsRevision += 1
         }
         await agent.send(prompt, context: context)
+    }
+
+    /// What the user is looking at, as references (spec §9.7): the list on
+    /// screen is the context, and a selection narrows it.
+    var promptContext: PromptContextInfo {
+        let targets = actionTargets
+        let visible = targets.isEmpty && listDescription != nil
+            ? Array(threads.rows.prefix(Self.maxVisibleInPrompt).map(\.id)) : []
+        return PromptContextInfo(mailboxId: selectedMailboxID, listDescription: listDescription,
+                                 visibleThreadIds: visible, selectedThreadIds: targets, searchQuery: threads.searchQuery)
+    }
+
+    /// The most rows a prompt names; the description carries the total.
+    static let maxVisibleInPrompt = 100
+
+    /// One line on what the thread list shows, for the agent: "Inbox ›
+    /// Primary · 34 conversations · Important only". Nil for the Tasks,
+    /// Writing Guide and Facts pages, which show no mail list.
+    var listDescription: String? {
+        let searching = threads.searchQuery != nil
+        guard searching || listMailboxID != nil else { return nil }
+        var parts: [String] = []
+        if searching {
+            parts.append("Search results")
+        } else {
+            var name = mailboxes.mailboxes.first { $0.id == selectedMailboxID }.map { LabelTree.leafName($0.name) }
+                ?? "Mailbox"
+            if selectedMailboxID == "INBOX", let tab = activeInboxCategory { name += " › " + InboxCategories.title(tab) }
+            parts.append(name)
+        }
+        let count = threads.rows.count
+        var conversations = count == 1 ? "1 conversation" : "\(count.formatted()) conversations"
+        if threads.hasMore { conversations += " loaded so far" }
+        parts.append(conversations)
+        if !searching, selectedMailboxID == "INBOX" {
+            if inboxImportantOnly { parts.append("Important only") }
+            if hiddenTaskLabel != nil { parts.append("Tasks hidden") }
+        }
+        if !listFilters.isEmpty { parts.append(ListFilter.ordered(listFilters).map(\.title).joined(separator: ", ")) }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Agent suggestions (spec §14.6b)

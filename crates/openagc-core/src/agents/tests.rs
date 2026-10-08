@@ -206,7 +206,13 @@ fn present_threads_reaches_the_session() {
     assert_eq!(shown["shown"], 2);
     let (session, event) = rx.try_recv().unwrap();
     assert_eq!(session.as_str(), "s1");
-    assert_eq!(event, AgentEvent::ResultsAvailable { thread_ids: vec![ThreadId::new("a"), ThreadId::new("b")] });
+    assert_eq!(
+        event,
+        AgentEvent::ResultsAvailable {
+            thread_ids: vec![ThreadId::new("a"), ThreadId::new("b")],
+            title: Some("Needs reply".into())
+        }
+    );
 }
 
 #[test]

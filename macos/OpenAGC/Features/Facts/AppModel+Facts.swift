@@ -10,12 +10,19 @@ extension AppModel {
 
     var isFacts: Bool { selectedMailboxID == Self.factsMailboxID && threads.searchQuery == nil }
 
-    /// Open Facts; with `proposed`, its review flow on the first proposed fact.
+    /// Open Facts; with `proposed`, Review mode on its proposed facts.
     func openFacts(proposed: Bool = false) {
         guidePrompt = nil
-        selectedMailboxID = Self.factsMailboxID
-        analysis.reviewingFacts = proposed
-        if proposed, let first = analysis.factProposals.first { facts.selection = AnalysisStore.tag(first) }
+        if proposed, !analysis.factProposals.isEmpty {
+            enterReview(.facts)
+        } else {
+            selectedMailboxID = Self.factsMailboxID
+        }
+    }
+
+    /// The proposed fact current in Review mode, if one is.
+    var selectedFactProposal: AnalysisFactProposalInfo? {
+        analysis.factProposal(tagged: facts.selection)
     }
 
     /// Apply fact edits in `scope` as one change.

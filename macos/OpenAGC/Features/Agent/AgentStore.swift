@@ -16,7 +16,8 @@ final class AgentStore {
             case reply(String)
             case thinking(String)
             case tool(name: String, arguments: String, state: ToolState, summary: String)
-            case results([ThreadRow])
+            /// Threads the agent presented, under its heading.
+            case results(title: String?, rows: [ThreadRow])
             case error(String)
             /// Something the agent wants to do that the user decides.
             case proposal(actionID: Int64, tool: String, summary: String, draftID: Int64?, state: ProposalState)
@@ -88,6 +89,33 @@ final class AgentStore {
         // Fall back to whichever agent is ready.
         if !isProviderReady, let ready = providers.first(where: { if case .ready = $0.status { true } else { false } }) {
             providerID = ready.id
+        }
+    }
+
+    /// When the last look found no agent ready, look again, afresh: the
+    /// answer was taken once at launch and may have been a bad moment. At
+    /// most every few seconds.
+    func ensureReady() async {
+        guard !isProviderReady, Date().timeIntervalSince(lastReadyCheck) > 5 else { return }
+        lastReadyCheck = Date()
+        await loadProviders(refresh: true)
+    }
+
+    @ObservationIgnored private var lastReadyCheck = Date.distantPast
+
+    /// Why the agent cannot be asked yet, in a line; nil when it can.
+    var notReadyReason: String? {
+        Self.notReadyReason(for: provider, named: providerName, loaded: !providers.isEmpty)
+    }
+
+    static func notReadyReason(for provider: AgentProviderInfo?, named name: String, loaded: Bool) -> String? {
+        guard let provider else { return loaded ? "\(name) isn't set up" : "Looking for \(name)…" }
+        switch provider.status {
+        case .ready: return nil
+        case .notInstalled: return "\(provider.name) isn't installed"
+        case .notAuthenticated: return "\(provider.name) needs you to sign in"
+        case .updateRequired: return "\(provider.name) needs an update"
+        case let .error(message): return "\(provider.name) couldn't be checked: \(message)"
         }
     }
 
@@ -261,9 +289,9 @@ final class AgentStore {
                 isPresented = true
             case let .actionResolved(actionID, approved):
                 decide(actionID, approved: approved)
-            case let .resultsAvailable(threadIDs):
+            case let .resultsAvailable(threadIDs, title):
                 let rows = await rows(for: threadIDs)
-                if !rows.isEmpty { append(.results(rows)) }
+                if !rows.isEmpty { append(.results(title: title, rows: rows)) }
             case let .turnCompleted(input, output, cost):
                 isRunning = false
                 lastUsage = Self.usageText(input: input, output: output, cost: cost)
@@ -315,6 +343,14 @@ final class AgentStore {
     }
 
     /// "Searched mail" rather than "mail_search".
+    /// Over the agent's results: its title and the count, "Needs a reply ·
+    /// 12 conversations"; the count alone without a title.
+    static func resultsHeading(_ title: String?, count: Int) -> String {
+        let conversations = count == 1 ? "1 conversation" : "\(count.formatted()) conversations"
+        guard let title, !title.isEmpty else { return conversations }
+        return "\(title) · \(conversations)"
+    }
+
     static func toolTitle(_ name: String) -> String {
         switch name {
         case "mail_search": "Searched mail"

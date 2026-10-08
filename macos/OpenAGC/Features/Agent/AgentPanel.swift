@@ -54,11 +54,12 @@ struct AgentPromptBar: View {
                 .hoverHelp("Choose the agent")
                 .accessibilityLabel("Choose the agent")
 
+                // Always typable, so ⌘K always lands here; Send waits for
+                // a ready agent, and the line under says why.
                 TextField("Ask \(agent.providerName)…", text: $model.agentPromptDraft)
                     .textFieldStyle(.plain)
                     .focused($focused)
                     .onSubmit(send)
-                    .disabled(!agent.isProviderReady)
                     .accessibilityLabel("Ask \(agent.providerName)")
                     .onKeyPress(.downArrow) { move(1, in: chips) }
                     .onKeyPress(.tab) { move(1, in: chips) }
@@ -91,9 +92,31 @@ struct AgentPromptBar: View {
                 }
             }
             .glassCapsule()
+            if let reason = agent.notReadyReason {
+                HStack(spacing: Space.s) {
+                    Text(reason)
+                    Button("Agent Settings…") {
+                        model.settingsTab = .agents
+                        openSettings()
+                    }
+                    .buttonStyle(.link)
+                    .hoverHelp("Open Settings › Agents to set up or check the agent")
+                }
+                .font(TypeRole.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Space.l)
+            }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: chips)
-        .task { await agent.loadProviders() }
+        .task {
+            await agent.loadProviders()
+            // A probe at launch can miss; one more look a little later.
+            if !agent.isProviderReady {
+                try? await Task.sleep(for: .seconds(3))
+                await agent.ensureReady()
+            }
+        }
+        .onChange(of: focused) { _, isFocused in if isFocused { Task { await agent.ensureReady() } } }
         .onChange(of: model.agentFocusRequests) { focused = true }
         // Sending from under the reader opens the column, and the prompt
         // moves under the conversation: it keeps the cursor for the
@@ -127,6 +150,12 @@ struct AgentPromptBar: View {
     private func send() {
         let prompt = model.agentPromptDraft
         guard !prompt.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        // Not ready: the words stay in the field, and the agent is looked
+        // for again; the line under the field says what is wrong.
+        guard model.agent.isProviderReady else {
+            Task { await model.agent.ensureReady() }
+            return
+        }
         model.agentPromptDraft = ""
         Task { await model.askAgent(prompt) }
     }
@@ -330,19 +359,13 @@ private struct EntryView: View {
                 .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
             }
-        case let .results(rows):
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(rows, id: \.id) { row in
-                    ResultRow(row: row, selected: model.selectedThreadID == row.id)
-                        .contentShape(.rect)
-                        .onTapGesture { model.selectedThreadID = row.id }
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityAction { model.selectedThreadID = row.id }
-                    if row.id != rows.last?.id { InsetRule(inset: Space.m) }
-                }
+        case let .results(title, rows):
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(AgentStore.resultsHeading(title, count: rows.count))
+                    .font(TypeRole.meta).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                ResultsCard(rows: rows)
             }
-            .background(.background, in: .rect(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
         case let .error(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(TypeRole.meta)
@@ -421,6 +444,28 @@ private struct ProposalCard: View {
         case "mail_delete": "trash"
         default: "hand.raised"
         }
+    }
+}
+
+/// The agent's results: a heading and the rows, like a slice of the main
+/// list.
+private struct ResultsCard: View {
+    let rows: [ThreadRow]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows, id: \.id) { row in
+                ResultRow(row: row, selected: model.selectedThreadID == row.id)
+                    .contentShape(.rect)
+                    .onTapGesture { model.selectedThreadID = row.id }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { model.selectedThreadID = row.id }
+                if row.id != rows.last?.id { InsetRule(inset: Space.m) }
+            }
+        }
+        .background(.background, in: .rect(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(.separator))
     }
 }
 

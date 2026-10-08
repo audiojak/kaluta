@@ -578,7 +578,6 @@ async fn attachment_text(core: &Arc<Core>, session: &str, arguments: Value) -> R
 struct PresentArgs {
     thread_ids: Vec<String>,
     #[serde(default)]
-    #[allow(dead_code)]
     title: Option<String>,
 }
 
@@ -586,9 +585,10 @@ fn present_threads(core: &Arc<Core>, session: &str, arguments: Value) -> Result<
     let a: PresentArgs = args(arguments)?;
     let ids: Vec<ThreadId> = a.thread_ids.into_iter().map(ThreadId).filter(|t| in_scope(core, session, t)).collect();
     let shown = ids.len();
+    let title = a.title.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
     core.agents.with_session(session, |s| {
         if let Some(sink) = &s.sink {
-            sink.emit(AgentEvent::ResultsAvailable { thread_ids: ids });
+            sink.emit(AgentEvent::ResultsAvailable { thread_ids: ids, title: title.clone() });
         }
     });
     Ok(Outcome::json(json!({ "shown": shown })))

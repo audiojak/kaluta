@@ -49,21 +49,22 @@ struct AnalysisTests {
         #expect(model.selectedDecision?.id == first.id)
     }
 
-    /// The review flow's keys as the keyboard sends them: ⌫ is DEL
-    /// (U+007F), which `.onKeyPress(.delete)` never matched.
+    /// Review mode's keys on its queue, as the keyboard sends them: ⌫ is
+    /// DEL (U+007F), which `.onKeyPress(.delete)` never matched; the list
+    /// takes it as its delete command.
     @Test func theDeleteKeyRejectsTheCurrentProposedRule() async throws {
         let model = try await reviewed()
         model.openProposedRules()
         let first = try #require(model.guide.decisions.first)
         model.analysis.selection = AnalysisStore.tag(first)
         NSApp.activate()
-        let window = ReviewKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600), styleMask: [.titled],
+        let window = ReviewKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 600), styleMask: [.titled],
                                      backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: ProposedRulesView().environment(model))
+        window.contentView = NSHostingView(rootView: ReviewModeView(mode: .rules).environment(model))
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: .milliseconds(400))
         let delete = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                                       context: nil, characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
@@ -74,6 +75,9 @@ struct AnalysisTests {
         }
         #expect(!model.guide.decisions.contains { $0.id == first.id }, "⌫ rejected the current rule")
         #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Reject Entry")
+        // The item stays in the queue with its outcome until Done.
+        let item = try #require(model.reviewItems.first { $0.tag == AnalysisStore.tag(first) })
+        #expect(model.reviewOutcome(of: item) == .rejected)
     }
 
     @Test func decidingAProposedRuleChoosesTheNext() async throws {
@@ -85,13 +89,46 @@ struct AnalysisTests {
         await model.decideProposedRule(reject: first)
         #expect(!model.guide.decisions.contains { $0.id == first.id })
         #expect(model.analysis.selection == tags[1], "the next proposed rule")
-        // A category chosen: the review flow gives way to it; the header's
-        // button brings it back.
-        #expect(model.analysis.reviewingRules)
-        model.showGuideCategory("A1")
-        #expect(!model.analysis.reviewingRules && model.guide.selectedCategory == "A1")
-        model.openProposedRules()
-        #expect(model.analysis.reviewingRules && model.analysis.selection == tags[1])
+        // Done leaves the mode with a category chosen; the band brings it back.
+        #expect(model.reviewMode == .rules && model.analysis.reviewingRules)
+        model.leaveReview()
+        #expect(model.reviewMode == nil && !model.analysis.reviewingRules && model.guide.selectedCategory != nil)
+        #expect(model.reviewItems.isEmpty, "the queue is let go on Done")
+        model.enterReview(.rules)
+        #expect(model.reviewMode == .rules && model.analysis.selection == tags[1], "the first still waiting is current")
+    }
+
+    /// Review mode (spec §14.10): the queue holds what the mode opened on,
+    /// decided items stay with their outcome, Undo makes them wait again,
+    /// and the run ends in a summary.
+    @Test func reviewModeKeepsDecidedItemsUntilDoneAndUndoReopensThem() async throws {
+        let model = try await reviewed()
+        model.enterReview(.rules)
+        let items = model.reviewItems
+        #expect(items.filter { !$0.watching }.count == model.proposedRuleTags.count)
+        #expect(items.contains { $0.watching }, "patterns collecting evidence come last")
+        #expect(model.reviewProgress == "0 of \(model.proposedRuleTags.count)")
+        let proposal = try #require(model.analysis.proposals.first { $0.op == .add && $0.contradicts == nil })
+        let tag = AnalysisStore.tag(proposal)
+        model.analysis.selection = tag
+        #expect(model.reviewAct(.accept))
+        for _ in 0..<100 where model.analysis.proposals.contains(where: { $0.id == proposal.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let item = try #require(model.reviewItems.first { $0.tag == tag })
+        #expect(model.reviewOutcome(of: item) == .accepted)
+        #expect(model.reviewItems.count == items.count, "decided items stay in the queue")
+        #expect(model.reviewProgress.hasPrefix("1 of"))
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where !model.analysis.proposals.contains(where: { $0.id == proposal.id }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.reviewOutcome(of: item) == nil, "back in the stores, it waits again")
+        await model.reviewAcceptAll()
+        #expect(model.reviewWaitingCount == model.reviewItems.filter { !$0.watching && model.reviewOutcome(of: $0) == nil }.count)
+        #expect(ReviewSummaryView.summary(accepted: 5, rejected: 2, mode: .rules) == "5 added to your writing guide, 2 left out.")
+        #expect(ReviewBand.words(waiting: 1, watching: 0, mode: .facts) == "proposed fact waiting for you")
+        #expect(ReviewBand.words(waiting: 0, watching: 2, mode: .rules) == "patterns collecting evidence")
     }
 
     @Test func acceptingChangesTheGuideAndUndoPutsItBack() async throws {

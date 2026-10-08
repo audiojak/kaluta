@@ -16,7 +16,13 @@ struct MainWindow: View {
                 OnboardingView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             default:
-                mailWindow
+                // Review mode (spec §14.10, §14.11) takes the whole window
+                // until Done; the split view comes back as it was.
+                if let mode = model.reviewMode {
+                    ReviewModeView(mode: mode)
+                } else {
+                    mailWindow
+                }
             }
         }
         .focusedSceneValue(\.isMailWindow, true)
@@ -164,15 +170,17 @@ struct MainWindow: View {
         if model.isGuide {
             let accepted = model.guide.acceptedCount
             parts.append(accepted == 1 ? "1 entry" : "\(accepted.formatted()) entries")
-            let proposed = model.analysis.rulesWaiting
-            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
+            let waiting = model.analysis.rulesWaiting
+            if waiting > 0 { parts.append("\(waiting.formatted()) waiting") }
+            if let learned = model.guideLearnedLine { parts.append(learned) }
             return parts.joined(separator: " · ")
         }
         if model.isFacts {
             let count = model.facts.facts.filter { $0.status == .accepted }.count
             parts.append(count == 1 ? "1 fact" : "\(count.formatted()) facts")
-            let proposed = model.analysis.factProposals.count
-            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
+            let waiting = model.analysis.factProposals.count
+            if waiting > 0 { parts.append("\(waiting.formatted()) waiting") }
+            if let reviewed = model.reviewedLine { parts.append(reviewed) }
             return parts.joined(separator: " · ")
         }
         if model.isTaskList {
@@ -212,6 +220,19 @@ struct MainWindow: View {
         case let .failed(message):
             ContentUnavailableView("Something Went Wrong", systemImage: "exclamationmark.triangle", description: Text(message))
         case .open:
+            // A GeometryReader takes whatever height it is given and asks
+            // for next to none: the split view takes the column's ideal
+            // size as the window's minimum, and a List's ideal height is
+            // its whole content, which pushed the window past the bottom
+            // of the screen on the Writing Guide and Facts pages (and held
+            // the Inbox window at 1,200 points).
+            GeometryReader { _ in
+                openColumn
+            }
+        }
+    }
+
+    @ViewBuilder private var openColumn: some View {
             VStack(spacing: 0) {
                 if model.needsReauthentication {
                     ReauthenticationBanner()
@@ -258,7 +279,6 @@ struct MainWindow: View {
             // floating sidebar, and a full-width rule showed through its
             // glass (oagc-0cw). The bar sits in the column's safe area.
             .columnHeader { listHeader }
-        }
     }
 
     /// The row under the title: the Inbox's category tabs, as Mail shows
@@ -268,8 +288,9 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             categoryTabs
             taskTabs
-            if model.isGuide { GuideHeader() }
-            if model.isFacts { FactsHeader() }
+            if model.isGuide { GuideActivityStrip() }
+            if model.isGuide { ReviewBand(mode: .rules) }
+            if model.isFacts { ReviewBand(mode: .facts) }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,

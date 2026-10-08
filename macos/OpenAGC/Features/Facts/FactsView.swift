@@ -2,8 +2,8 @@ import SwiftUI
 
 /// The Facts page's list (spec §14.11), or (global facts) Settings ›
 /// Facts: facts by category, built-ins first then the user's own, a globe
-/// on global ones. Proposed facts are reviewed in the detail, from the
-/// header's *Review Proposed Facts*.
+/// on global ones. Proposed facts are counted on the band over it and
+/// decided in Review mode.
 struct FactsList: View {
     @Environment(AppModel.self) private var model
     @Bindable var store: FactsStore
@@ -33,10 +33,9 @@ struct FactsList: View {
         .onDeleteCommand {
             if let fact = store.selected { Task { await model.deleteFact(fact) } }
         }
-        // A fact chosen: the review flow gives way to it.
-        .onChange(of: store.selection) { _, tag in
-            if let tag, !AnalysisStore.isFactProposalTag(tag) { model.analysis.reviewingFacts = false }
-        }
+        // Tab from the sidebar (the main window's loop, spec §14.3).
+        .focused($focused)
+        .onChange(of: model.threadListFocusRequests) { focused = true }
         .task(id: model.factsRevision) { await store.load() }
     }
 }

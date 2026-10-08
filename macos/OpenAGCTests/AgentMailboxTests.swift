@@ -300,3 +300,129 @@ struct TabIntoListTests {
         #expect(model.selectedThreadID == second)
     }
 }
+
+@MainActor
+struct AgentPromptFocusTests {
+    private func field(in view: NSView) -> NSTextField? {
+        if let f = view as? NSTextField, f.placeholderString?.contains("Ask") == true { return f }
+        for sub in view.subviews { if let found = field(in: sub) { return found } }
+        return nil
+    }
+
+    /// ⌘K (Message › Ask …) puts the cursor in the agent prompt.
+    @Test func askTheAgentFocusesThePromptField() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 3)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        NSApp.activate()
+        let window = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 120), styleMask: [.titled],
+                                     backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: AgentPromptBar().environment(model))
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        var prompt: NSTextField?
+        for _ in 0..<100 where prompt == nil {
+            try await Task.sleep(for: .milliseconds(20))
+            prompt = window.contentView.flatMap(field(in:))
+        }
+        let found = try #require(prompt, "the prompt field is in the bar")
+        for _ in 0..<100 where !model.agent.isProviderReady {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.agent.isProviderReady, "the fake agent is ready")
+        #expect(found.isEnabled, "an enabled field can take the keyboard")
+
+        model.focusAgentPrompt()
+        var focused = false
+        for _ in 0..<100 where !focused {
+            try await Task.sleep(for: .milliseconds(20))
+            let responder = window.firstResponder
+            focused = responder === found || (responder as? NSTextView)?.delegate === found
+        }
+        #expect(focused, "first responder is \(String(describing: window.firstResponder))")
+    }
+
+    /// ⌘K from another window (a composer): the mail window comes forward
+    /// and the prompt gets the keyboard, not the list that had it there.
+    @Test func askTheAgentFromAnotherWindowReachesThePrompt() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        try await core.addDemoAccount("work", email: "work@example.com", threads: 3)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: false)
+        NSApp.activate()
+        let main = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: [.titled],
+                                   backing: .buffered, defer: false)
+        main.isReleasedWhenClosed = false
+        main.identifier = NSUserInterfaceItemIdentifier("main-AppWindow-1")
+        // Something else held the keyboard in the mail window, as the list does.
+        let other = NSTextField(frame: NSRect(x: 0, y: 150, width: 200, height: 24))
+        let host = NSView(frame: main.contentRect(forFrameRect: main.frame))
+        host.addSubview(other)
+        let bar = NSHostingView(rootView: AgentPromptBar().environment(model))
+        bar.frame = NSRect(x: 0, y: 0, width: 600, height: 60)
+        host.addSubview(bar)
+        main.contentView = host
+        main.makeKeyAndOrderFront(nil)
+        main.makeFirstResponder(other)
+        defer { main.orderOut(nil) }
+        let composer = EmptyListWindow(contentRect: NSRect(x: 700, y: 0, width: 300, height: 100), styleMask: [.titled],
+                                       backing: .buffered, defer: false)
+        composer.isReleasedWhenClosed = false
+        composer.makeKeyAndOrderFront(nil)
+        defer { composer.orderOut(nil) }
+        for _ in 0..<50 where !composer.isKeyWindow { try await Task.sleep(for: .milliseconds(20)) }
+        var prompt: NSTextField?
+        for _ in 0..<100 where prompt == nil {
+            try await Task.sleep(for: .milliseconds(20))
+            prompt = field(in: bar)
+        }
+        let found = try #require(prompt)
+        for _ in 0..<100 where !model.agent.isProviderReady { try await Task.sleep(for: .milliseconds(20)) }
+
+        model.focusAgentPrompt()
+        // The test host is not the active app, so no window becomes key
+        // here; what can be checked is where the mail window's keyboard
+        // went.
+        var focused = false
+        for _ in 0..<150 where !focused {
+            try await Task.sleep(for: .milliseconds(20))
+            let responder = main.firstResponder
+            focused = responder === found || (responder as? NSTextView)?.delegate === found
+        }
+        #expect(focused, "first responder is \(String(describing: main.firstResponder))")
+        #expect(main.firstResponder !== other, "the field that had the keyboard lost it to the prompt")
+    }
+}
+
+@MainActor
+struct AgentReadinessTests {
+    private func provider(_ id: String, _ status: AgentStatusInfo) -> AgentProviderInfo {
+        AgentProviderInfo(id: id, name: id == "codex" ? "Codex" : "Claude Code", status: status)
+    }
+
+    /// The prompt field is never disabled; the line under it says why the
+    /// agent cannot be asked yet.
+    @Test func whyTheAgentCannotBeAskedIsSaidInALine() {
+        let store = AgentStore(core: nil, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        #expect(store.notReadyReason == "Looking for Claude…", "nothing loaded yet")
+        let reason = { (p: AgentProviderInfo?) in AgentStore.notReadyReason(for: p, named: "Claude", loaded: true) }
+        #expect(reason(nil) == "Claude isn't set up")
+        #expect(reason(provider("claude-code", .error(message: "timed out"))) == "Claude Code couldn't be checked: timed out")
+        #expect(reason(provider("claude-code", .notInstalled)) == "Claude Code isn't installed")
+        #expect(reason(provider("claude-code", .notAuthenticated(version: "2.1"))) == "Claude Code needs you to sign in")
+        #expect(reason(provider("claude-code", .ready(version: "2.1"))) == nil)
+    }
+
+    /// With a real core the fake agent is ready; a store that never loaded
+    /// looks again when asked, and stops looking once it is ready.
+    @Test func lookingAgainFindsTheAgent() async throws {
+        let core = try CoreClient(dataDirectory: CoreClient.testScratch())
+        let store = AgentStore(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        #expect(!store.isProviderReady)
+        await store.ensureReady()
+        #expect(store.isProviderReady)
+        #expect(store.notReadyReason == nil)
+    }
+}
