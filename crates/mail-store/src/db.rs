@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0018_cleanup.sql"),
     include_str!("../migrations/0019_cleanup_progress.sql"),
     include_str!("../migrations/0020_inbox_category_stats.sql"),
+    include_str!("../migrations/0021_outbox_claims.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -144,7 +145,12 @@ impl Db {
         let (tx, rx) = oneshot::channel();
         let job: WriteJob = Box::new(move |conn| {
             let result = (|| {
-                let txn = conn.transaction()?;
+                // The write lock up front: another process writing the same
+                // store (the headless MCP, spec §7.4) makes a deferred
+                // transaction that read first fail at its first write with
+                // SQLITE_BUSY at once, past the busy timeout. Taken at BEGIN,
+                // the lock is waited for.
+                let txn = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 let value = f(&txn)?;
                 txn.commit()?;
                 Ok(value)
@@ -225,8 +231,14 @@ fn open_writer(path: &Path) -> StoreResult<Connection> {
     }
 }
 
+/// How long a write waits for another process's write to finish before
+/// failing. Writes are short (a sync batch is well under a second); this
+/// is far past any of them, so a second writer is waited for, never
+/// reported to the user.
+const WRITER_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn configure(conn: &Connection, writer: bool) -> StoreResult<()> {
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.busy_timeout(if writer { WRITER_BUSY_TIMEOUT } else { std::time::Duration::from_secs(5) })?;
     if writer {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -354,7 +366,12 @@ mod tests {
         db.close();
         // The store as it was before the counts were kept.
         let c = Connection::open(&path).unwrap();
-        c.execute_batch("DROP TABLE inbox_category_stats; PRAGMA user_version = 19").unwrap();
+        c.execute_batch(
+            "DROP TABLE inbox_category_stats;
+             ALTER TABLE outbox DROP COLUMN claimed_by; ALTER TABLE outbox DROP COLUMN lease_until;
+             PRAGMA user_version = 19",
+        )
+        .unwrap();
         drop(c);
         let db = Db::open(&path).unwrap();
         let tabs = db.read_blocking(crate::read::stored_inbox_categories).unwrap();

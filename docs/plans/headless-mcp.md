@@ -54,6 +54,34 @@ helper reading those items would raise an *Allow access?* prompt.
 an App ID for team Y5W2BTVS33 and let Xcode fetch the profile. Only then
 can the spike run, against a scratch Keychain service.
 
+## The outbox lock (built, oagc-uys.3)
+
+Step 2 is done; spec §7.4, *outbox claims*. There is no whole-outbox file
+lock: each op is claimed in the store, in the `BEGIN IMMEDIATE`
+transaction that picks it, only while no other op is in flight, with the
+drainer's id and a 60 s lease it renews during the call. A drainer is
+known to be alive by an `flock` it holds on `outbox-claims/<id>.lock`
+beside the store; a dead one's ops come back at once, a hung one's when
+its lease runs out. A send that comes back, or that was tried before, is
+looked for at the provider (`MailProvider::already_sent`) before it is
+sent again. What the `--mailbox` mode uses:
+
+- **Queue a send** (app closed, the interim): open the account's store
+  with `mail_store::Db::open` (it migrates and takes the write lock only
+  per transaction), save the draft (`mail_store::drafts::save`) and call
+  `mail_sync::send_draft(&db, draft_id, from, true, 0)`: one write
+  transaction, safe beside a running app. No lock is taken to enqueue;
+  SQLite serializes the writes.
+- **Drain from this process** (once the helper can read the key): build
+  a `mail_sync::SyncEngine::new(provider, db, observer)` for the account
+  (it registers its claimant) and call `drain_outbox()` again whenever
+  `next_outbox_retry()` says (within 2 s while the app has an op in
+  flight; `DrainReport::busy`). Do not run sync, backfill or anything else
+  that releases or rewrites outbox rows; never touch `in_flight` rows
+  directly.
+- With the app running, the shim goes through the core as now and does
+  neither.
+
 ## Open questions
 
 1. Is the helper the MCP binary itself (embedded and signed in the bundle)
@@ -72,7 +100,8 @@ can the spike run, against a scratch Keychain service.
 
 1. Signing spike: the embedded helper reads a Keychain item the app wrote,
    with the app closed.
-2. Outbox lock across processes; tests with two writers.
+2. Outbox lock across processes; tests with two writers. *Done
+   (oagc-uys.3), above.*
 3. `--mailbox` mode: guide and facts tools, mail read tools, sending;
    through the core when the app runs, else headless.
 4. Connect an Agent…; spec §10 and §12.

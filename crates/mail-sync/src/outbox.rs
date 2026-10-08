@@ -17,6 +17,9 @@ use crate::error::SyncResult;
 /// Retries before an op is given up and rolled back.
 pub const MAX_ATTEMPTS: u32 = 5;
 
+/// How soon to look again while another drainer has an op in flight.
+const BUSY_POLL_MS: Millis = 2_000;
+
 /// A change the user (or an agent) makes to threads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LocalChange {
@@ -106,6 +109,9 @@ pub struct DrainReport {
     pub sent: usize,
     pub retrying: usize,
     pub failed: usize,
+    /// Another drainer (another engine or process on this store) had an op
+    /// in flight, so this drain stopped behind it.
+    pub busy: bool,
 }
 
 pub fn now_millis() -> Millis {
@@ -257,79 +263,95 @@ impl SyncEngine {
     /// Send every ready op to the provider, oldest first. Transient failures
     /// are retried later with backoff; after [`MAX_ATTEMPTS`], or on a
     /// permanent error, the op is rolled back locally and marked failed.
+    ///
+    /// Safe to run from several engines or processes on one store (spec
+    /// §7.4, outbox claims): each op is claimed in the transaction that
+    /// picks it, only while nothing else is in flight, so ops go one at a
+    /// time and in order whoever sends them. When another drainer has an op
+    /// in flight this returns with [`DrainReport::busy`] set; ask again
+    /// at [`SyncEngine::next_outbox_retry`].
     pub async fn drain_outbox(&self) -> SyncResult<DrainReport> {
         let _serialized = self.drain_lock.lock().await;
-        self.db().write(outbox::release_in_flight).await?;
+        let me = self.claimant.clone();
+        self.db().write(move |tx| outbox::recover_in_flight(tx, &me, now_millis())).await?;
         let mut report = DrainReport::default();
         loop {
             let now = now_millis();
-            let Some(queued) = self.db().read(move |c| outbox::next_ready(c, now)).await? else {
-                return Ok(report);
+            // Claimed in one transaction with the pick: a held send
+            // cancelled since stays unsent (Undo Send), and an op another
+            // drainer took is not taken again.
+            let me = self.claimant.clone();
+            let claim = self.db().write(move |tx| outbox::claim_next(tx, me.id(), now, now + outbox::LEASE_MS)).await?;
+            let queued = match claim {
+                outbox::Claim::Ready(queued) => queued,
+                outbox::Claim::Idle => return Ok(report),
+                outbox::Claim::Busy => {
+                    report.busy = true;
+                    return Ok(report);
+                }
             };
-            // Claimed first: a held send cancelled since it was read stays
-            // unsent (Undo Send).
-            let claimed_id = queued.id;
-            if !self.db().write(move |tx| outbox::claim(tx, claimed_id)).await? {
-                continue;
-            }
+            let id = queued.id;
             let timer = crate::transport::Timer::start();
             // A send's optimistic copy and the id the provider gave it.
             let mut adopt: Option<(MessageId, MessageId)> = None;
-            let result = match &queued.op {
-                OutboxOp::ModifyLabels { message_ids, add, remove } => {
-                    // Before the call: history may report it before we return.
-                    self.remember_own(message_ids, add, remove);
-                    self.modify_labels_present(LabelOp {
-                        message_ids: message_ids.clone(),
-                        add: add.clone(),
-                        remove: remove.clone(),
-                    })
-                    .await
-                }
-                OutboxOp::Trash { message_ids, .. } => {
-                    self.remember_own(
-                        message_ids,
-                        &[LabelId::new(system_labels::TRASH)],
-                        &[LabelId::new(system_labels::INBOX)],
-                    );
-                    let mut result = Ok(());
-                    for m in message_ids {
-                        match self.provider().move_to_trash(m).await {
-                            // Deleted on the server: the others still go.
-                            Ok(()) | Err(ProviderError::NotFound(_)) => {}
-                            Err(e) => {
-                                result = Err(e);
-                                break;
+            let call = async {
+                SyncResult::Ok(match &queued.op {
+                    OutboxOp::ModifyLabels { message_ids, add, remove } => {
+                        // Before the call: history may report it before we return.
+                        self.remember_own(message_ids, add, remove);
+                        self.modify_labels_present(LabelOp {
+                            message_ids: message_ids.clone(),
+                            add: add.clone(),
+                            remove: remove.clone(),
+                        })
+                        .await
+                    }
+                    OutboxOp::Trash { message_ids, .. } => {
+                        self.remember_own(
+                            message_ids,
+                            &[LabelId::new(system_labels::TRASH)],
+                            &[LabelId::new(system_labels::INBOX)],
+                        );
+                        let mut result = Ok(());
+                        for m in message_ids {
+                            match self.provider().move_to_trash(m).await {
+                                // Deleted on the server: the others still go.
+                                Ok(()) | Err(ProviderError::NotFound(_)) => {}
+                                Err(e) => {
+                                    result = Err(e);
+                                    break;
+                                }
                             }
                         }
+                        result
                     }
-                    result
-                }
-                OutboxOp::Untrash { message_ids } => {
-                    self.remember_own(message_ids, &[], &[LabelId::new(system_labels::TRASH)]);
-                    let mut result = Ok(());
-                    for m in message_ids {
-                        match self.provider().restore_from_trash(m).await {
-                            Ok(()) | Err(ProviderError::NotFound(_)) => {}
-                            Err(e) => {
-                                result = Err(e);
-                                break;
+                    OutboxOp::Untrash { message_ids } => {
+                        self.remember_own(message_ids, &[], &[LabelId::new(system_labels::TRASH)]);
+                        let mut result = Ok(());
+                        for m in message_ids {
+                            match self.provider().restore_from_trash(m).await {
+                                Ok(()) | Err(ProviderError::NotFound(_)) => {}
+                                Err(e) => {
+                                    result = Err(e);
+                                    break;
+                                }
                             }
                         }
+                        result
                     }
-                    result
-                }
-                OutboxOp::Send { raw, thread_id, local_message_id, .. } => match crate::compose::decode_raw(raw) {
-                    Some(bytes) => self.provider().send(&bytes, thread_id.as_ref()).await.map(|sent| {
-                        if self.provider().adopts_sent_copies() {
-                            adopt = Some((local_message_id.clone(), sent));
-                        }
-                    }),
-                    None => Err(ProviderError::Invalid("queued message is corrupt".into())),
-                },
-                OutboxOp::SyncDraft { draft_id, from } => self.mirror_draft(*draft_id, from).await?,
-                OutboxOp::DeleteDraft { gmail_draft_id } => self.provider().delete_draft(gmail_draft_id).await,
+                    OutboxOp::Send { raw, thread_id, local_message_id, .. } => match crate::compose::decode_raw(raw) {
+                        Some(bytes) => self.send_once(&bytes, thread_id.as_ref(), queued.attempts).await.map(|sent| {
+                            if self.provider().adopts_sent_copies() {
+                                adopt = Some((local_message_id.clone(), sent));
+                            }
+                        }),
+                        None => Err(ProviderError::Invalid("queued message is corrupt".into())),
+                    },
+                    OutboxOp::SyncDraft { draft_id, from } => self.mirror_draft(*draft_id, from).await?,
+                    OutboxOp::DeleteDraft { gmail_draft_id } => self.provider().delete_draft(gmail_draft_id).await,
+                })
             };
+            let result = self.leased(id, call).await?;
             self.record_api(
                 &timer,
                 crate::transport::Job::Write,
@@ -337,12 +359,18 @@ impl SyncEngine {
                 1,
                 result.is_ok(),
             );
-            let id = queued.id;
+            // The outcome is recorded only while the claim is still ours:
+            // past its lease another drainer may have taken the op back.
+            let me = self.claimant.clone();
+            let held = move |tx: &mail_store::Transaction<'_>| outbox::holds(tx, id, me.id());
             match result {
                 Ok(()) => {
                     let changes = self
                         .db()
                         .write(move |tx| {
+                            if !held(tx)? {
+                                return Ok(ThreadChanges::default());
+                            }
                             outbox::complete(tx, id)?;
                             let mut w = MailWriter::new(tx);
                             if let Some((local, sent)) = &adopt {
@@ -363,13 +391,15 @@ impl SyncEngine {
                 // Multi-message ops only get here once every present id
                 // was changed ([`Self::modify_labels_present`]).
                 Err(ProviderError::NotFound(_)) if !matches!(queued.op, OutboxOp::Send { .. }) => {
-                    self.db().write(move |tx| outbox::complete(tx, id)).await?;
+                    self.db().write(move |tx| if held(tx)? { outbox::complete(tx, id) } else { Ok(()) }).await?;
                     report.sent += 1;
                 }
                 Err(e) if e.is_transient() && queued.attempts + 1 < MAX_ATTEMPTS => {
                     let at = now + backoff(queued.attempts).as_millis() as Millis;
                     let message = e.to_string();
-                    self.db().write(move |tx| outbox::retry_later(tx, id, at, &message)).await?;
+                    self.db()
+                        .write(move |tx| if held(tx)? { outbox::retry_later(tx, id, at, &message) } else { Ok(()) })
+                        .await?;
                     report.retrying += 1;
                     // Later ops wait: order matters (archive then unarchive).
                     return Ok(report);
@@ -381,11 +411,59 @@ impl SyncEngine {
                         ProviderError::Forbidden(m) | ProviderError::Invalid(m) => m.clone(),
                         other => other.to_string(),
                     };
-                    let changes = self.db().write(move |tx| outbox::fail(tx, id, &message)).await?;
+                    let changes =
+                        self.db()
+                            .write(move |tx| {
+                                if held(tx)? { outbox::fail(tx, id, &message) } else { Ok(ThreadChanges::default()) }
+                            })
+                            .await?;
                     self.publish_changes(&changes);
                     report.failed += 1;
                     if matches!(e, ProviderError::Unauthorized) {
                         return Err(e.into());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Send a queued message, unless an earlier attempt already got it to
+    /// the provider. A send tried before (`attempts` > 0: an error that
+    /// may have come after the provider took it, or left in flight by a
+    /// drainer that died) is looked for first ([`MailProvider::already_sent`])
+    /// and, found, taken as sent rather than sent again.
+    ///
+    /// [`MailProvider::already_sent`]: provider_api::MailProvider::already_sent
+    async fn send_once(
+        &self,
+        raw: &[u8],
+        thread: Option<&ThreadId>,
+        attempts: u32,
+    ) -> Result<MessageId, ProviderError> {
+        if attempts > 0
+            && let Some(sent) = self.provider().already_sent(raw).await?
+        {
+            tracing::info!(attempts, "an earlier attempt of this send reached the provider; not sending it again");
+            return Ok(sent);
+        }
+        self.provider().send(raw, thread).await
+    }
+
+    /// Run an op's provider call while renewing this drainer's claim on it
+    /// every [`outbox::LEASE_RENEW_MS`], so a long call (a large
+    /// attachment) is not taken for a dead one by another drainer.
+    async fn leased<T>(&self, id: i64, call: impl std::future::Future<Output = T>) -> T {
+        let mut call = std::pin::pin!(call);
+        loop {
+            tokio::select! {
+                out = &mut call => return out,
+                () = tokio::time::sleep(Duration::from_millis(outbox::LEASE_RENEW_MS as u64)) => {
+                    let me = self.claimant.clone();
+                    let until = now_millis() + outbox::LEASE_MS;
+                    match self.db().write(move |tx| outbox::renew(tx, id, me.id(), until)).await {
+                        Ok(true) => {}
+                        Ok(false) => tracing::warn!(id, "outbox claim lost to another drainer during the call"),
+                        Err(e) => tracing::warn!(error = %e, id, "renewing an outbox claim failed"),
                     }
                 }
             }
@@ -461,9 +539,16 @@ impl SyncEngine {
         Ok(Ok(()))
     }
 
-    /// When the next op waiting on a retry becomes ready.
+    /// When to drain again: when the next op waiting on a retry becomes
+    /// ready, or shortly while another drainer has an op in flight (so
+    /// the ops behind it go once it is done, or are recovered if it died).
     pub async fn next_outbox_retry(&self) -> SyncResult<Option<Millis>> {
-        Ok(self.db().read(outbox::next_retry_at).await?)
+        let (retry, busy) = self.db().read(|c| Ok((outbox::next_retry_at(c)?, outbox::in_flight(c)?))).await?;
+        let poll = busy.then(|| now_millis() + BUSY_POLL_MS);
+        Ok(match (retry, poll) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        })
     }
 
     pub async fn outbox_counts(&self) -> SyncResult<OutboxCounts> {

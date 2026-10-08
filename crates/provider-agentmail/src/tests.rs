@@ -544,6 +544,28 @@ async fn after_a_timeout_the_retry_finds_the_mail_that_went_out_and_never_sends_
 }
 
 #[tokio::test]
+async fn another_process_finds_a_fresh_send_a_dead_one_left_by_its_header() {
+    let server = MockServer::start().await;
+    let mut listed = item("sent-1", "t9", &["sent"], "2026-10-08T10:00:00Z");
+    listed["subject"] = json!("Plans");
+    listed["headers"] = json!({ "x-openagc-outbox-id": "q1@openagc.local" });
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages")))
+        .respond_with(ok(json!({ "count": 1, "messages": [listed] })))
+        .mount(&server)
+        .await;
+    // Queued a moment ago, so a send's own check would not look; the
+    // outbox asks, since the send was left in flight.
+    let raw = outgoing(&["ada@example.com"], "Plans", None, now_millis());
+    assert_eq!(provider(&server).already_sent(&raw).await.unwrap(), Some(MessageId::new("sent-1")));
+    // Another send (another Message-ID) is not taken for it.
+    let other = String::from_utf8(outgoing(&["ada@example.com"], "Other", None, now_millis()))
+        .unwrap()
+        .replace("q1@openagc.local", "q2@openagc.local");
+    assert_eq!(provider(&server).already_sent(other.as_bytes()).await.unwrap(), None);
+}
+
+#[tokio::test]
 async fn a_retry_with_nothing_found_sends_with_the_same_idempotency_key() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))

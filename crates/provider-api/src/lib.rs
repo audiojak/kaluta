@@ -222,6 +222,16 @@ pub trait MailProvider: Send + Sync {
     async fn restore_from_trash(&self, id: &MessageId) -> ProviderResult<()>;
     /// Send raw RFC 5322 bytes, threaded into `thread` when given.
     async fn send(&self, raw: &[u8], thread: Option<&ThreadId>) -> ProviderResult<MessageId>;
+    /// Whether an earlier attempt of this send (the same raw bytes, so the
+    /// same Message-ID) already reached the provider: the sent message's
+    /// id if so. The outbox asks before sending again a send that was
+    /// tried before or left in flight by a drainer that died (spec §7.4,
+    /// outbox claims). `None` when it was not found, or when the provider
+    /// cannot look and its [`MailProvider::send`] is idempotent itself
+    /// (an `Idempotency-Key`).
+    async fn already_sent(&self, _raw: &[u8]) -> ProviderResult<Option<MessageId>> {
+        Ok(None)
+    }
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>>;
     /// Create a server draft (`existing` = `None`) or replace one; returns
     /// the draft id. [`ProviderError::NotFound`] if `existing` is gone.

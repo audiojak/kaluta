@@ -377,7 +377,7 @@ Body           message_id, text_plain?, html_sanitized?, html_original?, has_rem
 Participant    message_id, role (From|To|Cc|Bcc|ReplyTo), name?, email
 Attachment     id, message_id, gmail_attachment_id, filename, mime_type, size, content_id?, is_inline, local_path?
 Draft          id, account_id, gmail_draft_id?, thread_id?, in_reply_to_message_id?, to, cc, bcc, subject, body_html, body_text, attachments, updated_at, dirty
-OutboxOp       id, account_id, kind, payload (json), created_at, attempts, last_error?, state (Pending|InFlight|Failed)
+OutboxOp       id, account_id, kind, payload (json), created_at, attempts, last_error?, state (Pending|InFlight|Failed), claimed_by?, lease_until? (§7.4 outbox claims)
 AgentSession   id, provider, external_session_id?, started_at, ended_at?, state, prompt_count, cost_usd?
 AgentAction    id, session_id, tool, args (json), risk (ReadOnly|Reversible|External), state (Executed|Pending|Approved|Rejected|Failed), result_summary?, created_at, resolved_at?
 ```
@@ -493,7 +493,8 @@ CREATE TABLE outbox (
   id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, kind TEXT NOT NULL,
   payload_json TEXT NOT NULL, created_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER,
-  state TEXT NOT NULL DEFAULT 'pending', last_error TEXT);
+  state TEXT NOT NULL DEFAULT 'pending', last_error TEXT,
+  claimed_by TEXT, lease_until INTEGER);  -- migration 0021, §7.4 outbox claims
 
 CREATE TABLE sync_state (account_id INTEGER PRIMARY KEY, key TEXT, value TEXT);
 CREATE TABLE backfill_queue (
@@ -593,6 +594,10 @@ subject and sender, tie-broken by date.
   is fine here since readers never hold locks across awaits).
 - WAL mode makes readers never block on the writer.
 - Prepared statements are cached per connection (`prepare_cached`).
+- Write transactions begin `IMMEDIATE`, so a writer in another process on
+  the same store (the headless MCP) is waited for, up to a 30 s busy
+  timeout, rather than failing a transaction that read before it wrote
+  (§7.4 outbox claims).
 
 ---
 
@@ -749,6 +754,55 @@ a successful outbox op will see our own change in history and no-op.
 Conflict rule: server wins for labels/read state on the next history sync;
 the outbox is drained *before* history is applied so local intent is not
 overwritten while in flight.
+
+**Amendment (2026-10-08): outbox claims, several drainers.** *Implemented
+(oagc-uys.3).* The app and a second process (the headless MCP,
+[headless-mcp.md](plans/headless-mcp.md)) may both drain one account's
+outbox. No op is sent twice, none out of order, and neither process waits
+forever on the other.
+- *Claims in the store, not a file lock on the whole outbox.* A drainer
+  takes an op in one `BEGIN IMMEDIATE` transaction that picks the oldest
+  ready op (as before: one waiting on a retry holds back the rest; held
+  sends step aside) and marks it `in_flight` with `claimed_by` (the
+  drainer's id) and `lease_until` (now + 60 s), and only when **no** op
+  is in flight. So across processes, too, one op is in flight at a time
+  and ops go strictly in order (an unarchive never passes its archive). A
+  drainer that finds another's op in flight stops (`DrainReport.busy`)
+  and looks again within 2 s (`next_outbox_retry`). A coarse `flock` on
+  the whole drain was not needed: single flight in the claim gives the
+  same ordering, and a held per-op claim says exactly which op a dead
+  process left.
+- *Who is alive.* Each drainer (one per sync engine) holds an exclusive
+  `flock` on `outbox-claims/<id>.lock` beside the store for its life; the
+  kernel drops it when the process dies, however it dies, and a reused pid
+  cannot fool it. A drainer renews its lease every 15 s while the
+  provider call runs, and records the call's outcome only if it still
+  holds the claim.
+- *Recovery,* at the start of each drain: an op in flight goes back to
+  pending if it is the drainer's own (an interrupted drain), unnamed (left
+  by a build from before claims: the old single-process recovery at
+  launch), or its claimant is gone (lock file free) or its lease ran out
+  (a hung process). A crash is recovered at once at the next drain, by the
+  app at its next launch or by the other process within 2 s.
+- *Sends are never blindly retried.* A send returned to pending counts an
+  attempt, and any send tried before (`attempts > 0`: left in flight, or
+  an error that may have come after the provider took it) is first looked
+  for: `MailProvider::already_sent`. Gmail searches `rfc822msgid:` (its
+  `messages.send` has no idempotency key; it keeps the composer's
+  Message-ID, §7.5); AgentMail looks for its `X-OpenAGC-Outbox-Id` header
+  (and its `Idempotency-Key` holds 24 h); Primitive cannot look and relies
+  on its Message-ID `Idempotency-Key`. Found, the send is taken as sent
+  (the draft is done with, the optimistic copy adopted) and not sent again.
+  Label changes are idempotent and go again as they are.
+- *Busy store.* Every store write takes the write lock at `BEGIN`
+  (`IMMEDIATE`), so a second process's write is waited for (busy timeout
+  30 s on the writer) instead of failing a deferred transaction at its
+  first write; no busy error reaches the user.
+- Tests: two engines on one store file, and a second OS process racing
+  this one over 1,000 queued changes against a counting fake: each op
+  reaches the provider exactly once and in queue order; a process killed
+  inside a send is recovered at once, and the send is found rather than
+  sent again (or sent once, if it never reached the provider).
 
 **Amendment (2026-09-26): bulk backfill over IMAP.** *Superseded by the
 2026-09-28 amendment, IMAP-first sync, at the end of this section; kept for

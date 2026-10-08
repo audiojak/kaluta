@@ -255,6 +255,26 @@ impl MailProvider for GmailProvider {
         Ok(MessageId(sent.id))
     }
 
+    /// Gmail's `messages.send` takes no idempotency key, so an earlier
+    /// attempt is found by the composer's Message-ID, which Gmail keeps
+    /// (§7.5): `rfc822msgid:` anywhere in the mailbox, Trash and Spam
+    /// included. A send with no Message-ID cannot be looked for.
+    async fn already_sent(&self, raw: &[u8]) -> ProviderResult<Option<MessageId>> {
+        let parsed = mail_mime::parse(raw).map_err(|e| ProviderError::Invalid(e.to_string()))?;
+        let Some(id) = parsed.headers.message_id.as_deref().map(|m| m.trim().trim_matches(['<', '>'])) else {
+            return Ok(None);
+        };
+        if id.is_empty() || id.contains(char::is_whitespace) {
+            return Ok(None);
+        }
+        let url = self.url("messages");
+        let query =
+            [("q", format!("rfc822msgid:{id}")), ("includeSpamTrash", "true".into()), ("maxResults", "1".into())];
+        let list: wire::MessageList =
+            self.http.json(cost::MESSAGES_LIST, Priority::Interactive, |c| c.get(&url).query(&query)).await?;
+        Ok(list.messages.into_iter().next().map(|m| MessageId(m.id)))
+    }
+
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>> {
         let url = self.url(&format!("messages/{}/attachments/{attachment_id}", message.as_str()));
         let data: wire::AttachmentData =

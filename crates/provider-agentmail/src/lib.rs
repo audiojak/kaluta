@@ -860,6 +860,21 @@ impl MailProvider for AgentMailProvider {
         }
     }
 
+    /// The message an earlier attempt left, by its [`OUTBOX_HEADER`]
+    /// (asked by the outbox when a send was tried before, or left in
+    /// flight by a process that died, which this one's memory of unsure
+    /// sends cannot know about).
+    async fn already_sent(&self, raw: &[u8]) -> ProviderResult<Option<MessageId>> {
+        let parsed = mail_mime::parse(raw).map_err(|e| ProviderError::Invalid(e.to_string()))?;
+        let outbox = outbox_id(&parsed, raw);
+        let queued = parsed.headers.date.unwrap_or_else(now_millis);
+        let found = self.find_sent(&outbox, &parsed.headers.subject, queued).await?;
+        if found.is_some() {
+            self.unsure().remove(&outbox);
+        }
+        Ok(found.map(MessageId))
+    }
+
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>> {
         let link: wire::Download =
             self.get(&["messages", message.as_str(), "attachments", attachment_id], &[], Priority::Interactive).await?;
