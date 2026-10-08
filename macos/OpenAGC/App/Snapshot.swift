@@ -42,11 +42,12 @@ import os
 ///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
-///   -OpenAGCSnapshotAgentMailbox create|verify|banner|domain|domain-ready
+///   -OpenAGCSnapshotAgentMailbox create|verify|banner|domain|domain-ready|two
 ///                                       the Create an Agent Mailbox sheet, or a
 ///                                       new mailbox (fake service) with its
-///                                       verify sheet, its limits banner, or its
-///                                       own-domain sheet (spec §7.9)
+///                                       verify sheet, its limits banner, its
+///                                       own-domain sheet, or a second agent on
+///                                       the same service account (spec §7.9)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -254,6 +255,15 @@ enum Snapshot {
                                                     subject: "Confirm your sign-up",
                                                     body: "Click to confirm the account for research-scout.")
                     if agent == "verify" { model.beginAgentVerification(created.accountId) }
+                    // Two agents on one service account (ADR 0015): the first's
+                    // account id is the service account's.
+                    if agent == "two",
+                       let writer = try? await core.addAgent(toServiceAccount: created.accountId, name: "Writer") {
+                        try? core.deliverToAgentMailbox(writer.accountId, from: "Grace Hopper <grace@example.com>",
+                                                        subject: "Draft for review",
+                                                        body: "Could you tighten the second paragraph?")
+                        await model.reloadAccounts()
+                    }
                     if agent == "domain" || agent == "domain-ready" {
                         let added = try? await core.addAgentDomain(created.accountId, domain: "agents.example.com")
                         if agent == "domain-ready", let added {

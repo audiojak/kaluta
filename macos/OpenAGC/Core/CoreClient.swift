@@ -278,6 +278,22 @@ final class CoreClient: Sendable {
         try callSync { try core.setAgentSendMode(accountId: accountID, mode: mode) }
     }
 
+    // MARK: Service accounts (spec §7.9, ADR 0015)
+
+    /// The service accounts with their agents' account ids.
+    func listServiceAccounts() async throws(CoreClientError) -> [ServiceAccountSummary] {
+        try await call { try await core.listServiceAccounts() }
+    }
+
+    /// Add an agent to a service account: no sign-up, terms or code.
+    func addAgent(toServiceAccount serviceAccountID: String, name: String, domain: String? = nil,
+                  requestID: String = UUID().uuidString) async throws(CoreClientError) -> AgentAdded {
+        try await call {
+            try await core.addAgent(serviceAccountId: serviceAccountID, name: name, domain: domain,
+                                    requestId: requestID)
+        }
+    }
+
     /// Tests: deliver a message into a fake agent mailbox.
     func deliverToAgentMailbox(_ accountID: String, from: String, subject: String, body: String) throws(CoreClientError) {
         try callSync { try core.debugDeliverToAgentMailbox(accountId: accountID, from: from, subject: subject, body: body) }

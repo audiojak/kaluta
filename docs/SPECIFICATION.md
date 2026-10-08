@@ -1137,6 +1137,35 @@ and rotates its key when the sign-up is repeated.
   verification, plan and limits, add a mailbox) beside each agent's
   `MailProvider`, and chooses the provider by kind.
 
+*(Implemented 2026-10-08, core: `agent_mailbox/service_account.rs`. The
+migration happens on read and writes nothing by itself: `agent.json`
+without `service_account` is read with the agent's own account id, and a
+missing `service.json` is read from that agent's `agent.json` (service,
+created, the managed domain from its address). The record is written the
+first time it changes (a plan read, a verification, a domain, an agent
+added, or the first agent removed while others remain), and `agent.json`
+gains the field when next written; reading again gives the same answer.
+FFI: `list_service_accounts` (id, service, human email, verified, the
+plan as last read, the managed domain, agents' account ids in the
+accounts' order), `agent_service_account`, `add_agent(service account,
+name, domain, request id)` (the request id becomes the account id, so a
+retry returns the same agent; `domain` is a verified own domain, else the
+managed one), and `service_account_plan`,
+`start_service_account_verification`, `verify_service_account`,
+`find_service_account_code`, `service_account_api_key`,
+`rotate_service_account_key`, `service_account_send_rules`,
+`service_account_domains`, `add_service_account_domain`,
+`check_service_account_domain`, `service_account_domain_zone_file`. The
+per-agent calls (`agent_mailbox_plan`, `verify_agent_mailbox`,
+`agent_domains`, …) remain as wrappers that resolve the agent's service
+account. `MailboxService` gains `add_mailbox` (AgentMail's inbox; the
+default says the service adds none) and `rotate_key` (default
+unavailable: no Primitive endpoint is wired, so *Rotate Key* works only
+where a service implements it). Removing an agent, or an orphaned store,
+deletes the key only when no other agent on disk names its service
+account. A new service account takes the id of its first agent, as a
+migrated one does.)*
+
 **Creating one.** *Accounts › Create an Agent Mailbox…*, also on the
 welcome screen and in Settings › Accounts. A sheet:
 1. Asks for the agent's name, and shows the service (only Primitive at

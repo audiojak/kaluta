@@ -2,8 +2,10 @@
 //! user's agents on an agent-mail service, created and verified here with
 //! the service's own API, then synced like any account.
 //!
-//! The account directory holds `agent.json` (service, address, name); the
-//! service's API key is in the Keychain as `mailbox.api_key.<id>`.
+//! The account directory holds `agent.json` (service, address, name, and
+//! its service account); the key, plan, verification and own domains
+//! belong to the service account (ADR 0015, [`service_account`]), whose
+//! key is in the Keychain as `mailbox.api_key.<service account id>`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -20,8 +22,12 @@ use provider_api::{
 use serde::{Deserialize, Serialize};
 
 use crate::registry::{AccountKind, IndexEntry, accounts_dir};
-use crate::secrets::{self, keys};
+use crate::secrets::keys;
 use crate::{Core, CoreError, ErrorKind, runtime};
+
+mod service_account;
+
+pub use service_account::{AgentAdded, ServiceAccountSummary};
 
 const META_FILE: &str = "agent.json";
 /// How far back to look for a verification code before *Send Code*: the
@@ -47,7 +53,7 @@ pub enum AgentSendMode {
 }
 
 /// What an agent mailbox may do now (spec §7.9).
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
 pub struct AgentMailboxPlan {
     /// The service's plan name.
     pub name: String,
@@ -172,6 +178,13 @@ pub(crate) struct AgentMeta {
     /// own domain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_address: Option<String>,
+    /// The service account it belongs to (ADR 0015). Mailboxes created
+    /// before 2026-10-08 have none: see [`read_meta`].
+    #[serde(default)]
+    pub service_account: String,
+    /// AgentMail: the service's id for its inbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox_id: Option<String>,
 }
 
 pub(crate) fn read_meta(dir: &Path) -> Option<AgentMeta> {
@@ -181,6 +194,12 @@ pub(crate) fn read_meta(dir: &Path) -> Option<AgentMeta> {
     // domain as the address; read it as the agent's address there.
     meta.address = mailbox_address(&meta.address, &meta.name);
     meta.managed_address = meta.managed_address.map(|m| mailbox_address(&m, &meta.name));
+    // Mailboxes created before 2026-10-08 are a service account of their
+    // own, under their account id: the Keychain item keeps its name
+    // (`service_account` module docs).
+    if meta.service_account.is_empty() {
+        meta.service_account = dir.file_name()?.to_string_lossy().into_owned();
+    }
     Some(meta)
 }
 
@@ -277,12 +296,16 @@ pub(crate) struct AgentMailState {
     base: Mutex<Option<String>>,
     fake_service: Mutex<Option<Arc<FakeMailboxService>>>,
     fake_mailboxes: Mutex<HashMap<String, Arc<FakeProvider>>>,
-    /// When each account's last code was asked for.
+    /// When each service account's last code was asked for.
     verifications: Mutex<HashMap<String, i64>>,
+    /// Held while a service account's record is read and rewritten.
+    records: Mutex<()>,
+    /// Held while an agent is added, so two cannot take one address.
+    adding: tokio::sync::Mutex<()>,
 }
 
 impl Core {
-    fn mailbox_service(&self, service: AgentService) -> Result<Arc<dyn MailboxService>, CoreError> {
+    pub(crate) fn mailbox_service(&self, service: AgentService) -> Result<Arc<dyn MailboxService>, CoreError> {
         let state = &self.agent_mail;
         if state.fake.load(Ordering::SeqCst) {
             let mut fake = state.fake_service.lock().unwrap_or_else(|e| e.into_inner());
@@ -308,18 +331,18 @@ impl Core {
         self.agent_meta(account_id).is_some()
     }
 
-    fn agent_meta_or_err(&self, account_id: &str) -> Result<AgentMeta, CoreError> {
+    pub(crate) fn agent_meta_or_err(&self, account_id: &str) -> Result<AgentMeta, CoreError> {
         self.agent_meta(account_id).ok_or_else(|| CoreError::new(ErrorKind::NotFound, "not an agent mailbox"))
     }
 
-    fn agent_client(&self, account_id: &str) -> Result<(Arc<dyn MailboxService>, Redacted<String>), CoreError> {
-        let meta = self.agent_meta_or_err(account_id)?;
-        Ok((self.mailbox_service(meta.service)?, self.agent_key(account_id)?))
+    /// The agent's key: its service account's.
+    fn agent_key(&self, account_id: &str) -> Result<Redacted<String>, CoreError> {
+        self.service_key(&self.service_of(account_id)?)
     }
 
-    fn agent_key(&self, account_id: &str) -> Result<Redacted<String>, CoreError> {
-        secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(account_id))?
-            .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this agent mailbox's key is missing from the Keychain"))
+    /// The Keychain item holding an agent's key: its service account's.
+    pub(crate) fn agent_key_name(&self, account_id: &str) -> Option<String> {
+        self.agent_meta(account_id).map(|m| keys::mailbox_api_key(&m.service_account))
     }
 
     /// Bring the index and the store in line with the mailbox's address
@@ -422,13 +445,14 @@ impl Core {
 
 #[uniffi::export]
 impl Core {
-    /// Create a mailbox for an agent named `name` on `service` (spec §7.9).
-    /// Accepts the service's terms: call only from the user's *Agree and
-    /// Create*. The account is registered and its key stored; the app
-    /// then opens it and starts sync.
-    /// `request_id` is the sheet's own (a UUID): it becomes the account id
-    /// and the service's idempotency key, so a retry after a timeout or a
-    /// failure part way returns the same service account, never a second.
+    /// Create a mailbox for an agent named `name` on `service` (spec §7.9),
+    /// in a new service account. Accepts the service's terms: call only
+    /// from the user's *Agree and Create*. The account is registered and
+    /// its key stored; the app then opens it and starts sync.
+    /// `request_id` is the sheet's own (a UUID): it becomes the account id,
+    /// the service account's id and the service's idempotency key, so a
+    /// retry after a timeout or a failure part way returns the same
+    /// service account, never a second.
     pub async fn create_agent_mailbox(
         self: Arc<Self>,
         service: AgentService,
@@ -449,7 +473,27 @@ impl Core {
             let SignedUp { api_key, address, plan } =
                 client.sign_up(&name, &account_id).await.map_err(service_error)?;
             let address = mailbox_address(&address, &name);
+            let plan: AgentMailboxPlan = plan.into();
+            // The service account takes the id of its first agent.
             core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
+            {
+                let _guard = core.agent_mail.records.lock().unwrap_or_else(|e| e.into_inner());
+                let mut record = service_account::read_service(&core.data_path(), &account_id).unwrap_or(
+                    service_account::ServiceMeta {
+                        service,
+                        created_at: mail_sync::now_millis(),
+                        human_email: None,
+                        verified: false,
+                        plan: None,
+                        managed_domain: service_account::domain_of(&address),
+                        domains: vec![],
+                    },
+                );
+                record.verified = plan.verified;
+                record.human_email = plan.email.clone().or(record.human_email);
+                record.plan = Some(plan.clone());
+                service_account::write_service(&core.data_path(), &account_id, &record)?;
+            }
             let dir = accounts_dir(&core.data_path()).join(&account_id);
             write_meta(
                 &dir,
@@ -461,6 +505,8 @@ impl Core {
                     created_at: mail_sync::now_millis(),
                     send_mode: AgentSendMode::default(),
                     managed_address: Some(address.clone()),
+                    service_account: account_id.clone(),
+                    inbox_id: None,
                 },
             )?;
             let db = core.store_for(&account_id).await?;
@@ -479,87 +525,48 @@ impl Core {
             })
             .await?;
             tracing::info!(account = %account_id, service = client.name(), "agent mailbox created");
-            Ok(AgentMailboxCreated { account_id, address, plan: plan.into() })
+            Ok(AgentMailboxCreated { account_id, address, plan })
         })
         .await
     }
 
-    /// The mailbox's plan and limits now, from the service.
+    // The calls below take an agent's account id and act on its service
+    // account (ADR 0015); the app moves to the `service_account_*` calls.
+
+    /// The plan and limits now, from the service: the agent's service
+    /// account's.
     pub async fn agent_mailbox_plan(&self, account_id: String) -> Result<AgentMailboxPlan, CoreError> {
-        let meta = self.agent_meta_or_err(&account_id)?;
-        let client = self.mailbox_service(meta.service)?;
-        let key = self.agent_key(&account_id)?;
-        runtime::run(async move { client.plan(key.expose()).await.map(Into::into).map_err(service_error) }).await
+        self.service_account_plan(self.service_of(&account_id)?).await
     }
 
-    /// Email a verification code to `email`.
+    /// Email a verification code to `email`, for the agent's service account.
     pub async fn start_agent_mailbox_verification(
         &self,
         account_id: String,
         email: String,
     ) -> Result<AgentVerification, CoreError> {
-        let email = email.trim().to_owned();
-        if !email.contains('@') {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "enter an email address"));
-        }
-        let meta = self.agent_meta_or_err(&account_id)?;
-        let client = self.mailbox_service(meta.service)?;
-        let key = self.agent_key(&account_id)?;
-        let started: VerificationStarted =
-            runtime::run(async move { client.start_verification(key.expose(), &email).await.map_err(service_error) })
-                .await?;
-        self.agent_mail
-            .verifications
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(account_id, mail_sync::now_millis());
-        Ok(AgentVerification { resend_after_secs: started.resend_after_secs, expires_in_secs: started.expires_in_secs })
+        self.start_service_account_verification(self.service_of(&account_id)?, email).await
     }
 
     /// Confirm the code; the plan afterwards.
     pub async fn verify_agent_mailbox(&self, account_id: String, code: String) -> Result<AgentMailboxPlan, CoreError> {
-        let code = code.trim().to_owned();
-        if code.is_empty() {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "enter the code from the email"));
-        }
-        let meta = self.agent_meta_or_err(&account_id)?;
-        let client = self.mailbox_service(meta.service)?;
-        let key = self.agent_key(&account_id)?;
-        let plan = runtime::run(async move { client.verify(key.expose(), &code).await.map_err(service_error) }).await?;
-        self.agent_mail.verifications.lock().unwrap_or_else(|e| e.into_inner()).remove(&account_id);
-        Ok(plan.into())
+        self.verify_service_account(self.service_of(&account_id)?, code).await
     }
 
-    /// The verification code for `account_id`, if it has arrived in the
-    /// user's account `in_account_id` since the code was asked for: only
-    /// mail from the service's domain is read (spec §7.9). `None` until
-    /// then, or when no code was asked for.
+    /// The verification code for the agent's service account, if it has
+    /// arrived in the user's account `in_account_id` (see
+    /// `find_service_account_code`).
     pub async fn find_agent_mailbox_code(
         &self,
         account_id: String,
         in_account_id: String,
     ) -> Result<Option<String>, CoreError> {
-        let meta = self.agent_meta_or_err(&account_id)?;
-        let Some(asked) =
-            self.agent_mail.verifications.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).copied()
-        else {
-            return Ok(None);
-        };
-        let domain = self.mailbox_service(meta.service)?.code_sender_domain();
-        let db = self.store_for(&in_account_id).await?;
-        let since = asked - CODE_SLACK_MS;
-        runtime::run(async move {
-            let texts = db.read(move |c| mail_store::read::recent_text_from_domain(c, domain, since, 5)).await?;
-            Ok(texts.iter().find_map(|t| find_code(t)))
-        })
-        .await
+        self.find_service_account_code(self.service_of(&account_id)?, in_account_id).await
     }
 
-    /// The mailbox's API key, for an agent that calls the service itself
-    /// (*Copy API Key*, behind a confirmation in the app).
+    /// The agent's service account's API key (*Copy API Key*).
     pub fn agent_mailbox_api_key(&self, account_id: String) -> Result<String, CoreError> {
-        self.agent_meta_or_err(&account_id)?;
-        Ok(self.agent_key(&account_id)?.expose().clone())
+        self.service_account_api_key(self.service_of(&account_id)?)
     }
 
     /// Whether agents send from this mailbox without asking.
@@ -577,49 +584,27 @@ impl Core {
 
     /// Where this mailbox may send now, from the service, broadest first.
     pub async fn agent_send_rules(&self, account_id: String) -> Result<Vec<AgentSendRule>, CoreError> {
-        let (client, key) = self.agent_client(&account_id)?;
-        runtime::run(async move {
-            Ok(client.send_rules(key.expose()).await.map_err(service_error)?.into_iter().map(Into::into).collect())
-        })
-        .await
+        self.service_account_send_rules(self.service_of(&account_id)?).await
     }
 
-    /// The user's own domains on this mailbox's account.
+    /// The user's own domains on the agent's service account.
     pub async fn agent_domains(&self, account_id: String) -> Result<Vec<AgentDomain>, CoreError> {
-        let (client, key) = self.agent_client(&account_id)?;
-        runtime::run(async move {
-            Ok(client.domains(key.expose()).await.map_err(service_error)?.into_iter().map(Into::into).collect())
-        })
-        .await
+        self.service_account_domains(self.service_of(&account_id)?).await
     }
 
-    /// Add one of the user's domains (a subdomain such as
-    /// `agents.example.com` is the usual choice): the DNS records to create.
+    /// Add one of the user's domains to the agent's service account.
     pub async fn add_agent_domain(&self, account_id: String, domain: String) -> Result<AgentDomain, CoreError> {
-        let domain = domain.trim().trim_end_matches('.').to_lowercase();
-        if !domain.contains('.') || domain.contains('@') || domain.contains(char::is_whitespace) {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "enter a domain such as agents.example.com"));
-        }
-        let (client, key) = self.agent_client(&account_id)?;
-        runtime::run(
-            async move { client.add_domain(key.expose(), &domain).await.map(Into::into).map_err(service_error) },
-        )
-        .await
+        self.add_service_account_domain(self.service_of(&account_id)?, domain).await
     }
 
     /// Check a domain's records now.
     pub async fn check_agent_domain(&self, account_id: String, domain_id: String) -> Result<AgentDomain, CoreError> {
-        let (client, key) = self.agent_client(&account_id)?;
-        runtime::run(async move {
-            client.verify_domain(key.expose(), &domain_id).await.map(Into::into).map_err(service_error)
-        })
-        .await
+        self.check_service_account_domain(self.service_of(&account_id)?, domain_id).await
     }
 
     /// The records as a BIND zone file.
     pub async fn agent_domain_zone_file(&self, account_id: String, domain_id: String) -> Result<String, CoreError> {
-        let (client, key) = self.agent_client(&account_id)?;
-        runtime::run(async move { client.zone_file(key.expose(), &domain_id).await.map_err(service_error) }).await
+        self.service_account_domain_zone_file(self.service_of(&account_id)?, domain_id).await
     }
 
     /// Send and receive as `address`: the address the service gave the
@@ -633,6 +618,17 @@ impl Core {
             return Err(CoreError::new(ErrorKind::InvalidInput, "enter an address such as scout@agents.example.com"));
         }
         let mut meta = self.agent_meta_or_err(&account_id)?;
+        let taken = service_account::agents_on_disk(&self.data_path()).into_iter().any(|(other, a)| {
+            other != account_id
+                && a.service_account == meta.service_account
+                && (a.address == address || a.managed_address.as_deref() == Some(address.as_str()))
+        });
+        if taken {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!("another agent of this service account is {address}"),
+            ));
+        }
         let managed = meta.managed_address.clone().is_some_and(|m| m == address);
         if !managed {
             let domains = self.agent_domains(account_id.clone()).await?;
@@ -753,10 +749,14 @@ impl Core {
 }
 
 /// An in-memory agent-mail service: sign-up always works, the code is
-/// `123456`. Development and tests only; never a real account.
+/// `123456`. Development and tests only; never a real account. Like
+/// Primitive, one service account takes mail at any local part of its
+/// domain, so several agents can share it (`Core::add_agent`); each agent
+/// still has a fake mailbox of its own.
 #[derive(Default)]
 pub(crate) struct FakeMailboxService {
     accounts: Mutex<HashMap<String, MailboxPlan>>,
+    rotations: std::sync::atomic::AtomicU32,
     /// Domains by key; each check finds the records, as if DNS had caught up.
     domains: Mutex<HashMap<String, Vec<MailboxDomain>>>,
 }
@@ -844,6 +844,18 @@ impl MailboxService for FakeMailboxService {
         }
         *plan = fake_plan(true, plan.email.clone());
         Ok(plan.clone())
+    }
+
+    async fn rotate_key(&self, api_key: &str) -> ProviderResult<Redacted<String>> {
+        let mut accounts = self.accounts.lock().unwrap_or_else(|e| e.into_inner());
+        let plan = accounts.remove(api_key).ok_or(ProviderError::Unauthorized)?;
+        let fresh = format!("{api_key}-r{}", self.rotations.fetch_add(1, Ordering::SeqCst) + 1);
+        accounts.insert(fresh.clone(), plan);
+        let mut domains = self.domains.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(list) = domains.remove(api_key) {
+            domains.insert(fresh.clone(), list);
+        }
+        Ok(Redacted::new(fresh))
     }
 
     async fn send_rules(&self, api_key: &str) -> ProviderResult<Vec<SendRule>> {

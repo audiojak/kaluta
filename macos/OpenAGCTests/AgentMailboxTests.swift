@@ -31,6 +31,22 @@ struct AgentMailboxTests {
         #expect(CoreClient.usesFakeAgentMail)
     }
 
+    @Test func aSecondAgentSharesTheServiceAccountAndItsKey() async throws {
+        let (model, core) = try await modelWithAnAccount()
+        let scout = try await model.createAgentMailbox(name: "Scout")
+        let writer = try await core.addAgent(toServiceAccount: scout.accountId, name: "Writer")
+        #expect(writer.address == "writer@demo.primitive.email")
+        #expect(writer.serviceAccountId == scout.accountId)
+        let services = try await core.listServiceAccounts()
+        #expect(services.map(\.agentAccountIds) == [[scout.accountId, writer.accountId]])
+        #expect(try core.agentMailboxAPIKey(writer.accountId) == core.agentMailboxAPIKey(scout.accountId))
+        await #expect(throws: CoreClientError.self) {
+            try await core.addAgent(toServiceAccount: scout.accountId, name: "scout")
+        }
+        await model.reloadAccounts()
+        #expect(model.accounts.filter { $0.kind == .agent }.count == 2, "each agent is an account")
+    }
+
     @Test func creatingAMailboxShowsItWithItsLimitsAndSyncsItsMail() async throws {
         let (model, core) = try await modelWithAnAccount()
         let created = try await model.createAgentMailbox(name: "Research Scout")

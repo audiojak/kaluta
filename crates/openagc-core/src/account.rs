@@ -969,11 +969,7 @@ impl Core {
     /// Keychain that refuses to answer is an error, not "no credentials":
     /// the user must be told to sign in again rather than see nothing.
     pub fn account_has_credentials(&self, account_id: String) -> Result<bool, CoreError> {
-        let key = if self.is_agent(&account_id) {
-            keys::mailbox_api_key(&account_id)
-        } else {
-            keys::refresh_token(&account_id)
-        };
+        let key = self.agent_key_name(&account_id).unwrap_or_else(|| keys::refresh_token(&account_id));
         match self.secrets.get(key) {
             Ok(token) => Ok(token.is_some()),
             Err(e) => {

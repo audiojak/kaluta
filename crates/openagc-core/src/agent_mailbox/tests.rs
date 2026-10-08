@@ -62,6 +62,8 @@ fn the_agents_prompt_says_whose_mailbox_it_is_and_the_one_recipient_rule() {
         created_at: 0,
         send_mode: AgentSendMode::Freely,
         managed_address: None,
+        service_account: "a1".into(),
+        inbox_id: None,
     };
     let prompt = agent_prompt(&meta);
     assert!(prompt.contains("goes out as Scout <scout@abc.primitive.email>"));
@@ -273,6 +275,14 @@ fn a_primitive_mailbox_is_created_and_synced_over_its_api() {
         block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "req-5".into())).unwrap();
     assert_eq!(agent.address, "scout@abc.primitive.email");
     assert_eq!(key_of(&secrets, &agent.account_id), "prim_k");
+
+    // A second agent on the same Primitive account is a local part: no call.
+    let calls = rt.block_on(server.received_requests()).unwrap().len();
+    let writer =
+        block_on(core.clone().add_agent(agent.account_id.clone(), "Writer".into(), None, "req-5b".into())).unwrap();
+    assert_eq!(writer.address, "writer@abc.primitive.email");
+    assert_eq!(rt.block_on(server.received_requests()).unwrap().len(), calls, "adding an agent calls nothing");
+    assert_eq!(secrets.0.lock().unwrap().len(), 1, "one key for both");
     block_on(core.clone().set_current_account(agent.account_id.clone())).unwrap();
     core.clone().start_sync().unwrap();
     wait_for("the welcome message", || inbox_rows(&core) == 1);
@@ -489,4 +499,211 @@ fn where_the_mailbox_may_send_follows_verification_and_domains() {
             ("address".to_owned(), Some("me@example.com".to_owned())),
         ]
     );
+}
+
+/// The agent's `agent.json` and the service account as a mailbox made
+/// before 2026-10-08 left them: no `service_account`, no `service.json`.
+fn as_before_service_accounts(t: &Temp, account_id: &str) {
+    let path = t.0.join("accounts").join(account_id).join("agent.json");
+    let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    raw.as_object_mut().unwrap().remove("service_account");
+    std::fs::write(&path, serde_json::to_vec_pretty(&raw).unwrap()).unwrap();
+    std::fs::remove_dir_all(t.0.join("services")).unwrap();
+}
+
+fn service_file(t: &Temp, id: &str) -> std::path::PathBuf {
+    t.0.join("services").join(id).join("service.json")
+}
+
+#[test]
+fn a_mailbox_made_before_service_accounts_is_one_under_its_own_id_and_keeps_its_key() {
+    let (t, core, secrets) = core("migrate");
+    core.debug_use_fake_agent_mail(true);
+    let old =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "old-1".into())).unwrap();
+    let id = old.account_id.clone();
+    as_before_service_accounts(&t, &id);
+    let agent_json = std::fs::read(t.0.join("accounts").join(&id).join("agent.json")).unwrap();
+    let keys_before = secrets.0.lock().unwrap().clone();
+
+    // Read, not rewritten: its service account is itself, under the same key.
+    for _ in 0..2 {
+        assert_eq!(core.agent_service_account(id.clone()).unwrap(), id);
+        let listed = block_on(core.list_service_accounts()).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!((listed[0].id.as_str(), listed[0].agent_account_ids.clone()), (id.as_str(), vec![id.clone()]));
+        assert_eq!(listed[0].managed_domain.as_deref(), Some("demo.primitive.email"));
+        assert!(core.account_has_credentials(id.clone()).unwrap());
+        assert_eq!(core.agent_mailbox_api_key(id.clone()).unwrap(), key_of(&secrets, &id));
+    }
+    assert_eq!(std::fs::read(t.0.join("accounts").join(&id).join("agent.json")).unwrap(), agent_json);
+    assert!(!service_file(&t, &id).exists(), "nothing written by reading");
+    assert_eq!(*secrets.0.lock().unwrap(), keys_before, "nothing re-keyed");
+
+    // The first change writes the record; the key keeps its name.
+    block_on(core.agent_mailbox_plan(id.clone())).unwrap();
+    assert!(service_file(&t, &id).is_file());
+    assert_eq!(*secrets.0.lock().unwrap(), keys_before);
+
+    // A second agent joins it; removing the first keeps the key for the second.
+    let writer = block_on(core.clone().add_agent(id.clone(), "Writer".into(), None, "new-1".into())).unwrap();
+    assert_eq!(writer.service_account_id, id);
+    block_on(core.remove_account(id.clone())).unwrap();
+    assert_eq!(*secrets.0.lock().unwrap(), keys_before, "the second agent still uses it");
+    assert_eq!(core.agent_service_account(writer.account_id.clone()).unwrap(), id);
+    assert!(block_on(core.agent_mailbox_plan(writer.account_id.clone())).is_ok());
+    let listed = block_on(core.list_service_accounts()).unwrap();
+    assert_eq!(listed[0].agent_account_ids, vec![writer.account_id.clone()]);
+
+    // The last agent takes the key and the record with it.
+    block_on(core.remove_account(writer.account_id)).unwrap();
+    assert!(secrets.0.lock().unwrap().is_empty());
+    assert!(!service_file(&t, &id).exists());
+    assert!(block_on(core.list_service_accounts()).unwrap().is_empty());
+}
+
+#[test]
+fn a_migrated_mailbox_removed_alone_forgets_its_key() {
+    let (t, core, secrets) = core("migrate-remove");
+    core.debug_use_fake_agent_mail(true);
+    let old =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "old-2".into())).unwrap();
+    as_before_service_accounts(&t, &old.account_id);
+    block_on(core.remove_account(old.account_id.clone())).unwrap();
+    assert!(secrets.0.lock().unwrap().is_empty());
+    assert!(!t.0.join("services").join(&old.account_id).exists());
+}
+
+#[test]
+fn two_agents_share_one_key_one_verification_and_one_set_of_domains() {
+    let (t, core, secrets) = core("share");
+    core.debug_use_fake_agent_mail(true);
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "sa-1".into())).unwrap();
+    let service = scout.account_id.clone();
+    assert!(service_file(&t, &service).is_file());
+    let writer = block_on(core.clone().add_agent(service.clone(), "Writer".into(), None, "ag-2".into())).unwrap();
+    assert_eq!(writer.address, "writer@demo.primitive.email");
+    assert_ne!(writer.account_id, scout.account_id);
+
+    let keys = secrets.0.lock().unwrap().clone();
+    assert_eq!(keys.len(), 1, "one Keychain item: {keys:?}");
+    assert!(keys.contains_key(&keys::mailbox_api_key(&service)));
+    assert_eq!(
+        core.agent_mailbox_api_key(writer.account_id.clone()).unwrap(),
+        core.agent_mailbox_api_key(scout.account_id.clone()).unwrap()
+    );
+    assert!(core.account_has_credentials(writer.account_id.clone()).unwrap());
+
+    let listed = block_on(core.list_service_accounts()).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].agent_account_ids, vec![scout.account_id.clone(), writer.account_id.clone()]);
+    assert!(!listed[0].verified);
+    let accounts = block_on(core.list_accounts()).unwrap();
+    assert_eq!(accounts.len(), 2, "each agent is an account");
+    assert_eq!(accounts[1].display_name.as_deref(), Some("Writer"));
+
+    // Verifying through one agent verifies the service account, so both.
+    block_on(core.start_agent_mailbox_verification(writer.account_id.clone(), "me@example.com".into())).unwrap();
+    block_on(core.verify_agent_mailbox(writer.account_id.clone(), "123456".into())).unwrap();
+    assert!(block_on(core.agent_mailbox_plan(scout.account_id.clone())).unwrap().verified);
+    let listed = block_on(core.list_service_accounts()).unwrap();
+    assert!(listed[0].verified);
+    assert_eq!(listed[0].human_email.as_deref(), Some("me@example.com"));
+    assert!(listed[0].plan.as_ref().is_some_and(|p| p.verified));
+
+    // A domain added through one agent is the other's too.
+    let added = block_on(core.add_agent_domain(scout.account_id.clone(), "agents.example.com".into())).unwrap();
+    block_on(core.check_service_account_domain(service.clone(), added.id)).unwrap();
+    assert_eq!(block_on(core.agent_domains(writer.account_id.clone())).unwrap().len(), 1);
+    block_on(core.clone().set_agent_address(writer.account_id.clone(), "writer@agents.example.com".into())).unwrap();
+    assert!(
+        block_on(core.clone().set_agent_address(scout.account_id.clone(), "writer@agents.example.com".into())).is_err(),
+        "another agent's address"
+    );
+
+    // Rotating the key replaces the one item both agents use.
+    block_on(core.rotate_service_account_key(service.clone())).unwrap();
+    assert_eq!(secrets.0.lock().unwrap().len(), 1);
+    assert_ne!(key_of(&secrets, &service), keys[&keys::mailbox_api_key(&service)]);
+    assert!(block_on(core.agent_mailbox_plan(writer.account_id.clone())).unwrap().verified, "the new key works");
+
+    // Removing one agent keeps the key; removing the last forgets it.
+    block_on(core.remove_account(scout.account_id.clone())).unwrap();
+    assert!(secrets.0.lock().unwrap().contains_key(&keys::mailbox_api_key(&service)));
+    assert!(service_file(&t, &service).is_file());
+    assert_eq!(
+        block_on(core.agent_mailbox_plan(writer.account_id.clone())).unwrap().email.as_deref(),
+        Some("me@example.com")
+    );
+    block_on(core.remove_account(writer.account_id.clone())).unwrap();
+    assert!(secrets.0.lock().unwrap().is_empty());
+    assert!(!service_file(&t, &service).exists());
+}
+
+#[test]
+fn an_agents_address_is_unique_within_its_service_account() {
+    let (_t, core, _secrets) = core("unique");
+    core.debug_use_fake_agent_mail(true);
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "u-1".into())).unwrap();
+    let service = scout.account_id.clone();
+    let err = block_on(core.clone().add_agent(service.clone(), "  SCOUT ".into(), None, "u-2".into())).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    assert!(err.to_string().contains("scout@demo.primitive.email"), "{err}");
+
+    // A retry of the same request returns the same agent.
+    let writer = block_on(core.clone().add_agent(service.clone(), "Writer".into(), None, "u-3".into())).unwrap();
+    let again = block_on(core.clone().add_agent(service.clone(), "Writer".into(), None, "u-3".into())).unwrap();
+    assert_eq!(writer, again);
+    assert_eq!(block_on(core.list_accounts()).unwrap().len(), 2);
+
+    // An own domain must be one of the service account's verified ones.
+    assert!(
+        block_on(core.clone().add_agent(
+            service.clone(),
+            "Clerk".into(),
+            Some("agents.example.com".into()),
+            "u-4".into()
+        ))
+        .is_err()
+    );
+    let added = block_on(core.add_service_account_domain(service.clone(), "agents.example.com".into())).unwrap();
+    block_on(core.check_service_account_domain(service.clone(), added.id)).unwrap();
+    let clerk = block_on(core.clone().add_agent(
+        service.clone(),
+        "Clerk".into(),
+        Some("Agents.Example.com".into()),
+        "u-4".into(),
+    ))
+    .unwrap();
+    assert_eq!(clerk.address, "clerk@agents.example.com");
+    assert_eq!(
+        core.agent_meta(&clerk.account_id).unwrap().managed_address.as_deref(),
+        Some("clerk@demo.primitive.email")
+    );
+    // Its managed address is taken too.
+    assert!(block_on(core.clone().add_agent(service.clone(), "Clerk".into(), None, "u-5".into())).is_err());
+    assert!(block_on(core.clone().add_agent("nope".into(), "Other".into(), None, "u-6".into())).is_err());
+}
+
+#[test]
+fn a_second_agent_syncs_its_own_fake_mailbox() {
+    let (_t, core, _secrets) = core("two-sync");
+    core.debug_use_fake_agent_mail(true);
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "s-1".into())).unwrap();
+    let writer =
+        block_on(core.clone().add_agent(scout.account_id.clone(), "Writer".into(), None, "s-2".into())).unwrap();
+    block_on(core.clone().set_current_account(writer.account_id.clone())).unwrap();
+    assert!(block_on(core.clone().start_all_sync()).unwrap().is_empty(), "nothing needs a sign-in");
+    core.debug_deliver_to_agent_mailbox(
+        writer.account_id.clone(),
+        "ada@example.com".into(),
+        "Hi".into(),
+        "Hello".into(),
+    )
+    .unwrap();
+    wait_for("the delivered mail", || inbox_rows(&core) == 1);
+    core.stop_sync();
 }

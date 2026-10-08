@@ -490,6 +490,8 @@ impl Core {
         if !crate::mail::valid_account_id(&account_id) || account_id == DEMO_ACCOUNT_ID {
             return Err(CoreError::new(ErrorKind::InvalidInput, "not a removable account"));
         }
+        // An agent's service account, read before its directory goes.
+        let service_account = self.agent_meta(&account_id).map(|m| m.service_account);
         // Mark it first so nothing reopens it, then stop everything that
         // uses it, and delete under the index lock.
         self.open_accounts.write().unwrap_or_else(|e| e.into_inner()).removed.insert(account_id.clone());
@@ -499,7 +501,9 @@ impl Core {
         self.close_store(&account_id);
         self.secrets.delete(crate::secrets::keys::refresh_token(&account_id))?;
         self.secrets.delete(crate::account::client_key(&account_id))?;
-        self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id))?;
+        // An agent's key is its service account's: it goes with the last
+        // agent (ADR 0015).
+        self.release_service_account(service_account.as_deref().unwrap_or(&account_id), &account_id)?;
         let data_dir = self.data_path();
         let _guard = self.index_lock.lock().await;
         runtime::run(async move {
@@ -596,10 +600,11 @@ impl Core {
         if !orphans.iter().any(|o| o.id == account_id) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "that store belongs to an account"));
         }
+        let service_account = self.agent_meta(&account_id).map(|m| m.service_account);
         self.close_store(&account_id);
         let _ = self.secrets.delete(crate::secrets::keys::refresh_token(&account_id));
         let _ = self.secrets.delete(crate::account::client_key(&account_id));
-        let _ = self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id));
+        let _ = self.release_service_account(service_account.as_deref().unwrap_or(&account_id), &account_id);
         let dir = accounts_dir(&self.data_path()).join(&account_id);
         runtime::run(async move {
             tokio::fs::remove_dir_all(dir).await.map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))

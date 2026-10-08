@@ -82,7 +82,19 @@ pub enum SendRule {
     Address(String),
 }
 
+/// Another mailbox on a service account, for one more agent (ADR 0015).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedMailbox {
+    /// The mailbox's address.
+    pub address: String,
+    /// The service's id for it (AgentMail's `inbox_id`).
+    pub inbox_id: String,
+}
+
 /// One agent-mail service: everything about an account that is not mail.
+/// An account here is a *service account* (ADR 0015): what the service
+/// calls an organisation or an account, with one key shared by every
+/// mailbox in it.
 #[async_trait]
 pub trait MailboxService: Send + Sync {
     /// A short name for logs ("primitive").
@@ -102,6 +114,24 @@ pub trait MailboxService: Send + Sync {
     async fn start_verification(&self, api_key: &str, email: &str) -> ProviderResult<VerificationStarted>;
     /// Confirm the code; the account's plan afterwards.
     async fn verify(&self, api_key: &str, code: &str) -> ProviderResult<MailboxPlan>;
+
+    /// Create another mailbox on the account, for another agent, with no
+    /// sign-up. Services whose mailboxes are local parts of one account
+    /// (Primitive) need no call and leave this as it is; AgentMail creates
+    /// an inbox (`POST /v0/inboxes`).
+    async fn add_mailbox(
+        &self,
+        _api_key: &str,
+        _username: &str,
+        _domain: Option<&str>,
+        _display_name: &str,
+    ) -> ProviderResult<AddedMailbox> {
+        Err(crate::ProviderError::Unavailable("this service adds no mailboxes to an account".into()))
+    }
+    /// Replace the account's key with a new one; the old one stops working.
+    async fn rotate_key(&self, _api_key: &str) -> ProviderResult<Redacted<String>> {
+        Err(crate::ProviderError::Unavailable("this service cannot replace its key from the app".into()))
+    }
 
     /// Where the account may send now, broadest rule first.
     async fn send_rules(&self, _api_key: &str) -> ProviderResult<Vec<SendRule>> {
