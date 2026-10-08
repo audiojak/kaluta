@@ -16,7 +16,13 @@ struct MainWindow: View {
                 OnboardingView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             default:
-                mailWindow
+                // Review mode (spec §14.10, §14.11) takes the whole window
+                // until Done; the split view comes back as it was.
+                if let mode = model.reviewMode {
+                    ReviewModeView(mode: mode)
+                } else {
+                    mailWindow
+                }
             }
         }
         .focusedSceneValue(\.isMailWindow, true)
@@ -283,6 +289,8 @@ struct MainWindow: View {
             categoryTabs
             taskTabs
             if model.isGuide { GuideActivityStrip() }
+            if model.isGuide { ReviewBand(mode: .rules) }
+            if model.isFacts { ReviewBand(mode: .facts) }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,

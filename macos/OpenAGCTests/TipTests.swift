@@ -27,16 +27,6 @@ struct TipTests {
         var elsewhere = inbox
         elsewhere.inInbox = false
         #expect(Tip.next(dismissed: [], context: elsewhere) == nil)
-        // The Writing Guide and Facts pages each explain themselves once.
-        var guide = elsewhere
-        guide.inGuide = true
-        #expect(Tip.next(dismissed: [], context: guide) == .guide)
-        #expect(Tip.next(dismissed: ["guide"], context: guide) == nil)
-        var facts = elsewhere
-        facts.inFacts = true
-        #expect(Tip.next(dismissed: [], context: facts) == .facts)
-        #expect(Tip.next(dismissed: ["facts"], context: facts) == nil, "put away for good")
-        #expect(Tip.facts.action == "Learning Settings…" && Tip.facts.dismiss == "Got It")
         var agentMailbox = inbox
         agentMailbox.categoriesAvailable = false
         agentMailbox.importantAvailable = false

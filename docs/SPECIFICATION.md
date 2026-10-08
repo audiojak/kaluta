@@ -2690,24 +2690,42 @@ originals and signature stripped), and each pair records its distance
 - *Cost cap*: at most 50 pairs a day (Settings); the rest wait for the
   next day, oldest first.
 
-**Proposed rules in the Writing Guide** (amended 2026-10-07). The
-Writing Guide's page behaves like a mailbox. Its list begins with a
-*Waiting for you · N* section: one row per proposed rule, the learning
-runs' decisions (§14.9) first and the daily reviews' proposed changes
-after, each row the statement with a caption (the change: *new*, a change,
-*remove*; its category; its strength, "seen in 4 replies"), then a
-*Collecting evidence · N* section for patterns short of the threshold,
-then the categories. *Accept All* sits in the Waiting section's header
-and takes every proposed rule that goes against none of the user's.
-Choosing a row shows its card in the detail, as a message shows in the
-reader: the change, its actions, and for a review proposal its evidence,
-side by side snippets of what the AI wrote and what the user sent, with
-the differing words marked (*Why?* shows them all). Return accepts, ⌫
-rejects, e edits; after a decision the next row waiting is chosen, and
-when none is left the chosen category shows again. Choosing a category
-leaves the flow. Before 2026-10-07 the header carried a *Review N
-Proposed Rules* button that filled the detail with every card at once;
-the rows replaced it so the page needs no navigation of its own.
+**Proposed rules and Review mode** (amended 2026-10-07). Deciding is a
+different activity from reading mail, so it has a mode of its own. The
+Writing Guide's list shows the categories only; under its title a band
+says, large, how many proposed rules wait ("3 proposed rules waiting for
+you", or "2 patterns collecting evidence" when only those do) with one
+button, *Review*. The band, the sidebar badge and the daily notification
+are the ways in; nothing enters the mode by itself.
+
+In Review mode the whole window is the decision: sidebar and reader are
+gone until *Done* (top left, also Esc). The toolbar shows the title
+("Proposed Rules"), the progress ("3 of 7") and *Accept All*. On the
+left, the queue (340 points): every decision the mode opened on, the
+learning runs' decisions (§14.9) first, the daily reviews' proposed
+changes after, patterns short of the threshold last under *Collecting
+evidence*; each row a symbol, the statement and a caption (the change:
+*new*, a change, *remove*; its category; its strength, "seen in 4
+replies"). The current row is highlighted; arrows or j and k move. On
+the right, the current decision as a document in large type, with the
+same cues on both pages: a kind chip (Rule, Guideline, Fact), a category
+chip, a source chip ("From learning your sent mail", "From the daily
+review", "Collecting evidence"); the statement in display type, a change
+with the old line struck above the new; a caution block for a conflict
+("Goes against an entry of yours", with *Use This Instead* and *Keep
+Mine*); the evidence as blockquotes, and for a review proposal the
+messages behind it, the AI's draft beside what the user sent with the
+differing words marked (*Show All N Messages*). The actions sit in a bar
+at the bottom (*Accept*, *Edit…*, *Reject*; Return, e, ⌫) with ⌘Z named
+beside them. After a decision the next one waiting becomes current.
+Decided items stay in the queue, dimmed with their outcome (*Accepted*,
+*Left out*, *Used instead of yours*), until the user leaves, so the run
+is visible and Undo has somewhere to land: an item Undo puts back waits
+again. When nothing is left, the right pane shows the run's summary ("5
+added to your writing guide, 2 left out") with *Done* and *Undo*. The
+window keeps its size throughout. Before 2026-10-07 the header carried a
+*Review N Proposed Rules* button that filled the detail with every card
+at once.
 
 The Writing Guide's actions are in the window toolbar when the page is
 open, where the mail actions would be: *Learn from Sent Mail*, a *More*
@@ -2716,8 +2734,7 @@ Now*, merge and export) and *Learning Settings*. The list's subtitle
 says how many entries, how many wait and when learning last ran
 ("Learned today"). Over the list, only what is happening now: the
 learning progress bars while a run is going, the review's progress while
-it runs, and why a review waits or failed. What the page is for is a tip
-(§14.3's tip card) shown until the user puts it away.
+it runs, and why a review waits or failed.
 
 Each decision is one change on the account's undo stack (§14.6a),
 recorded with the guide's own change so one Undo puts the guide and the
@@ -2852,22 +2869,25 @@ left out), so a long list need not sit in every prompt; tool names allow
 no dots.
 
 **The Facts page** (a sidebar entry under the Writing Guide, laid out like
-it; amended 2026-10-07): it behaves like a mailbox. Its actions are in
-the window toolbar when the page is open: *Add Fact*, a *Categories* menu
-(*Add Category…*, *Add Categories › From a Starter Set…*, export and
-merge) and *Learning Settings*. The list begins with a *Waiting for you ·
-N* section, one row per proposed fact, category or starter set (what it
-would say, with where it comes from as a caption), *Accept All* in its
-header; choosing a row shows its card in the detail, with the quote it
-came from, how freely drafts may use it (*Use freely*, *Ask before
-using*, *Never share*; preset to the category's default, or the fact's
-own for a change, applied in the same change), *Accept* and *Reject*.
-Return accepts, ⌫ rejects; the next row waiting is then chosen. The
-subtitle says how many facts, how many wait and when the review last ran;
-what the page is for, and where facts are learned from, is a tip shown
-until the user puts it away, and Learning Settings. Before 2026-10-07 a
-header over the list held the buttons and a *Review N Proposed Facts*
-button that filled the detail with every card. Below, the list shows facts by category, with a globe on global ones,
+it; amended 2026-10-07): its actions are in the window toolbar when the
+page is open: *Add Fact*, a *Categories* menu (*Add Category…*, *Add
+Categories › From a Starter Set…*, export and merge) and *Learning
+Settings*. Under the title a band says, large, how many proposed facts
+wait, with *Review*, which opens Review mode (§14.10) on them: the
+queue of proposed facts, categories and starter sets on the left, the
+current one on the right as a document: a kind chip (Fact, Changed fact,
+Category, Starter set), the category and source chips, the label small
+and the value in display type (a change with the old value struck), the
+quote it came from as a blockquote, and *Drafts may* with how freely
+drafts may use it (*Use freely*, *Ask before using*, *Never share*;
+preset to the category's default, or the fact's own for a change,
+applied in the same change) and one line saying what the choice means;
+*Accept* and *Reject* in the bar below. Return accepts, ⌫ rejects; the
+next one waiting is then current; decided ones stay dimmed with their
+outcome until *Done*. The subtitle says how many facts, how many wait
+and when the review last ran. Before 2026-10-07 a header over the list
+held the buttons and a *Review N Proposed Facts* button that filled the
+detail with every card. The list shows facts by category, with a globe on global ones,
 custom categories after the built-in ones in the user's order. The
 sidebar entry counts proposed facts and shows a red dot while one is new.
 On a fact: edit, delete, change *use*, *Make

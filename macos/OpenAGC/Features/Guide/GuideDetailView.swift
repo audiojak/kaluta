@@ -1,15 +1,13 @@
 import SwiftUI
 
-/// The Writing Guide section's detail column: the chosen proposed rule's
-/// card, or the chosen category's entries, read like a document, with
-/// their scope and the quotes from the user's mail behind them.
+/// The Writing Guide section's detail column: the chosen category's
+/// entries, read like a document, with their scope and the quotes from
+/// the user's mail behind them. Proposed rules are decided in Review mode.
 struct GuideDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.analysis.reviewingRules {
-            ProposedRuleDetail()
-        } else if let category = model.guide.selected {
+        if let category = model.guide.selected {
             GuideCategoryDetail(category: category)
         } else {
             ContentUnavailableView("No Category Selected", systemImage: "text.book.closed")

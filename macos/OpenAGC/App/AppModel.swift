@@ -135,9 +135,7 @@ final class AppModel {
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
             agentShown: agent.isPresented,
-            importantAvailable: !isAgentMailbox,
-            inGuide: isGuide,
-            inFacts: isFacts))
+            importantAvailable: !isAgentMailbox))
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -148,7 +146,6 @@ final class AppModel {
         case (.agent, true):
             agent.isPresented = true
             focusAgentPrompt()
-        case (.guide, true), (.facts, true): guideSheet = .analysisSettings
         default: break
         }
         dismissedTips.insert(tip.rawValue)
@@ -321,6 +318,13 @@ final class AppModel {
     /// Create an Agent Mailbox, or verify one, while its sheet is open
     /// (spec §7.9).
     var agentMailboxSheet: AgentMailboxRequest?
+    /// Review mode (spec §14.10, §14.11): deciding in the whole window.
+    var reviewMode: ReviewMode?
+    /// What the mode opened on, decided ones included, until Done.
+    var reviewItems: [ReviewItem] = []
+    /// How each decided item went, by tag; an item back in the stores
+    /// (Undo) waits again whatever this says.
+    var reviewOutcomes: [String: ReviewItem.Outcome] = [:]
     /// Agent mailboxes' plans as the service last reported them.
     var agentPlans: [String: AgentMailboxPlan] = [:]
     /// The task dialog, while open (spec §14.8).

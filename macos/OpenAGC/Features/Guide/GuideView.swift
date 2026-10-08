@@ -34,55 +34,16 @@ enum GuideSheet: Identifiable {
     }
 }
 
-/// The Writing Guide section's list column (spec §14.9): what waits for
-/// a decision first (the learning run's decisions and the daily review's
-/// proposed rules, as rows the user goes down like mail; then the
-/// patterns still collecting evidence), then every category by group with
-/// how much of the guide covers it. A proposal's card shows in the
-/// detail; Return accepts, ⌫ rejects, e edits, and the next one is chosen.
+/// The Writing Guide section's list column (spec §14.9): every category
+/// by group with how much of the guide covers it. What waits for a
+/// decision is counted on the band over it and decided in Review mode.
 struct GuideView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
 
     var body: some View {
         @Bindable var guide = model.guide
-        let decisions = model.guide.decisions
-        let proposals = model.analysis.proposals
-        let watching = model.analysis.watching
-        // The chosen row: a proposal while reviewing, else the category.
-        List(selection: Binding(get: { model.analysis.reviewingRules ? model.analysis.selection : model.guide.selectedCategory },
-                                set: { model.chooseGuideRow($0) })) {
-            if !decisions.isEmpty || !proposals.isEmpty {
-                Section {
-                    ForEach(decisions, id: \.id) { entry in
-                        ProposedRuleRow(statement: entry.statement, caption: Self.caption(entry, in: model),
-                                        symbol: entry.contradictionOf == nil ? "plus.circle" : "arrow.triangle.2.circlepath")
-                            .tag(AnalysisStore.tag(entry))
-                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
-                    }
-                    ForEach(proposals, id: \.id) { proposal in
-                        ProposedRuleRow(statement: proposal.statement, caption: Self.caption(proposal, in: model),
-                                        symbol: proposal.symbol)
-                            .tag(AnalysisStore.tag(proposal))
-                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
-                    }
-                } header: {
-                    WaitingSectionHeader(count: decisions.count + proposals.count,
-                                         acceptAllHelp: "Accept every proposed rule that goes against none of yours") {
-                        Task { await model.acceptAllProposedRules() }
-                    }
-                }
-            }
-            if !watching.isEmpty {
-                Section(watching.count == 1 ? "Collecting evidence · 1" : "Collecting evidence · \(watching.count)") {
-                    ForEach(watching, id: \.id) { proposal in
-                        ProposedRuleRow(statement: proposal.statement, caption: Self.caption(proposal, in: model),
-                                        symbol: proposal.symbol)
-                            .foregroundStyle(.secondary)
-                            .tag(AnalysisStore.tag(proposal))
-                    }
-                }
-            }
+        List(selection: Binding(get: { model.guide.selectedCategory }, set: { model.showGuideCategory($0) })) {
             ForEach(guide.sections, id: \.group) { section in
                 Section(section.name) {
                     ForEach(section.categories, id: \.id) { category in
@@ -96,12 +57,6 @@ struct GuideView: View {
         // Tab from the sidebar (the main window's loop, spec §14.3).
         .focused($focused)
         .onChange(of: model.threadListFocusRequests) { focused = true }
-        .onKeyPress(.return) { decide(.accept) }
-        .onDeleteCommand { _ = decide(.reject) }
-        .onKeyPress(characters: .init(charactersIn: "e"), phases: .down) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            return decide(.edit)
-        }
         .overlay {
             if model.guide.loaded, model.guide.categories.isEmpty {
                 ContentUnavailableView("No Writing Guide", systemImage: "text.book.closed")
@@ -109,71 +64,6 @@ struct GuideView: View {
         }
         .task { await model.guide.load() }
     }
-
-    /// "A1 Overall voice · Guideline · 2 messages show this".
-    static func caption(_ entry: GuideEntry, in model: AppModel) -> String {
-        let name = model.guide.categories.first { $0.id == entry.category }?.name ?? ""
-        var parts = ["\(entry.category) \(name)", entry.kind.title]
-        if entry.contradictionOf != nil { parts.append("goes against yours") }
-        parts.append("\(entry.support.formatted()) \(entry.support == 1 ? "message shows" : "messages show") this")
-        return parts.joined(separator: " · ")
-    }
-
-    /// "Change · A1 Overall voice · Seen in 2 messages".
-    static func caption(_ proposal: AnalysisProposalInfo, in model: AppModel) -> String {
-        let name = model.guide.categories.first { $0.id == proposal.category }?.name ?? ""
-        var parts = [proposal.title, "\(proposal.category) \(name)"]
-        parts.append(proposal.watching ? "\(proposal.strength), waiting for more" : proposal.strength)
-        return parts.joined(separator: " · ")
-    }
-
-    private enum Decision { case accept, reject, edit }
-
-    /// The keys on a chosen row of the Waiting section; a category row
-    /// takes none of them.
-    private func decide(_ decision: Decision) -> KeyPress.Result {
-        guard model.analysis.reviewingRules, let tag = model.analysis.selection else { return .ignored }
-        if let entry = model.guide.decisions.first(where: { AnalysisStore.tag($0) == tag }) {
-            switch decision {
-            case .accept: Task { await model.acceptDecision(entry) }
-            case .reject: Task { await model.decideProposedRule(reject: entry) }
-            case .edit: model.guideSheet = .edit(entry, category: entry.category)
-            }
-            return .handled
-        }
-        guard let proposal = model.analysis.selectedProposal else { return .ignored }
-        switch decision {
-        case .accept: Task { await model.decideProposedRule(proposal, accept: true) }
-        case .reject: Task { await model.decideProposedRule(proposal, accept: false) }
-        case .edit:
-            guard proposal.op != .remove else { return .ignored }
-            model.guideSheet = .proposal(proposal)
-        }
-        return .handled
-    }
-}
-
-/// A proposed rule, a learning decision or a pattern collecting evidence
-/// as a row of the list: what it says and where it comes from.
-private struct ProposedRuleRow: View {
-    let statement: String
-    let caption: String
-    let symbol: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-            Image(systemName: symbol).foregroundStyle(.tint)
-                .frame(width: Self.symbolWidth)
-            VStack(alignment: .leading, spacing: Space.hair) {
-                Text(statement).lineLimit(2)
-                Text(caption).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Proposed: \(statement). \(caption)")
-    }
-
-    private static let symbolWidth: CGFloat = 16
 }
 
 /// Over the category list while something runs (spec §14.9, §14.10): the

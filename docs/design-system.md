@@ -78,6 +78,8 @@ controls), `card` 8 (cards), `panel` 12 (floating panels). Capsules use
 | `code` / `codeCaption` | body / caption, monospaced | ids, paths, logs |
 | `fine` | caption2 | the sidebar's sync detail |
 | `welcome` | title semibold | onboarding's heading |
+| `display` | title semibold | the one thing a page is about: a decision's statement in Review mode, the count on its band |
+| `reading` | title3 | reading text beside `display`: quotes, explanations, scopes |
 
 The AppKit thread row uses `TypeRole.rowSender(unread:)` (13 pt, semibold
 when unread), `rowSubject(unread:)` (12 pt, medium when unread),
@@ -166,15 +168,20 @@ is only for "approved". Orange is text or a band's fill, never an error.
   (the writing guide's questions): a number key (1 to 9), the answer, and
   a check on the answer given before. Choosing it answers and goes on, so
   such a question has no Save; *Back* returns to the question before.
-- **Review flows** (proposed rules, proposed facts): the page behaves
-  like a mailbox. What waits is a *Waiting for you · N* section at the
-  top of the list (`WaitingSectionHeader`, with *Accept All* as a link
-  button), one row per proposal with a symbol, the statement and a
-  caption; the chosen row's card shows in the detail
-  (`.card(.attention)`, its Return action `.defaultAction(true)`). Return
-  and ⌫ on the list decide and choose the next row. The page's actions
-  are in the window toolbar, never in a strip over the list; what the
-  page is for is a `TipCard`, never a permanent sentence.
+- **Review mode** (proposed rules, proposed facts; `ReviewModeView`):
+  deciding takes the whole window, entered only from the page's
+  `ReviewBand` (the count in `TypeRole.display`, one prominent *Review*
+  button, `.card(.attention)`), the sidebar badge or a notification;
+  *Done* (Esc) leaves. Left, the queue (`ReviewQueueView`, 340 points):
+  one row per decision, symbol, statement in `TypeRole.heading`, caption;
+  decided rows dim to 0.55 with an outcome symbol and stay until Done.
+  Right, the decision as a document at a 680-point reading width: a cue
+  row (kind, category, source chips in `TypeRole.groupLabel`), the
+  statement in `TypeRole.display`, reading text in `TypeRole.reading`,
+  quotes as blockquotes with a 3-point tinted rule, conflicts in
+  `.card(.caution)`; the actions in a `.bar` strip pinned to the bottom,
+  `.controlSize(.large)`, with the keys named beside them. The page's
+  actions are in the window toolbar, never in a strip over the list.
 - **`NewDot`**: the small red dot after a sidebar entry with something
   new since the user last looked (proposed rules on the Writing Guide,
   proposed facts on Facts, spec §14.10). It clears when

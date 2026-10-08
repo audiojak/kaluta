@@ -33,14 +33,11 @@ extension AppModel {
         return status == .running || status == .paused
     }
 
-    /// Open the Writing Guide's review flow on its first proposed rule (the
-    /// learning decisions first when asked).
+    /// Open Review mode on the Writing Guide's proposed rules (the first
+    /// learning decision current when asked).
     func openProposedRules(learning: Bool = false) {
-        guidePrompt = nil
-        selectedMailboxID = Self.guideMailboxID
-        analysis.reviewingRules = true
-        let first = learning ? guide.decisions.first.map(AnalysisStore.tag) : nil
-        analysis.selection = first ?? proposedRuleTags.first
+        enterReview(.rules)
+        if learning, let first = guide.decisions.first { analysis.selection = AnalysisStore.tag(first) }
     }
 
     /// The Writing Guide's proposed rules, in list order.
@@ -59,33 +56,9 @@ extension AppModel {
     private func selectNextProposedRule(after tag: String?, in before: [String]) {
         guard let tag, let at = before.firstIndex(of: tag) else { return }
         let left = proposedRuleTags
-        let next = before[(at + 1)...].first { left.contains($0) } ?? before[..<at].last { left.contains($0) }
-        analysis.selection = next
-        // Nothing left to decide: the list's chosen category shows again.
-        if next == nil { analysis.reviewingRules = false }
+        analysis.selection = before[(at + 1)...].first { left.contains($0) }
+            ?? before[..<at].last { left.contains($0) }
     }
-
-    /// Whether `tag` names a proposed rule, a learning decision or a
-    /// pattern still collecting evidence: a row of the list's Waiting
-    /// section, not a category.
-    func isProposedRuleTag(_ tag: String) -> Bool {
-        AnalysisStore.isProposalTag(tag)
-    }
-
-    /// A row of the Writing Guide's list chosen: a proposal shows its card
-    /// in the detail, a category its entries.
-    func chooseGuideRow(_ tag: String?) {
-        if let tag, isProposedRuleTag(tag) {
-            analysis.selection = tag
-            analysis.reviewingRules = true
-        } else {
-            showGuideCategory(tag)
-        }
-    }
-
-    /// The rows of the list's Waiting section, in order: the learning
-    /// decisions, then the review's proposals.
-    var waitingRuleTags: [String] { proposedRuleTags }
 
     /// Accept a learning decision; one that goes against an accepted entry
     /// replaces it, as its default button says.
@@ -129,7 +102,6 @@ extension AppModel {
         if !proposals.isEmpty { await decideAnalysis(proposals, accept: true) }
         await analysis.load()
         analysis.selection = proposedRuleTags.first
-        if analysis.selection == nil { analysis.reviewingRules = false }
     }
 
     /// Looking at a page's proposals: read them, and clear its dot.
