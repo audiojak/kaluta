@@ -385,9 +385,43 @@ struct CleanUpTests {
 
     // MARK: Loading every header (spec §14.12)
 
-    private func status(window: SyncWindow, cheap: Bool, gmail: Bool = true) -> CleanupLoadStatus {
-        CleanupLoadStatus(hasSyncWindow: gmail, window: window, cheapHeaders: cheap, headersWaiting: 0,
-                          bodiesWaiting: 0)
+    private func status(window: SyncWindow, cheap: Bool, gmail: Bool = true, paused: Bool = false)
+        -> CleanupLoadStatus {
+        CleanupLoadStatus(hasSyncWindow: gmail, window: window, cheapHeaders: cheap, headersWaiting: paused ? 2_000 : 0,
+                          bodiesWaiting: 0, headersPaused: paused)
+    }
+
+    /// oagc-merk.8: IMAP refused after Clean Up began loading every header.
+    @Test func aHeaderLoadWaitingForIMAPAsksBeforeLoadingTheRestWhole() {
+        let waiting = status(window: .everything, cheap: false, paused: true)
+        #expect(CleanUpLoadPlan.of(waiting, declined: false) == .ask, "the same question as without IMAP")
+        #expect(CleanUpLoadPlan.of(waiting, declined: true) == .nothing, "Not Now holds for the session")
+        #expect(CleanUpLoadPlan.of(status(window: .everything, cheap: false), declined: false) == .nothing,
+                "an Everything window from before Clean Up downloads as it always did")
+
+        let question = CleanUpLoadQuestion(accountID: "acct", messages: 2_000, seconds: 480, paused: true)
+        #expect(question.message == "Gmail refused IMAP for this account, so headers for 2,000 older messages "
+            + "stopped loading. Over the Gmail API they come down whole and take about 8 minutes.")
+        #expect(question.detail == CleanUpLoadQuestion.pausedDetail)
+        #expect(CleanUpLoadQuestion(accountID: "acct", messages: 1, seconds: 1, paused: false).detail
+            == CleanUpLoadQuestion.detail)
+
+        let store = bare()
+        store.loadQuestion = question
+        store.answerLoadQuestion(load: false)
+        #expect(store.loadQuestion == nil)
+        #expect(store.declinedLoads.contains("acct"))
+    }
+
+    @Test func theBandSaysTheHeadersWaitAndResumesWhenTheyMove() {
+        let store = bare()
+        store.headerLoad = CleanUpHeaderLoad(total: 5_000, remaining: 2_000, widened: true, paused: true)
+        #expect(store.headerLoad?.text == "Waiting for IMAP — headers for 2,000 older messages are still to load")
+        store.syncChanged(pending: 0, headers: 2_000, accountID: nil)
+        #expect(store.headerLoad?.paused == true, "no movement: still waiting")
+        store.syncChanged(pending: 0, headers: 1_000, accountID: nil)
+        #expect(store.headerLoad?.paused == false, "IMAP is back")
+        #expect(store.headerLoad?.text == "Loading headers for all mail — 4,000 of 5,000")
     }
 
     @Test func openingDecidesWhetherToWidenAskOrDoNothing() {

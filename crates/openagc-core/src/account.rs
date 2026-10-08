@@ -899,8 +899,13 @@ impl Core {
             None => {
                 let db = self.db()?;
                 runtime::run(async move {
-                    db.write(move |tx| mail_store::read::set_sync_state(tx, mail_sync::KEY_WINDOW, window.as_str()))
-                        .await?;
+                    // The user's window: its headers-only tier is not
+                    // Clean Up's (spec §14.12), as `set_window` does.
+                    db.write(move |tx| {
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_WINDOW, window.as_str())?;
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_CLEANUP_HEADERS, "no")
+                    })
+                    .await?;
                     Ok(())
                 })
                 .await

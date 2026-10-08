@@ -206,7 +206,7 @@ struct CleanUpLoadDialog: View {
 
     var body: some View {
         Dialog(title: "Load All Mail", message: question.message) {
-            Text(CleanUpLoadQuestion.detail)
+            Text(question.detail)
                 .font(TypeRole.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

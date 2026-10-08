@@ -166,6 +166,8 @@ final class CleanUpStore {
     @ObservationIgnored var declinedLoads: Set<String> = []
     /// Accounts whose sync window Clean Up widened this session.
     @ObservationIgnored var widenedLoads: Set<String> = []
+    /// A check whether the header load waits for IMAP is under way.
+    @ObservationIgnored var checkingPause = false
 
     @ObservationIgnored let core: CoreClient?
     @ObservationIgnored private let undo: MailUndo
@@ -462,7 +464,11 @@ enum CleanUpLoadPlan: Equatable {
     case ask
 
     static func of(_ status: CleanupLoadStatus, declined: Bool) -> CleanUpLoadPlan {
-        guard status.hasSyncWindow, status.window != .everything else { return .nothing }
+        guard status.hasSyncWindow else { return .nothing }
+        // Clean Up's header load waits for IMAP (refused since it began):
+        // the rest would come down whole, so ask as without IMAP.
+        if status.headersPaused { return declined ? .nothing : .ask }
+        guard status.window != .everything else { return .nothing }
         if status.cheapHeaders { return .widen }
         return declined ? .nothing : .ask
     }
@@ -480,6 +486,8 @@ struct CleanUpHeaderLoad: Equatable {
     var whole = false
     /// Clean Up changed the sync window: the band says so.
     var widened = false
+    /// The headers wait for IMAP, refused since the load began.
+    var paused = false
 
     var done: Bool { !listing && remaining == 0 }
     var fraction: Double { total == 0 ? 1 : Double(total - min(remaining, total)) / Double(total) }
@@ -488,6 +496,9 @@ struct CleanUpHeaderLoad: Equatable {
     var text: String {
         if listing { return "Finding older mail in Gmail…" }
         if done { return whole ? "All mail is on this Mac" : "Headers for all mail are on this Mac" }
+        if paused {
+            return "Waiting for IMAP — headers for \(remaining.formatted()) older messages are still to load"
+        }
         let what = whole ? "Loading all mail" : "Loading headers for all mail"
         return "\(what) — \((total - min(remaining, total)).formatted()) of \(total.formatted())"
     }
@@ -502,8 +513,16 @@ struct CleanUpLoadQuestion: Identifiable, Equatable {
     /// Messages in Gmail not on this Mac, if Gmail said.
     let messages: UInt64?
     let seconds: UInt64?
+    /// Clean Up's header load stopped because IMAP was refused: the
+    /// question is whether to load the rest whole over the API.
+    var paused = false
 
     var message: String {
+        if paused, let messages, let seconds {
+            let count = messages == 1 ? "1 older message" : "\(messages.formatted()) older messages"
+            return "Gmail refused IMAP for this account, so headers for \(count) stopped loading. Over the Gmail "
+                + "API they come down whole and take about \(Self.duration(seconds))."
+        }
         guard let messages, let seconds else {
             return "Clean Up groups the mail on this Mac. Downloading all older mail from Gmail over the Gmail API "
                 + "can take hours for a large mailbox."
@@ -513,8 +532,12 @@ struct CleanUpLoadQuestion: Identifiable, Equatable {
             + "about \(Self.duration(seconds)) to download."
     }
 
+    var detail: String { paused ? Self.pausedDetail : Self.detail }
+
     static let detail = "The account's sync window becomes Everything (Settings › Accounts) and Clean Up fills as "
         + "the mail arrives. Signing in again for IMAP there makes downloads much faster."
+    static let pausedDetail = "Not Now waits for IMAP: the headers load again once Gmail accepts it (⌘R tries at "
+        + "once). Clean Up groups the mail already on this Mac meanwhile."
 
     /// "2 hours, 52 minutes"; "a minute" for anything shorter.
     static func duration(_ seconds: UInt64) -> String {
@@ -541,18 +564,51 @@ extension CleanUpStore {
         case .widen:
             await loadAllMail(whole: false)
         case .ask:
+            if status.headersPaused { showPausedLoad(status) }
             let estimate = try? await core.cleanupLoadEstimate(accountID: accountID)
             guard accountID == self.accountID else { return }
             loadQuestion = CleanUpLoadQuestion(accountID: accountID, messages: estimate?.messages,
-                                               seconds: estimate?.seconds)
+                                               seconds: estimate?.seconds, paused: status.headersPaused)
         case .nothing:
-            // Reopened while a load runs: show it again.
-            let waiting = status.cheapHeaders ? status.headersWaiting : status.headersWaiting + status.bodiesWaiting
+            // Reopened while a load runs (or waits for IMAP): show it again.
+            let headersOnly = status.cheapHeaders || status.headersPaused
+            let waiting = headersOnly ? status.headersWaiting : status.headersWaiting + status.bodiesWaiting
             if status.hasSyncWindow, status.window == .everything, waiting > 0 || widenedLoads.contains(accountID) {
-                headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: !status.cheapHeaders,
-                                               widened: widenedLoads.contains(accountID))
+                headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: !headersOnly,
+                                               widened: widenedLoads.contains(accountID),
+                                               paused: status.headersPaused)
             }
         }
+    }
+
+    /// The band for a header load that waits for IMAP.
+    private func showPausedLoad(_ status: CleanupLoadStatus) {
+        var load = headerLoad ?? CleanUpHeaderLoad(total: status.headersWaiting,
+                                                   widened: widenedLoads.contains(accountID ?? ""))
+        load.listing = false
+        load.whole = false
+        load.paused = true
+        load.remaining = status.headersWaiting
+        load.total = max(load.total, status.headersWaiting)
+        headerLoad = load
+    }
+
+    /// The header load stopped moving: IMAP may have been refused part way
+    /// (spec §14.12). If so, ask as without IMAP, unless the user said Not
+    /// Now this session.
+    func checkPausedLoad() async {
+        guard let core, let accountID, loadQuestion == nil, !checkingPause,
+              headerLoad?.whole == false, headerLoad?.paused == false else { return }
+        checkingPause = true
+        defer { checkingPause = false }
+        guard let status = try? await core.cleanupLoadStatus(accountID: accountID),
+              accountID == self.accountID, status.headersPaused else { return }
+        showPausedLoad(status)
+        guard !declinedLoads.contains(accountID) else { return }
+        let estimate = try? await core.cleanupLoadEstimate(accountID: accountID)
+        guard accountID == self.accountID, loadQuestion == nil else { return }
+        loadQuestion = CleanUpLoadQuestion(accountID: accountID, messages: estimate?.messages,
+                                           seconds: estimate?.seconds, paused: true)
     }
 
     /// The answer to the question: Load All Mail, or Not Now (remembered
@@ -561,9 +617,25 @@ extension CleanUpStore {
         guard let question = loadQuestion else { return }
         loadQuestion = nil
         if load {
-            Task { await loadAllMail(whole: true) }
+            Task { question.paused ? await loadWaitingHeaders() : await loadAllMail(whole: true) }
         } else {
             declinedLoads.insert(question.accountID)
+        }
+    }
+
+    /// Load All Mail for a header load waiting for IMAP: the rest whole.
+    func loadWaitingHeaders() async {
+        guard let core, let accountID else { return }
+        do {
+            _ = try await core.cleanupLoadWaitingHeaders(accountID: accountID)
+            let status = try await core.cleanupLoadStatus(accountID: accountID)
+            guard accountID == self.accountID else { return }
+            let waiting = status.headersWaiting + status.bodiesWaiting
+            headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: true,
+                                           widened: headerLoad?.widened ?? widenedLoads.contains(accountID))
+        } catch {
+            logger.error("loading the waiting headers failed: \(error.message, privacy: .private)")
+            self.error = error.message
         }
     }
 
@@ -590,6 +662,12 @@ extension CleanUpStore {
     func syncChanged(pending: UInt32, headers: UInt32, accountID: String?) {
         guard accountID == nil || accountID == self.accountID, var load = headerLoad, !load.listing else { return }
         let remaining = UInt64(headers) + (load.whole ? UInt64(pending) : 0)
+        // Headers stopped moving: IMAP may have been refused (the core
+        // reports once when Clean Up's load starts waiting for it).
+        if !load.whole, !load.paused, remaining > 0, remaining == load.remaining {
+            Task { await checkPausedLoad() }
+        }
+        if load.paused, remaining < load.remaining { load.paused = false }
         load.remaining = remaining
         load.total = max(load.total, remaining)
         if load.done, !load.widened {

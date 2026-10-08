@@ -51,6 +51,8 @@ struct State {
     header_fetches: usize,
     /// Refuse every AUTHENTICATE (an admin disabled IMAP).
     refuse_login: bool,
+    /// Logins refused so far.
+    refusals: usize,
     /// "Now" for `newer_than:` (ms); the real clock when unset.
     now: Option<i64>,
     searches: usize,
@@ -127,6 +129,16 @@ impl FakeImapServer {
         self.state.lock().unwrap().refuse_login = true;
     }
 
+    /// Accept logins again (IMAP back on for the account).
+    pub fn allow_logins(&self) {
+        self.state.lock().unwrap().refuse_login = false;
+    }
+
+    /// Logins refused so far.
+    pub fn refusals(&self) -> usize {
+        self.state.lock().unwrap().refusals
+    }
+
     pub fn logins(&self) -> usize {
         self.state.lock().unwrap().logins
     }
@@ -188,6 +200,7 @@ async fn serve(stream: TcpStream, state: Arc<Mutex<State>>, bell: Arc<tokio::syn
                     state.lock().unwrap().logins += 1;
                     write.write_all(format!("{tag} OK me@example.com authenticated (Success)\r\n").as_bytes()).await?;
                 } else {
+                    state.lock().unwrap().refusals += 1;
                     write
                         .write_all(
                             format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)\r\n").as_bytes(),

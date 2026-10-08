@@ -3,6 +3,8 @@
 //! With IMAP the older mail comes down as headers only and the body window
 //! keeps bodies where they were; without it, headers cost as much as whole
 //! messages, so the window states the count and the time and asks first.
+//! If IMAP is refused part way, the headers Clean Up asked for wait for it
+//! and the window asks the same question before loading the rest whole.
 
 use crate::account::SyncWindow;
 use crate::registry::AccountKind;
@@ -23,6 +25,11 @@ pub struct CleanupLoadStatus {
     pub headers_waiting: u64,
     /// Messages waiting for a whole download.
     pub bodies_waiting: u64,
+    /// Clean Up's header load waits for IMAP (refused since it began):
+    /// the rest would come down whole over the API, so the window asks
+    /// first (`cleanup_load_waiting_headers`). Accounts whose window was
+    /// *Everything* before Clean Up download it whole without asking.
+    pub headers_paused: bool,
 }
 
 /// What loading all mail without IMAP would take.
@@ -48,6 +55,7 @@ impl Core {
                 cheap_headers: false,
                 headers_waiting: 0,
                 bodies_waiting: 0,
+                headers_paused: false,
             });
         };
         let db = self.store_for(&account_id).await?;
@@ -62,7 +70,15 @@ impl Core {
                 })
                 .await?;
             let window = window.as_deref().and_then(mail_sync::SyncWindow::parse).unwrap_or_default().into();
-            Ok(CleanupLoadStatus { has_sync_window: true, window, cheap_headers, headers_waiting, bodies_waiting })
+            let headers_paused = mail_sync::cleanup_headers_paused(&db, cheap_headers).await?;
+            Ok(CleanupLoadStatus {
+                has_sync_window: true,
+                window,
+                cheap_headers,
+                headers_waiting,
+                bodies_waiting,
+                headers_paused,
+            })
         })
         .await
     }
@@ -72,12 +88,14 @@ impl Core {
     /// is queued for headers only. Returns false when the window was
     /// *Everything* already.
     pub async fn cleanup_load_every_header(&self, account_id: String) -> Result<bool, CoreError> {
-        let gmail = crate::registry::load_index(&self.data_path())
+        let entry = crate::registry::load_index(&self.data_path())
             .into_iter()
-            .any(|e| e.id == account_id && e.kind == AccountKind::Gmail);
-        if !gmail {
+            .find(|e| e.id == account_id && e.kind == AccountKind::Gmail);
+        let Some(entry) = entry else {
             return Err(CoreError::new(ErrorKind::InvalidInput, "only a Gmail account has a sync window"));
-        }
+        };
+        // Not syncing: it will use IMAP if granted.
+        let imap = entry.imap == Some(true);
         let db = self.store_for(&account_id).await?;
         let service = self.accounts_sync_service(&account_id);
         runtime::run(async move {
@@ -87,21 +105,50 @@ impl Core {
                     service.sync_now();
                     Ok(widened)
                 }
-                None => Ok(mail_sync::load_every_header_stored(&db).await?),
+                None => Ok(mail_sync::load_every_header_stored(&db, imap).await?),
             }
+        })
+        .await
+    }
+
+    /// *Load All Mail* while Clean Up's header load waits for IMAP
+    /// (`CleanupLoadStatus::headers_paused`): the messages still waiting
+    /// for headers come down whole over the API instead. Returns how many
+    /// were queued.
+    pub async fn cleanup_load_waiting_headers(&self, account_id: String) -> Result<u64, CoreError> {
+        let db = self.store_for(&account_id).await?;
+        let service = self.accounts_sync_service(&account_id);
+        runtime::run(async move {
+            let queued = match service {
+                Some(service) => {
+                    let queued = service.engine().load_waiting_headers().await?;
+                    service.sync_now();
+                    queued
+                }
+                None => mail_sync::load_waiting_headers_stored(&db).await?,
+            };
+            Ok(queued as u64)
         })
         .await
     }
 
     /// How many messages loading all of `account_id`'s mail over the
     /// Gmail API would download, and about how long it would take. Asks
-    /// Gmail for its count (one cheap call).
+    /// Gmail for its count (one cheap call); while Clean Up's header load
+    /// waits for IMAP, the messages still waiting instead.
     pub async fn cleanup_load_estimate(&self, account_id: String) -> Result<CleanupLoadEstimate, CoreError> {
         let db = self.store_for(&account_id).await?;
         let Some(service) = self.accounts_sync_service(&account_id) else {
             return Ok(CleanupLoadEstimate { messages: None, seconds: None });
         };
         runtime::run(async move {
+            if service.engine().headers_paused().await? {
+                let (_, waiting) = db.read(mail_store::queue::counts).await?;
+                return Ok(CleanupLoadEstimate {
+                    messages: Some(waiting),
+                    seconds: Some(provider_gmail::rest_download_seconds(waiting)),
+                });
+            }
             let total = match service.engine().provider().profile().await {
                 Ok(profile) => profile.messages_total,
                 Err(e) => {

@@ -380,77 +380,105 @@ fn body_state(core: &Core, id: &str) -> Option<String> {
     .unwrap()
 }
 
+/// The five messages of the IMAP tests, aged in days: the Inbox, the last
+/// 30 days, the rest of six months, last year and older.
+const IMAP_AGES: [(&str, i64, bool); 5] =
+    [("inbox", 1, true), ("recent", 10, false), ("spring", 100, false), ("lastyear", 250, false), ("old", 900, false)];
+
+fn imap_id(n: usize) -> u64 {
+    0x1a0000000000001u64 + n as u64
+}
+
+fn imap_hex(n: usize) -> String {
+    format!("{:x}", imap_id(n))
+}
+
+/// The IMAP fake and the API's fake holding the same mailbox.
+async fn imap_mailbox() -> (provider_gmail::imap_fake::FakeImapServer, Arc<FakeProvider>) {
+    use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+    let server = FakeImapServer::start("tok").await;
+    server.set_now(NOW);
+    let rest = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    for (n, (name, age, inbox)) in IMAP_AGES.iter().enumerate() {
+        let labels: &[&str] = if *inbox { &["INBOX"] } else { &[] };
+        // With its body: over the API a message comes down whole.
+        rest.seed(aged(&imap_hex(n), *age, labels));
+        let date = chrono::DateTime::from_timestamp_millis(NOW - age * 86_400_000).unwrap().to_rfc2822();
+        server.add(FakeImapMessage {
+            uid: n as u32 + 1,
+            msgid: imap_id(n),
+            thrid: imap_id(n),
+            labels: if *inbox { vec!["\\Inbox".into()] } else { vec![] },
+            flags: vec!["\\Seen".into()],
+            raw: format!(
+                "From: News <news@example.com>\r\nTo: me@example.com\r\nSubject: {name}\r\nMessage-ID: <{name}@example.com>\r\nDate: {date}\r\n\r\nBody of {name}\r\n"
+            )
+            .into_bytes(),
+        });
+    }
+    (server, rest)
+}
+
+/// Start syncing "acct" with a fresh IMAP source on `server`.
+fn start_imap(
+    core: &Arc<Core>,
+    server: &provider_gmail::imap_fake::FakeImapServer,
+    rest: &Arc<FakeProvider>,
+    refusal_lasts: Duration,
+) {
+    use provider_gmail::imap::{ImapConfig, ImapEndpoint};
+    let config =
+        ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), refusal_lasts, ..ImapConfig::gmail("me@example.com") };
+    let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
+    core.start_sync_with_backfill(rest.clone(), imap).unwrap();
+}
+
+/// Wait until `stored` messages are listed and nothing is queued.
+async fn settled(core: &Arc<Core>, stored: u64) {
+    for _ in 0..400 {
+        let status = core.cleanup_load_status("acct".into()).await.unwrap();
+        let groups =
+            core.cleanup_groups("acct".into(), CleanupView::Size, CleanupScope::AllMail, String::new()).await.unwrap();
+        if groups.iter().map(|g| g.count).sum::<u64>() == stored && status.headers_waiting + status.bodies_waiting == 0
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("sync did not settle at {stored} messages");
+}
+
+/// Wait until `ok` holds for the account's load status.
+async fn status_until(core: &Arc<Core>, what: &str, ok: impl Fn(&CleanupLoadStatus) -> bool) -> CleanupLoadStatus {
+    for _ in 0..400 {
+        let status = core.cleanup_load_status("acct".into()).await.unwrap();
+        if ok(&status) {
+            return status;
+        }
+        core.sync_now();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
 #[test]
 fn opening_clean_up_over_imap_loads_every_header_and_no_body_beyond_the_body_window() {
-    use provider_gmail::imap::{ImapConfig, ImapEndpoint};
-    use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
-
     let (_temp, core, _events) = core("load-imap");
     register_gmail(&core, true);
     block_on(core.clone().open_account("acct".into())).unwrap();
     // Six months (the default) and bodies for the last 30 days (the default).
-    let ages = [
-        ("inbox", 1, true),
-        ("recent", 10, false),
-        ("spring", 100, false),
-        ("lastyear", 250, false),
-        ("old", 900, false),
-    ];
-    let id = |n: usize| 0x1a0000000000001u64 + n as u64;
     crate::runtime::runtime().block_on(async {
-        let server = FakeImapServer::start("tok").await;
-        server.set_now(NOW);
-        let rest = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
-        for (n, (name, age, inbox)) in ages.iter().enumerate() {
-            let labels: &[&str] = if *inbox { &["INBOX"] } else { &[] };
-            let mut m = aged(&format!("{:x}", id(n)), *age, labels);
-            m.body = None;
-            rest.seed(m);
-            let date = chrono::DateTime::from_timestamp_millis(NOW - age * 86_400_000).unwrap().to_rfc2822();
-            server.add(FakeImapMessage {
-                uid: n as u32 + 1,
-                msgid: id(n),
-                thrid: id(n),
-                labels: if *inbox { vec!["\\Inbox".into()] } else { vec![] },
-                flags: vec!["\\Seen".into()],
-                raw: format!(
-                    "From: News <news@example.com>\r\nTo: me@example.com\r\nSubject: {name}\r\nMessage-ID: <{name}@example.com>\r\nDate: {date}\r\n\r\nBody of {name}\r\n"
-                )
-                .into_bytes(),
-            });
-        }
-        let config = ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), ..ImapConfig::gmail("me@example.com") };
-        let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
-        core.start_sync_with_backfill(rest.clone(), imap).unwrap();
-        let settled = |core: &Arc<Core>, stored: u64| {
-            let core = core.clone();
-            async move {
-                for _ in 0..400 {
-                    let status = core.cleanup_load_status("acct".into()).await.unwrap();
-                    let groups = core
-                        .cleanup_groups("acct".into(), CleanupView::Size, CleanupScope::AllMail, String::new())
-                        .await
-                        .unwrap();
-                    if groups.iter().map(|g| g.count).sum::<u64>() == stored
-                        && status.headers_waiting + status.bodies_waiting == 0
-                    {
-                        return;
-                    }
-                    tokio::time::sleep(Duration::from_millis(25)).await;
-                }
-                panic!("sync did not settle at {stored} messages");
-            }
-        };
+        let (server, rest) = imap_mailbox().await;
+        start_imap(&core, &server, &rest, Duration::from_secs(3600));
         settled(&core, 3).await;
-        let hex = |n: usize| format!("{:x}", id(n));
-        assert_eq!(body_state(&core, &hex(0)).as_deref(), Some("full"), "the Inbox in full");
-        assert_eq!(body_state(&core, &hex(1)).as_deref(), Some("full"), "the last 30 days in full");
-        assert_eq!(body_state(&core, &hex(2)).as_deref(), Some("metadata"), "the rest of six months: headers");
-        assert_eq!(body_state(&core, &hex(4)), None, "outside the window");
+        assert_eq!(body_state(&core, &imap_hex(0)).as_deref(), Some("full"), "the Inbox in full");
+        assert_eq!(body_state(&core, &imap_hex(1)).as_deref(), Some("full"), "the last 30 days in full");
+        assert_eq!(body_state(&core, &imap_hex(2)).as_deref(), Some("metadata"), "the rest of six months: headers");
+        assert_eq!(body_state(&core, &imap_hex(4)), None, "outside the window");
         let bodies = server.body_fetches();
 
         let status = core.cleanup_load_status("acct".into()).await.unwrap();
-        assert!(status.has_sync_window && status.cheap_headers, "{status:?}");
+        assert!(status.has_sync_window && status.cheap_headers && !status.headers_paused, "{status:?}");
         assert_eq!(status.window, SyncWindow::HalfYear);
 
         // Opening Clean Up: every header, no body.
@@ -458,11 +486,86 @@ fn opening_clean_up_over_imap_loads_every_header_and_no_body_beyond_the_body_win
         settled(&core, 5).await;
         assert_eq!(core.cleanup_load_status("acct".into()).await.unwrap().window, SyncWindow::Everything);
         assert_eq!(core.body_window_for("acct".into()).await.unwrap(), crate::account::BodyWindow::Month, "unchanged");
-        assert_eq!(body_state(&core, &hex(3)).as_deref(), Some("metadata"));
-        assert_eq!(body_state(&core, &hex(4)).as_deref(), Some("metadata"));
+        assert_eq!(body_state(&core, &imap_hex(3)).as_deref(), Some("metadata"));
+        assert_eq!(body_state(&core, &imap_hex(4)).as_deref(), Some("metadata"));
         assert_eq!(server.body_fetches(), bodies, "no body downloaded for the older mail");
         assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "nothing over the API");
         assert!(!core.cleanup_load_every_header("acct".into()).await.unwrap(), "already everything");
+    });
+    core.stop_sync();
+}
+
+/// oagc-merk.8: IMAP refused after Clean Up began loading every header.
+/// The headers wait rather than coming down whole over the API unasked;
+/// the window asks with the count and the time; Load All Mail downloads
+/// them whole.
+#[test]
+fn imap_refused_mid_load_pauses_clean_ups_headers_until_load_all_mail() {
+    let (_temp, core, _events) = core("load-imap-refused");
+    register_gmail(&core, true);
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    crate::runtime::runtime().block_on(async {
+        let (server, rest) = imap_mailbox().await;
+        start_imap(&core, &server, &rest, Duration::from_secs(3600));
+        settled(&core, 3).await;
+        // Clean Up widens while the account is between syncs, then Gmail
+        // refuses IMAP as the header load starts.
+        core.stop_sync();
+        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        server.refuse_logins();
+        start_imap(&core, &server, &rest, Duration::from_secs(3600));
+        let status = status_until(&core, "the header load to wait", |s| s.headers_paused).await;
+        assert!(!status.cheap_headers);
+        assert_eq!((status.headers_waiting, status.bodies_waiting), (2, 0), "last year and older: headers only");
+        assert!(server.refusals() > 0);
+        let estimate = core.cleanup_load_estimate("acct".into()).await.unwrap();
+        assert_eq!(estimate.messages, Some(2), "what is left, not Gmail's count");
+        assert_eq!(estimate.seconds, Some(provider_gmail::rest_download_seconds(2)));
+        assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "nothing downloaded unasked");
+        assert_eq!(body_state(&core, &imap_hex(4)), None);
+
+        // Load All Mail: the rest whole, over the API.
+        assert_eq!(core.cleanup_load_waiting_headers("acct".into()).await.unwrap(), 2);
+        settled(&core, 5).await;
+        assert!(!core.cleanup_load_status("acct".into()).await.unwrap().headers_paused);
+        assert_eq!(body_state(&core, &imap_hex(3)).as_deref(), Some("full"));
+        assert_eq!(body_state(&core, &imap_hex(4)).as_deref(), Some("full"));
+        assert!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst) > 0, "over the API");
+    });
+    core.stop_sync();
+}
+
+/// IMAP coming back resumes Clean Up's header load: headers only, no
+/// body and nothing over the API.
+#[test]
+fn imap_coming_back_resumes_clean_ups_headers() {
+    let (_temp, core, _events) = core("load-imap-back");
+    register_gmail(&core, true);
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    crate::runtime::runtime().block_on(async {
+        let (server, rest) = imap_mailbox().await;
+        start_imap(&core, &server, &rest, Duration::from_secs(3600));
+        settled(&core, 3).await;
+        let bodies = server.body_fetches();
+        core.stop_sync();
+        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        server.refuse_logins();
+        // A refusal that lasts a moment, so IMAP is tried again soon.
+        start_imap(&core, &server, &rest, Duration::from_millis(200));
+        for _ in 0..400 {
+            if server.refusals() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(server.refusals() >= 2, "refused");
+        server.allow_logins();
+        status_until(&core, "the headers to arrive", |s| s.headers_waiting + s.bodies_waiting == 0).await;
+        settled(&core, 5).await;
+        assert_eq!(body_state(&core, &imap_hex(3)).as_deref(), Some("metadata"));
+        assert_eq!(body_state(&core, &imap_hex(4)).as_deref(), Some("metadata"));
+        assert_eq!(server.body_fetches(), bodies, "no body for the older mail");
+        assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "nothing over the API");
     });
     core.stop_sync();
 }

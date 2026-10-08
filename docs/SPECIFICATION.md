@@ -837,7 +837,14 @@ Details:
    window's phases are re-listed. If the source stops offering cheap
    headers mid-run (IMAP refused), the headers-only tier is promoted to
    body fetches rather than left unlisted. A header-only refresh keeps an
-   existing snippet.)*
+   existing snippet.)* *(Amended 2026-10-08, oagc-merk.8: except the tier
+   Clean Up created by widening the window with IMAP (§14.12; recorded in
+   `sync_state` as `cleanup_headers_only`): it waits for IMAP instead,
+   keeps its tiering across restarts, and resumes headers only when IMAP
+   comes back; the Clean Up window asks *Load All Mail* / *Not Now* first,
+   and only *Load All Mail* promotes it. A window the user sets in
+   Settings, or an *Everything* window from before Clean Up, is promoted
+   as above.)*
 2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
    available, else REST) and store them; agent tools (`mail_get_thread`,
    `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
@@ -3311,7 +3318,24 @@ messages) and says the sync window is now *Everything*; the groups fill
 as headers arrive. Imported mailboxes, agent mailboxes and the demo have
 no sync window and load nothing. If IMAP is refused part way, the engine
 promotes the headers-only tier to whole downloads as for any
-*Everything* account (§7.4).*
+*Everything* account (§7.4).* *(Amended 2026-10-08, oagc-merk.8: not
+any more. A widening with cheap headers records that the headers-only
+tier is Clean Up's (`cleanup_headers_only = ask` in `sync_state`; set
+from the account's IMAP grant when widened while not syncing); if IMAP
+is then refused, that tier waits (no whole download unasked, also across
+a restart while refused), the engine reports progress once, and
+`CleanupLoadStatus.headers_paused` is set. The window, on opening or when
+the band's header count stops moving, asks the same *Load All Mail* /
+*Not Now* question with the count still waiting and its time over the
+API (`cleanup_load_estimate` answers with those while paused); the band
+reads "Waiting for IMAP — headers for N older messages are still to
+load". *Load All Mail* calls `cleanup_load_waiting_headers`, which
+promotes the tier to whole downloads and makes it no longer Clean
+Up's; *Not Now* holds for the session, and IMAP coming back (after the
+refusal's hour, or ⌘R) resumes headers only. Setting the sync window in
+Settings makes the tier the user's again (`no`), so §7.4's promotion
+applies, as for windows from before Clean Up. Tested against the IMAP
+fake (refused logins, then allowed) and `FakeProvider`.)*
 
 *Also 2026-10-08: Size groups show their range as the second line ("Less
 than 1 KB" … "More than 10 MB"), and optimistic local copies of sent

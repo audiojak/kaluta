@@ -1293,9 +1293,16 @@ final class CoreClient: Sendable {
     }
 
     /// Without IMAP: how many messages loading all mail would download, and
-    /// about how long it would take.
+    /// about how long it would take (while Clean Up's header load waits for
+    /// IMAP, the messages still waiting).
     func cleanupLoadEstimate(accountID: String) async throws(CoreClientError) -> CleanupLoadEstimate {
         try await call { try await core.cleanupLoadEstimate(accountId: accountID) }
+    }
+
+    /// Load All Mail while Clean Up's header load waits for IMAP: the rest
+    /// comes down whole over the API. Returns how many were queued.
+    func cleanupLoadWaitingHeaders(accountID: String) async throws(CoreClientError) -> UInt64 {
+        try await call { try await core.cleanupLoadWaitingHeaders(accountId: accountID) }
     }
 
     /// Which part of the download range gets full messages over IMAP.

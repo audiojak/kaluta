@@ -417,6 +417,132 @@ async fn headers_only_mail_is_fetched_in_full_when_headers_stop_being_cheap() {
     assert_eq!(engine.backfill_all().await.unwrap(), 5);
 }
 
+/// A cheap-headers source whose IMAP can be refused and let back, as
+/// `ImapBackfill` is: refused, headers are not cheap and fetching them is
+/// unavailable.
+struct Refusable(CountingSource, std::sync::atomic::AtomicBool);
+
+impl Refusable {
+    fn new(fake: &Arc<FakeProvider>) -> Arc<Self> {
+        Arc::new(Self(CountingSource::cheap(fake), Default::default()))
+    }
+    fn refuse(&self, refused: bool) {
+        self.1.store(refused, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn refused(&self) -> bool {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl provider_api::BackfillSource for Refusable {
+    async fn fetch(&self, ids: &[MessageId]) -> provider_api::ProviderResult<Vec<FetchedMessage>> {
+        self.0.fetch(ids).await
+    }
+    async fn fetch_headers(&self, ids: &[MessageId]) -> provider_api::ProviderResult<Option<Vec<FetchedMessage>>> {
+        if self.refused() {
+            return Err(provider_api::ProviderError::Unavailable("IMAP sign-in was refused".into()));
+        }
+        self.0.fetch_headers(ids).await
+    }
+    fn cheap_headers(&self) -> bool {
+        !self.refused()
+    }
+    fn name(&self) -> &'static str {
+        "refusable"
+    }
+}
+
+/// Six months synced over IMAP with every header stored, so that Clean Up
+/// widening leaves exactly "ancient" in the headers-only tier.
+async fn six_months_over_imap(name: &str) -> (Arc<FakeProvider>, Db, Arc<Recorder>, SyncEngine, Arc<Refusable>) {
+    let (fake, db, recorder, engine) = setup(name);
+    engine.set_window(SyncWindow::HalfYear).await.unwrap();
+    seed_mailbox(&fake);
+    let source = Refusable::new(&fake);
+    engine.set_backfill_source(source.clone());
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    while engine.headers_pass(100).await.unwrap() > 0 {}
+    engine.backfill_all().await.unwrap();
+    (fake, db, recorder, engine, source)
+}
+
+/// oagc-merk.8: Clean Up's header load does not turn into whole downloads
+/// over the API unasked when IMAP is refused part way; it waits, IMAP
+/// coming back resumes it, and the user's Load All Mail promotes it.
+#[tokio::test]
+async fn clean_ups_headers_wait_for_imap_when_it_is_refused_mid_load() {
+    let (_fake, db, recorder, engine, source) = six_months_over_imap("cleanup-refused").await;
+    let fetched = source.0.bodies();
+    assert!(engine.load_every_header().await.unwrap());
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "the older mail: headers only");
+    assert!(!engine.headers_paused().await.unwrap(), "IMAP is fine");
+
+    // Refused mid-load: the tier waits instead of becoming body fetches.
+    source.refuse(true);
+    let reports = recorder.progress.lock().unwrap().len();
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "not promoted");
+    assert!(engine.headers_paused().await.unwrap());
+    assert_eq!(recorder.progress.lock().unwrap().len(), reports + 1, "reported once, so the window asks");
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
+    assert_eq!(recorder.progress.lock().unwrap().len(), reports + 1, "not again while it waits");
+    assert_eq!(engine.backfill_all().await.unwrap(), 0, "no whole download");
+    // A restart while refused keeps the tiering.
+    engine.ensure_tiers().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "still headers only after a restart");
+
+    // IMAP back: headers only, as before.
+    source.refuse(false);
+    assert!(!engine.headers_paused().await.unwrap());
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 2, "progress: its row stored, its id done");
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 0));
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"));
+    assert_eq!(source.0.bodies(), fetched, "no body for the older mail");
+    assert_consistent(&db);
+}
+
+#[tokio::test]
+async fn load_all_mail_downloads_clean_ups_waiting_headers_whole() {
+    let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-load-all").await;
+    assert!(engine.load_every_header().await.unwrap());
+    source.refuse(true);
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
+    assert!(engine.headers_paused().await.unwrap());
+
+    assert_eq!(engine.load_waiting_headers().await.unwrap(), 1, "Load All Mail");
+    assert!(!engine.headers_paused().await.unwrap());
+    assert_eq!(db.read(queue::counts).await.unwrap(), (1, 0), "a whole download now");
+    assert_eq!(engine.backfill_all().await.unwrap(), 1);
+    assert_eq!(body_state(&db, "ancient").as_deref(), Some("full"));
+    assert_consistent(&db);
+}
+
+/// A window the user chose (in Settings, or before Clean Up) keeps §7.4's
+/// promotion when IMAP is refused.
+#[tokio::test]
+async fn a_window_the_user_chose_still_promotes_when_imap_is_refused() {
+    let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-user-window").await;
+    assert!(engine.load_every_header().await.unwrap());
+    // The user picks Everything in Settings afterwards: the tier is theirs.
+    engine.set_window(SyncWindow::Everything).await.unwrap();
+    source.refuse(true);
+    assert_eq!(engine.headers_pass(100).await.unwrap(), 0);
+    assert!(!engine.headers_paused().await.unwrap());
+    assert_eq!(db.read(queue::counts).await.unwrap(), (1, 0), "promoted, as before Clean Up");
+
+    // Widened while not syncing, the account to sync over IMAP: Clean Up's.
+    let (_fake, db, _recorder, engine, source) = six_months_over_imap("cleanup-stored").await;
+    assert!(mail_sync::load_every_header_stored(&db, true).await.unwrap());
+    source.refuse(true);
+    engine.ensure_tiers().await.unwrap();
+    assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "listed headers only, waiting");
+    assert!(mail_sync::cleanup_headers_paused(&db, false).await.unwrap());
+    assert_eq!(mail_sync::load_waiting_headers_stored(&db).await.unwrap(), 1);
+    assert_eq!(db.read(queue::counts).await.unwrap(), (1, 0));
+}
+
 /// A cheap-headers source that never returns some ids (moved to Spam or
 /// Trash since they were listed).
 struct Forgetful(CountingSource, Vec<MessageId>);

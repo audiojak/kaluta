@@ -166,15 +166,53 @@ const KEY_EMAIL: &str = "account_email";
 pub const KEY_WINDOW: &str = "sync_window";
 pub const KEY_BODY_WINDOW: &str = "body_window";
 const KEY_TIERS: &str = "queue_tiers";
+/// Whether the headers-only tier is Clean Up's (spec §14.12): "ask" when
+/// Clean Up widened the window to *Everything* with cheap headers. If
+/// headers then stop being cheap (IMAP refused), that tier waits for IMAP
+/// or for the user's *Load All Mail* instead of becoming whole downloads
+/// over the API unasked. "no" (or absent) keeps §7.4's promotion: a window
+/// the user chose, or one from before Clean Up.
+pub const KEY_CLEANUP_HEADERS: &str = "cleanup_headers_only";
+const CLEANUP_ASK: &str = "ask";
+const CLEANUP_NO: &str = "no";
+
+/// Whether Clean Up's headers-only tier waits rather than being promoted.
+fn cleanup_tier_waits(conn: &mail_store::Connection) -> mail_store::StoreResult<bool> {
+    Ok(read::sync_state(conn, KEY_CLEANUP_HEADERS)?.as_deref() == Some(CLEANUP_ASK))
+}
+
+/// Whether Clean Up's headers-only tier is waiting for IMAP now: it is
+/// Clean Up's, headers are not cheap (`cheap_headers`, the source's
+/// answer) and some are queued. Clean Up then asks before downloading
+/// the rest whole ([`SyncEngine::load_waiting_headers`]).
+pub async fn cleanup_headers_paused(db: &Db, cheap_headers: bool) -> SyncResult<bool> {
+    if cheap_headers {
+        return Ok(false);
+    }
+    Ok(db.read(|c| Ok(cleanup_tier_waits(c)? && queue::counts(c)?.1 > 0)).await?)
+}
+
+/// *Load All Mail* for Clean Up's waiting tier on an account that is not
+/// syncing: the tier stops being Clean Up's and its ids become whole
+/// downloads. Returns how many.
+pub async fn load_waiting_headers_stored(db: &Db) -> SyncResult<usize> {
+    Ok(db
+        .write(|tx| {
+            read::set_sync_state(tx, KEY_CLEANUP_HEADERS, CLEANUP_NO)?;
+            queue::promote_headers_only(tx)
+        })
+        .await?)
+}
 
 /// [`SyncEngine::load_every_header`] for an account that is not syncing:
 /// the window and body window are stored, and the queue's tiering is
 /// marked stale so the next start lists the wider window
-/// ([`SyncEngine::ensure_tiers`]). Returns false when the window was
-/// *Everything* already.
-pub async fn load_every_header_stored(db: &Db) -> SyncResult<bool> {
+/// ([`SyncEngine::ensure_tiers`]). `cheap_headers`: the account will sync
+/// over IMAP, so the older mail is Clean Up's headers-only tier. Returns
+/// false when the window was *Everything* already.
+pub async fn load_every_header_stored(db: &Db, cheap_headers: bool) -> SyncResult<bool> {
     Ok(db
-        .write(|tx| {
+        .write(move |tx| {
             let window = read::sync_state(tx, KEY_WINDOW)?.as_deref().and_then(SyncWindow::parse).unwrap_or_default();
             if window == SyncWindow::Everything {
                 return Ok(false);
@@ -186,6 +224,7 @@ pub async fn load_every_header_stored(db: &Db) -> SyncResult<bool> {
                 .kept_from(window);
             read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
             read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
+            read::set_sync_state(tx, KEY_CLEANUP_HEADERS, if cheap_headers { CLEANUP_ASK } else { CLEANUP_NO })?;
             read::set_sync_state(tx, KEY_TIERS, "stale")?;
             Ok(true)
         })
@@ -275,6 +314,9 @@ pub struct SyncEngine {
     /// All Mail since they were listed): left to the body backfill, which
     /// falls back to the API, and not asked for again.
     headers_missed: std::sync::Mutex<std::collections::HashSet<MessageId>>,
+    /// Clean Up's headers-only tier is waiting for IMAP, reported once so
+    /// the window can ask (spec §14.12).
+    headers_waiting: std::sync::atomic::AtomicBool,
     /// IMAP or the API per job, the breaker, and recent operations
     /// (docs/plans/imap-first-sync.md).
     pub(crate) transport: crate::transport::Transport,
@@ -312,6 +354,7 @@ impl SyncEngine {
             drain_lock: tokio::sync::Mutex::new(()),
             own_changes: std::sync::Mutex::new(Vec::new()),
             headers_missed: Default::default(),
+            headers_waiting: Default::default(),
             transport: Default::default(),
         }
     }
@@ -768,15 +811,24 @@ impl SyncEngine {
     /// dropped and the window's own phases re-listed, so widening
     /// downloads more and narrowing stops downloading older mail. Mail
     /// already stored is kept either way.
+    /// A window the user sets is theirs: its headers-only tier is not
+    /// Clean Up's ([`KEY_CLEANUP_HEADERS`]).
     pub async fn set_window(&self, window: SyncWindow) -> SyncResult<()> {
-        self.db.write(move |tx| read::set_sync_state(tx, KEY_WINDOW, window.as_str())).await?;
+        self.db
+            .write(move |tx| {
+                read::set_sync_state(tx, KEY_WINDOW, window.as_str())?;
+                read::set_sync_state(tx, KEY_CLEANUP_HEADERS, CLEANUP_NO)
+            })
+            .await?;
         self.relist_window().await
     }
 
     /// Download every header (Clean Up, spec §14.12): the window becomes
     /// *Everything* and the body window keeps bodies where they were
     /// ([`BodyWindow::kept_from`]), so with cheap headers the older mail
-    /// is listed for headers only. Returns false when the window was
+    /// is listed for headers only, and that tier is Clean Up's
+    /// ([`KEY_CLEANUP_HEADERS`]): it waits rather than becoming whole
+    /// downloads if IMAP is refused. Returns false when the window was
     /// *Everything* already (nothing changes).
     pub async fn load_every_header(&self) -> SyncResult<bool> {
         let window = self.window().await?;
@@ -784,10 +836,12 @@ impl SyncEngine {
             return Ok(false);
         }
         let body = self.body_window().await?.kept_from(window);
+        let cleanup = if self.cheap_headers() { CLEANUP_ASK } else { CLEANUP_NO };
         self.db
             .write(move |tx| {
                 read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
-                read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())
+                read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
+                read::set_sync_state(tx, KEY_CLEANUP_HEADERS, cleanup)
             })
             .await?;
         self.relist_window().await?;
@@ -810,10 +864,29 @@ impl SyncEngine {
 
     /// The first phase priority listed for headers only, or `None` when
     /// every phase gets bodies: the source cannot fetch headers cheaply
-    /// (REST), or the body window is the whole sync window.
+    /// (REST), or the body window is the whole sync window. Clean Up's
+    /// tier keeps its tiering without cheap headers: it waits for IMAP.
     async fn headers_from(&self) -> SyncResult<Option<u8>> {
         let cheap = self.backfill.read().unwrap_or_else(|e| e.into_inner()).cheap_headers();
-        Ok(if cheap { self.body_window().await?.headers_from() } else { None })
+        let tiered = cheap || self.db.read(cleanup_tier_waits).await?;
+        Ok(if tiered { self.body_window().await?.headers_from() } else { None })
+    }
+
+    /// Whether Clean Up's headers-only tier is waiting for IMAP now
+    /// ([`cleanup_headers_paused`]).
+    pub async fn headers_paused(&self) -> SyncResult<bool> {
+        cleanup_headers_paused(&self.db, self.cheap_headers()).await
+    }
+
+    /// *Load All Mail* (spec §14.12): Clean Up's waiting headers-only tier
+    /// becomes whole downloads over the API, as §7.4 does for any other
+    /// tier when IMAP is refused. Returns how many were queued.
+    pub async fn load_waiting_headers(&self) -> SyncResult<usize> {
+        let promoted = load_waiting_headers_stored(&self.db).await?;
+        self.headers_waiting.store(false, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(promoted, "Clean Up's headers-only messages queued for whole downloads");
+        self.report(SyncPhase::Backfilling).await;
+        Ok(promoted)
     }
 
     /// Re-list the window's own phases if the queue was listed under
@@ -919,6 +992,15 @@ impl SyncEngine {
         let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(headers) = self.fetch_headers(&ids).await? else {
             if !source.cheap_headers() {
+                if self.db.read(cleanup_tier_waits).await? {
+                    // Clean Up's tier (spec §14.12): wait for IMAP or the
+                    // user's Load All Mail; say so once, so the window asks.
+                    if !self.headers_waiting.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        tracing::info!("IMAP refused: Clean Up's headers-only tier waits for it");
+                        self.report(SyncPhase::Backfilling).await;
+                    }
+                    return Ok(0);
+                }
                 // Headers cost as much as bodies now (IMAP refused): fetch
                 // the headers-only tier in full rather than never.
                 let promoted = self.db.write(queue::promote_headers_only).await?;
@@ -928,6 +1010,7 @@ impl SyncEngine {
             }
             return Ok(0);
         };
+        self.headers_waiting.store(false, std::sync::atomic::Ordering::Relaxed);
         let incoming: Vec<_> = headers.into_iter().map(to_incoming).collect();
         let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
         let stored = incoming.len();
