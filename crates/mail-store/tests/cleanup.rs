@@ -514,3 +514,65 @@ fn progress_history_baseline_and_percent() {
     assert_eq!(pct(None, 0), 100, "an empty Inbox is Inbox Zero");
     assert_eq!(pct(Some(3), 1), 66);
 }
+
+#[test]
+fn a_groups_newest_list_headers_and_its_unsubscribe() {
+    let db = open("unsubscribe");
+    let listed = |id: &str, at: i64, unsubscribe: Option<&str>| {
+        let mut m = msg(id, ("Digest", "digest@example.org"), "Issue", at, &["INBOX"]);
+        m.list = ListHeaders {
+            id: Some("digest.example.org".into()),
+            name: Some("Weekly Digest".into()),
+            unsubscribe: unsubscribe.map(Into::into),
+            unsubscribe_post: unsubscribe.map(|_| "List-Unsubscribe=One-Click".into()),
+        };
+        m
+    };
+    store(
+        &db,
+        vec![
+            listed("old", NOW - DAY, Some("<https://old.example.org/u>")),
+            listed("new", NOW, Some("<https://digest.example.org/u/1>, <mailto:leave@digest.example.org>")),
+            msg("x", ("Sam", "sam@example.com"), "Hi", NOW, &["INBOX"]),
+        ],
+    );
+    let q = query(View::MailingList, Scope::Inbox);
+    let k = keys(&["digest.example.org", "nothing.example.org"]);
+    let found = db.read_blocking(move |c| cleanup::newest_list_headers(c, &q, &k)).unwrap();
+    assert_eq!(found.len(), 1, "a group with no messages is left out");
+    let newest = &found[0];
+    assert_eq!(newest.key, "digest.example.org");
+    assert_eq!(
+        newest.unsubscribe.as_deref(),
+        Some("<https://digest.example.org/u/1>, <mailto:leave@digest.example.org>"),
+        "the newest message's, not an older one's"
+    );
+    assert_eq!(newest.unsubscribe_post.as_deref(), Some("List-Unsubscribe=One-Click"));
+    assert_eq!(newest.list_name.as_deref(), Some("Weekly Digest"));
+    assert_eq!(newest.from.as_ref().map(|f| f.email.as_str()), Some("digest@example.org"));
+
+    // Sender view: the same message, keyed by address.
+    let q = query(View::Sender, Scope::Inbox);
+    let found = db.read_blocking(move |c| cleanup::newest_list_headers(c, &q, &keys(&["sam@example.com"]))).unwrap();
+    assert_eq!(found[0].unsubscribe, None, "no list headers");
+
+    // Recorded unsubscribes mark the list's group and the sender's.
+    assert!(!groups(&db, View::MailingList, Scope::Inbox)[0].unsubscribed);
+    db.write_blocking(|tx| {
+        cleanup::record_unsubscribed(
+            tx,
+            &[
+                cleanup::unsubscribe_identity(cleanup::UnsubscribeKind::List, "digest.example.org"),
+                cleanup::unsubscribe_identity(cleanup::UnsubscribeKind::Sender, "Digest@Example.org"),
+            ],
+            NOW,
+        )
+    })
+    .unwrap();
+    assert!(groups(&db, View::MailingList, Scope::Inbox)[0].unsubscribed);
+    let senders = groups(&db, View::Sender, Scope::Inbox);
+    assert!(senders.iter().find(|g| g.key == "digest@example.org").unwrap().unsubscribed);
+    assert!(!senders.iter().find(|g| g.key == "sam@example.com").unwrap().unsubscribed);
+    assert!(groups(&db, View::Subject, Scope::Inbox).iter().all(|g| !g.unsubscribed), "a subject is no list");
+    assert_eq!(db.read_blocking(cleanup::unsubscribed).unwrap().len(), 2);
+}

@@ -36,6 +36,9 @@ import os
 ///                                       the progress card
 ///   -OpenAGCSnapshotCleanUpCard YES     …capturing the progress card alone (the
 ///                                       sidebar's glass hides it)
+///   -OpenAGCSnapshotCleanUpUnsubscribe one|all  …and ask to unsubscribe from
+///                                       the largest group or every group (the
+///                                       confirmation; never confirmed)
 ///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
 ///                                       undo notice)
 ///   -OpenAGCSnapshotCleanUpLoad loading|ask  …showing every header loading
@@ -183,6 +186,14 @@ enum Snapshot {
                     model.undo.runsClock = false
                     await store.apply(.archive)
                 }
+                // The confirmation only: nothing is ever confirmed here (the
+                // demo's addresses are not to be contacted).
+                let unsubscribe = defaults.string(forKey: "OpenAGCSnapshotCleanUpUnsubscribe")
+                if let unsubscribe {
+                    if unsubscribe == "all" { store.setTicked(true, keys: store.groups.map(\.key)) }
+                    await store.refreshMessages()
+                    store.askUnsubscribe()
+                }
                 let load = defaults.string(forKey: "OpenAGCSnapshotCleanUpLoad")
                 if load == "loading" {
                     store.headerLoad = CleanUpHeaderLoad(total: 43_118, remaining: 31_406, widened: true)
@@ -197,7 +208,7 @@ enum Snapshot {
                     window = cleanUpCardWindow(model)
                     try? await Task.sleep(for: .milliseconds(500))
                 }
-                if load == "ask", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                if load == "ask" || unsubscribe != nil, let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
                     window = sheet
                 }
             }
@@ -406,6 +417,7 @@ enum Snapshot {
             delegate.model?.guidePrompt = nil
             delegate.model?.agentMailboxSheet = nil
             delegate.model?.cleanUp.loadQuestion = nil
+            delegate.model?.cleanUp.unsubscribeQuestion = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)

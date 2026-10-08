@@ -147,7 +147,16 @@ final class AppModel {
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
             agentShown: agent.isPresented,
-            importantAvailable: !isAgentMailbox))
+            importantAvailable: !isAgentMailbox,
+            inboxCount: Int(mailboxes.mailboxes.first { $0.kind == .inbox }?.totalCount ?? 0),
+            cleanUpAvailable: !isArchive))
+    }
+
+    /// Clean Up opened: its Inbox tip has done its work and never shows.
+    func cleanUpOpened() {
+        guard !dismissedTips.contains(Tip.cleanUp.rawValue) else { return }
+        dismissedTips.insert(Tip.cleanUp.rawValue)
+        defaults.set(Array(dismissedTips).sorted(), forKey: Self.dismissedTipsKey)
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -158,6 +167,7 @@ final class AppModel {
         case (.agent, true):
             agent.isPresented = true
             focusAgentPrompt()
+        case (.cleanUp, true): openCleanUp?()
         default: break
         }
         dismissedTips.insert(tip.rawValue)
@@ -407,6 +417,7 @@ final class AppModel {
         facts = FactsStore(core: core)
         undo = MailUndo(core: core)
         cleanUp = CleanUpStore(core: core, undo: undo)
+        cleanUp.openComposer = { [weak self] in self?.compose($0) }
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
             Task { await self?.threads.refresh() }

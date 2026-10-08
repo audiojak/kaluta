@@ -45,4 +45,34 @@ struct TipTests {
         #expect(Set(defaults.stringArray(forKey: AppModel.dismissedTipsKey) ?? []) == ["importantOnly", "agent"])
         #expect(AppModel(core: nil, defaults: defaults).dismissedTips == ["importantOnly", "agent"], "remembered")
     }
+
+    @Test func aLargeInboxSuggestsCleanUpFirstUntilItIsOpenedOrPutAway() {
+        var large = inbox
+        large.inboxCount = 1_001
+        #expect(Tip.next(dismissed: [], context: large) == .cleanUp)
+        #expect(Tip.next(dismissed: ["cleanUp"], context: large) == .categories, "never again once put away")
+        var exactly = inbox
+        exactly.inboxCount = 1_000
+        #expect(Tip.next(dismissed: [], context: exactly) == .categories, "more than 1,000 only")
+        var imported = large
+        imported.cleanUpAvailable = false
+        #expect(Tip.next(dismissed: [], context: imported) == .categories, "an imported mailbox has no Clean Up")
+        #expect(Tip.cleanUp.action == "Open Clean Up")
+        #expect(Tip.cleanUp.dismiss == "Not Now")
+    }
+
+    @Test func openingCleanUpRetiresItsTip() {
+        let suite = "openagc-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(core: nil, defaults: defaults)
+        var opened = false
+        model.openCleanUp = { opened = true }
+        model.finishTip(.cleanUp, accept: true)
+        #expect(opened, "Open Clean Up opens the window")
+        let other = AppModel(core: nil, defaults: UserDefaults(suiteName: suite + "-2")!)
+        other.cleanUpOpened()
+        #expect(other.dismissedTips.contains("cleanUp"), "opened from the menu: the tip is done too")
+        UserDefaults().removePersistentDomain(forName: suite + "-2")
+    }
 }

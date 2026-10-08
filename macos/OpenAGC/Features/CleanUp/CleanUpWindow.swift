@@ -28,8 +28,12 @@ struct CleanUpWindow: View {
         .sheet(item: Binding(get: { store.loadQuestion }, set: { if $0 == nil { store.answerLoadQuestion(load: false) } })) {
             CleanUpLoadDialog(question: $0)
         }
+        .sheet(item: Binding(get: { store.unsubscribeQuestion }, set: { if $0 == nil { store.unsubscribeQuestion = nil } })) {
+            CleanUpUnsubscribeDialog(question: $0)
+        }
         .onAppear {
             store.isShown = true
+            model.cleanUpOpened()
             ToolbarToolTips.install(model: model)
         }
         .onDisappear { store.isShown = false }
@@ -115,6 +119,9 @@ private struct CleanUpGroupsColumn: View {
                     .padding(.horizontal, Space.l)
                     .padding(.vertical, Space.s)
             }
+            if let note = store.unsubscribeNote {
+                CleanUpUnsubscribeNoteView(note: note)
+            }
         }
     }
 
@@ -136,6 +143,7 @@ private struct CleanUpGroupsColumn: View {
 enum CleanUpGroupsColumnText {
     static func empty(_ view: CleanUpViewKind, scope: CleanupScope, noCategoryMail: Bool) -> String {
         if view == .people { return "Senders you have written to are listed here." }
+        if view == .mailingList { return "Mailing lists show here as new mail from them arrives." }
         if view.isCategory {
             let category = view == .social ? "Social" : "Promotions"
             if noCategoryMail {
@@ -213,6 +221,74 @@ struct CleanUpLoadDialog: View {
     }
 }
 
+/// The confirmation before unsubscribing (spec §14.12): each list once,
+/// named with how it is left (the host a one-click unsubscribe goes to,
+/// or the address a message goes to), and *Archive Them Too*, off.
+struct CleanUpUnsubscribeDialog: View {
+    @Environment(AppModel.self) private var model
+    let question: CleanUpUnsubscribeQuestion
+    @State private var archiveToo = false
+
+    var body: some View {
+        Dialog(title: question.title, message: question.message) {
+            VStack(alignment: .leading, spacing: Space.m) {
+                if question.targets.count > 1 {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        ForEach(Array(question.targets.enumerated()), id: \.offset) { _, target in
+                            VStack(alignment: .leading, spacing: Space.hair) {
+                                Text(target.name).lineLimit(1)
+                                Text(CleanUpUnsubscribeQuestion.how(target.method))
+                                    .font(TypeRole.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(.neutral, padding: Space.m)
+                }
+                Toggle("Archive Them Too", isOn: $archiveToo)
+                    .hoverHelp("Also archive every message in the ticked groups; one Undo brings them back")
+            }
+        } buttons: {
+            CancelButton { model.cleanUp.unsubscribeQuestion = nil }
+            Button("Unsubscribe") {
+                let archive = archiveToo
+                Task { await model.cleanUp.confirmUnsubscribe(archiveToo: archive) }
+            }
+            .keyboardShortcut(.defaultAction)
+            .hoverHelp("Unsubscribe from \(question.targets.count == 1 ? "this list" : "these lists") (Return)")
+        }
+    }
+}
+
+/// What the last unsubscribe did, over the groups: done in the secondary
+/// style, a failure in the error style, a message waiting to be sent.
+struct CleanUpUnsubscribeNoteView: View {
+    @Environment(AppModel.self) private var model
+    let note: CleanUpUnsubscribeNote
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                ForEach(Array(note.lines.enumerated()), id: \.offset) { _, line in
+                    Label(line.text, systemImage: line.failed ? "exclamationmark.triangle" : "checkmark.circle")
+                        .foregroundStyle(line.failed ? AnyShapeStyle(Tone.failure) : AnyShapeStyle(.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            Button("OK") { model.cleanUp.dismissUnsubscribeNote() }
+                .controlSize(.small)
+                .hoverHelp("Hide this note")
+        }
+        .font(TypeRole.meta)
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.s)
+    }
+}
+
 /// "813 messages in 2 groups", then the messages.
 private struct CleanUpMessagesColumn: View {
     @Environment(AppModel.self) private var model
@@ -285,6 +361,12 @@ private struct CleanUpToolbar: ToolbarContent {
         ToolbarItem {
             CleanUpMoveMenu()
                 .disabled(!store.canAct)
+        }
+        ToolbarSpacer(.fixed)
+        ToolbarItem {
+            Button("Unsubscribe", systemImage: "bell.slash") { store.askUnsubscribe() }
+                .help(ToolbarHelp.text(for: "Unsubscribe", model: model) ?? "") // toolbar
+                .disabled(!store.canUnsubscribe)
         }
     }
 

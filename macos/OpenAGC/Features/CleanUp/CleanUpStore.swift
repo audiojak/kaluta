@@ -6,9 +6,8 @@ import os
 enum CleanUpViewKind: String, CaseIterable, Identifiable {
     case sender, people, subject, mailingList, time, social, promotions, size
 
-    /// The views the window lists, in order. Mailing Lists (C7) joins
-    /// when its groups are ready.
-    static let shown: [CleanUpViewKind] = [.sender, .people, .subject, .time, .social, .promotions, .size]
+    /// The views the window lists, in order: adding a view is a line here.
+    static let shown: [CleanUpViewKind] = [.sender, .people, .subject, .mailingList, .time, .social, .promotions, .size]
 
     var id: String { rawValue }
 
@@ -58,6 +57,9 @@ enum CleanUpViewKind: String, CaseIterable, Identifiable {
         case .subject, .time: false
         }
     }
+
+    /// Its groups are lists or senders one can unsubscribe from.
+    var offersUnsubscribe: Bool { self == .mailingList || self == .sender || self == .people }
 
     /// Groups Gmail's category of that name by sender domain.
     var isCategory: Bool { self == .social || self == .promotions }
@@ -113,6 +115,7 @@ final class CleanUpStore {
         didSet {
             guard view != oldValue else { return }
             filter = ""
+            unsubscribeNote = nil
             clearTicks()
             Task { await reload() }
         }
@@ -144,6 +147,15 @@ final class CleanUpStore {
     var error: String?
     /// Changes still waiting to go to the provider (the outbox).
     private(set) var pending: UInt32 = 0
+    /// What Unsubscribe would do for the ticked groups: one target per
+    /// list, from each group's newest message (empty: nothing to leave).
+    private(set) var unsubscribeTargets: [CleanupUnsubscribeTarget] = []
+    /// The confirmation shown before unsubscribing (a sheet).
+    var unsubscribeQuestion: CleanUpUnsubscribeQuestion?
+    /// What the last unsubscribe did, over the groups until put away.
+    private(set) var unsubscribeNote: CleanUpUnsubscribeNote?
+    /// Opens a composer (the main window's), for a mailto unsubscribe.
+    @ObservationIgnored var openComposer: ((ComposeRequest) -> Void)?
     /// The Inbox Zero card's numbers (spec §14.12), nil until loaded.
     private(set) var progress: CleanupProgress?
     /// Every header loading (spec §14.12), shown in a band over the groups.
@@ -162,6 +174,7 @@ final class CleanUpStore {
     @ObservationIgnored private let groupLoads = LatestLoad()
     @ObservationIgnored private let countLoads = LatestLoad()
     @ObservationIgnored private let progressLoads = LatestLoad()
+    @ObservationIgnored private let targetLoads = LatestLoad()
     /// Bumped whenever the pages are dropped; a page that arrives after is ignored.
     @ObservationIgnored private var pageEpoch = 0
     @ObservationIgnored let logger = Logger(subsystem: "ai.actual.openagc", category: "cleanup")
@@ -198,6 +211,7 @@ final class CleanUpStore {
             error = nil
             pending = 0
             progress = nil
+            unsubscribeNote = nil
             headerLoad = nil
             loadQuestion = nil
         }
@@ -263,6 +277,7 @@ final class CleanUpStore {
         pageEpoch += 1
         if restart { messageGeneration += 1 } else { pageRevision += 1 }
         let (accountID, view, scope, keys) = (accountID, view, scope, tickedKeys)
+        await loadUnsubscribeTargets()
         await countLoads.run { [self] isCurrent in
             guard let core, let accountID, !keys.isEmpty else {
                 messageCount = 0
@@ -611,5 +626,156 @@ final class LatestLoad {
             awaited = newer
             await newer.value
         }
+    }
+}
+
+// MARK: Unsubscribe (spec §14.12)
+
+/// The confirmation before unsubscribing: each list once, how it is left
+/// (one click at a host, or a message to send), and whether to archive
+/// the ticked groups too.
+struct CleanUpUnsubscribeQuestion: Identifiable, Equatable {
+    let id = UUID()
+    let targets: [CleanupUnsubscribeTarget]
+    /// Ticked groups whose newest message has no way to unsubscribe.
+    let untargeted: Int
+
+    var title: String {
+        targets.count == 1 ? "Unsubscribe from \(targets[0].name)?" : "Unsubscribe from \(targets.count) Lists?"
+    }
+
+    var message: String {
+        let oneClick = targets.filter { if case .oneClick = $0.method { true } else { false } }.count
+        let mail = targets.count - oneClick
+        var parts: [String] = []
+        if oneClick == 1, targets.count == 1, case let .oneClick(host) = targets[0].method {
+            parts.append("OpenAGC asks \(host) once to take you off the list. Nothing else is sent.")
+        } else if oneClick > 0 {
+            parts.append("OpenAGC asks each list's site once to take you off it. Nothing else is sent.")
+        }
+        if mail == 1, targets.count == 1, case let .mailto(to, _, _, _) = targets[0].method {
+            parts.append("A message to \(to.joined(separator: ", ")) opens for you to read and send.")
+        } else if mail > 0 {
+            parts.append("Lists that unsubscribe by email open a message each, for you to read and send.")
+        }
+        if untargeted > 0 {
+            parts.append(untargeted == 1 ? "One ticked group has no unsubscribe link and is left as it is."
+                : "\(untargeted) ticked groups have no unsubscribe link and are left as they are.")
+        }
+        return parts.joined(separator: " ")
+    }
+
+    /// "one click at weekly-digest.example.org", "a message to leave@list.example".
+    static func how(_ method: CleanupUnsubscribeMethod) -> String {
+        switch method {
+        case let .oneClick(host): "one click at \(host)"
+        case let .mailto(to, _, _, _): "a message to \(to.joined(separator: ", "))"
+        }
+    }
+}
+
+/// What an unsubscribe did, line by line: done, failed, or a message
+/// waiting in the composer.
+struct CleanUpUnsubscribeNote: Equatable {
+    struct Line: Equatable {
+        let text: String
+        let failed: Bool
+    }
+
+    let lines: [Line]
+
+    static func of(_ results: [CleanupUnsubscribeResult], mailed: [String]) -> CleanUpUnsubscribeNote {
+        let done = results.filter { $0.error == nil }.map(\.name)
+        var lines: [Line] = []
+        if !done.isEmpty { lines.append(Line(text: "Unsubscribed from " + Self.names(done), failed: false)) }
+        for failed in results where failed.error != nil {
+            lines.append(Line(text: "Could not unsubscribe from \(failed.name): \(failed.error ?? "")", failed: true))
+        }
+        if !mailed.isEmpty {
+            lines.append(Line(text: "To unsubscribe from \(Self.names(mailed)), send the message that opened",
+                              failed: false))
+        }
+        return CleanUpUnsubscribeNote(lines: lines)
+    }
+
+    /// "A", "A and B", "A, B and 3 more".
+    static func names(_ names: [String]) -> String {
+        switch names.count {
+        case 0: ""
+        case 1: names[0]
+        case 2: "\(names[0]) and \(names[1])"
+        case 3: "\(names[0]), \(names[1]) and \(names[2])"
+        default: "\(names[0]), \(names[1]) and \(names.count - 2) more"
+        }
+    }
+}
+
+extension CleanUpStore {
+    /// Unsubscribe is offered: groups are ticked in a view of lists or
+    /// senders, and at least one ticked group's newest message says how.
+    var canUnsubscribe: Bool { canAct && view.offersUnsubscribe && !unsubscribeTargets.isEmpty }
+
+    /// The ticked groups' targets, as they are now.
+    func loadUnsubscribeTargets() async {
+        let (accountID, view, scope, keys) = (accountID, view, scope, tickedKeys)
+        await targetLoads.run { [self] isCurrent in
+            guard let core, let accountID, view.offersUnsubscribe, !keys.isEmpty else {
+                unsubscribeTargets = []
+                return
+            }
+            let targets = (try? await core.cleanupUnsubscribeTargets(accountID: accountID, view: view.core,
+                                                                        scope: scope, keys: keys)) ?? []
+            guard isCurrent() else { return }
+            unsubscribeTargets = targets
+        }
+    }
+
+    /// The toolbar's Unsubscribe: ask first, always.
+    func askUnsubscribe() {
+        guard canUnsubscribe else { return }
+        let covered = Set(unsubscribeTargets.flatMap(\.keys))
+        unsubscribeQuestion = CleanUpUnsubscribeQuestion(targets: unsubscribeTargets,
+                                                         untargeted: tickedKeys.filter { !covered.contains($0) }.count)
+    }
+
+    /// The answer: one POST per one-click list from the core (addresses
+    /// read from the store again), a filled-in composer per mailto list,
+    /// what happened shown over the groups; then, if asked, the ticked
+    /// groups archived as one undoable action.
+    func confirmUnsubscribe(archiveToo: Bool) async {
+        guard let question = unsubscribeQuestion, let core, let accountID else { return }
+        unsubscribeQuestion = nil
+        let (view, scope) = (view, scope)
+        let oneClickKeys = question.targets.filter { if case .oneClick = $0.method { true } else { false } }
+            .flatMap(\.keys)
+        var mailed: [String] = []
+        for target in question.targets {
+            if case let .mailto(to, cc, subject, body) = target.method {
+                openComposer?(.prefilled(to: to, cc: cc, subject: subject, body: body))
+                mailed.append(target.name)
+            }
+        }
+        var results: [CleanupUnsubscribeResult] = []
+        if !oneClickKeys.isEmpty {
+            working = oneClickKeys.count == 1 ? "Unsubscribing…" : "Unsubscribing from \(oneClickKeys.count) lists…"
+            do {
+                results = try await core.cleanupUnsubscribe(accountID: accountID, view: view.core, scope: scope,
+                                                            keys: oneClickKeys)
+            } catch {
+                self.error = error.message
+            }
+            working = nil
+        }
+        unsubscribeNote = CleanUpUnsubscribeNote.of(results, mailed: mailed)
+        if archiveToo {
+            await apply(.archive)
+        } else {
+            await loadGroups()
+        }
+    }
+
+    /// Put the note away.
+    func dismissUnsubscribeNote() {
+        unsubscribeNote = nil
     }
 }

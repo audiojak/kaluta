@@ -374,6 +374,14 @@ C7. **Mailing Lists view and Unsubscribe** (oagc-merk.7) — group by `List-Id`;
     sender and the URL's host, or a mailto that opens the composer
     filled in for the user to send. Never automatic; never an agent's.
     The Inbox tip for large inboxes lands here too.
+    *(as built: Unsubscribe in Mailing Lists, Sender and People; the
+    newest message's header only; the POST is re-resolved from the store
+    in the core, follows no redirect and counts 2xx/3xx as done; mailto
+    opens a new `ComposeRequest.prefilled`; one-click successes are
+    remembered in `cleanup_meta` and shown as "Unsubscribed", mailtos are
+    not; the list's detail line stays its id; the tip counts the Inbox in
+    conversations, as the sidebar does. The demo's Careers list
+    unsubscribes by mail only, so the dialog shows both ways.)*
 
 ## Checks before closing an issue
 

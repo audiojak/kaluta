@@ -74,15 +74,18 @@ pub struct CleanupGroup {
     pub title: String,
     /// Other names the sender or list used, most used first.
     pub aka: Vec<String>,
-    /// The address (Sender, People) or the list id (Mailing Lists).
+    /// The address (Sender, People), the list id (Mailing Lists), the
+    /// senders' names (Social, Promotions) or the range (Size).
     pub detail: Option<String>,
     /// Messages in it now.
     pub count: u64,
+    /// The user unsubscribed from this list or sender from Clean Up.
+    pub unsubscribed: bool,
 }
 
 impl From<cleanup::Group> for CleanupGroup {
     fn from(g: cleanup::Group) -> Self {
-        Self { key: g.key, title: g.title, aka: g.aka, detail: g.detail, count: g.count }
+        Self { key: g.key, title: g.title, aka: g.aka, detail: g.detail, count: g.count, unsubscribed: g.unsubscribed }
     }
 }
 
@@ -429,6 +432,8 @@ impl Core {
 
 mod load;
 pub use load::{CleanupLoadEstimate, CleanupLoadStatus};
+mod unsubscribe;
+pub use unsubscribe::{CleanupUnsubscribeMethod, CleanupUnsubscribeResult, CleanupUnsubscribeTarget};
 
 #[cfg(test)]
 mod tests;

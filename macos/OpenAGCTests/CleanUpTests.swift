@@ -23,7 +23,9 @@ struct CleanUpTests {
     }
 
     @Test func theWindowListsTheReadyViews() {
-        #expect(CleanUpViewKind.shown == [.sender, .people, .subject, .time, .social, .promotions, .size])
+        #expect(CleanUpViewKind.shown == [.sender, .people, .subject, .mailingList, .time, .social, .promotions, .size])
+        #expect(CleanUpViewKind.mailingList.offersUnsubscribe && CleanUpViewKind.sender.offersUnsubscribe)
+        #expect(!CleanUpViewKind.subject.offersUnsubscribe && !CleanUpViewKind.social.offersUnsubscribe)
         #expect(CleanUpViewKind.social.filterPrompt == "Type a domain…")
         #expect(CleanUpViewKind.promotions.isCategory && !CleanUpViewKind.sender.isCategory)
         #expect(CleanUpViewKind.sender.filterPrompt == "Type a sender…")
@@ -218,6 +220,115 @@ struct CleanUpTests {
         #expect(CleanUpGroupsColumnText.empty(.social, scope: .allMail, noCategoryMail: false)
             == "No social mail outside Spam and Trash.")
         #expect(CleanUpGroupsColumnText.empty(.sender, scope: .inbox, noCategoryMail: false) == "The Inbox is empty.")
+    }
+
+    // MARK: Mailing Lists and Unsubscribe (spec §14.12)
+    //
+    // Nothing here confirms a one-click unsubscribe: the demo's addresses
+    // are documentation domains, never to be contacted. The POST itself is
+    // tested in the core against a local server.
+
+    @Test func mailingListsGroupTheDemosListsAndOfferUnsubscribe() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        store.view = .mailingList
+        await store.reload()
+        #expect(Set(store.groups.map(\.key)) == ["weekly-digest.example.org", "events.example.org", "careers.example.com"])
+        #expect(!store.canUnsubscribe, "nothing ticked")
+        let digest = try #require(store.groups.first { $0.key == "weekly-digest.example.org" })
+        #expect(digest.title == "Weekly Digest")
+        #expect(digest.detail == "weekly-digest.example.org")
+        store.toggle(digest.key)
+        await store.refreshMessages()
+        #expect(store.canUnsubscribe)
+        #expect(store.unsubscribeTargets.map(\.method) == [.oneClick(host: "weekly-digest.example.org")])
+        store.askUnsubscribe()
+        let question = try #require(store.unsubscribeQuestion)
+        #expect(question.title == "Unsubscribe from Weekly Digest?")
+        #expect(question.message == "OpenAGC asks weekly-digest.example.org once to take you off the list. Nothing else is sent.")
+        store.unsubscribeQuestion = nil
+
+        // Every list ticked: each once, the mailto one says where it writes.
+        store.setTicked(true, keys: store.groups.map(\.key))
+        await store.refreshMessages()
+        #expect(store.unsubscribeTargets.count == 3)
+        store.askUnsubscribe()
+        let all = try #require(store.unsubscribeQuestion)
+        #expect(all.title == "Unsubscribe from 3 Lists?")
+        #expect(all.message.contains("open a message each"))
+        let careers = try #require(all.targets.first { $0.keys == ["careers.example.com"] })
+        #expect(CleanUpUnsubscribeQuestion.how(careers.method) == "a message to unsubscribe@careers.example.com")
+    }
+
+    @Test func aMailtoUnsubscribeOpensTheComposerAndCanArchiveToo() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        var opened: [ComposeRequest] = []
+        store.openComposer = { opened.append($0) }
+        store.view = .mailingList
+        await store.reload()
+        let careers = try #require(store.groups.first { $0.key == "careers.example.com" })
+        store.toggle(careers.key)
+        await store.refreshMessages()
+        store.askUnsubscribe()
+        #expect(store.unsubscribeQuestion?.message == "A message to unsubscribe@careers.example.com opens for you to read and send.")
+        await store.confirmUnsubscribe(archiveToo: true)
+        #expect(opened == [.prefilled(to: ["unsubscribe@careers.example.com"], cc: [], subject: "Unsubscribe", body: "")],
+                "filled in for the user to send; nothing is sent")
+        #expect(store.unsubscribeNote?.lines == [.init(text: "To unsubscribe from Careers, send the message that opened",
+                                                       failed: false)])
+        #expect(!store.groups.contains { $0.key == careers.key }, "archived too")
+        #expect(model.undo.notice?.text.hasPrefix("Archived") == true, "one undo for the archive")
+        #expect(!store.groups.contains { $0.unsubscribed }, "a mailto is not recorded: sending it is the user's")
+    }
+
+    @Test func groupsWithoutAListOfferNothingAndAreCountedApart() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        let person = try #require(store.groups.first { !$0.key.hasSuffix("example.org") && $0.title.contains(" ") })
+        store.toggle(person.key)
+        await store.refreshMessages()
+        #expect(!store.canUnsubscribe, "a person's mail has no unsubscribe link")
+        let digest = try #require(store.groups.first { $0.key == "digest@example.org" })
+        store.toggle(digest.key)
+        await store.refreshMessages()
+        #expect(store.canUnsubscribe, "the sender's newest message is list mail")
+        store.askUnsubscribe()
+        #expect(store.unsubscribeQuestion?.untargeted == 1)
+        #expect(store.unsubscribeQuestion?.message.hasSuffix("One ticked group has no unsubscribe link and is left as it is.")
+            == true)
+        store.unsubscribeQuestion = nil
+        store.view = .subject
+        await store.reload()
+        store.toggle(try #require(store.groups.first).key)
+        await store.refreshMessages()
+        #expect(!store.canUnsubscribe, "a subject is no list")
+    }
+
+    @Test func theNoteAndTheMailtoDraft() {
+        let note = CleanUpUnsubscribeNote.of([
+            CleanupUnsubscribeResult(name: "Weekly Digest", host: "a.example", error: nil),
+            CleanupUnsubscribeResult(name: "Events", host: "b.example", error: nil),
+            CleanupUnsubscribeResult(name: "Deals", host: "c.example", error: "c.example answered 500 Internal Server Error"),
+        ], mailed: [])
+        #expect(note.lines == [
+            .init(text: "Unsubscribed from Weekly Digest and Events", failed: false),
+            .init(text: "Could not unsubscribe from Deals: c.example answered 500 Internal Server Error", failed: true),
+        ])
+        #expect(CleanUpUnsubscribeNote.names(["A", "B", "C", "D", "E"]) == "A, B and 3 more")
+        let draft = DraftInfo.prefilled(to: ["leave@list.example"], cc: ["x@list.example"], subject: "Stop",
+                                        body: "Remove <me>\nplease")
+        #expect(draft.to.map(\.email) == ["leave@list.example"])
+        #expect(draft.cc.map(\.email) == ["x@list.example"])
+        #expect(draft.bodyHtml == "<p>Remove &lt;me&gt;<br>please</p>")
+        #expect(CleanUpGroupRowView.detailLine(CleanupGroup(key: "l", title: "List", aka: [], detail: "list.example",
+                                                            count: 3, unsubscribed: true))
+            == "Unsubscribed · list.example")
+    }
+
+    @Test func theMailingListsEmptyStateSaysHowItFills() {
+        #expect(CleanUpGroupsColumnText.empty(.mailingList, scope: .inbox, noCategoryMail: false)
+            == "Mailing lists show here as new mail from them arrives.")
     }
 
     // MARK: The progress card (spec §14.12)

@@ -75,6 +75,9 @@ pub struct Group {
     /// of sizes (Size).
     pub detail: Option<String>,
     pub count: u64,
+    /// The user unsubscribed from this list (Mailing Lists) or sender
+    /// (Sender, People) from Clean Up ([`record_unsubscribed`]).
+    pub unsubscribed: bool,
 }
 
 /// One row of the messages column.
@@ -159,6 +162,7 @@ pub fn groups(conn: &Connection, q: &Query, filter: &str) -> StoreResult<Vec<Gro
                     aka: vec![],
                     detail: None,
                     count: count as u64,
+                    unsubscribed: false,
                 })
             })?;
             rows.collect::<Result<Vec<_>, _>>()?
@@ -176,6 +180,14 @@ pub fn groups(conn: &Connection, q: &Query, filter: &str) -> StoreResult<Vec<Gro
                 .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
                 .then_with(|| a.key.cmp(&b.key))
         });
+    }
+    if let Some(kind) = unsubscribe_kind(q.view) {
+        let done = unsubscribed(conn)?;
+        if !done.is_empty() {
+            for g in &mut groups {
+                g.unsubscribed = done.contains(&unsubscribe_identity(kind, &g.key));
+            }
+        }
     }
     let filter = filter.trim().to_lowercase();
     if !filter.is_empty() {
@@ -476,6 +488,97 @@ pub fn progress(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreRe
     })
 }
 
+/// What a group can be unsubscribed from: a list or a sender. Other
+/// views (Subject, Time, Size, the category domains) do not name one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsubscribeKind {
+    List,
+    Sender,
+}
+
+/// Which kind of thing a view's groups are, for unsubscribing.
+pub fn unsubscribe_kind(view: View) -> Option<UnsubscribeKind> {
+    match view {
+        View::MailingList => Some(UnsubscribeKind::List),
+        View::Sender | View::People => Some(UnsubscribeKind::Sender),
+        _ => None,
+    }
+}
+
+/// How an unsubscribe is remembered: `list:<id>` or `from:<address>`.
+pub fn unsubscribe_identity(kind: UnsubscribeKind, key: &str) -> String {
+    match kind {
+        UnsubscribeKind::List => format!("list:{}", key.to_lowercase()),
+        UnsubscribeKind::Sender => format!("from:{}", key.to_lowercase()),
+    }
+}
+
+const UNSUBSCRIBED_PREFIX: &str = "unsubscribed:";
+
+/// Remember that the user unsubscribed from these lists or senders (see
+/// [`unsubscribe_identity`]) at `at`, so their groups say so.
+pub fn record_unsubscribed(conn: &Connection, identities: &[String], at: Millis) -> StoreResult<()> {
+    let mut stmt = conn.prepare_cached("INSERT OR REPLACE INTO cleanup_meta (key, value) VALUES (?1, ?2)")?;
+    for identity in identities {
+        stmt.execute(params![format!("{UNSUBSCRIBED_PREFIX}{identity}"), at.to_string()])?;
+    }
+    Ok(())
+}
+
+/// Every list or sender unsubscribed from, by identity.
+pub fn unsubscribed(conn: &Connection) -> StoreResult<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare_cached("SELECT substr(key, ?2) FROM cleanup_meta WHERE key >= ?1 AND key < ?3")?;
+    let start = UNSUBSCRIBED_PREFIX;
+    let end = format!("{}{}", &UNSUBSCRIBED_PREFIX[..UNSUBSCRIBED_PREFIX.len() - 1], ';');
+    let rows = stmt.query_map(params![start, (start.len() + 1) as i64, end], |r| r.get(0))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// A group's newest message's list headers: what Unsubscribe acts on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListHeadersOf {
+    /// The group's key.
+    pub key: String,
+    pub list_id: Option<String>,
+    pub list_name: Option<String>,
+    pub from: Option<EmailAddress>,
+    /// `List-Unsubscribe` as received (unfolded).
+    pub unsubscribe: Option<String>,
+    pub unsubscribe_post: Option<String>,
+}
+
+/// For each group named by `keys`, its newest message's list headers (as
+/// they are now, in scope); groups with no messages are left out. The
+/// newest message only: an older message's address may have expired.
+pub fn newest_list_headers(conn: &Connection, q: &Query, keys: &[String]) -> StoreResult<Vec<ListHeadersOf>> {
+    let mut out = Vec::new();
+    for key in keys {
+        let mut params = Vec::new();
+        let filter = selection_sql(conn, q, std::slice::from_ref(key), &mut params)?;
+        let sql = format!(
+            "SELECT m.list_id, m.list_name, m.from_name, m.from_email, m.list_unsubscribe, m.list_unsubscribe_post
+             FROM messages m WHERE {filter} ORDER BY m.date DESC, m.id DESC LIMIT 1"
+        );
+        let row = conn
+            .prepare_cached(&sql)?
+            .query_row(params_from_iter(&params), |r| {
+                let name: Option<String> = r.get(2)?;
+                let email: Option<String> = r.get(3)?;
+                Ok(ListHeadersOf {
+                    key: key.clone(),
+                    list_id: r.get(0)?,
+                    list_name: r.get(1)?,
+                    from: email.map(|e| EmailAddress::new(name.as_deref(), &e)),
+                    unsubscribe: r.get(4)?,
+                    unsubscribe_post: r.get(5)?,
+                })
+            })
+            .optional()?;
+        out.extend(row);
+    }
+    Ok(out)
+}
+
 /// How [`named`] titles a group.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Titled {
@@ -513,11 +616,13 @@ fn named(conn: &Connection, sql: &str, params: &[Value], titled: Titled) -> Stor
             match titled {
                 Titled::ByName => {
                     let title = names.next().unwrap_or_else(|| key.clone());
-                    Group { title, aka: names.take(MAX_AKA).collect(), detail: Some(key.clone()), count, key }
+                    let aka = names.take(MAX_AKA).collect();
+                    Group { title, aka, detail: Some(key.clone()), count, key, unsubscribed: false }
                 }
                 Titled::ByKey => {
                     let names: Vec<String> = names.collect();
-                    Group { title: key.clone(), aka: vec![], detail: senders_line(&names), count, key }
+                    let detail = senders_line(&names);
+                    Group { title: key.clone(), aka: vec![], detail, count, key, unsubscribed: false }
                 }
             }
         })
@@ -627,7 +732,14 @@ fn size_groups(conn: &Connection, scope: &str, params: &[Value]) -> StoreResult<
 }
 
 fn group(key: &str, title: &str, count: i64) -> Group {
-    Group { key: key.to_owned(), title: title.to_owned(), aka: vec![], detail: None, count: count.max(0) as u64 }
+    Group {
+        key: key.to_owned(),
+        title: title.to_owned(),
+        aka: vec![],
+        detail: None,
+        count: count.max(0) as u64,
+        unsubscribed: false,
+    }
 }
 
 fn month_title(key: &str) -> String {

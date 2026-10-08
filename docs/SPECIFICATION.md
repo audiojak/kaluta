@@ -3350,6 +3350,36 @@ view is empty the window says whether the scope has none ("No promotions
 in the Inbox.") or the mailbox has no mail in that category at all, as
 IMAP-only, imported and agent mailboxes, which Gmail does not sort.)*
 
+*(Implemented 2026-10-08, Mailing Lists and Unsubscribe: Mailing Lists
+sits after Subject; its groups are titled by the list's most used name,
+else its id, with the id below (the spec's choice, kept over the domain
+alone: the id names the list and ends in its domain); while empty it
+says "Mailing lists show here as new mail from them arrives."
+*Unsubscribe* is in the toolbar of Mailing Lists, Sender and People (the
+other views name no list or sender) and is enabled when a ticked group's
+newest message in scope carries `List-Unsubscribe`; an older message's
+address may have expired, so it is not used. Each list is asked once
+(groups sharing a List-Id, or without one the same address, are one).
+`List-Unsubscribe-Post: List-Unsubscribe=One-Click` with an https URI
+means one POST from the core with RFC 8058's body, `application/x-www-
+form-urlencoded`, after the confirmation: no cookies, no credentials (an
+address with a user name is refused), no redirect followed, 5 s to
+connect and 10 s in all; a 2xx or 3xx answer counts as done. The address
+is read from the store again when the user confirms, never passed in by
+the app. Otherwise a `mailto:` URI (RFC 6068: To, Cc, Subject and Body,
+`+` kept) opens the composer filled in for the user to send; a web page
+alone is not offered. The confirmation names each list and the host (or
+the address), says ticked groups without a link are left alone, and
+offers *Archive Them Too*, off, which archives the ticked groups as one
+undoable action afterwards. What happened shows over the groups. A
+one-click success is remembered (`cleanup_meta`, `unsubscribed:list:<id>`
+and, from Sender or People, `unsubscribed:from:<address>`), and the
+group's second line then starts "Unsubscribed"; a mailto is not, since
+sending it is the user's. Not an agent tool, and never automatic. The
+Inbox tip suggesting Clean Up shows when the Inbox holds more than 1,000
+conversations (the sidebar's count; so more than 1,000 messages), before
+the other tips, until put away or until Clean Up is opened.)*
+
 ---
 
 ## 15. Security Model and Threat Model

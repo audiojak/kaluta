@@ -56,7 +56,8 @@ pub use archive::{ImportStatus, MailboxScan};
 pub use attachments::AttachmentFileInfo;
 pub use cleanup::{
     CleanupAction, CleanupDay, CleanupGroup, CleanupLoadEstimate, CleanupLoadStatus, CleanupMessage, CleanupProgress,
-    CleanupResult, CleanupScope, CleanupView,
+    CleanupResult, CleanupScope, CleanupUnsubscribeMethod, CleanupUnsubscribeResult, CleanupUnsubscribeTarget,
+    CleanupView,
 };
 pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};

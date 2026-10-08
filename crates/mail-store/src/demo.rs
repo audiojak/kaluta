@@ -340,12 +340,22 @@ fn demo_size(t: u32, i: u32, sender: &str, automated: bool, text: usize, attachm
     text as u64 + attachments.iter().map(|a| a.size).sum::<u64>() + extra
 }
 
+/// A list's headers: one-click unsubscribe (RFC 8058) with a mailto
+/// besides, except Careers, which unsubscribes by email only, so Clean
+/// Up's Unsubscribe shows both ways. (Never acted on: the demo has no
+/// network, and its addresses are documentation domains.)
 fn list_headers(sender: &EmailAddress, from_me: bool) -> ListHeaders {
     match LISTS.iter().find(|(email, _)| !from_me && sender.email == *email) {
+        Some((email, id)) if email.starts_with("careers@") => ListHeaders {
+            id: Some((*id).to_owned()),
+            name: sender.name.clone(),
+            unsubscribe: Some(format!("<mailto:unsubscribe@{id}?subject=Unsubscribe>")),
+            unsubscribe_post: None,
+        },
         Some((_, id)) => ListHeaders {
             id: Some((*id).to_owned()),
             name: sender.name.clone(),
-            unsubscribe: Some(format!("<https://{id}/unsubscribe>")),
+            unsubscribe: Some(format!("<mailto:unsubscribe@{id}>, <https://{id}/unsubscribe>")),
             unsubscribe_post: Some("List-Unsubscribe=One-Click".to_owned()),
         },
         None => ListHeaders::default(),

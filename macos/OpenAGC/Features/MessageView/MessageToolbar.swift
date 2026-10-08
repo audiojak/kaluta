@@ -228,6 +228,7 @@ enum ToolbarHelp {
         case "Trash": "Move every message in the ticked groups to the Trash (⌫)"
         case "Spam": "Mark every message in the ticked groups as spam (!)"
         case "Move": "Move every message in the ticked groups to the Inbox or a label"
+        case "Unsubscribe": "Unsubscribe from the ticked lists, after you confirm"
         case "Scope": "Clean up the Inbox, or all mail but Spam and Trash"
         case "Star": "Star (s)"
         case "Unstar": "Unstar (s)"

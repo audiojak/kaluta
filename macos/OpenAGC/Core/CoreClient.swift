@@ -1254,6 +1254,21 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// What Unsubscribe would do for the ticked groups: one target per list.
+    func cleanupUnsubscribeTargets(accountID: String, view: CleanupView, scope: CleanupScope,
+                                   keys: [String]) async throws(CoreClientError) -> [CleanupUnsubscribeTarget] {
+        try await call {
+            try await core.cleanupUnsubscribeTargets(accountId: accountID, view: view, scope: scope, keys: keys)
+        }
+    }
+
+    /// The one-click unsubscribes (RFC 8058) of the ticked groups, after
+    /// the user confirmed; mailto targets are the composer's.
+    func cleanupUnsubscribe(accountID: String, view: CleanupView, scope: CleanupScope,
+                            keys: [String]) async throws(CoreClientError) -> [CleanupUnsubscribeResult] {
+        try await call { try await core.cleanupUnsubscribe(accountId: accountID, view: view, scope: scope, keys: keys) }
+    }
+
     /// The Inbox Zero card's numbers; also records today's count at
     /// midnight and, the first time, the baseline (spec §14.12).
     func cleanupProgress(accountID: String) async throws(CoreClientError) -> CleanupProgress {
@@ -1445,6 +1460,9 @@ typealias CleanupLoadStatus = OpenAGCCore.CleanupLoadStatus
 typealias CleanupLoadEstimate = OpenAGCCore.CleanupLoadEstimate
 typealias CleanupProgress = OpenAGCCore.CleanupProgress
 typealias CleanupDay = OpenAGCCore.CleanupDay
+typealias CleanupUnsubscribeTarget = OpenAGCCore.CleanupUnsubscribeTarget
+typealias CleanupUnsubscribeMethod = OpenAGCCore.CleanupUnsubscribeMethod
+typealias CleanupUnsubscribeResult = OpenAGCCore.CleanupUnsubscribeResult
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService

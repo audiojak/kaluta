@@ -192,9 +192,10 @@ final class CleanUpGroupRowView: NSTableCellView {
         }
     }
 
-    /// The second line: "billing@example.net · aka Example Billing, Billing Team".
+    /// The second line: "billing@example.net · aka Example Billing, Billing
+    /// Team", led by "Unsubscribed" once the user unsubscribed from it here.
     static func detailLine(_ group: CleanupGroup) -> String {
-        var parts: [String] = []
+        var parts: [String] = group.unsubscribed ? ["Unsubscribed"] : []
         if let address = group.detail, !address.isEmpty, address != group.title { parts.append(address) }
         if !group.aka.isEmpty { parts.append("aka " + group.aka.joined(separator: ", ")) }
         return parts.joined(separator: " · ")

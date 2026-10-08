@@ -159,8 +159,9 @@ is only for "approved". Orange is text or a band's fill, never an error.
 - **`TipCard`**: introduces a feature, as Mail introduces Categories: an
   icon, a title, one sentence, the main action and a dismiss ("Turn Off",
   "Not Now"). An info card under the Inbox's header, one tip at a time
-  (`Tip`: Categories, Important Only, the agent); any button puts it away
-  for good.
+  (`Tip`: Clean Up when the Inbox holds more than 1,000 conversations,
+  Categories, Important Only, the agent); any button puts it away for
+  good, and opening Clean Up retires its tip.
 - **`CapsuleTabs`**: tabs at the top of a list column as pills (the
   Inbox's categories, Tasks' Open and Done): a symbol each, and the
   chosen one widens to show its name. With two tabs whose names fit,
@@ -280,8 +281,21 @@ done over thousands of messages at once.
   spinner with "Archiving 813 messages…" while an action runs, or
   "Sending changes to Gmail… N left" while the outbox drains; then
   *Archive*, *Trash* and *Spam* in one glass group and *Move* (the Inbox
-  and the labels) after a fixed spacer. Disabled, not hidden, with
-  nothing ticked.
+  and the labels) after a fixed spacer, then *Unsubscribe* (`bell.slash`)
+  after another. Disabled, not hidden, with nothing ticked; *Unsubscribe*
+  is enabled only in Mailing Lists, Sender and People, when a ticked
+  group's newest message carries `List-Unsubscribe`.
+- **Unsubscribe always asks** (`CleanUpUnsubscribeDialog`, a `Dialog`):
+  the title names the list ("Unsubscribe from Weekly Digest?") or counts
+  them; the message says what happens (one request to the host, or a
+  message opened for the user to send); with several lists, a
+  `.card(.neutral)` lists each by name with "one click at <host>" or "a
+  message to <address>" in caption, secondary; *Archive Them Too* is a
+  toggle, off. *Cancel* (Esc), *Unsubscribe* (Return). What happened is a
+  line over the groups (`CleanUpUnsubscribeNoteView`): "Unsubscribed from
+  Weekly Digest" in secondary with a check, a failure in `Tone.failure`
+  with the triangle, and *OK* to put it away. A group the user left
+  leads its second line with "Unsubscribed".
 - **Loading every header** (spec §14.12): an info band (`CleanUpLoadBand`,
   `.bandBackground(.info)`) under the filter, over the groups, since the
   groups fill as headers arrive: "Loading headers for all mail — 11,712
@@ -556,3 +570,5 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Clean Up asking before loading all mail without IMAP, light](design/cleanup-ask-light.png) | ![Clean Up asking before loading all mail without IMAP, dark](design/cleanup-ask-dark.png) |
 | ![Clean Up's Inbox Zero card, light](design/cleanup-progress-light.png) | ![Clean Up's Inbox Zero card, dark](design/cleanup-progress-dark.png) |
 | ![Clean Up's Social view on All Mail, light](design/cleanup-social-light.png) | ![Clean Up's Social view on All Mail, dark](design/cleanup-social-dark.png) |
+| ![Clean Up's Mailing Lists, light](design/cleanup-lists-light.png) | ![Clean Up's Mailing Lists, dark](design/cleanup-lists-dark.png) |
+| ![Unsubscribing from three lists, light](design/cleanup-unsubscribe-light.png) | ![Unsubscribing from three lists, dark](design/cleanup-unsubscribe-dark.png) |
