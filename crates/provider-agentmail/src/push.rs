@@ -67,6 +67,10 @@ pub struct SocketConfig {
     pub ping_every: Duration,
     /// No frame at all (not even a pong) for this long: reconnect.
     pub silence_limit: Duration,
+    /// A connection dropped sooner than this after subscribing counts as a
+    /// failure (toward resting), so a server that closes at once is not
+    /// reconnected to in a loop.
+    pub stable_after: Duration,
 }
 
 impl Default for SocketConfig {
@@ -79,6 +83,7 @@ impl Default for SocketConfig {
             rest: Duration::from_secs(15 * 60),
             ping_every: Duration::from_secs(60),
             silence_limit: Duration::from_secs(150),
+            stable_after: Duration::from_secs(30),
         }
     }
 }
@@ -187,7 +192,8 @@ impl AgentMailSocket {
 enum Ended {
     /// The socket's owners are gone: stop.
     Closed,
-    /// It was subscribed, then dropped: reconnect at once.
+    /// It was subscribed for a while ([`SocketConfig::stable_after`]),
+    /// then dropped: reconnect after the first backoff.
     Dropped,
     /// It never got going, or the server said no.
     Failed(String),
@@ -208,7 +214,8 @@ async fn run(weak: Weak<AgentMailSocket>, mut commands: mpsc::UnboundedReceiver<
                 failures = 0;
                 backoff = config.first_backoff;
                 tracing::info!("AgentMail's WebSocket closed; reconnecting");
-                Duration::ZERO
+                // Not at once: every reconnection wakes every agent.
+                config.first_backoff
             }
             Ended::Failed(why) => {
                 failures += 1;
@@ -319,21 +326,36 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
         Ok(Err(e)) => return Ended::Failed(redact(&e.to_string(), key)),
         Err(_) => return Ended::Failed("the WebSocket handshake timed out".into()),
     };
-    // Every inbox, ten to a message.
+    // Every inbox, ten to a message. The queue of inboxes added meanwhile
+    // is emptied first and the list read after: an inbox added in between
+    // is then in the list, or its command still queued (subscribed twice at
+    // worst), never neither.
+    while commands.try_recv().is_ok() {}
     let inboxes: Vec<String> = match weak.upgrade() {
         Some(socket) => socket.inboxes().keys().cloned().collect(),
         None => return Ended::Closed,
     };
-    while commands.try_recv().is_ok() {}
     for chunk in inboxes.chunks(INBOXES_PER_SUBSCRIBE) {
         if let Err(e) = ws.send(subscribe(chunk)).await {
             return Ended::Failed(e.to_string());
         }
     }
     let mut subscribed = inboxes.is_empty();
+    let mut subscribed_at = tokio::time::Instant::now();
     if subscribed {
         mark_connected(weak);
     }
+    // Dropped once subscribed: a failure all the same if it came soon after
+    // (a server closing at once must not be reconnected to in a loop).
+    let dropped = |subscribed: bool, at: tokio::time::Instant, why: String| {
+        if !subscribed {
+            Ended::Failed(why)
+        } else if at.elapsed() < config.stable_after {
+            Ended::Failed(format!("dropped soon after subscribing ({why})"))
+        } else {
+            Ended::Dropped
+        }
+    };
     let mut last_frame = tokio::time::Instant::now();
     let mut ping = tokio::time::interval(config.ping_every);
     ping.reset();
@@ -344,19 +366,15 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                 last_frame = tokio::time::Instant::now();
                 let text = match frame {
                     Some(Ok(Message::Text(text))) => text,
-                    Some(Ok(Message::Close(_))) | None => {
-                        return if subscribed { Ended::Dropped } else { Ended::Failed("closed before subscribing".into()) };
-                    }
+                    Some(Ok(Message::Close(_))) | None => return dropped(subscribed, subscribed_at, "closed".into()),
                     Some(Ok(_)) => continue,
-                    Some(Err(e)) => {
-                        let why = redact(&e.to_string(), key);
-                        return if subscribed { Ended::Dropped } else { Ended::Failed(why) };
-                    }
+                    Some(Err(e)) => return dropped(subscribed, subscribed_at, redact(&e.to_string(), key)),
                 };
                 let Ok(value) = serde_json::from_str::<Value>(text.as_str()) else { continue };
                 match value.get("type").and_then(Value::as_str) {
                     Some("subscribed") if !subscribed => {
                         subscribed = true;
+                        subscribed_at = tokio::time::Instant::now();
                         mark_connected(weak);
                     }
                     Some("event") => match weak.upgrade() {
@@ -379,7 +397,7 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                 }
                 Some(inbox) => {
                     if let Err(e) = ws.send(subscribe(std::slice::from_ref(&inbox))).await {
-                        return if subscribed { Ended::Dropped } else { Ended::Failed(e.to_string()) };
+                        return dropped(subscribed, subscribed_at, e.to_string());
                     }
                 }
             },
@@ -389,10 +407,10 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                     return Ended::Closed;
                 }
                 if last_frame.elapsed() > config.silence_limit {
-                    return Ended::Dropped;
+                    return dropped(subscribed, subscribed_at, "silent".into());
                 }
                 if ws.send(Message::Ping(Vec::new().into())).await.is_err() {
-                    return if subscribed { Ended::Dropped } else { Ended::Failed("ping failed".into()) };
+                    return dropped(subscribed, subscribed_at, "ping failed".into());
                 }
             }
             () = tokio::time::sleep_until(deadline), if !subscribed => {

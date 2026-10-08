@@ -30,6 +30,9 @@ struct State {
     refuse: bool,
     /// Answer subscriptions with an error.
     error_on_subscribe: bool,
+    /// Close each connection right after answering its subscription (a
+    /// server that keeps one socket per key, say).
+    close_after_subscribe: bool,
 }
 
 /// A running fake. Dropping it stops accepting connections.
@@ -106,6 +109,10 @@ impl FakeAgentMailSocket {
 
     pub fn error_on_subscribe(&self, error: bool) {
         self.state().error_on_subscribe = error;
+    }
+
+    pub fn close_after_subscribe(&self, close: bool) {
+        self.state().close_after_subscribe = close;
     }
 
     /// Send `message.received` for `inbox` on every live connection.
@@ -194,10 +201,10 @@ async fn serve(stream: tokio::net::TcpStream, state: Arc<Mutex<State>>) -> Resul
                     .and_then(Value::as_array)
                     .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
                     .unwrap_or_default();
-                let error = {
+                let (error, close) = {
                     let mut s = state.lock().unwrap_or_else(|e| e.into_inner());
                     s.subscriptions.push(inboxes.clone());
-                    s.error_on_subscribe
+                    (s.error_on_subscribe, s.close_after_subscribe)
                 };
                 let answer = if error {
                     json!({ "type": "error", "name": "ForbiddenError", "message": "not allowed" })
@@ -205,6 +212,10 @@ async fn serve(stream: tokio::net::TcpStream, state: Arc<Mutex<State>>) -> Resul
                     json!({ "type": "subscribed", "inbox_ids": inboxes, "event_types": value.get("event_types") })
                 };
                 write.send(Message::Text(answer.to_string().into())).await.map_err(|_| ())?;
+                if close {
+                    let _ = write.close().await;
+                    return Ok(());
+                }
             }
             message = rx.recv() => match message {
                 Some(Some(message)) => write.send(message).await.map_err(|_| ())?,

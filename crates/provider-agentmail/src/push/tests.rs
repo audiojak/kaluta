@@ -18,6 +18,7 @@ fn quick() -> SocketConfig {
         rest: Duration::from_secs(60),
         ping_every: Duration::from_millis(200),
         silence_limit: Duration::from_secs(5),
+        stable_after: Duration::ZERO,
     }
 }
 
@@ -135,6 +136,42 @@ async fn repeated_failures_rest_the_socket_so_the_agents_poll() {
     assert_eq!(fake.refused(), 3, "three tries with backoff, then rest");
     assert_eq!(socket.state(), SocketState::Resting);
     assert!(scout.watch(Duration::from_secs(5)).await.is_err(), "still resting: the push loop backs off");
+}
+
+#[tokio::test]
+async fn a_server_that_drops_right_after_subscribing_is_not_hammered() {
+    let fake = FakeAgentMailSocket::start().await;
+    fake.close_after_subscribe(true);
+    let socket = socket(&fake, SocketConfig { stable_after: Duration::from_secs(30), ..quick() });
+    let scout = push(&socket, "scout@agentmail.to");
+    // Each connection subscribes and is dropped at once: it backs off and,
+    // after three such drops, rests while the agents poll.
+    let mut wakes = 0;
+    loop {
+        match scout.watch(Duration::from_secs(5)).await {
+            Ok(Some(true)) => wakes += 1,
+            Ok(other) => panic!("neither woken nor resting: {other:?}"),
+            Err(_) => break,
+        }
+    }
+    assert_eq!(socket.state(), SocketState::Resting);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(fake.connections(), 3, "three tries with backoff, not a tight loop");
+    assert!(wakes <= 3, "woken once per connection at most: {wakes}");
+    assert!(scout.watch(Duration::from_millis(50)).await.is_err(), "resting: the push loop backs off");
+}
+
+#[tokio::test]
+async fn a_drop_after_a_while_reconnects_after_a_pause() {
+    let fake = FakeAgentMailSocket::start().await;
+    let socket = socket(&fake, SocketConfig { first_backoff: Duration::from_millis(300), ..quick() });
+    let scout = push(&socket, "scout@agentmail.to");
+    take_catch_up(&scout).await;
+    fake.drop_connections();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(fake.connections(), 1, "not back at once");
+    assert_eq!(scout.watch(Duration::from_secs(2)).await.unwrap(), Some(true), "woken after reconnecting");
+    assert_eq!(fake.connections(), 2);
 }
 
 #[tokio::test]
