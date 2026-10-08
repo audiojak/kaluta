@@ -138,6 +138,8 @@ final class CleanUpStore {
     var error: String?
     /// Changes still waiting to go to the provider (the outbox).
     private(set) var pending: UInt32 = 0
+    /// The Inbox Zero card's numbers (spec §14.12), nil until loaded.
+    private(set) var progress: CleanupProgress?
     /// Every header loading (spec §14.12), shown in a band over the groups.
     var headerLoad: CleanUpHeaderLoad?
     /// Asking before loading all mail without IMAP (a sheet).
@@ -153,6 +155,7 @@ final class CleanUpStore {
     @ObservationIgnored private var loadingPages: Set<Int> = []
     @ObservationIgnored private let groupLoads = LatestLoad()
     @ObservationIgnored private let countLoads = LatestLoad()
+    @ObservationIgnored private let progressLoads = LatestLoad()
     /// Bumped whenever the pages are dropped; a page that arrives after is ignored.
     @ObservationIgnored private var pageEpoch = 0
     @ObservationIgnored let logger = Logger(subsystem: "ai.actual.openagc", category: "cleanup")
@@ -188,6 +191,7 @@ final class CleanUpStore {
             groupsLoaded = false
             error = nil
             pending = 0
+            progress = nil
             headerLoad = nil
             loadQuestion = nil
         }
@@ -195,10 +199,23 @@ final class CleanUpStore {
         await prepareHeaderLoad()
     }
 
-    /// The groups and the ticked groups' messages, as they are now.
+    /// The groups, the ticked groups' messages and the progress card, as
+    /// they are now.
     func reload() async {
         await loadGroups()
         await refreshMessages()
+        await loadProgress()
+    }
+
+    /// The progress card's numbers. Loading them is also what records
+    /// opening Clean Up: today's count at midnight and the baseline.
+    func loadProgress() async {
+        guard let core, let accountID else { return }
+        await progressLoads.run { [self] isCurrent in
+            guard let loaded = try? await core.cleanupProgress(accountID: accountID),
+                  isCurrent(), accountID == self.accountID else { return }
+            progress = loaded
+        }
     }
 
     func loadGroups() async {
@@ -381,6 +398,7 @@ final class CleanUpStore {
             if self.working == nil {
                 await self.loadGroups()
                 await self.refreshMessages(restart: false)
+                await self.loadProgress()
             }
         }
     }

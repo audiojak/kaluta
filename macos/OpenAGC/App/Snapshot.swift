@@ -31,6 +31,10 @@ import os
 ///                                       people, subject, time, size) with its
 ///                                       largest group ticked, and capture it
 ///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
+///   -OpenAGCSnapshotCleanUpProgress YES …with a month of sample history on
+///                                       the progress card
+///   -OpenAGCSnapshotCleanUpCard YES     …capturing the progress card alone (the
+///                                       sidebar's glass hides it)
 ///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
 ///                                       undo notice)
 ///   -OpenAGCSnapshotCleanUpLoad loading|ask  …showing every header loading
@@ -161,6 +165,19 @@ enum Snapshot {
                     store.setTicked(true, keys: [largest.key])
                     await store.refreshMessages()
                 }
+                // A month of history for the progress card: the demo has
+                // none, so sample counts falling to today's Inbox.
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpProgress"), let core = model.core,
+                   let account = model.openAccountID, let now = store.progress?.now {
+                    let start = Double(now) * 2.6
+                    let counts = (0..<30).map { day -> UInt64 in
+                        let t = Double(day) / 29
+                        let wobble = Double((day * 37) % 11) - 5
+                        return UInt64(max(Double(now) + 37, start - (start - Double(now) - 37) * (1 - pow(1 - t, 2)) + wobble * 4))
+                    }
+                    try? await core.debugSeedInboxHistory(accountID: account, counts: counts, baseline: counts[0] + 140)
+                    await store.loadProgress()
+                }
                 if defaults.bool(forKey: "OpenAGCSnapshotCleanUpArchive") {
                     model.undo.runsClock = false
                     await store.apply(.archive)
@@ -173,6 +190,12 @@ enum Snapshot {
                 }
                 try? await Task.sleep(for: .milliseconds(1200))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("cleanup") ?? false) }
+                // The sidebar's glass hides the card from self-snapshots:
+                // the left column's foot in a window of its own.
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpCard") {
+                    window = cleanUpCardWindow(model)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
                 if load == "ask", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
                     window = sheet
                 }
@@ -410,6 +433,25 @@ enum Snapshot {
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: form)
+        window.makeKeyAndOrderFront(nil)
+        return window
+    }
+
+    /// Clean Up's left column foot (the progress card) at the column's
+    /// width, in a window of its own.
+    private static func cleanUpCardWindow(_ model: AppModel) -> NSWindow {
+        let size = NSSize(width: 210, height: 300)
+        let root = VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            CleanUpSidebarFooter()
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(model)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: root)
         window.makeKeyAndOrderFront(nil)
         return window
     }

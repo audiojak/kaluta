@@ -1254,6 +1254,17 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// The Inbox Zero card's numbers; also records today's count at
+    /// midnight and, the first time, the baseline (spec §14.12).
+    func cleanupProgress(accountID: String) async throws(CoreClientError) -> CleanupProgress {
+        try await call { try await core.cleanupProgress(accountId: accountID) }
+    }
+
+    /// Snapshots only: the Inbox's daily counts, today's last, and the baseline.
+    func debugSeedInboxHistory(accountID: String, counts: [UInt64], baseline: UInt64) async throws(CoreClientError) {
+        try await call { try await core.debugSeedInboxHistory(accountId: accountID, counts: counts, baseline: baseline) }
+    }
+
     /// Where the account's download stands, for loading every header when
     /// Clean Up opens (spec §14.12).
     func cleanupLoadStatus(accountID: String) async throws(CoreClientError) -> CleanupLoadStatus {
@@ -1432,6 +1443,8 @@ typealias CleanupMessage = OpenAGCCore.CleanupMessage
 typealias CleanupResult = OpenAGCCore.CleanupResult
 typealias CleanupLoadStatus = OpenAGCCore.CleanupLoadStatus
 typealias CleanupLoadEstimate = OpenAGCCore.CleanupLoadEstimate
+typealias CleanupProgress = OpenAGCCore.CleanupProgress
+typealias CleanupDay = OpenAGCCore.CleanupDay
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService

@@ -3319,6 +3319,28 @@ mail are out of scope everywhere (groups, counts, messages, actions), so
 "N messages in M groups" counts exactly what an action may change; the
 result's count and notice still give only the messages that changed.)*
 
+*(Implemented 2026-10-08, progress card: `cleanup_progress(account)`
+returns the baseline, the percentage, At Midnight, Received Today,
+Removed Today, Now and the last 30 days' counts at midnight (today's
+last; the sparkline ends with Now). The day's count is recorded by the
+first incremental sync after local midnight once the first listing is
+done, and by `cleanup_progress` itself, which the window calls as it
+opens and after every change; the first record of a day stands. A count
+recorded after midnight is the Inbox then less what arrived since
+midnight and is still in it, so the day starts consistent (Removed Today
+0). Received Today is the mail that arrived today by `internal_date`
+(not the user's own, not drafts, not Spam) wherever it is now, not only
+what is still in the Inbox: otherwise archiving today's mail would not
+count as removed. Mail a Gmail filter keeps out of the Inbox therefore
+counts as received and removed; the percentage, which uses only the
+baseline and Now, is unaffected. The baseline is set the first time and
+rises when the Inbox outgrows it (older Inbox mail arriving as every
+header loads would otherwise pin Inbox Zero at 0 %); it never falls. An
+empty Inbox is 100 %. Migration `0019_cleanup_progress` indexes
+`internal_date`. The card is `CleanUpProgressCard` at the foot of the
+views and refreshes with the groups: after every action, undo and redo,
+and when mail changes.)*
+
 ---
 
 ## 15. Security Model and Threat Model

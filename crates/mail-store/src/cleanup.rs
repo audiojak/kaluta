@@ -339,6 +339,142 @@ pub fn set_baseline_once(conn: &Connection, count: u64, at: Millis) -> StoreResu
     Ok(true)
 }
 
+/// Raise the baseline to `count` when the Inbox has outgrown it (older
+/// Inbox mail arriving as Clean Up loads every header, or more mail than
+/// there ever was); never lowers it. Returns whether it rose.
+pub fn raise_baseline(conn: &Connection, count: u64) -> StoreResult<bool> {
+    match baseline(conn)? {
+        Some((base, _)) if count > base => {
+            conn.prepare_cached("INSERT OR REPLACE INTO cleanup_meta (key, value) VALUES (?1, ?2)")?
+                .execute(params![BASELINE_KEY, count.to_string()])?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Days of history the progress card's sparkline shows, today included.
+pub const HISTORY_DAYS: i64 = 30;
+
+/// UTC milliseconds of the local midnight that starts the day `at` falls
+/// in, `utc_offset_secs` east of UTC.
+pub fn local_midnight(at: Millis, utc_offset_secs: i64) -> Millis {
+    let offset = utc_offset_secs * 1000;
+    (at + offset).div_euclid(DAY_MS) * DAY_MS - offset
+}
+
+/// The local day `at` falls in, as `YYYY-MM-DD`.
+pub fn day_key(at: Millis, utc_offset_secs: i64) -> String {
+    let (y, m, d) = civil_from_days((at + utc_offset_secs * 1000).div_euclid(DAY_MS));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Mail received since `since` (by arrival): not the user's own, not
+/// drafts, not Spam (which never reached the Inbox). `inbox`: only what
+/// is in the Inbox now.
+fn received_since(conn: &Connection, since: Millis, inbox: bool) -> StoreResult<u64> {
+    let mut params = vec![
+        Value::Integer(since),
+        Value::Integer(label_rowid(conn, system_labels::SPAM)?),
+        Value::Text(LOCAL_PREFIX.to_owned() + "%"),
+    ];
+    let inbox = if inbox {
+        params.push(Value::Integer(label_rowid(conn, system_labels::INBOX)?));
+        " AND m.id IN (SELECT message_id FROM message_labels WHERE label_id = ?4)"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT COUNT(*) FROM messages m
+         WHERE m.internal_date >= ?1 AND m.is_sent_by_me = 0 AND m.is_draft = 0 AND m.gmail_id NOT LIKE ?3
+           AND m.id NOT IN (SELECT message_id FROM message_labels WHERE label_id = ?2){inbox}"
+    );
+    let n: i64 = conn.prepare_cached(&sql)?.query_row(params_from_iter(&params), |r| r.get(0))?;
+    Ok(n.max(0) as u64)
+}
+
+/// The Inbox at the start of today, worked out now: what is in it less
+/// what arrived since midnight and is still there. Removals since midnight
+/// of older mail are not seen, which is why the first count of a day is
+/// recorded and kept ([`record_today`]).
+fn midnight_now(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreResult<u64> {
+    let midnight = local_midnight(now, utc_offset_secs);
+    Ok(inbox_count(conn)?.saturating_sub(received_since(conn, midnight, true)?))
+}
+
+/// Record the Inbox's count at the start of today unless it is recorded:
+/// at the first sync after local midnight, and when Clean Up opens.
+/// Returns whether this was the day's first record.
+pub fn record_today(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreResult<bool> {
+    let day = day_key(now, utc_offset_secs);
+    let known: bool = conn
+        .prepare_cached("SELECT EXISTS (SELECT 1 FROM inbox_history WHERE day = ?1)")?
+        .query_row([&day], |r| r.get(0))?;
+    if known {
+        return Ok(false);
+    }
+    let count = midnight_now(conn, now, utc_offset_secs)?;
+    record_inbox_day(conn, &day, count)
+}
+
+/// The Inbox Zero card's numbers (spec §14.12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    /// The Inbox when Clean Up was first opened (raised if the Inbox
+    /// outgrew it); `None` before then.
+    pub baseline: Option<u64>,
+    /// The Inbox at the start of today.
+    pub at_midnight: u64,
+    /// Mail received today (by arrival), wherever it is now.
+    pub received_today: u64,
+    /// `at_midnight + received_today - now`, never below zero.
+    pub removed_today: u64,
+    pub now: u64,
+    /// The Inbox at the start of each recorded day of the last
+    /// [`HISTORY_DAYS`], oldest first, ending with today's.
+    pub days: Vec<(String, u64)>,
+}
+
+impl Progress {
+    /// Inbox Zero as a percentage: how much of the baseline is gone,
+    /// 0 to 100. An empty Inbox is 100 whatever the baseline.
+    pub fn percent(&self) -> u8 {
+        if self.now == 0 {
+            return 100;
+        }
+        match self.baseline {
+            Some(base) if base > self.now => ((base - self.now) * 100 / base).min(100) as u8,
+            _ => 0,
+        }
+    }
+}
+
+/// The progress card's numbers at `now`, in the user's calendar.
+pub fn progress(conn: &Connection, now: Millis, utc_offset_secs: i64) -> StoreResult<Progress> {
+    let today = day_key(now, utc_offset_secs);
+    let first = day_key(local_midnight(now, utc_offset_secs) - (HISTORY_DAYS - 1) * DAY_MS, utc_offset_secs);
+    let mut days = inbox_days(conn, &first)?;
+    days.retain(|(day, _)| *day <= today);
+    let at_midnight = match days.last() {
+        Some((day, count)) if *day == today => *count,
+        _ => {
+            let count = midnight_now(conn, now, utc_offset_secs)?;
+            days.push((today, count));
+            count
+        }
+    };
+    let received_today = received_since(conn, local_midnight(now, utc_offset_secs), false)?;
+    let now_count = inbox_count(conn)?;
+    Ok(Progress {
+        baseline: baseline(conn)?.map(|(n, _)| n),
+        at_midnight,
+        received_today,
+        removed_today: (at_midnight + received_today).saturating_sub(now_count),
+        now: now_count,
+        days,
+    })
+}
+
 /// How [`named`] titles a group.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Titled {

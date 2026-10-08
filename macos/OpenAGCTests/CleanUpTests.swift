@@ -174,6 +174,43 @@ struct CleanUpTests {
         #expect(!store.groups.contains { $0.key == first.key })
     }
 
+    // MARK: The progress card (spec §14.12)
+
+    @Test func openingSetsTheBaselineAndArchivingCountsAsRemoved() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        let first = try #require(store.progress)
+        #expect(first.now > 0)
+        #expect(first.baseline == first.now, "the Inbox when Clean Up first opened")
+        #expect(first.percent == 0)
+        #expect(first.removedToday == 0)
+        #expect(first.days.last?.count == first.atMidnight, "today, recorded on opening")
+
+        let group = try #require(store.groups.first)
+        store.toggle(group.key)
+        await store.apply(.archive)
+        let after = try #require(store.progress)
+        #expect(after.now == first.now - group.count)
+        #expect(after.removedToday == group.count, "follows the action")
+        #expect(after.baseline == first.baseline)
+        #expect(UInt64(after.percent) == group.count * 100 / first.baseline)
+
+        model.undoMailAction()
+        await eventually { store.progress?.now == first.now }
+        #expect(store.progress?.removedToday == 0, "and its undo")
+    }
+
+    @Test func theCardsWordsAndPoints() {
+        #expect(CleanUpProgressCard.percentText(62) == "62%")
+        #expect(CleanUpProgressCard.signed(12, plus: true) == "+12")
+        #expect(CleanUpProgressCard.signed(1_310, plus: false) == "\u{2212}1,310")
+        #expect(CleanUpProgressCard.signed(0, plus: false) == "0")
+        let progress = CleanupProgress(baseline: 900, percent: 33, atMidnight: 640, receivedToday: 12, removedToday: 52,
+                                       now: 600, days: [CleanupDay(day: "2026-10-07", count: 700),
+                                                        CleanupDay(day: "2026-10-08", count: 640)])
+        #expect(CleanUpProgressCard.points(progress) == [700, 640, 600], "the days, then now")
+    }
+
     @Test func toolbarWordsWhileWorking() {
         #expect(CleanUpStore.workingText(.archive, count: 813) == "Archiving 813 messages…")
         #expect(CleanUpStore.workingText(.trash, count: 1) == "Moving 1 message to the Trash…")

@@ -142,6 +142,66 @@ pub struct CleanupResult {
     pub action_name: String,
 }
 
+/// One day of the Inbox's history: its count at the start of the day.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CleanupDay {
+    /// `YYYY-MM-DD` in the user's calendar.
+    pub day: String,
+    pub count: u64,
+}
+
+/// The Inbox Zero card under Clean Up's views (spec §14.12).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CleanupProgress {
+    /// The Inbox when Clean Up was first opened, raised when the Inbox
+    /// outgrew it (older Inbox mail arriving as every header loads).
+    pub baseline: u64,
+    /// How much of the baseline is gone, 0 to 100; 100 for an empty Inbox.
+    pub percent: u8,
+    /// The Inbox at the start of today.
+    pub at_midnight: u64,
+    /// Mail received today (by arrival, not Spam), wherever it is now.
+    pub received_today: u64,
+    /// `at_midnight + received_today - now`, never below zero.
+    pub removed_today: u64,
+    /// The Inbox now.
+    pub now: u64,
+    /// The Inbox at the start of each recorded day of the last 30, oldest
+    /// first, ending with today's: the sparkline, with `now` as its last
+    /// point.
+    pub days: Vec<CleanupDay>,
+}
+
+/// The card's numbers at `now`: also what opening Clean Up records,
+/// today's count at midnight (if the first sync after midnight has not
+/// recorded it) and the baseline (set once; raised, never lowered).
+pub(crate) fn progress_at(
+    tx: &mail_store::Transaction<'_>,
+    now: i64,
+    utc_offset_secs: i64,
+) -> mail_store::StoreResult<CleanupProgress> {
+    cleanup::record_today(tx, now, utc_offset_secs)?;
+    let inbox = cleanup::inbox_count(tx)?;
+    if !cleanup::set_baseline_once(tx, inbox, now)? {
+        cleanup::raise_baseline(tx, inbox)?;
+    }
+    let p = cleanup::progress(tx, now, utc_offset_secs)?;
+    Ok(CleanupProgress {
+        baseline: p.baseline.unwrap_or(p.now),
+        percent: p.percent(),
+        at_midnight: p.at_midnight,
+        received_today: p.received_today,
+        removed_today: p.removed_today,
+        now: p.now,
+        days: p.days.into_iter().map(|(day, count)| CleanupDay { day, count }).collect(),
+    })
+}
+
+/// Seconds east of UTC on this Mac now.
+pub(crate) fn utc_offset_now() -> i64 {
+    i64::from(chrono::Local::now().offset().local_minus_utc())
+}
+
 /// Undo records of Clean Up's applies start with this; they are undone
 /// and redone in batches, as they were applied.
 const KIND_PREFIX: &str = "cleanup_";
@@ -157,7 +217,7 @@ fn query(view: CleanupView, scope: CleanupScope) -> cleanup::Query {
         view: view.into(),
         scope: scope.into(),
         now: mail_sync::now_millis(),
-        utc_offset_secs: i64::from(chrono::Local::now().offset().local_minus_utc()),
+        utc_offset_secs: utc_offset_now(),
     }
 }
 
@@ -326,6 +386,44 @@ impl Core {
             done.replacen("{}", &which(view, changed, groups, title.as_deref()), 1)
         };
         Ok(CleanupResult { changed: changed as u64, undo, description, action_name: action_name.to_owned() })
+    }
+
+    /// The Inbox Zero card's numbers for `account_id` (spec §14.12). Called
+    /// as Clean Up opens and after each change, so it also records what
+    /// opening records: today's count at midnight and the baseline.
+    pub async fn cleanup_progress(&self, account_id: String) -> Result<CleanupProgress, CoreError> {
+        let db = self.store_for(&account_id).await?;
+        let (now, offset) = (mail_sync::now_millis(), utc_offset_now());
+        runtime::run(async move { Ok(db.write(move |tx| progress_at(tx, now, offset)).await?) }).await
+    }
+
+    /// Development hook for snapshots: the Inbox's count at the start of
+    /// each of the last `counts.len()` days, today's last, and the
+    /// baseline. Replaces what was recorded for those days.
+    pub async fn debug_seed_inbox_history(
+        &self,
+        account_id: String,
+        counts: Vec<u64>,
+        baseline: u64,
+    ) -> Result<(), CoreError> {
+        let db = self.store_for(&account_id).await?;
+        let (now, offset) = (mail_sync::now_millis(), utc_offset_now());
+        runtime::run(async move {
+            db.write(move |tx| {
+                let days = counts.len() as i64;
+                for (i, count) in counts.into_iter().enumerate() {
+                    let at = now - (days - 1 - i as i64) * 86_400_000;
+                    tx.execute("DELETE FROM inbox_history WHERE day = ?1", [cleanup::day_key(at, offset)])?;
+                    cleanup::record_inbox_day(tx, &cleanup::day_key(at, offset), count)?;
+                }
+                tx.execute("DELETE FROM cleanup_meta WHERE key LIKE 'baseline%'", [])?;
+                cleanup::set_baseline_once(tx, baseline, now)?;
+                Ok(())
+            })
+            .await?;
+            Ok(())
+        })
+        .await
     }
 }
 

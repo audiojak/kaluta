@@ -378,3 +378,99 @@ fn inbox_history_and_baseline() {
     assert!(set && kept);
     assert_eq!(base, Some((1200, NOW)));
 }
+
+#[test]
+fn progress_counts_today_in_the_users_calendar() {
+    let db = open("progress-today");
+    // 12:00 UTC is 05:00 at UTC-7: local midnight was 07:00 UTC.
+    let offset = -7 * 3600;
+    let midnight = NOW - 5 * 3_600_000;
+    assert_eq!(cleanup::local_midnight(NOW, offset), midnight);
+    assert_eq!(cleanup::day_key(NOW, offset), "2026-10-08");
+    assert_eq!(cleanup::day_key(midnight - 1, offset), "2026-10-07");
+    let sent = msg("sent", ("Me", "me@example.com"), "s", NOW - 1000, &["SENT"]);
+    store(
+        &db,
+        vec![
+            // In the Inbox since before midnight: four, one archived today below.
+            msg("old1", ("A", "a@example.com"), "s", midnight - 3 * DAY, &["INBOX"]),
+            msg("old2", ("A", "a@example.com"), "s", midnight - 2 * DAY, &["INBOX"]),
+            msg("old3", ("B", "b@example.com"), "s", midnight - DAY, &["INBOX"]),
+            msg("old4", ("B", "b@example.com"), "s", midnight - 1, &["INBOX"]),
+            // Arrived today: two still in the Inbox, one archived, one spam.
+            msg("new1", ("C", "c@example.com"), "s", midnight + 1, &["INBOX"]),
+            msg("new2", ("C", "c@example.com"), "s", NOW - 60_000, &["INBOX", "UNREAD"]),
+            msg("new3", ("C", "c@example.com"), "s", NOW - 50_000, &[]),
+            msg("spam", ("D", "d@example.com"), "s", NOW - 40_000, &["SPAM"]),
+            sent,
+        ],
+    );
+    let (recorded, again, p) = db
+        .write_blocking(move |tx| {
+            let recorded = cleanup::record_today(tx, NOW, offset)?;
+            let again = cleanup::record_today(tx, NOW + 1000, offset)?;
+            Ok((recorded, again, cleanup::progress(tx, NOW, offset)?))
+        })
+        .unwrap();
+    assert!(recorded && !again, "one record a day");
+    // Six in the Inbox now, two of them from today: four at midnight.
+    assert_eq!((p.at_midnight, p.received_today, p.now), (4, 3, 6));
+    assert_eq!(p.removed_today, 1, "the one that arrived today and was archived");
+    assert_eq!(p.days, [("2026-10-08".to_owned(), 4)]);
+    assert_eq!(p.baseline, None);
+
+    // Archiving two older ones: removed today follows; midnight stands.
+    store(
+        &db,
+        vec![
+            msg("old1", ("A", "a@example.com"), "s", midnight - 3 * DAY, &[]),
+            msg("old2", ("A", "a@example.com"), "s", midnight - 2 * DAY, &[]),
+        ],
+    );
+    let p = db.read_blocking(move |c| cleanup::progress(c, NOW, offset)).unwrap();
+    assert_eq!((p.at_midnight, p.received_today, p.removed_today, p.now), (4, 3, 3, 4));
+}
+
+#[test]
+fn progress_history_baseline_and_percent() {
+    let db = open("progress-history");
+    store(
+        &db,
+        (0..10).map(|i| msg(&format!("m{i}"), ("A", "a@example.com"), "s", NOW - 40 * DAY, &["INBOX"])).collect(),
+    );
+    let p = db
+        .write_blocking(|tx| {
+            // 40 days of records: the card shows the last 30, today's included.
+            for d in 1..=40 {
+                let day = cleanup::day_key(NOW - d * DAY, 0);
+                cleanup::record_inbox_day(tx, &day, 100 - d as u64)?;
+            }
+            cleanup::set_baseline_once(tx, 40, NOW - DAY)?;
+            cleanup::progress(tx, NOW, 0)
+        })
+        .unwrap();
+    assert_eq!(p.days.len(), 30);
+    assert_eq!(p.days.first().unwrap(), &("2026-09-09".to_owned(), 71));
+    assert_eq!(p.days[28], ("2026-10-07".to_owned(), 99));
+    assert_eq!(p.days.last().unwrap(), &("2026-10-08".to_owned(), 10), "today, worked out before its record");
+    assert_eq!((p.baseline, p.now), (Some(40), 10));
+    assert_eq!(p.percent(), 75);
+
+    // The Inbox outgrowing the baseline raises it; it never falls.
+    let (rose, fell, base) = db
+        .write_blocking(|tx| {
+            Ok((cleanup::raise_baseline(tx, 60)?, cleanup::raise_baseline(tx, 5)?, cleanup::baseline(tx)?))
+        })
+        .unwrap();
+    assert!(rose && !fell);
+    assert_eq!(base.map(|b| b.0), Some(60));
+
+    let pct = |baseline, now| {
+        cleanup::Progress { baseline, at_midnight: 0, received_today: 0, removed_today: 0, now, days: vec![] }.percent()
+    };
+    assert_eq!(pct(None, 5), 0, "no baseline yet");
+    assert_eq!(pct(Some(5), 9), 0, "grown past it: clamped");
+    assert_eq!(pct(Some(0), 0), 100);
+    assert_eq!(pct(None, 0), 100, "an empty Inbox is Inbox Zero");
+    assert_eq!(pct(Some(3), 1), 66);
+}

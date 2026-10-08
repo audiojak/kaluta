@@ -357,6 +357,13 @@ C4. **Loading every header on open** (oagc-merk.4) — set the window to *Everyt
 
 C5. **The progress card** (oagc-merk.5) — `inbox_history` written at the first sync
     after midnight and on open, baseline, sparkline, the four numbers.
+    *(as built: Received Today is mail that arrived today wherever it
+    is now, not only what is still in the Inbox, so archiving today's
+    mail counts as removed; a count recorded after midnight subtracts
+    what arrived since; the baseline rises when the Inbox outgrows it
+    (headers loading); `cleanup_progress` records on open, so no separate
+    "opened" call; self-snapshots cannot see the sidebar, so the card is
+    captured alone with `-OpenAGCSnapshotCleanUpCard`.)*
 C6. **Social and Promotions views** (oagc-merk.6).
 C7. **Mailing Lists view and Unsubscribe** (oagc-merk.7) — group by `List-Id`;
     *Unsubscribe* for groups whose messages carry `List-Unsubscribe`:

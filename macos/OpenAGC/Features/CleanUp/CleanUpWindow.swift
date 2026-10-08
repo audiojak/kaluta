@@ -41,8 +41,7 @@ extension FocusedValues {
     @Entry var isCleanUpWindow: Bool?
 }
 
-/// The views, as a source list. Under them, a slot for the progress card
-/// (spec §14.12, C5), empty for now.
+/// The views, as a source list, with the progress card under them.
 private struct CleanUpSidebar: View {
     @Environment(AppModel.self) private var model
 
@@ -61,10 +60,17 @@ private struct CleanUpSidebar: View {
     }
 }
 
-/// The left column's foot: where the progress card goes (C5). Nothing yet.
+/// The left column's foot: the Inbox Zero card (spec §14.12), once its
+/// numbers are in.
 struct CleanUpSidebarFooter: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        EmptyView()
+        if let progress = model.cleanUp.progress {
+            CleanUpProgressCard(progress: progress)
+                .padding(.horizontal, Space.m)
+                .padding(.bottom, Space.m)
+        }
     }
 }
 

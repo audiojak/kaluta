@@ -505,3 +505,77 @@ fn imported_and_demo_mailboxes_have_nothing_to_load() {
     assert!(!status.has_sync_window);
     assert!(block_on(core.cleanup_load_every_header("demo".into())).is_err());
 }
+
+#[test]
+fn progress_sets_the_baseline_on_opening_and_counts_what_was_removed() {
+    let (_temp, core, _events) = core("progress");
+    block_on(core.clone().open_account("demo".into())).unwrap();
+    block_on(core.debug_seed_demo_mailbox(80)).unwrap();
+    let first = block_on(core.cleanup_progress("demo".into())).unwrap();
+    assert!(first.now > 0);
+    assert_eq!(first.baseline, first.now, "the Inbox when Clean Up first opened");
+    assert_eq!((first.at_midnight, first.received_today, first.removed_today), (first.now, 0, 0));
+    assert_eq!(first.percent, 0);
+    assert_eq!(first.days.len(), 1, "today, recorded on opening");
+
+    let groups =
+        block_on(core.cleanup_groups("demo".into(), CleanupView::Sender, CleanupScope::Inbox, String::new())).unwrap();
+    let biggest = groups[0].clone();
+    block_on(core.cleanup_apply(
+        "demo".into(),
+        CleanupView::Sender,
+        CleanupScope::Inbox,
+        vec![biggest.key],
+        CleanupAction::Archive,
+    ))
+    .unwrap();
+    let after = block_on(core.cleanup_progress("demo".into())).unwrap();
+    assert_eq!(after.baseline, first.baseline, "set once");
+    assert_eq!(after.now, first.now - biggest.count);
+    assert_eq!(after.removed_today, biggest.count);
+    assert_eq!(after.at_midnight, first.at_midnight);
+    assert_eq!(u64::from(after.percent), biggest.count * 100 / first.baseline);
+}
+
+#[test]
+fn progress_at_a_fixed_moment_and_offset() {
+    let (_temp, core, _events) = core("progress-fixed");
+    block_on(core.clone().open_account("demo".into())).unwrap();
+    block_on(core.debug_seed_demo_mailbox(40)).unwrap();
+    let db = block_on(core.store_for("demo")).unwrap();
+    // The demo's newest mail arrived at NOW: a moment later, at UTC+2,
+    // what arrived since that local midnight is today's.
+    let offset = 2 * 3600;
+    let midnight = mail_store::cleanup::local_midnight(NOW, offset);
+    let p = db.write_blocking(move |tx| progress_at(tx, NOW + 1, offset)).unwrap();
+    let today = db
+        .read_blocking(move |c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM messages WHERE internal_date >= ?1 AND is_sent_by_me = 0",
+                [midnight],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(p.received_today, today as u64);
+    assert_eq!(p.days.last().map(|d| d.day.clone()), Some(mail_store::cleanup::day_key(NOW, offset)));
+    assert_eq!(p.at_midnight + p.received_today - p.removed_today, p.now);
+}
+
+#[test]
+fn the_first_sync_of_the_day_records_the_inbox() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 500));
+    for i in 0..3 {
+        fake.seed(message(&format!("m{i}"), &format!("t{i}"), "a@example.com", &["INBOX"]));
+    }
+    let (_temp, core, _events) = synced("history", &fake, 3);
+    let db = block_on(core.store_for("acct")).unwrap();
+    let today = mail_store::cleanup::day_key(mail_sync::now_millis(), utc_offset_now());
+    wait_until("today's count recorded", || {
+        let today = today.clone();
+        db.read_blocking(move |c| mail_store::cleanup::inbox_days(c, &today)).unwrap().len() == 1
+    });
+    let days = db.read_blocking(|c| mail_store::cleanup::inbox_days(c, "2000-01-01")).unwrap();
+    assert_eq!(days, [(today, 3)]);
+    assert_eq!(db.read_blocking(mail_store::cleanup::baseline).unwrap(), None, "only opening Clean Up sets it");
+}

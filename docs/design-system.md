@@ -77,6 +77,8 @@ controls), `card` 8 (cards), `panel` 12 (floating panels). Capsules use
 | `body` | body | Settings rows, detail values |
 | `code` / `codeCaption` | body / caption, monospaced | ids, paths, logs |
 | `fine` | caption2 | the sidebar's sync detail |
+| `numeric` | callout, monospaced digits | figures that change in place: Clean Up's progress card |
+| `figure` | title3 semibold, monospaced digits | a card's headline figure ("62%") |
 | `welcome` | title semibold | onboarding's heading |
 | `display` | title semibold | the one thing a page is about: a decision's statement in Review mode, the count on its band |
 | `reading` | title3 | reading text beside `display`: quotes, explanations, scopes |
@@ -290,6 +292,15 @@ done over thousands of messages at once.
   `Dialog` ("Load All Mail": the count and the time as its message, the
   consequence as a caption, *Not Now* (Esc) and *Load All Mail* (Return)).
   Not in the toolbar: the toolbar's status is for actions and the outbox.
+- **The progress card** (`CleanUpProgressCard`) sits at the views'
+  foot, a `.card(.neutral)` inset `Space.m`: "Inbox Zero" in
+  `groupLabel` with the percentage in `TypeRole.figure` on the right; a
+  small linear bar (a known total); a sparkline (Swift Charts `LineMark`,
+  monotone, 1.5 pt, the tint, no axes or labels, a dot on today's point);
+  then At Midnight, Received Today ("+12"), Removed Today ("−310", a real
+  minus) and Now, labels secondary and values right-aligned, all in
+  `TypeRole.numeric` (digits of one width, so the figures line up and do
+  not jitter as they change). It refreshes with the groups.
 - **Undo** is the app's: one entry per action on the account's stack
   (⌘Z works from this window too), acknowledged by `UndoNoticeView(origin:
   .cleanUp)` floating over the groups. A notice carries its window's
@@ -539,3 +550,4 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |
 | ![Clean Up loading every header, light](design/cleanup-load-light.png) | ![Clean Up loading every header, dark](design/cleanup-load-dark.png) |
 | ![Clean Up asking before loading all mail without IMAP, light](design/cleanup-ask-light.png) | ![Clean Up asking before loading all mail without IMAP, dark](design/cleanup-ask-dark.png) |
+| ![Clean Up's Inbox Zero card, light](design/cleanup-progress-light.png) | ![Clean Up's Inbox Zero card, dark](design/cleanup-progress-dark.png) |
