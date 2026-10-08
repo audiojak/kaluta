@@ -97,20 +97,6 @@ struct ProposedFactsView: View {
         ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.l) {
-                    HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                        VStack(alignment: .leading, spacing: Space.xs) {
-                            Text("Proposed Facts").font(TypeRole.title)
-                            Text(proposals.isEmpty ? "Nothing waiting"
-                                 : "\(proposals.count) waiting. Return accepts, ⌫ rejects; each can be undone.")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: Space.m)
-                        if !proposals.isEmpty {
-                            Button("Accept All") { Task { await model.decideProposedFacts(proposals, accept: true) } }
-                                .controlSize(.small)
-                                .hoverHelp("Add every proposed fact; one Undo takes them all back")
-                        }
-                    }
                     ForEach(proposals, id: \.id) { proposal in
                         ProposedFactCard(proposal: proposal, isCurrent: AnalysisStore.tag(proposal) == current)
                             .id(AnalysisStore.tag(proposal))
@@ -126,6 +112,10 @@ struct ProposedFactsView: View {
                 .frame(maxWidth: Self.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // The header stays put (design system: headers are safe-area
+            // bars); the cards scroll under it, and the next card after a
+            // decision comes to rest just below it.
+            .columnHeader { header(proposals) }
             .onChange(of: current) { _, tag in
                 if let tag { withAnimation { scroller.scrollTo(tag, anchor: .top) } }
             }
@@ -146,6 +136,27 @@ struct ProposedFactsView: View {
             model.facts.selection = tags[min(max(at + (press.characters == "j" ? 1 : -1), 0), tags.count - 1)]
             return .handled
         }
+    }
+
+    private func header(_ proposals: [AnalysisFactProposalInfo]) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Proposed Facts").font(TypeRole.title)
+                Text(proposals.isEmpty ? "Nothing waiting"
+                     : "\(proposals.count) waiting. Return accepts, ⌫ rejects; each can be undone.")
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: Space.m)
+            if !proposals.isEmpty {
+                Button("Accept All") { Task { await model.decideProposedFacts(proposals, accept: true) } }
+                    .controlSize(.small)
+                    .hoverHelp("Add every proposed fact; one Undo takes them all back")
+            }
+        }
+        .padding(.horizontal, Space.xxl)
+        .padding(.vertical, Space.m)
+        .frame(maxWidth: Self.readingWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// The chosen card while it is there; else the first.

@@ -254,7 +254,6 @@ struct ProposedRulesView: View {
         ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.l) {
-                    header
                     ForEach(decisions, id: \.id) { entry in
                         GuideDecisionCard(entry: entry, isCurrent: AnalysisStore.tag(entry) == current,
                                           accepted: model.guide.entries.first { $0.id == entry.contradictionOf })
@@ -288,6 +287,9 @@ struct ProposedRulesView: View {
                 .frame(maxWidth: Self.readingWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // The header stays put (design system: headers are safe-area
+            // bars); the cards scroll under it.
+            .columnHeader { header }
             .onChange(of: current) { _, tag in
                 if let tag { withAnimation { scroller.scrollTo(tag, anchor: .top) } }
             }
@@ -336,6 +338,10 @@ struct ProposedRulesView: View {
                     .hoverHelp("Accept every proposed rule that goes against none of yours")
             }
         }
+        .padding(.horizontal, Space.xxl)
+        .padding(.vertical, Space.m)
+        .frame(maxWidth: Self.readingWidth, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Every card in order, the folded ones only while shown.
