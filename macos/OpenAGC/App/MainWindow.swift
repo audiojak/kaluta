@@ -214,6 +214,19 @@ struct MainWindow: View {
         case let .failed(message):
             ContentUnavailableView("Something Went Wrong", systemImage: "exclamationmark.triangle", description: Text(message))
         case .open:
+            // A GeometryReader takes whatever height it is given and asks
+            // for next to none: the split view takes the column's ideal
+            // size as the window's minimum, and a List's ideal height is
+            // its whole content, which pushed the window past the bottom
+            // of the screen on the Writing Guide and Facts pages (and held
+            // the Inbox window at 1,200 points).
+            GeometryReader { _ in
+                openColumn
+            }
+        }
+    }
+
+    @ViewBuilder private var openColumn: some View {
             VStack(spacing: 0) {
                 if model.needsReauthentication {
                     ReauthenticationBanner()
@@ -260,7 +273,6 @@ struct MainWindow: View {
             // floating sidebar, and a full-width rule showed through its
             // glass (oagc-0cw). The bar sits in the column's safe area.
             .columnHeader { listHeader }
-        }
     }
 
     /// The row under the title: the Inbox's category tabs, as Mail shows

@@ -265,6 +265,10 @@ enum Snapshot {
                 FileHandle.standardError.write(Data("snapshot state: no model\n".utf8))
             }
             if defaults.bool(forKey: "OpenAGCSnapshotDumpViews"), let root = (window ?? NSApp.windows.first)?.contentView?.superview {
+                if let w = window ?? NSApp.windows.first {
+                    let line = "window frame=\(w.frame.integral) contentMinSize=\(w.contentMinSize) contentMaxSize=\(w.contentMaxSize) screen=\(w.screen?.visibleFrame.integral ?? .zero)\n"
+                    FileHandle.standardError.write(Data(line.utf8))
+                }
                 dump(root, depth: 0)
                 for item in (window ?? NSApp.windows.first)?.toolbar?.items ?? [] {
                     let line = "toolbar item \(item.itemIdentifier.rawValue) label=\"\(item.label)\" toolTip=\(item.toolTip.map { "\"\($0)\"" } ?? "nil")\n"
@@ -300,6 +304,10 @@ enum Snapshot {
         }
         if let text = view as? NSTextField, !text.stringValue.isEmpty { detail = " \"\(text.stringValue)\"" }
         if let tip = view.toolTip { detail += " toolTip=\"\(tip)\"" }
+        // The view's own minimum (Auto Layout fitting size): what can make
+        // the window grow past the screen.
+        let fit = view.fittingSize
+        if fit.width > 0 || fit.height > 0 { detail += " fit=\(Int(fit.width))x\(Int(fit.height))" }
         let line = String(repeating: "  ", count: depth) + "\(type(of: view)) \(view.frame.integral) hidden=\(view.isHidden)\(detail)\n"
         FileHandle.standardError.write(Data(line.utf8))
         for sub in view.subviews { dump(sub, depth: depth + 1) }
