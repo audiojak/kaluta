@@ -57,7 +57,7 @@ async fn sign_up_accepts_the_terms_and_returns_the_key_address_and_plan() {
         .mount(&server)
         .await;
     let service = PrimitiveService::with_base(&server.uri()).unwrap();
-    let signed = service.sign_up("Scout", "k1").await.unwrap();
+    let signed = service.sign_up("Scout", "k1", Some("me@example.com")).await.unwrap();
     assert_eq!(signed.api_key.expose(), "prim_new");
     assert_eq!(signed.address, "scout@abc.primitive.email");
     assert_eq!(

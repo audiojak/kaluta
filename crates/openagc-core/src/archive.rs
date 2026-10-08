@@ -145,7 +145,8 @@ impl Core {
             text.push_str(ARCHIVE_PROMPT);
         }
         if let Some((others, agent)) = agent {
-            text.push_str(&crate::agent_mailbox::agent_prompt(&agent, &others));
+            let limits = self.agent_limits_text(&agent);
+            text.push_str(&crate::agent_mailbox::agent_prompt(&agent, &others, &limits));
         }
         if !guide.is_empty() {
             text.push_str("\n\n## Writing guide\n\n");

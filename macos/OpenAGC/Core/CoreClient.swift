@@ -205,9 +205,14 @@ final class CoreClient: Sendable {
     /// Create a mailbox for an agent. Accepts the service's terms: only
     /// from the user's Agree and Create.
     /// `requestID` is the sheet's own: a retry returns the same mailbox.
-    func createAgentMailbox(service: AgentService, name: String,
+    /// `humanEmail` is the user's email: AgentMail needs it, Primitive
+    /// ignores it.
+    func createAgentMailbox(service: AgentService, name: String, humanEmail: String? = nil,
                             requestID: String) async throws(CoreClientError) -> AgentMailboxCreated {
-        try await call { try await core.createAgentMailbox(service: service, name: name, requestId: requestID) }
+        try await call {
+            try await core.createAgentMailbox(service: service, name: name, humanEmail: humanEmail,
+                                              requestId: requestID)
+        }
     }
 
     func agentMailboxPlan(_ accountID: String) async throws(CoreClientError) -> AgentMailboxPlan {

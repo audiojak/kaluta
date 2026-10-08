@@ -29,6 +29,9 @@ pub struct SignedUp {
     /// The mailbox's address.
     pub address: String,
     pub plan: MailboxPlan,
+    /// The service's id for the mailbox it made (AgentMail's `inbox_id`);
+    /// `None` where mailboxes are local parts of the account (Primitive).
+    pub inbox_id: Option<String>,
 }
 
 /// A verification code is on its way.
@@ -106,8 +109,19 @@ pub trait MailboxService: Send + Sync {
     fn code_sender_domain(&self) -> &'static str;
     /// Create an account (no authentication). `idempotency_key` makes a
     /// retried call return the same account. Accepts the service's terms:
-    /// call only after the user agreed to them.
-    async fn sign_up(&self, device_name: &str, idempotency_key: &str) -> ProviderResult<SignedUp>;
+    /// call only after the user agreed to them. `human_email` is the user's
+    /// email, for services that take it at sign-up and send the
+    /// verification code there at once (AgentMail); others ignore it.
+    ///
+    /// AgentMail: signing up again with the same `human_email` returns the
+    /// same organisation with a *new* key, so the caller never signs up for
+    /// a service account it already has (ADR 0015).
+    async fn sign_up(
+        &self,
+        device_name: &str,
+        idempotency_key: &str,
+        human_email: Option<&str>,
+    ) -> ProviderResult<SignedUp>;
     /// The account's plan and limits now.
     async fn plan(&self, api_key: &str) -> ProviderResult<MailboxPlan>;
     /// Email a verification code to `email`.
@@ -118,15 +132,23 @@ pub trait MailboxService: Send + Sync {
     /// Create another mailbox on the account, for another agent, with no
     /// sign-up. Services whose mailboxes are local parts of one account
     /// (Primitive) need no call and leave this as it is; AgentMail creates
-    /// an inbox (`POST /v0/inboxes`).
+    /// an inbox (`POST /v0/inboxes`). `idempotency_key` makes a retried
+    /// call return the same mailbox.
     async fn add_mailbox(
         &self,
         _api_key: &str,
         _username: &str,
         _domain: Option<&str>,
         _display_name: &str,
+        _idempotency_key: &str,
     ) -> ProviderResult<AddedMailbox> {
         Err(crate::ProviderError::Unavailable("this service adds no mailboxes to an account".into()))
+    }
+    /// A new key that reaches only the mailbox `inbox_id` (AgentMail, once
+    /// verified), for an agent outside the app that should not reach the
+    /// other agents of the account.
+    async fn mailbox_api_key(&self, _api_key: &str, _inbox_id: &str, _name: &str) -> ProviderResult<Redacted<String>> {
+        Err(crate::ProviderError::Unavailable("this service has no keys for one mailbox".into()))
     }
     /// Replace the account's key with a new one; the old one stops working.
     async fn rotate_key(&self, _api_key: &str) -> ProviderResult<Redacted<String>> {

@@ -354,13 +354,12 @@ impl Core {
         if agent.is_some() {
             let reader = db.clone();
             let recipients = runtime::run(async move {
-                Ok(reader
-                    .read(move |c| mail_store::drafts::get(c, id))
-                    .await?
-                    .map_or(0, |d| d.to.len() + d.cc.len() + d.bcc.len()))
+                Ok(reader.read(move |c| mail_store::drafts::get(c, id)).await?.map_or_else(Vec::new, |d| {
+                    d.to.iter().chain(&d.cc).chain(&d.bcc).map(|a| a.email.clone()).collect::<Vec<_>>()
+                }))
             })
             .await?;
-            self.check_agent_recipients(recipients)?;
+            self.check_agent_recipients(&recipients)?;
         }
         let from = EmailAddress::new(agent.as_deref(), &self.own_address().await?);
         let service = self.sync_service();

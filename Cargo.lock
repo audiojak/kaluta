@@ -1535,6 +1535,7 @@ dependencies = [
  "mail-store",
  "mail-sync",
  "permissions",
+ "provider-agentmail",
  "provider-api",
  "provider-gmail",
  "provider-primitive",
@@ -1735,6 +1736,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "provider-agentmail"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "chrono",
+ "futures",
+ "mail-domain",
+ "mail-mime",
+ "provider-api",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "wiremock",
 ]
 
 [[package]]

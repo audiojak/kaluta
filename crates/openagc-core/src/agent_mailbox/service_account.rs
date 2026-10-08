@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AgentDomain, AgentMailboxPlan, AgentMeta, AgentSendMode, AgentSendRule, AgentService, AgentVerification,
-    CODE_SLACK_MS, find_code, local_part, read_meta, service_error, write_meta,
+    CODE_SLACK_MS, find_code, limits_text, local_part, read_meta, service_error, write_meta,
 };
 use crate::registry::{AccountKind, DEMO_ACCOUNT_ID, IndexEntry, accounts_dir, load_index};
 use crate::secrets::{self, keys};
@@ -194,6 +194,19 @@ impl Core {
         write_service(&self.data_path(), id, &meta)
     }
 
+    /// A plan from the service, with what the record knows and the service
+    /// does not say: AgentMail's organisation tells neither whether it is
+    /// verified nor the human email, and an organisation once verified stays
+    /// so.
+    fn with_record(&self, id: &str, mut plan: AgentMailboxPlan) -> Result<AgentMailboxPlan, CoreError> {
+        let meta = self.service_meta(id)?;
+        if meta.service == AgentService::AgentMail {
+            plan.verified |= meta.verified;
+            plan.email = plan.email.or(meta.human_email);
+        }
+        Ok(plan)
+    }
+
     pub(crate) fn service_key(&self, id: &str) -> Result<Redacted<String>, CoreError> {
         secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(id))?
             .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this agent mailbox's key is missing from the Keychain"))
@@ -349,11 +362,24 @@ impl Core {
                 format!("{} already has {address}; give this agent another name", other.name),
             ));
         }
-        // Primitive: a local part, no call. AgentMail (oagc-uys.6) creates
-        // an inbox here with `MailboxService::add_mailbox` and keeps its
-        // `inbox_id` in `agent.json`.
-        let inbox_id: Option<String> = match service.service {
-            AgentService::Primitive => None,
+        // Primitive: a local part, no call. AgentMail: an inbox in the
+        // organisation, whose id `agent.json` keeps; the request id makes a
+        // retry return the same inbox. Never a sign-up (ADR 0015).
+        let (address, inbox_id) = match service.service {
+            AgentService::Primitive => (address, None),
+            AgentService::AgentMail => {
+                let (client, key) = self.service_client(&service_account_id)?;
+                let custom = (Some(&domain) != managed.as_ref()).then(|| domain.clone());
+                let (username, display, request) = (local.clone(), name.clone(), request_id.clone());
+                let added = runtime::run(async move {
+                    client
+                        .add_mailbox(key.expose(), &username, custom.as_deref(), &display, &request)
+                        .await
+                        .map_err(service_error)
+                })
+                .await?;
+                (added.address, Some(added.inbox_id))
+            }
         };
         // The record outlives the agent it may have been read from.
         if !service_written(&data_dir, &service_account_id) {
@@ -403,6 +429,7 @@ impl Core {
         let (client, key) = self.service_client(&service_account_id)?;
         let plan: AgentMailboxPlan =
             runtime::run(async move { client.plan(key.expose()).await.map(Into::into).map_err(service_error) }).await?;
+        let plan = self.with_record(&service_account_id, plan)?;
         self.update_service(&service_account_id, |m| m.learn_plan(&plan))?;
         Ok(plan)
     }
@@ -417,10 +444,29 @@ impl Core {
         if !email.contains('@') {
             return Err(CoreError::new(ErrorKind::InvalidInput, "enter an email address"));
         }
+        let meta = self.service_meta(&service_account_id)?;
+        // AgentMail: the code goes to the human the organisation was made
+        // with; asking with another email would replace that human, which
+        // AgentMail allows only twice.
+        if meta.service == AgentService::AgentMail
+            && let Some(human) = meta.human_email.as_deref().filter(|h| !h.trim().eq_ignore_ascii_case(&email))
+        {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "AgentMail sends the code to {human}, the email this service account was created with. To use \
+                     another email, change it in AgentMail's console."
+                ),
+            ));
+        }
         let (client, key) = self.service_client(&service_account_id)?;
+        let asked = email.clone();
         let started =
             runtime::run(async move { client.start_verification(key.expose(), &email).await.map_err(service_error) })
                 .await?;
+        if meta.service == AgentService::AgentMail && meta.human_email.is_none() {
+            self.update_service(&service_account_id, |m| m.human_email = Some(asked))?;
+        }
         self.agent_mail
             .verifications
             .lock()
@@ -446,6 +492,7 @@ impl Core {
                 async move { client.verify(key.expose(), &code).await.map(Into::into).map_err(service_error) },
             )
             .await?;
+        let plan = self.with_record(&service_account_id, plan)?;
         self.agent_mail.verifications.lock().unwrap_or_else(|e| e.into_inner()).remove(&service_account_id);
         self.update_service(&service_account_id, |m| m.learn_plan(&plan))?;
         Ok(plan)
@@ -482,6 +529,36 @@ impl Core {
     pub fn service_account_api_key(&self, service_account_id: String) -> Result<String, CoreError> {
         self.service_meta(&service_account_id)?;
         Ok(self.service_key(&service_account_id)?.expose().clone())
+    }
+
+    /// AgentMail, once verified: a new key that reaches only this agent's
+    /// inbox, for an agent outside the app that should not reach the other
+    /// agents of the organisation (*Copy API Key*, spec §7.9). Each call
+    /// makes another key at AgentMail; it is not stored here.
+    pub async fn agent_inbox_api_key(&self, account_id: String) -> Result<String, CoreError> {
+        let agent = self.agent_meta_or_err(&account_id)?;
+        if agent.service != AgentService::AgentMail {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "only AgentMail makes keys for one inbox"));
+        }
+        if !self.service_meta(&agent.service_account)?.verified {
+            return Err(CoreError::new(ErrorKind::InvalidInput, provider_agentmail::NOT_VERIFIED_YET));
+        }
+        let inbox = agent.inbox_id.clone().unwrap_or_else(|| agent.address.clone());
+        let (client, key) = self.service_client(&agent.service_account)?;
+        let label = format!("OpenAGC {}", agent.name);
+        let made =
+            runtime::run(
+                async move { client.mailbox_api_key(key.expose(), &inbox, &label).await.map_err(service_error) },
+            )
+            .await?;
+        Ok(made.expose().clone())
+    }
+
+    /// What the service account's agents may do, in words (spec §7.9): the
+    /// same text the agents' prompts carry.
+    pub fn service_account_limits(&self, service_account_id: String) -> Result<String, CoreError> {
+        let meta = self.service_meta(&service_account_id)?;
+        Ok(limits_text(meta.service, meta.verified, meta.human_email.as_deref()))
     }
 
     /// Replace the service account's key at the service and in the

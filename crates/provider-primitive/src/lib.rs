@@ -953,7 +953,13 @@ impl MailboxService for PrimitiveService {
         CODE_SENDER_DOMAIN
     }
 
-    async fn sign_up(&self, device_name: &str, idempotency_key: &str) -> ProviderResult<SignedUp> {
+    /// Primitive takes no email at sign-up: verification starts later.
+    async fn sign_up(
+        &self,
+        device_name: &str,
+        idempotency_key: &str,
+        _human_email: Option<&str>,
+    ) -> ProviderResult<SignedUp> {
         let account: wire::AgentAccount = self
             .call(
                 self.client
@@ -970,6 +976,7 @@ impl MailboxService for PrimitiveService {
             api_key: mail_domain::Redacted::new(account.api_key.clone()),
             address,
             plan: plan_of(account.plan.clone(), None, &account.limits),
+            inbox_id: None,
         })
     }
 

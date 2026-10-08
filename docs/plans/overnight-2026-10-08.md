@@ -164,6 +164,21 @@ The managed subdomain "can receive at any local-part".
    — sign-up, verify, add inbox, list, raw, labels both ways, events,
    send with the duplicate-send guard, error mapping. Wiremock fake of
    every endpoint used; check-deps; `FakeMailboxService` learns AgentMail.
+   *(as built: the docs (re-read 2026-10-08) now offer an
+   `Idempotency-Key` on sends (24 h): it is sent, and the
+   `X-OpenAGC-Outbox-Id` check runs after an unclear answer or for a send
+   queued over ten minutes ago, so a retry days later is covered too. The
+   outbox id is the composer's Message-ID. `…/raw` answers with a signed
+   download URL, fetched without the key. A reply goes through
+   `…/{In-Reply-To}/reply`, falling back to `…/send` with threading
+   headers. Label changes for many messages use `batch-update` (50).
+   Resend is `POST /v0/agent/human` with the same email only. The
+   organisation does not say whether it is verified: the core keeps it.
+   AgentMail's provider keeps the store's labels (`labels_are_local`), so
+   oagc-hvv9's fix keeps its user labels too. `add_inbox` passes the
+   request id as `client_id`. FFI: `create_agent_mailbox` gains
+   `human_email`; new `agent_inbox_api_key`, `agent_service_limits`,
+   `service_account_limits`.)*
 5. **App: create sheet, grouping, service-account settings** (oagc-uys.14) — service
    choice, human email for AgentMail, *Add to <service account>*, the
    switcher groups, the settings pane, limits text. Tests, snapshots light
@@ -182,8 +197,21 @@ The managed subdomain "can receive at any local-part".
   the same `since` cursor both get the change (reading does not consume
   it).
 - AgentMail: the labels a received and a sent message carry (`received`,
-  `sent`?); whether `unread` is set on arrival; the error for a taken
-  username and for the fourth inbox on the free plan.
+  `sent`?): a sent message is recognised by `sent` alone, so if AgentMail
+  does not label it so, sent mail shows in the Inbox; whether `unread` is
+  set on arrival; the error for a taken username (`resource_taken`
+  expected) and for the fourth inbox on the free plan (`limit_exceeded`
+  or a 403 naming the limit expected); the domain verification codes come
+  from (`agentmail.to` assumed for *Fill Code*); that `…/raw` and
+  attachments answer with a signed URL that takes no key (and refuses
+  one); whether a message's `timestamp` is its arrival or its Date header
+  (polling looks back an hour past the newest); that listing rows or the
+  message carry the `X-OpenAGC-Outbox-Id` header it was sent with (the
+  duplicate check needs it; the `Idempotency-Key` covers 24 hours
+  without it); whether `message_id` is the RFC Message-ID, so a reply
+  finds its parent at `…/{In-Reply-To}/reply` (else it falls back to
+  `…/send`); what `GET /v0/organizations` gives before and after
+  verifying; and whether label events include arrivals.
 
 ## Feature 2: Clean Up (epic oagc-merk)
 

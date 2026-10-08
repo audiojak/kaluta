@@ -1208,6 +1208,82 @@ service account it has. Labels sync both ways (read state, archive and
 user labels, through the outbox); deleting stays local. Its sync, sending
 and limits are specified with its provider.
 
+*(Implemented 2026-10-08, oagc-uys.6: `crates/provider-agentmail`; core
+`agent_mailbox.rs`, `service_account.rs`.)*
+- **Sign-up.** `POST /v0/agent/sign-up {username, human_email, source}`:
+  the username is the agent's name as a local part; the answer's `inbox_id`
+  is the address (else `<username>@agentmail.to`) and is kept in
+  `agent.json`. `create_agent_mailbox(service, name, human_email,
+  request_id)` refuses AgentMail without an email, an email that already
+  has an AgentMail service account on this Mac, and a request id that
+  already holds a key; a retry of a finished creation returns it. So the
+  core never signs up twice for one organisation.
+- **Verification.** The code is sent at sign-up. *Resend* is
+  `POST /v0/agent/human` with the same email only (another email would
+  replace the human, which AgentMail allows twice per organisation; the
+  core refuses it). `POST /v0/agent/verify {otp_code}`; codes last 24
+  hours. AgentMail's organisation (`GET /v0/organizations`) gives limits
+  but not whether it is verified: the plan's name comes from its inbox
+  limit (3 free, 10 developer, 150 startup) and the core keeps *verified*
+  once a verification succeeded. Its per-hour and per-day fields are 0:
+  AgentMail's limits are per month and per new recipient, worded by
+  `agent_service_limits` / `service_account_limits` (the agent's prompt
+  says the same). Until verified, the composer refuses recipients other
+  than the human email.
+- **Adding an agent** is `POST /v0/inboxes {username, display_name,
+  client_id}` with the sheet's request id as `client_id`, so a retry
+  returns the same inbox. A taken name and a full plan are said in words.
+- **Inbox keys.** `agent_inbox_api_key(account)` makes a key for that
+  agent's inbox only (`POST /v0/inboxes/{id}/api-keys`), once verified; a
+  new key each call, not stored here.
+- **Sync.** Message and thread ids are AgentMail's. Listing is per inbox,
+  paged (`limit`, `page_token`); the Inbox and Sent are kept client-side
+  by label, unread, starred and user labels go as `labels`, `newer_than`
+  as `after`, Trash lists nothing. A message is fetched as its record
+  (labels, time) and its raw MIME: `…/raw` answers with a signed
+  `download_url`, downloaded without the key and parsed by `mail-mime`;
+  without one, the record's own fields, attachments fetched on demand.
+- **Labels.** `unread` ↔ `UNREAD` (marking read adds AgentMail's
+  conventional `read`); `sent` ↔ `SENT`; a message without `sent` is
+  received and in `INBOX` unless it carries the app's `archived` label
+  (archive adds it, *Move to Inbox* removes it); `starred` ↔ `STARRED`;
+  `spam` → `SPAM`; any other label is a user label whose id is its name.
+  Changes go out through the outbox as `PATCH …/messages/{id}
+  {add_labels, remove_labels}`, or `…/messages/batch-update` for up to 50
+  messages. Trash, spam and delete stay on this Mac. The provider's labels
+  are the store's (`labels_are_local`): a refetch keeps stored labels and
+  user labels survive the label refresh (there is no label listing at
+  AgentMail).
+- **Changes.** The sync cursor holds the newest message time seen, the
+  messages seen within an hour of it, and the newest label event seen. A
+  poll (every 30 s while active; WebSocket push is oagc-uys.15) lists
+  `messages?after=<newest − 1 h>` and reports what it had not seen, then
+  reads `…/events` newest first, page by page, down to the last event
+  seen, and applies `label.added`/`label.removed` oldest first. Not
+  reaching it within 20 pages is an expired cursor (a full resync).
+- **Sending.** The composer's MIME becomes AgentMail's JSON (`to`, `cc`,
+  `bcc`, `reply_to`, `subject`, `text`, `html`, base64 `attachments`,
+  `headers`). A reply goes to `…/messages/<In-Reply-To>/reply` (explicit
+  recipients, `reply_all` false) so AgentMail threads it; if AgentMail
+  does not know that id, `…/messages/send` with `In-Reply-To` and
+  `References` headers. Over 6 MB is refused before sending.
+- **Never twice.** Each send carries `X-OpenAGC-Outbox-Id` (the
+  composer's Message-ID, the same on every retry of that outbox entry) and
+  an `Idempotency-Key` derived from it (AgentMail now offers one, kept 24
+  hours; the plan expected none). The client never repeats a send itself.
+  After an answer that leaves it unknown whether the mail went (a timeout,
+  a 5xx), or when the message was queued more than ten minutes ago (an
+  earlier run may have tried it), the next attempt first lists the
+  inbox's mail since it was queued, looks for that header (fetching the
+  messages with the same subject whose row lacks headers), and takes a
+  match as the send.
+- **Errors** are AgentMail's `{name, code, message, fix}`, read through
+  `HttpClient`'s error hook: `message_rejected` before verification is
+  said as "can write only to the email it was created with";
+  `missing_permission` asks to verify first; `resource_taken`,
+  `inbox_paused` and a full plan in words; `conflict` (a send with that
+  key still running) and 429 are retried later.
+
 **Verification.** Verification belongs to the service account: once
 verified, every agent in it is. Until verified, a Primitive account is on
 its `agent` plan: it can only reply to addresses that have already sent it

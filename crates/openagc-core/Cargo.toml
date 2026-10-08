@@ -19,6 +19,7 @@ mail-sync.workspace = true
 provider-api.workspace = true
 provider-gmail.workspace = true
 provider-primitive.workspace = true
+provider-agentmail.workspace = true
 agent-api.workspace = true
 agent-claude.workspace = true
 agent-codex.workspace = true

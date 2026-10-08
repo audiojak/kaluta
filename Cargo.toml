@@ -19,6 +19,7 @@ mail-sync = { path = "crates/mail-sync" }
 provider-api = { path = "crates/provider-api" }
 provider-gmail = { path = "crates/provider-gmail" }
 provider-primitive = { path = "crates/provider-primitive" }
+provider-agentmail = { path = "crates/provider-agentmail" }
 agent-api = { path = "crates/agent-api" }
 agent-claude = { path = "crates/agent-claude" }
 agent-codex = { path = "crates/agent-codex" }

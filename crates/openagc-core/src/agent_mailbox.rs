@@ -39,6 +39,9 @@ const CODE_SLACK_MS: i64 = 2 * 60 * 1000;
 #[serde(rename_all = "lowercase")]
 pub enum AgentService {
     Primitive,
+    /// AgentMail (agentmail.to): an organisation per human email, an inbox
+    /// per agent (spec §7.9).
+    AgentMail,
 }
 
 /// Whether agents send from an agent mailbox without asking (spec §7.9).
@@ -236,26 +239,48 @@ pub(crate) fn rename_meta(dir: &Path, name: &str) -> Result<(), CoreError> {
 /// What syncs an account: its provider, and a bulk or push source.
 pub(crate) type SyncSources = (Arc<dyn MailProvider>, Option<Arc<dyn BackfillSource>>);
 
-/// Appended to the agent's system prompt in an agent mailbox: whose
-/// mailbox it is and what its service allows. `others` names the other
-/// agents of its service account, whose sends count against the same
-/// limits.
-pub(crate) fn agent_prompt(meta: &AgentMeta, others: &[String]) -> String {
-    let limits = match meta.service {
-        AgentService::Primitive => {
-            "Each message goes to exactly one recipient (no Cc or Bcc): to write to several people, \
-             write to each separately. Drafts stay on this Mac until sent."
+/// What a service lets an agent mailbox do, in words for the agent's
+/// prompt and the app (composer, settings): `verified` and `human_email`
+/// are its service account's.
+pub(crate) fn limits_text(service: AgentService, verified: bool, human_email: Option<&str>) -> String {
+    match service {
+        AgentService::Primitive => "Each message goes to exactly one recipient (no Cc or Bcc): to write to \
+             several people, write to each separately. Drafts stay on this Mac until sent."
+            .into(),
+        AgentService::AgentMail => {
+            let before = if verified {
+                String::new()
+            } else {
+                let human = human_email.map_or_else(|| "the email it was created with".to_owned(), str::to_owned);
+                format!(
+                    "Until its service account is verified, it can write only to {human}; AgentMail refuses \
+                     anyone else. "
+                )
+            };
+            format!(
+                "{before}A message may go to several people (To, Cc and Bcc). AgentMail's free plan sends 3,000 \
+                 messages a month across the service account, and a new inbox may write to at most 3 different \
+                 people in its first hour, 5 in its first day and 10 in its first week. A message with its \
+                 attachments may be up to 6 MB. Drafts stay on this Mac until sent."
+            )
         }
-    };
+    }
+}
+
+/// Appended to the agent's system prompt in an agent mailbox: whose
+/// mailbox it is and what its service allows (`limits`, from
+/// [`limits_text`]). `others` names the other agents of its service
+/// account, whose sends count against the same limits.
+pub(crate) fn agent_prompt(meta: &AgentMeta, others: &[String], limits: &str) -> String {
     let shared = match others {
         [] => String::new(),
         [one] => format!(
-            " This mailbox shares its service account's sending limits (per hour and per day) with the \
-             mailbox of another agent, {one}: its sends count against them too."
+            " This mailbox shares its service account's sending limits with the mailbox of another agent, \
+             {one}: its sends count against them too."
         ),
         many => format!(
-            " This mailbox shares its service account's sending limits (per hour and per day) with the \
-             mailboxes of {} other agents ({}): their sends count against them too.",
+            " This mailbox shares its service account's sending limits with the mailboxes of {} other \
+             agents ({}): their sends count against them too.",
             many.len(),
             many.join(", ")
         ),
@@ -341,7 +366,7 @@ pub(crate) struct AgentMailState {
     fake: AtomicBool,
     /// Tests: another base URL for the real client (a local mock).
     base: Mutex<Option<String>>,
-    fake_service: Mutex<Option<Arc<FakeMailboxService>>>,
+    fake_services: Mutex<HashMap<AgentService, Arc<FakeMailboxService>>>,
     fake_mailboxes: Mutex<HashMap<String, Arc<FakeProvider>>>,
     /// When each service account's last code was asked for.
     verifications: Mutex<HashMap<String, i64>>,
@@ -358,14 +383,20 @@ impl Core {
     pub(crate) fn mailbox_service(&self, service: AgentService) -> Result<Arc<dyn MailboxService>, CoreError> {
         let state = &self.agent_mail;
         if state.fake.load(Ordering::SeqCst) {
-            let mut fake = state.fake_service.lock().unwrap_or_else(|e| e.into_inner());
-            return Ok(fake.get_or_insert_with(Default::default).clone());
+            let mut fakes = state.fake_services.lock().unwrap_or_else(|e| e.into_inner());
+            return Ok(fakes.entry(service).or_insert_with(|| Arc::new(FakeMailboxService::new(service))).clone());
         }
         let base = state.base.lock().unwrap_or_else(|e| e.into_inner()).clone();
         match service {
             AgentService::Primitive => Ok(Arc::new(
                 provider_primitive::PrimitiveService::with_base(
                     base.as_deref().unwrap_or(provider_primitive::PRIMITIVE_API),
+                )
+                .map_err(service_error)?,
+            )),
+            AgentService::AgentMail => Ok(Arc::new(
+                provider_agentmail::AgentMailService::with_base(
+                    base.as_deref().unwrap_or(provider_agentmail::AGENTMAIL_API),
                 )
                 .map_err(service_error)?,
             )),
@@ -435,7 +466,10 @@ impl Core {
                 .entry(account_id.to_owned())
                 .or_insert_with(|| {
                     let fake = FakeProvider::new(&meta.address, mail_sync::now_millis(), 100);
-                    fake.set_labels(provider_primitive::labels());
+                    fake.set_labels(match meta.service {
+                        AgentService::Primitive => provider_primitive::labels(),
+                        AgentService::AgentMail => provider_agentmail::labels(),
+                    });
                     Arc::new(fake)
                 })
                 .clone();
@@ -473,6 +507,29 @@ impl Core {
                 let push: Arc<dyn BackfillSource> = Arc::new(provider_primitive::PrimitivePush(provider.clone()));
                 Ok((provider, Some(push)))
             }
+            // One inbox of the organisation; polled (no push source yet).
+            AgentService::AgentMail => {
+                let base = self.agent_mail.base.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let limiter = self
+                    .agent_mail
+                    .limiters
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(meta.service_account.clone())
+                    .or_insert_with(provider_agentmail::rate_limiter)
+                    .clone();
+                let inbox = meta.inbox_id.clone().unwrap_or_else(|| meta.address.clone());
+                let provider = provider_agentmail::AgentMailProvider::for_inbox(
+                    tokens,
+                    &meta.address,
+                    &inbox,
+                    limiter,
+                    provider_api::RetryPolicy::default(),
+                    base.as_deref().unwrap_or(provider_agentmail::AGENTMAIL_API),
+                )
+                .map_err(service_error)?;
+                Ok((Arc::new(provider), None))
+            }
         }
     }
 
@@ -504,16 +561,84 @@ impl Core {
         self.agent_meta(account_id).map(|m| m.name)
     }
 
-    /// Refuse a send the service cannot make (spec §7.9: Primitive takes
-    /// one recipient per message).
-    pub(crate) fn check_agent_recipients(&self, recipients: usize) -> Result<(), CoreError> {
+    /// Refuse a send the service cannot make (spec §7.9): Primitive takes
+    /// one recipient per message; AgentMail, until its service account is
+    /// verified, writes only to the human email.
+    pub(crate) fn check_agent_recipients(&self, recipients: &[String]) -> Result<(), CoreError> {
         let Some(account) = self.effective_account_id() else { return Ok(()) };
-        match self.agent_meta(&account).map(|m| m.service) {
-            Some(AgentService::Primitive) if recipients > 1 => {
+        let Some(meta) = self.agent_meta(&account) else { return Ok(()) };
+        match meta.service {
+            AgentService::Primitive if recipients.len() > 1 => {
                 Err(CoreError::new(ErrorKind::InvalidInput, provider_primitive::ONE_RECIPIENT_ONLY))
             }
-            _ => Ok(()),
+            AgentService::Primitive => Ok(()),
+            AgentService::AgentMail => {
+                let Ok(service) = self.service_meta(&meta.service_account) else { return Ok(()) };
+                if service.verified {
+                    return Ok(());
+                }
+                let human = service.human_email.unwrap_or_default();
+                let others: Vec<&String> =
+                    recipients.iter().filter(|r| !r.trim().eq_ignore_ascii_case(human.trim())).collect();
+                if others.is_empty() {
+                    return Ok(());
+                }
+                Err(CoreError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "Until this AgentMail service account is verified, it can write only to {}. Verify it \
+                         in Settings › Accounts, or write to {} alone.",
+                        if human.is_empty() { "the email it was created with" } else { human.as_str() },
+                        if human.is_empty() { "that email" } else { human.as_str() },
+                    ),
+                ))
+            }
         }
+    }
+
+    /// AgentMail keeps one organisation per human email, and signing up
+    /// again with it returns that organisation with a new key, breaking
+    /// every agent holding the old one (ADR 0015). Refuse before asking:
+    /// an email with an AgentMail service account here, or a request that
+    /// already got a key.
+    fn refuse_second_sign_up(&self, email: &str, request_id: &str) -> Result<(), CoreError> {
+        let data_dir = self.data_path();
+        let mut ids: Vec<String> =
+            service_account::agents_on_disk(&data_dir).into_iter().map(|(_, m)| m.service_account).collect();
+        ids.sort();
+        ids.dedup();
+        let existing = ids.iter().find(|id| {
+            service_account::read_service(&data_dir, id).is_some_and(|s| {
+                s.service == AgentService::AgentMail
+                    && s.human_email.as_deref().is_some_and(|h| h.trim().eq_ignore_ascii_case(email.trim()))
+            })
+        });
+        if existing.is_some() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "{email} already has an AgentMail service account here. Add the agent to it instead: signing \
+                     up again would replace the key its agents use."
+                ),
+            ));
+        }
+        if crate::secrets::get_redacted(self.secrets.as_ref(), &keys::mailbox_api_key(request_id))?.is_some() {
+            return Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                "this AgentMail sign-up already went through once; signing up again would replace its key",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The limits text for an agent mailbox (see [`limits_text`]).
+    pub(crate) fn agent_limits_text(&self, meta: &AgentMeta) -> String {
+        let service = self.service_meta(&meta.service_account).ok();
+        limits_text(
+            meta.service,
+            service.as_ref().is_some_and(|s| s.verified),
+            service.as_ref().and_then(|s| s.human_email.as_deref()),
+        )
     }
 }
 
@@ -527,10 +652,18 @@ impl Core {
     /// the service account's id and the service's idempotency key, so a
     /// retry after a timeout or a failure part way returns the same
     /// service account, never a second.
+    ///
+    /// `human_email` is the user's email: AgentMail needs it (it sends the
+    /// verification code there at once, and without it the mailbox only
+    /// receives); Primitive ignores it. AgentMail keeps one organisation per
+    /// human email and signing up again rotates its key, so this refuses an
+    /// email that already has an AgentMail service account here: add the
+    /// agent to it with `add_agent` instead.
     pub async fn create_agent_mailbox(
         self: Arc<Self>,
         service: AgentService,
         name: String,
+        human_email: Option<String>,
         request_id: String,
     ) -> Result<AgentMailboxCreated, CoreError> {
         let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -540,14 +673,42 @@ impl Core {
         if !crate::mail::valid_account_id(&request_id) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "request id must be 1-64 of [A-Za-z0-9-]"));
         }
+        let human_email = human_email.map(|e| e.trim().to_owned()).filter(|e| !e.is_empty());
+        if service == AgentService::AgentMail {
+            let Some(email) = human_email.as_deref() else {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidInput,
+                    "AgentMail needs your email: it sends the code there, and without it the mailbox cannot send",
+                ));
+            };
+            if !email.contains('@') {
+                return Err(CoreError::new(ErrorKind::InvalidInput, "enter an email address"));
+            }
+            // A retry of a creation that finished on this Mac.
+            if let Some(existing) = read_meta(&accounts_dir(&self.data_path()).join(&request_id)) {
+                return Ok(AgentMailboxCreated {
+                    account_id: request_id.clone(),
+                    address: existing.address,
+                    plan: self
+                        .service_meta(&existing.service_account)
+                        .ok()
+                        .and_then(|s| s.plan)
+                        .unwrap_or_else(|| provider_agentmail_plan(false)),
+                });
+            }
+            self.refuse_second_sign_up(email, &request_id)?;
+        }
         let core = self.clone();
         runtime::run(async move {
             let client = core.mailbox_service(service)?;
             let account_id = request_id;
-            let SignedUp { api_key, address, plan } =
-                client.sign_up(&name, &account_id).await.map_err(service_error)?;
+            let SignedUp { api_key, address, plan, inbox_id } =
+                client.sign_up(&name, &account_id, human_email.as_deref()).await.map_err(service_error)?;
             let address = mailbox_address(&address, &name);
-            let plan: AgentMailboxPlan = plan.into();
+            let mut plan: AgentMailboxPlan = plan.into();
+            if service == AgentService::AgentMail {
+                plan.email = plan.email.or_else(|| human_email.clone());
+            }
             // The service account takes the id of its first agent.
             core.secrets.set(keys::mailbox_api_key(&account_id), api_key.expose().clone())?;
             {
@@ -564,7 +725,7 @@ impl Core {
                     },
                 );
                 record.verified = plan.verified;
-                record.human_email = plan.email.clone().or(record.human_email);
+                record.human_email = plan.email.clone().or(record.human_email).or_else(|| human_email.clone());
                 record.plan = Some(plan.clone());
                 service_account::write_service(&core.data_path(), &account_id, &record)?;
             }
@@ -580,7 +741,7 @@ impl Core {
                     send_mode: AgentSendMode::default(),
                     managed_address: Some(address.clone()),
                     service_account: account_id.clone(),
-                    inbox_id: None,
+                    inbox_id,
                 },
             )?;
             let db = core.store_for(&account_id).await?;
@@ -758,7 +919,15 @@ impl Core {
     pub fn agent_service_terms_url(&self, service: AgentService) -> String {
         match service {
             AgentService::Primitive => provider_primitive::TERMS_URL.to_owned(),
+            AgentService::AgentMail => provider_agentmail::TERMS_URL.to_owned(),
         }
+    }
+
+    /// What an agent mailbox on `service` may do, in words for the
+    /// composer and settings (spec §7.9): `verified` and `human_email` are
+    /// its service account's. The agent's prompt says the same.
+    pub fn agent_service_limits(&self, service: AgentService, verified: bool, human_email: Option<String>) -> String {
+        limits_text(service, verified, human_email.as_deref())
     }
 
     /// Where the service's dashboard signs in; the user signs in with the
@@ -766,6 +935,7 @@ impl Core {
     pub fn agent_service_dashboard_url(&self, service: AgentService) -> String {
         match service {
             AgentService::Primitive => provider_primitive::DASHBOARD_URL.to_owned(),
+            AgentService::AgentMail => provider_agentmail::DASHBOARD_URL.to_owned(),
         }
     }
 
@@ -823,16 +993,65 @@ impl Core {
 }
 
 /// An in-memory agent-mail service: sign-up always works, the code is
-/// `123456`. Development and tests only; never a real account. Like
+/// `123456`. Development and tests only; never a real account. As
 /// Primitive, one service account takes mail at any local part of its
-/// domain, so several agents can share it (`Core::add_agent`); each agent
-/// still has a fake mailbox of its own.
-#[derive(Default)]
+/// domain, so several agents can share it (`Core::add_agent`); as
+/// AgentMail, an organisation per human email holds up to three inboxes,
+/// and signing up again with the same email rotates its key (counted, so
+/// tests can show the core never does it). Each agent still has a fake
+/// mailbox of its own.
 pub(crate) struct FakeMailboxService {
+    service: AgentService,
     accounts: Mutex<HashMap<String, MailboxPlan>>,
     rotations: std::sync::atomic::AtomicU32,
     /// Domains by key; each check finds the records, as if DNS had caught up.
     domains: Mutex<HashMap<String, Vec<MailboxDomain>>>,
+    /// AgentMail: the organisation's key by human email.
+    organisations: Mutex<HashMap<String, String>>,
+    /// AgentMail: sign-ups that repeated an organisation's email.
+    pub(crate) repeated_sign_ups: std::sync::atomic::AtomicU32,
+    /// AgentMail: inbox addresses by key.
+    inboxes: Mutex<HashMap<String, Vec<String>>>,
+}
+
+impl FakeMailboxService {
+    pub(crate) fn new(service: AgentService) -> Self {
+        Self {
+            service,
+            accounts: Mutex::default(),
+            rotations: Default::default(),
+            domains: Mutex::default(),
+            organisations: Mutex::default(),
+            repeated_sign_ups: Default::default(),
+            inboxes: Mutex::default(),
+        }
+    }
+
+    fn plan_for(&self, verified: bool, email: Option<String>) -> MailboxPlan {
+        match self.service {
+            AgentService::Primitive => fake_plan(verified, email),
+            AgentService::AgentMail => MailboxPlan {
+                name: "free".into(),
+                verified,
+                reply_only: false,
+                send_per_hour: 0,
+                send_per_day: 0,
+                email,
+            },
+        }
+    }
+}
+
+/// AgentMail's plan as signed up, before the service is asked.
+pub(crate) fn provider_agentmail_plan(verified: bool) -> AgentMailboxPlan {
+    AgentMailboxPlan {
+        name: provider_agentmail::plan_name(Some(3)),
+        verified,
+        reply_only: false,
+        send_per_hour: 0,
+        send_per_day: 0,
+        email: None,
+    }
 }
 
 fn fake_records(domain: &str, status: &str) -> Vec<DnsRecord> {
@@ -872,22 +1091,68 @@ impl MailboxService for FakeMailboxService {
     }
 
     fn terms_url(&self) -> &'static str {
-        provider_primitive::TERMS_URL
+        match self.service {
+            AgentService::Primitive => provider_primitive::TERMS_URL,
+            AgentService::AgentMail => provider_agentmail::TERMS_URL,
+        }
     }
 
     fn code_sender_domain(&self) -> &'static str {
-        provider_primitive::CODE_SENDER_DOMAIN
+        match self.service {
+            AgentService::Primitive => provider_primitive::CODE_SENDER_DOMAIN,
+            AgentService::AgentMail => provider_agentmail::CODE_SENDER_DOMAIN,
+        }
     }
 
-    async fn sign_up(&self, device_name: &str, idempotency_key: &str) -> ProviderResult<SignedUp> {
-        let slug: String = device_name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect::<String>()
-            .trim_matches('-')
-            .to_owned();
+    async fn sign_up(
+        &self,
+        device_name: &str,
+        idempotency_key: &str,
+        human_email: Option<&str>,
+    ) -> ProviderResult<SignedUp> {
+        let local = local_part(device_name);
         let key = format!("fake_{idempotency_key}");
+        if self.service == AgentService::AgentMail {
+            let address = format!("{local}@{}", provider_agentmail::MANAGED_DOMAIN);
+            let email = human_email.map(str::to_lowercase);
+            let known = email
+                .as_ref()
+                .and_then(|e| self.organisations.lock().unwrap_or_else(|p| p.into_inner()).get(e).cloned());
+            if let Some(old) = known {
+                // AgentMail: the same organisation with a new key; the old
+                // one stops working.
+                self.repeated_sign_ups.fetch_add(1, Ordering::SeqCst);
+                let fresh = self.rotate_key(&old).await?;
+                self.organisations
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(email.unwrap_or_default(), fresh.expose().clone());
+                let plan = self.plan(fresh.expose()).await?;
+                return Ok(SignedUp { api_key: fresh, address: address.clone(), plan, inbox_id: Some(address) });
+            }
+            let taken =
+                self.inboxes.lock().unwrap_or_else(|e| e.into_inner()).values().flatten().any(|a| *a == address);
+            if taken {
+                return Err(ProviderError::Invalid(provider_agentmail::USERNAME_TAKEN.into()));
+            }
+            if let Some(email) = email.clone() {
+                self.organisations.lock().unwrap_or_else(|p| p.into_inner()).insert(email, key.clone());
+            }
+            self.inboxes.lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), vec![address.clone()]);
+            let plan = self
+                .accounts
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(key.clone())
+                .or_insert_with(|| self.plan_for(false, email))
+                .clone();
+            return Ok(SignedUp {
+                api_key: Redacted::new(key),
+                address: address.clone(),
+                plan,
+                inbox_id: Some(address),
+            });
+        }
         let plan = self
             .accounts
             .lock()
@@ -895,8 +1160,47 @@ impl MailboxService for FakeMailboxService {
             .entry(key.clone())
             .or_insert_with(|| fake_plan(false, None))
             .clone();
-        let local = if slug.is_empty() { "agent".to_owned() } else { slug };
-        Ok(SignedUp { api_key: Redacted::new(key), address: format!("{local}@demo.primitive.email"), plan })
+        Ok(SignedUp {
+            api_key: Redacted::new(key),
+            address: format!("{local}@demo.primitive.email"),
+            plan,
+            inbox_id: None,
+        })
+    }
+
+    async fn add_mailbox(
+        &self,
+        api_key: &str,
+        username: &str,
+        domain: Option<&str>,
+        _display_name: &str,
+        _idempotency_key: &str,
+    ) -> ProviderResult<provider_api::AddedMailbox> {
+        if self.service != AgentService::AgentMail {
+            return Err(ProviderError::Unavailable("this service adds no mailboxes to an account".into()));
+        }
+        self.plan(api_key).await?;
+        let address = format!("{username}@{}", domain.unwrap_or(provider_agentmail::MANAGED_DOMAIN));
+        let mut inboxes = self.inboxes.lock().unwrap_or_else(|e| e.into_inner());
+        if inboxes.values().flatten().any(|a| *a == address) {
+            return Err(ProviderError::Invalid(provider_agentmail::USERNAME_TAKEN.into()));
+        }
+        let mine = inboxes.entry(api_key.to_owned()).or_default();
+        if mine.len() >= 3 {
+            return Err(ProviderError::Invalid(provider_agentmail::INBOX_LIMIT.into()));
+        }
+        mine.push(address.clone());
+        Ok(provider_api::AddedMailbox { address: address.clone(), inbox_id: address })
+    }
+
+    async fn mailbox_api_key(&self, api_key: &str, inbox_id: &str, _name: &str) -> ProviderResult<Redacted<String>> {
+        if self.service != AgentService::AgentMail {
+            return Err(ProviderError::Unavailable("this service has no keys for one mailbox".into()));
+        }
+        if !self.plan(api_key).await?.verified {
+            return Err(ProviderError::Forbidden(provider_agentmail::NOT_VERIFIED_YET.into()));
+        }
+        Ok(Redacted::new(format!("fake_inbox_{inbox_id}")))
     }
 
     async fn plan(&self, api_key: &str) -> ProviderResult<MailboxPlan> {
@@ -916,7 +1220,7 @@ impl MailboxService for FakeMailboxService {
         if code != "123456" {
             return Err(ProviderError::Invalid("That code is not right".into()));
         }
-        *plan = fake_plan(true, plan.email.clone());
+        *plan = self.plan_for(true, plan.email.clone());
         Ok(plan.clone())
     }
 
@@ -929,11 +1233,18 @@ impl MailboxService for FakeMailboxService {
         if let Some(list) = domains.remove(api_key) {
             domains.insert(fresh.clone(), list);
         }
+        let mut inboxes = self.inboxes.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(list) = inboxes.remove(api_key) {
+            inboxes.insert(fresh.clone(), list);
+        }
         Ok(Redacted::new(fresh))
     }
 
     async fn send_rules(&self, api_key: &str) -> ProviderResult<Vec<SendRule>> {
         let plan = self.plan(api_key).await?;
+        if self.service == AgentService::AgentMail {
+            return Ok(vec![]);
+        }
         let mut rules = vec![SendRule::ManagedZone("primitive.email".into())];
         rules.extend(
             self.domains(api_key).await?.into_iter().filter(|d| d.verified).map(|d| SendRule::YourDomain(d.domain)),
