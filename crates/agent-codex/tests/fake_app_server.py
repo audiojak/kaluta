@@ -32,6 +32,10 @@ for line in sys.stdin:
         if text.endswith("hang"):
             continue
         send({"id": 900, "method": "item/commandExecution/requestApproval", "params": {"threadId": thread}})
+        # Like Codex, wait for the answer before going on, so it is recorded
+        # before turn/completed: the test reads the record once the turn ends.
+        answer = sys.stdin.readline()
+        received.write(answer); received.flush()
         send({"method": "item/started", "params": {"threadId": thread, "turnId": turn, "startedAtMs": 0, "item": {
             "type": "mcpToolCall", "id": "call_1", "server": "openagc", "tool": "mail_search",
             "arguments": {"query": "is:unread"}, "status": "inProgress"}}})
