@@ -430,6 +430,63 @@ fn the_inbox_splits_into_category_tabs_with_primary_as_everything_uncategorised(
 }
 
 #[test]
+fn the_tab_counts_follow_every_change_and_a_deleted_category_label() {
+    let db = open("category-counts");
+    let tabs = |db: &Db| {
+        let counts = db.read_blocking(|c| read::inbox_categories(c, &[])).unwrap();
+        counts.iter().map(|c| (c.total, c.unread)).collect::<Vec<_>>()
+    };
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX", "CATEGORY_SOCIAL", "CATEGORY_FORUMS", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "CATEGORY_UPDATES"])).unwrap();
+        w.upsert_message(&msg("m4", "t4", 4_000, &["CATEGORY_UPDATES", "UNREAD"])).unwrap(); // archived
+    });
+    // Primary, Promotions, Social, Updates, Forums.
+    assert_eq!(tabs(&db), [(1, 1), (0, 0), (1, 1), (1, 0), (0, 0)], "two categories count in the first");
+    assert_eq!(mailbox(&db, MailboxKind::Inbox), (3, 1), "with other tabs, the Inbox counts Primary's unread");
+    assert_consistent(&db);
+
+    // Read, recategorised, a second message, archived, unarchived.
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "t1", 1_000, &["INBOX"])).unwrap();
+        w.upsert_message(&msg("m5", "t1", 5_000, &["INBOX", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m3", "t3", 3_000, &["INBOX", "CATEGORY_PROMOTIONS", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m4", "t4", 4_000, &["INBOX", "CATEGORY_UPDATES", "UNREAD"])).unwrap();
+    });
+    assert_eq!(tabs(&db), [(1, 1), (1, 1), (1, 1), (1, 1), (0, 0)]);
+    write(&db, |w| {
+        w.upsert_message(&msg("m4", "t4", 4_000, &["CATEGORY_UPDATES"])).unwrap();
+        assert!(w.delete_message(&MessageId::new("m3")).unwrap());
+    });
+    assert_eq!(tabs(&db), [(1, 1), (0, 0), (1, 1), (0, 0), (0, 0)]);
+    assert_consistent(&db);
+
+    // A label refresh that drops Social: the thread moves to Forums.
+    let keep: Vec<LabelId> = db
+        .read_blocking(read::list_labels)
+        .unwrap()
+        .into_iter()
+        .map(|l| l.id)
+        .filter(|id| id.as_str() != "CATEGORY_SOCIAL")
+        .collect();
+    write(&db, move |w| w.retain_labels(&keep).unwrap());
+    assert_eq!(tabs(&db), [(1, 1), (0, 0), (0, 0), (0, 0), (1, 1)]);
+    assert_eq!(mailbox(&db, MailboxKind::Inbox), (2, 1));
+    assert_consistent(&db);
+
+    // Only Primary left: the Inbox counts all its unread again.
+    write(&db, |w| {
+        w.upsert_message(&msg("m2", "t2", 2_000, &["INBOX", "CATEGORY_FORUMS"])).unwrap();
+        w.upsert_message(&msg("m2", "t2", 2_000, &["CATEGORY_FORUMS", "UNREAD"])).unwrap();
+        w.upsert_message(&msg("m6", "t6", 6_000, &["INBOX", "UNREAD"])).unwrap();
+    });
+    assert_eq!(tabs(&db), [(2, 2), (0, 0), (0, 0), (0, 0), (0, 0)]);
+    assert_eq!(mailbox(&db, MailboxKind::Inbox), (2, 2));
+    assert_consistent(&db);
+}
+
+#[test]
 fn exclusions_leave_out_threads_with_a_label_in_lists_and_tabs() {
     let db = open("exclusions");
     write(&db, |w| {

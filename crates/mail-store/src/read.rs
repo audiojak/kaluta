@@ -41,7 +41,8 @@ pub fn list_labels(conn: &Connection) -> StoreResult<Vec<Label>> {
 }
 
 /// Sidebar entries: system mailboxes in a fixed order, then visible user
-/// labels by name. Counts come from `label_stats`, never `COUNT(*)`.
+/// labels by name. Counts come from `label_stats` and
+/// `inbox_category_stats`, never `COUNT(*)`.
 pub fn list_mailboxes(conn: &Connection) -> StoreResult<Vec<Mailbox>> {
     const SYSTEM: &[(MailboxKind, &str, &str)] = &[
         (MailboxKind::Inbox, "INBOX", "Inbox"),
@@ -222,8 +223,27 @@ pub struct CategoryCount {
 /// `CATEGORIES` in order; `also` narrows as in `list_threads`
 /// (`IMPORTANT` for Important-only, `!Label_7` to leave out emails with
 /// tasks). Every tab is returned, empty ones with zero counts; a thread in
-/// two categories counts in the first.
+/// two categories counts in the first. Without narrowings the counts come
+/// from `inbox_category_stats`; with them, from the Inbox's threads.
 pub fn inbox_categories(conn: &Connection, also: &[&str]) -> StoreResult<Vec<CategoryCount>> {
+    if also.is_empty() {
+        return stored_inbox_categories(conn);
+    }
+    count_inbox_categories(conn, also)
+}
+
+/// `inbox_categories` without narrowings, from the maintained counts.
+pub(crate) fn stored_inbox_categories(conn: &Connection) -> StoreResult<Vec<CategoryCount>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT category, thread_count, unread_thread_count FROM inbox_category_stats")?;
+    let stored = stmt
+        .query_map([], |r| Ok((Some(r.get::<_, String>(0)?), r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(category_counts(&stored))
+}
+
+/// `inbox_categories` counted over the Inbox's threads.
+pub(crate) fn count_inbox_categories(conn: &Connection, also: &[&str]) -> StoreResult<Vec<CategoryCount>> {
     let mut values: Vec<rusqlite::types::Value> =
         CATEGORIES.iter().map(|c| rusqlite::types::Value::from((*c).to_owned())).collect();
     let placeholders = (1..=CATEGORIES.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
@@ -245,14 +265,20 @@ pub fn inbox_categories(conn: &Connection, also: &[&str]) -> StoreResult<Vec<Cat
             Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(std::iter::once(PRIMARY)
+    Ok(category_counts(&counted))
+}
+
+/// Every tab, Primary first, from `(category, threads, unread)` rows where
+/// no category means Primary.
+fn category_counts(rows: &[(Option<String>, i64, i64)]) -> Vec<CategoryCount> {
+    std::iter::once(PRIMARY)
         .chain(CATEGORIES.iter().copied())
         .map(|id| {
-            let found = counted.iter().find(|(c, _, _)| c.as_deref().unwrap_or(PRIMARY) == id);
+            let found = rows.iter().find(|(c, _, _)| c.as_deref().unwrap_or(PRIMARY) == id);
             let (total, unread) = found.map(|(_, t, u)| (*t, *u)).unwrap_or((0, 0));
             CategoryCount { id: id.to_owned(), total: total.max(0) as u32, unread: unread.max(0) as u32 }
         })
-        .collect())
+        .collect()
 }
 
 /// Of `ids`, the stored messages in the Inbox that lack `label`.

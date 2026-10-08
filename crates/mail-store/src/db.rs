@@ -36,6 +36,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0017_facts.sql"),
     include_str!("../migrations/0018_cleanup.sql"),
     include_str!("../migrations/0019_cleanup_progress.sql"),
+    include_str!("../migrations/0020_inbox_category_stats.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -325,6 +326,50 @@ mod tests {
         let db = Db::open(&path).unwrap();
         let n: i64 = db.read_blocking(|c| Ok(c.query_row("SELECT COUNT(*) FROM labels", [], |r| r.get(0))?)).unwrap();
         assert_eq!(n, 1, "seed row inserted once");
+    }
+
+    #[test]
+    fn upgrading_counts_the_inbox_tabs_of_the_mail_already_stored() {
+        use mail_domain::{LabelId, MessageId, ThreadId};
+        let path = temp_db_path("tab-counts");
+        let db = Db::open(&path).unwrap();
+        db.write_blocking(|tx| {
+            let mut w = crate::MailWriter::new(tx);
+            for (id, labels) in [
+                ("a", &["INBOX", "UNREAD"][..]),
+                ("b", &["INBOX", "CATEGORY_FORUMS", "CATEGORY_SOCIAL", "UNREAD"]),
+                ("c", &["INBOX", "CATEGORY_SOCIAL"]),
+                ("d", &["CATEGORY_SOCIAL", "UNREAD"]),
+            ] {
+                w.upsert_message(&crate::IncomingMessage {
+                    id: MessageId::new(id),
+                    thread_id: ThreadId::new(id),
+                    label_ids: labels.iter().map(|l| LabelId::new(*l)).collect(),
+                    ..Default::default()
+                })?;
+            }
+            w.finish()
+        })
+        .unwrap();
+        db.close();
+        // The store as it was before the counts were kept.
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch("DROP TABLE inbox_category_stats; PRAGMA user_version = 19").unwrap();
+        drop(c);
+        let db = Db::open(&path).unwrap();
+        let tabs = db.read_blocking(crate::read::stored_inbox_categories).unwrap();
+        let tabs: Vec<_> = tabs.iter().map(|t| (t.id.as_str(), t.total, t.unread)).collect();
+        assert_eq!(
+            tabs,
+            [
+                ("CATEGORY_PERSONAL", 1, 1),
+                ("CATEGORY_PROMOTIONS", 0, 0),
+                ("CATEGORY_SOCIAL", 2, 1),
+                ("CATEGORY_UPDATES", 0, 0),
+                ("CATEGORY_FORUMS", 0, 0),
+            ]
+        );
+        assert_eq!(db.read_blocking(crate::consistency::check).unwrap(), Vec::<String>::new());
     }
 
     #[test]
