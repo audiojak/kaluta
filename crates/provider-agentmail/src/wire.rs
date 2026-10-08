@@ -125,14 +125,20 @@ pub struct EventPage {
     pub next_page_token: Option<String>,
 }
 
+/// One event. Only label events matter here, but the list may hold others
+/// (`message.received`, …) without a top-level message id or label: those
+/// fields are optional so one such event does not fail the whole page.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Event {
     pub event_id: String,
     /// `label.added` or `label.removed` (`label_added` / `label_removed`
-    /// before 2026-04).
+    /// before 2026-04), or another kind, which is skipped.
+    #[serde(default)]
     pub event_type: String,
-    pub message_id: String,
-    pub label: String,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
     #[serde(default)]
     pub event_at: Option<String>,
 }

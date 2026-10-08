@@ -6,9 +6,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mail_domain::{EmailAddress, LabelId, MessageId, Millis, ThreadId, system_labels};
-use mail_store::{Db, IncomingMessage, MailWriter, ThreadChanges, queue, read};
+use mail_store::{Db, IncomingMessage, MailWriter, StoredLabels, ThreadChanges, queue, read};
 use provider_api::{
-    BackfillSource, Change, ListFilter, MailProvider, PageToken, Priority, ProviderError, RestBackfill,
+    BackfillSource, Change, LabelSync, ListFilter, MailProvider, PageToken, Priority, ProviderError, RestBackfill,
 };
 
 use crate::convert::to_incoming;
@@ -965,11 +965,11 @@ impl SyncEngine {
         tracing::debug!(count = fetched.len(), "backfill batch: storing");
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let processed = ids.len();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1042,11 +1042,11 @@ impl SyncEngine {
         let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
         let stored = incoming.len();
         let requested = ids.clone();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let (changes, dropped) = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1103,11 +1103,11 @@ impl SyncEngine {
         let fetched = self.fetch_bodies(&missing, Priority::Interactive).await?;
         let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
         let count = incoming.len();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1186,11 +1186,11 @@ impl SyncEngine {
         let downloaded = fetched.len();
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let pairs: Vec<(String, String)> = listed.into_iter().map(|(d, m)| (d, m.0)).collect();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1260,12 +1260,12 @@ impl SyncEngine {
         let new_cursor = set.cursor.0.clone();
         let changes_in = set.changes;
 
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let (changes, report) = self
             .db
             .write(move |tx| {
                 let mut report = IncrementalReport::default();
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     let stored =
                         tx.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1")?.exists([m.id.as_str()])?;
@@ -1370,12 +1370,14 @@ impl SyncEngine {
 
     /// Label list changes are not in history; refresh them wholesale.
     ///
-    /// When labels live on this Mac ([`MailProvider::labels_are_local`]),
-    /// the user labels in the store are the truth: the provider's list only
-    /// adds labels that are missing, and nothing the user made is dropped
-    /// or renamed. Otherwise the provider's list is the truth (Gmail).
+    /// When the provider's list does not hold every user label
+    /// ([`LabelSync::keeps_user_labels`]: labels live on this Mac, or the
+    /// provider has no label list), the user labels in the store are the
+    /// truth: the provider's list only adds labels that are missing, and
+    /// nothing the user made is dropped or renamed. Otherwise the
+    /// provider's list is the truth (Gmail).
     pub async fn refresh_labels(&self) -> SyncResult<()> {
-        let local = self.provider.labels_are_local();
+        let local = self.provider.label_sync().keeps_user_labels();
         let mut labels = self.provider.list_labels().await?;
         let mut keep: Vec<LabelId> = labels.iter().map(|l| l.id.clone()).collect();
         let changes = self
@@ -1400,8 +1402,19 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// What writing a fetched message does to a stored one's labels, by
+    /// whose labels they are ([`MailProvider::label_sync`]).
+    fn stored_labels(&self) -> StoredLabels {
+        match self.provider.label_sync() {
+            LabelSync::Provider => StoredLabels::Replace,
+            LabelSync::Local => StoredLabels::Keep,
+            LabelSync::Both(merge) => StoredLabels::Merge(merge),
+        }
+    }
+
     /// The history cursor expired: take a fresh cursor and re-list
-    /// everything. Stored messages are refetched so labels are current.
+    /// everything. Stored messages are refetched so labels are current
+    /// (as far as they are the provider's: [`Self::stored_labels`]).
     async fn start_resync(&self) -> SyncResult<()> {
         tracing::warn!("history cursor expired; starting full resync");
         let profile = self.provider.profile().await?;

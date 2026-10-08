@@ -78,8 +78,52 @@ pub fn to_local(labels: &[String]) -> Vec<LabelId> {
     ids
 }
 
+/// A stored message fetched again from AgentMail (a resync, a refetch):
+/// `stored` is what the store has, `fetched` what [`to_local`] made of
+/// AgentMail's labels now. What syncs both ways is AgentMail's: read state,
+/// the Inbox (archive), Sent, stars and user labels, so changes made
+/// elsewhere and missed by the event list are repaired. What is only this
+/// Mac's stays:
+/// - Trash and Spam (moving mail there never goes to AgentMail; theirs
+///   count too), and mail in either is out of the Inbox;
+/// - store labels AgentMail cannot carry: Gmail's and the store's own ids
+///   (`DRAFT`, `IMPORTANT`, a category, `@…`).
+pub fn merge_refetched(stored: &[LabelId], fetched: &[LabelId]) -> Vec<LabelId> {
+    const SYNCED: &[&str] = &[
+        system_labels::INBOX,
+        system_labels::UNREAD,
+        system_labels::SENT,
+        system_labels::STARRED,
+        system_labels::SPAM,
+        system_labels::TRASH,
+    ];
+    let out_of_inbox = |id: &str| id == system_labels::SPAM || id == system_labels::TRASH;
+    let synced = |id: &str| SYNCED.contains(&id) || (!is_system_id(id) && !id.starts_with('@') && !is_reserved(id));
+    let mut out: Vec<LabelId> = fetched.to_vec();
+    out.extend(stored.iter().filter(|l| out_of_inbox(l.as_str()) || !synced(l.as_str())).cloned());
+    if out.iter().any(|l| out_of_inbox(l.as_str())) {
+        out.retain(|l| l.as_str() != system_labels::INBOX);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Whether AgentMail's `label` takes mail out of the Inbox ([`to_local`]):
+/// `spam` and `trash`.
+pub fn leaves_the_inbox(label: &str) -> bool {
+    matches!(label.trim().to_ascii_lowercase().as_str(), "spam" | "trash")
+}
+
 /// What one AgentMail label event means for the store: labels added and
-/// labels removed. Nothing for AgentMail's own bookkeeping labels.
+/// labels removed, as [`to_local`] reads the same labels. Nothing for
+/// AgentMail's own bookkeeping labels.
+///
+/// `spam` or `trash` added also takes the message out of the Inbox. Taken
+/// off, the Inbox is not put back here: whether the message is in it
+/// depends on its other labels (archived or sent mail stays out), which the
+/// event does not carry, so the provider reads the message
+/// ([`leaves_the_inbox`]).
 pub fn event_change(label: &str, added: bool) -> Option<(Vec<LabelId>, Vec<LabelId>)> {
     let label = label.trim();
     let one = |id: &str| vec![LabelId::new(id)];
@@ -88,7 +132,10 @@ pub fn event_change(label: &str, added: bool) -> Option<(Vec<LabelId>, Vec<Label
         // Archived is the Inbox's absence.
         ARCHIVED => (one(system_labels::INBOX), true),
         "starred" => (one(system_labels::STARRED), false),
-        "spam" => (one(system_labels::SPAM), false),
+        "spam" | "trash" => {
+            let id = if label.eq_ignore_ascii_case("spam") { system_labels::SPAM } else { system_labels::TRASH };
+            return Some(if added { (one(id), one(system_labels::INBOX)) } else { (vec![], one(id)) });
+        }
         _ if label.is_empty() || is_reserved(label) => return None,
         _ => (one(label), false),
     };
@@ -202,12 +249,40 @@ mod tests {
     }
 
     #[test]
+    fn a_refetch_takes_agentmails_labels_and_keeps_what_is_only_this_macs() {
+        // Read and archived elsewhere, starred there; a user label taken off
+        // there and another put on: AgentMail's.
+        assert_eq!(
+            merge_refetched(&ids(&["INBOX", "UNREAD", "billing"]), &ids(&["STARRED", "receipts"])),
+            ids(&["STARRED", "receipts"])
+        );
+        // Trashed or marked spam on this Mac: it stays there, out of the
+        // Inbox, whatever AgentMail says of the Inbox.
+        assert_eq!(merge_refetched(&ids(&["TRASH", "UNREAD"]), &ids(&["INBOX"])), ids(&["TRASH"]));
+        assert_eq!(merge_refetched(&ids(&["SPAM"]), &ids(&["INBOX", "UNREAD"])), ids(&["SPAM", "UNREAD"]));
+        // Spam at AgentMail counts too.
+        assert_eq!(merge_refetched(&ids(&["INBOX"]), &ids(&["SPAM"])), ids(&["SPAM"]));
+        // Labels AgentMail cannot carry stay.
+        assert_eq!(
+            merge_refetched(&ids(&["INBOX", "IMPORTANT", "CATEGORY_SOCIAL", "@archive"]), &ids(&["INBOX"])),
+            ids(&["@archive", "CATEGORY_SOCIAL", "IMPORTANT", "INBOX"])
+        );
+    }
+
+    #[test]
     fn label_events_mean_the_same_as_labels() {
         assert_eq!(event_change("unread", false), Some((vec![], ids(&["UNREAD"]))));
         assert_eq!(event_change("archived", true), Some((vec![], ids(&["INBOX"]))));
         assert_eq!(event_change("archived", false), Some((ids(&["INBOX"]), vec![])));
         assert_eq!(event_change("billing", true), Some((ids(&["billing"]), vec![])));
         assert_eq!(event_change("read", true), None);
-        assert_eq!(event_change("trash", true), None);
+        // Spam and Trash leave the Inbox, as `to_local` has it; out of them,
+        // the Inbox is the message's own business (archived or sent mail
+        // stays out), so the provider asks AgentMail.
+        assert_eq!(event_change("spam", true), Some((ids(&["SPAM"]), ids(&["INBOX"]))));
+        assert_eq!(event_change("trash", true), Some((ids(&["TRASH"]), ids(&["INBOX"]))));
+        assert_eq!(event_change("Spam", false), Some((vec![], ids(&["SPAM"]))));
+        assert_eq!(event_change("trash", false), Some((vec![], ids(&["TRASH"]))));
+        assert!(leaves_the_inbox("spam") && leaves_the_inbox(" TRASH") && !leaves_the_inbox("starred"));
     }
 }

@@ -666,6 +666,131 @@ async fn labels_made_on_the_mac_are_names_and_agentmails_own_are_refused() {
     let label = p.create_label(" Receipts ", None).await.unwrap();
     assert_eq!((label.id.as_str(), label.name.as_str(), label.kind), ("Receipts", "Receipts", LabelKind::User));
     assert!(matches!(p.create_label("unread", None).await, Err(ProviderError::Invalid(_))));
-    assert!(p.labels_are_local() && p.adopts_sent_copies());
+    assert!(matches!(p.label_sync(), LabelSync::Both(_)) && p.adopts_sent_copies());
     assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+fn cursor_at(at: &str, event: &str, event_at: &str) -> SyncCursor {
+    cursor_text(&wire::Cursor {
+        at: parse_time(at).unwrap(),
+        seen: vec![],
+        event: Some(event.into()),
+        event_at: parse_time(event_at).unwrap(),
+    })
+}
+
+#[tokio::test]
+async fn more_new_mail_than_a_poll_reads_is_an_expired_cursor_not_a_gap() {
+    let server = MockServer::start().await;
+    // Every page of new mail says there is another.
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages")))
+        .respond_with(ok(json!({ "count": 1, "next_page_token": "more", "messages": [
+            item("m9", "t9", &["received"], "2026-10-08T09:00:00Z")
+        ] })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("events")))
+        .respond_with(ok(json!({ "count": 0, "events": [] })))
+        .mount(&server)
+        .await;
+    let p = provider(&server);
+    let err = p.changes_since(&cursor_at("2026-10-08T08:00:00Z", "e1", "2026-10-08T08:00:00Z")).await.unwrap_err();
+    assert_eq!(err, ProviderError::CursorExpired, "a resync lists what the poll could not");
+    let pages =
+        server.received_requests().await.unwrap().iter().filter(|r| r.url.path().ends_with("/messages")).count();
+    assert_eq!(pages, MAX_PAGES);
+}
+
+#[tokio::test]
+async fn events_that_are_not_label_changes_are_read_past() {
+    let server = MockServer::start().await;
+    // The newest event is a message event, with no label (and no message id
+    // at the top level): neither the start nor a poll stumbles on it.
+    let received = json!({
+        "event_id": "e5", "event_type": "message.received", "event_at": "2026-10-08T09:40:00Z",
+        "message": { "inbox_id": INBOX, "message_id": "m2" }
+    });
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages")))
+        .respond_with(ok(json!({ "count": 0, "messages": [] })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("events")))
+        .and(query_param("limit", "1"))
+        .respond_with(ok(json!({ "count": 1, "events": [received.clone()] })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("events")))
+        .and(query_param("limit", "100"))
+        .respond_with(ok(json!({ "count": 3, "events": [
+            received,
+            event("e4", "label.added", "m1", "starred", "2026-10-08T09:30:00Z"),
+            event("e1", "label.added", "m1", "unread", "2026-10-08T08:00:00Z")
+        ] })))
+        .mount(&server)
+        .await;
+    let p = provider(&server);
+    let profile = p.profile().await.unwrap();
+    let start: wire::Cursor = serde_json::from_str(&profile.cursor.0).unwrap();
+    assert_eq!(start.event.as_deref(), Some("e5"));
+    let set = p.changes_since(&cursor_at("2026-10-08T08:00:00Z", "e1", "2026-10-08T08:00:00Z")).await.unwrap();
+    assert_eq!(
+        set.changes,
+        vec![Change::LabelsAdded { id: MessageId::new("m1"), label_ids: vec![LabelId::new("STARRED")] }]
+    );
+    let cursor: wire::Cursor = serde_json::from_str(&set.cursor.0).unwrap();
+    assert_eq!(cursor.event.as_deref(), Some("e5"), "the newest event seen, whatever its kind");
+}
+
+#[tokio::test]
+async fn spam_and_trash_events_move_mail_out_of_the_inbox_and_back_as_agentmail_has_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages")))
+        .respond_with(ok(json!({ "count": 0, "messages": [] })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("events")))
+        .respond_with(ok(json!({ "count": 5, "events": [
+            event("e6", "label.removed", "m3", "spam", "2026-10-08T09:50:00Z"),
+            event("e5", "label.removed", "m2", "trash", "2026-10-08T09:40:00Z"),
+            event("e4", "label.added", "m2", "trash", "2026-10-08T09:30:00Z"),
+            event("e3", "label.added", "m1", "spam", "2026-10-08T09:20:00Z"),
+            event("e1", "label.added", "m1", "unread", "2026-10-08T08:00:00Z")
+        ] })))
+        .mount(&server)
+        .await;
+    // Out of Trash, m2 is received mail in the Inbox; m3, out of Spam, was
+    // archived there.
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages/m2")))
+        .respond_with(ok(item("m2", "t2", &["received"], "2026-10-08T07:00:00Z")))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages/m3")))
+        .respond_with(ok(item("m3", "t3", &["received", "archived"], "2026-10-08T07:00:00Z")))
+        .mount(&server)
+        .await;
+    let p = provider(&server);
+    let set = p.changes_since(&cursor_at("2026-10-08T08:00:00Z", "e1", "2026-10-08T08:00:00Z")).await.unwrap();
+    let ids = |v: &[&str]| v.iter().map(|l| LabelId::new(*l)).collect::<Vec<_>>();
+    assert_eq!(
+        set.changes,
+        vec![
+            Change::LabelsAdded { id: MessageId::new("m1"), label_ids: ids(&["SPAM"]) },
+            Change::LabelsRemoved { id: MessageId::new("m1"), label_ids: ids(&["INBOX"]) },
+            Change::LabelsAdded { id: MessageId::new("m2"), label_ids: ids(&["TRASH"]) },
+            Change::LabelsRemoved { id: MessageId::new("m2"), label_ids: ids(&["INBOX"]) },
+            Change::LabelsRemoved { id: MessageId::new("m2"), label_ids: ids(&["TRASH"]) },
+            Change::LabelsAdded { id: MessageId::new("m2"), label_ids: ids(&["INBOX"]) },
+            Change::LabelsRemoved { id: MessageId::new("m3"), label_ids: ids(&["SPAM"]) },
+        ],
+        "as `to_local` reads the same labels"
+    );
 }

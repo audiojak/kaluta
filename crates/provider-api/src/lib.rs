@@ -119,6 +119,32 @@ pub struct ChangeSet {
     pub cursor: SyncCursor,
 }
 
+/// Whose labels a message has (spec §7.9): what a refetched message's
+/// labels become, and whether the provider's label list is the whole truth.
+#[derive(Debug, Clone, Copy)]
+pub enum LabelSync {
+    /// The provider's labels are the truth (Gmail): a refetch takes them,
+    /// and its label list replaces the store's.
+    Provider,
+    /// Labels, read state, stars and trash live only on this Mac (Primitive):
+    /// a refetch keeps what is stored, the provider's labels apply only to
+    /// mail new to the store, and user labels made here are kept.
+    Local,
+    /// Labels sync both ways but some are only this Mac's (AgentMail): a
+    /// refetch takes `merge(stored, fetched)`, which keeps the Mac-only ones
+    /// and takes the provider's for the rest. The provider has no label
+    /// list, so user labels in the store are kept.
+    Both(fn(&[LabelId], &[LabelId]) -> Vec<LabelId>),
+}
+
+impl LabelSync {
+    /// The provider's label list does not hold every user label: the
+    /// store's are kept when it is refreshed.
+    pub fn keeps_user_labels(&self) -> bool {
+        !matches!(self, Self::Provider)
+    }
+}
+
 /// Add/remove labels on a set of messages (archive = remove INBOX).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelOp {
@@ -212,11 +238,11 @@ pub trait MailProvider: Send + Sync {
     /// Create a user label. `color` is a `(background, text)` pair from the
     /// provider's palette.
     async fn create_label(&self, name: &str, color: Option<(&str, &str)>) -> ProviderResult<Label>;
-    /// Labels, read state, stars and trash live only on this Mac (an agent
-    /// mailbox, spec §7.9): a refetched message keeps what is stored, and
-    /// the provider's labels apply only to mail new to the store.
-    fn labels_are_local(&self) -> bool {
-        false
+    /// Where a stored message's labels come from when it is fetched again
+    /// (a refetch, a resync, bodies arriving), and whether user labels need
+    /// the provider's label list. See [`LabelSync`].
+    fn label_sync(&self) -> LabelSync {
+        LabelSync::Provider
     }
     /// A sent message comes back under the id [`MailProvider::send`]
     /// returned, but perhaps with another Message-ID: the optimistic local

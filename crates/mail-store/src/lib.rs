@@ -29,5 +29,6 @@ pub use read::ThreadPage;
 /// The writer's transaction, for callers that compose store functions in one.
 pub use rusqlite::{Connection, Transaction};
 pub use write::{
-    ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, ThreadChanges,
+    ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, StoredLabels,
+    ThreadChanges,
 };

@@ -800,8 +800,8 @@ impl MailProvider for PrimitiveProvider {
         Ok(())
     }
 
-    fn labels_are_local(&self) -> bool {
-        true
+    fn label_sync(&self) -> provider_api::LabelSync {
+        provider_api::LabelSync::Local
     }
 
     /// Primitive may give a sent message its own Message-ID.

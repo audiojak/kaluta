@@ -87,23 +87,36 @@ impl ThreadChanges {
     }
 }
 
+/// What a stored message's labels become when it is upserted again (spec
+/// §7.9).
+#[derive(Debug, Clone, Copy, Default)]
+pub enum StoredLabels {
+    /// The incoming labels replace them (the provider's are the truth).
+    #[default]
+    Replace,
+    /// They stay, with the flags they set (labels that live only on this Mac).
+    Keep,
+    /// `merge(stored, incoming)` (labels that sync both ways, some of them
+    /// only this Mac's).
+    Merge(fn(&[LabelId], &[LabelId]) -> Vec<LabelId>),
+}
+
 pub struct MailWriter<'t> {
     tx: &'t Transaction<'t>,
     /// Thread rowid → provider thread id, for everything touched.
     dirty: BTreeMap<i64, String>,
-    /// A stored message keeps its labels when upserted again (labels that
-    /// live only on this Mac, spec §7.9).
-    keep_labels: bool,
+    /// A stored message's labels when upserted again.
+    stored_labels: StoredLabels,
 }
 
 impl<'t> MailWriter<'t> {
     pub fn new(tx: &'t Transaction<'t>) -> Self {
-        Self { tx, dirty: BTreeMap::new(), keep_labels: false }
+        Self { tx, dirty: BTreeMap::new(), stored_labels: StoredLabels::Replace }
     }
 
-    /// Upserts keep a stored message's labels and flags.
-    pub fn keeping_labels(mut self, keep: bool) -> Self {
-        self.keep_labels = keep;
+    /// What upserts do with a stored message's labels and flags.
+    pub fn with_stored_labels(mut self, stored_labels: StoredLabels) -> Self {
+        self.stored_labels = stored_labels;
         self
     }
 
@@ -170,9 +183,13 @@ impl<'t> MailWriter<'t> {
             .prepare_cached("SELECT id, thread_id, body_state FROM messages WHERE gmail_id = ?1")?
             .query_row([m.id.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .optional()?;
-        let label_ids: Vec<LabelId> = match &existing {
-            Some((rowid, _, _)) if self.keep_labels => {
+        let label_ids: Vec<LabelId> = match (&existing, self.stored_labels) {
+            (Some((rowid, _, _)), StoredLabels::Keep) => {
                 self.message_label_ids(*rowid)?.into_iter().map(LabelId).collect()
+            }
+            (Some((rowid, _, _)), StoredLabels::Merge(merge)) => {
+                let stored: Vec<LabelId> = self.message_label_ids(*rowid)?.into_iter().map(LabelId).collect();
+                merge(&stored, &m.label_ids)
             }
             _ => m.label_ids.clone(),
         };

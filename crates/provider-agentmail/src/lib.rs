@@ -38,9 +38,9 @@ use base64::Engine;
 use futures::stream::{FuturesUnordered, StreamExt};
 use mail_domain::{EmailAddress, Label, LabelColor, LabelId, LabelKind, MessageId, Millis, ThreadId, system_labels};
 use provider_api::{
-    Change, ChangeSet, FetchedAttachment, FetchedBody, FetchedMessage, HttpClient, IdPage, LabelOp, ListFilter,
-    MailProvider, PageToken, Priority, Profile, ProviderError, ProviderResult, RateLimiter, RetryPolicy, SyncCursor,
-    TokenSource,
+    Change, ChangeSet, FetchedAttachment, FetchedBody, FetchedMessage, HttpClient, IdPage, LabelOp, LabelSync,
+    ListFilter, MailProvider, PageToken, Priority, Profile, ProviderError, ProviderResult, RateLimiter, RetryPolicy,
+    SyncCursor, TokenSource,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -220,7 +220,11 @@ impl AgentMailProvider {
         self.get(&["messages"], &query, priority).await
     }
 
-    /// Every message from `after` on, newest first, up to [`MAX_PAGES`].
+    /// Every message from `after` on, newest first. More than
+    /// [`MAX_PAGES`] pages is [`ProviderError::CursorExpired`]: the listing
+    /// is newest first, so stopping there would report only the newest and
+    /// move the cursor past the rest, which no later poll would list. A
+    /// resync lists them all instead.
     async fn list_since(&self, after: Millis, priority: Priority) -> ProviderResult<Vec<wire::Message>> {
         let mut out = Vec::new();
         let mut page = None;
@@ -229,10 +233,21 @@ impl AgentMailProvider {
             out.extend(got.messages);
             match got.next_page_token.filter(|t| !t.is_empty()) {
                 Some(next) => page = Some(next),
-                None => break,
+                None => return Ok(out),
             }
         }
-        Ok(out)
+        tracing::info!(pages = MAX_PAGES, "more new mail than a poll reads; resyncing");
+        Err(ProviderError::CursorExpired)
+    }
+
+    /// Whether a message is in the Inbox at AgentMail now ([`labels::to_local`]
+    /// of its labels); `false` when it is gone.
+    async fn in_inbox(&self, id: &str) -> ProviderResult<bool> {
+        match self.get::<wire::Message>(&["messages", id], &[], Priority::Background).await {
+            Ok(m) => Ok(labels::to_local(&m.labels).iter().any(|l| l.as_str() == system_labels::INBOX)),
+            Err(ProviderError::NotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Label events newer than `cursor`'s, oldest first, and the newest
@@ -732,16 +747,21 @@ impl MailProvider for AgentMailProvider {
         for e in events {
             let added = matches!(e.event_type.as_str(), "label.added" | "label_added");
             let removed = matches!(e.event_type.as_str(), "label.removed" | "label_removed");
+            let (Some(message), Some(label)) = (e.message_id.as_deref(), e.label.as_deref()) else { continue };
             if !added && !removed {
                 continue;
             }
-            let Some((plus, minus)) = labels::event_change(&e.label, added) else { continue };
-            let id = MessageId(e.message_id.clone());
+            let Some((plus, minus)) = labels::event_change(label, added) else { continue };
+            let id = MessageId(message.to_owned());
             if !plus.is_empty() {
                 changes.push(Change::LabelsAdded { id: id.clone(), label_ids: plus });
             }
             if !minus.is_empty() {
-                changes.push(Change::LabelsRemoved { id, label_ids: minus });
+                changes.push(Change::LabelsRemoved { id: id.clone(), label_ids: minus });
+            }
+            // Out of Spam or Trash: back in the Inbox if AgentMail has it there.
+            if removed && labels::leaves_the_inbox(label) && self.in_inbox(message).await? {
+                changes.push(Change::LabelsAdded { id, label_ids: vec![LabelId::new(system_labels::INBOX)] });
             }
         }
 
@@ -878,11 +898,13 @@ impl MailProvider for AgentMailProvider {
         })
     }
 
-    /// The store's labels are kept when a message is fetched again: there
-    /// is no label listing at AgentMail, trash is the Mac's, and changes
-    /// made elsewhere arrive as events.
-    fn labels_are_local(&self) -> bool {
-        true
+    /// Labels sync both ways: a message fetched again (a resync, a
+    /// refetch) takes AgentMail's read state, Inbox, stars and user labels,
+    /// and keeps what is only this Mac's ([`labels::merge_refetched`]).
+    /// There is no label listing at AgentMail, so user labels in the store
+    /// are kept when the list is refreshed.
+    fn label_sync(&self) -> LabelSync {
+        LabelSync::Both(labels::merge_refetched)
     }
 
     /// AgentMail gives a sent message its own id.
