@@ -1278,11 +1278,36 @@ and limits are specified with its provider.
   AgentMail).
 - **Changes.** The sync cursor holds the newest message time seen, the
   messages seen within an hour of it, and the newest label event seen. A
-  poll (every 30 s while active; WebSocket push is oagc-uys.15) lists
+  poll (every 30 s while active, and at once on a push, below) lists
   `messages?after=<newest − 1 h>` and reports what it had not seen, then
   reads `…/events` newest first, page by page, down to the last event
   seen, and applies `label.added`/`label.removed` oldest first. Not
   reaching it within 20 pages is an expired cursor (a full resync).
+- **Push** *(implemented 2026-10-08, oagc-uys.15; docs.agentmail.to
+  websockets and its AsyncAPI, read that day)*. One WebSocket per
+  organisation, `wss://ws.agentmail.to/v0?api_key=<key>` (the key also as
+  `Authorization: Bearer`, never logged), shared by every agent of it
+  that syncs: it sends `{"type":"subscribe","inbox_ids":[…],
+  "event_types":["message.received","message.sent"]}` for every agent's
+  inbox, ten to a message, and one more for an agent that starts later;
+  the server answers `subscribed`. An `event` (`message`, `send`, … with
+  an `inbox_id`) only wakes that agent's sync, which polls as above: the
+  payload is not stored, and label changes still come from polling the
+  event list, which the socket does not carry. The socket is the agent's
+  push source (`AgentMailPush`, a `BackfillSource` whose `watch` waits
+  for its inbox, as Primitive's long-poll does); the 30 s / 5 min poll
+  runs alongside. On connecting or reconnecting every agent polls once
+  (mail may have arrived meanwhile). It pings every minute and
+  reconnects after 150 s without a frame; failures back off from 1 s to
+  a minute, and five in a row (a refused key, an `error` answer, no
+  network) rest it for 15 minutes, during which `watch` fails and the
+  agents poll only. TLS is `tokio-rustls` with the webpki roots, as for
+  IMAP (`tokio-tungstenite` without TLS features); plain `ws://` only to
+  the loopback address. Spam, blocked and unauthenticated mail events
+  need permissions a key may lack, which would fail the subscription, so
+  they are not asked for. Tests use a local fake (`ws_fake`); nothing
+  connects to AgentMail. Fake agent mailboxes, and tests with another
+  API base and no fake socket, poll only.
 - **Sending.** The composer's MIME becomes AgentMail's JSON (`to`, `cc`,
   `bcc`, `reply_to`, `subject`, `text`, `html`, base64 `attachments`,
   `headers`). A reply goes to `…/messages/<In-Reply-To>/reply` (explicit

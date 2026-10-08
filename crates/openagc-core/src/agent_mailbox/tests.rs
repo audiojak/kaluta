@@ -1003,11 +1003,11 @@ fn an_unverified_agentmail_account_writes_only_to_the_human_and_verifying_lifts_
     assert!(core.agent_service_terms_url(AgentService::AgentMail).starts_with("https://www.agentmail.to/"));
 }
 
-#[test]
-fn an_agentmail_organisation_is_created_its_second_agent_added_and_synced_over_the_api() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let server = rt.block_on(MockServer::start());
-    let mount = |mock: Mock| rt.block_on(mock.mount(&server));
+/// AgentMail's API as a wiremock fake: sign-up ("scout"), a second inbox
+/// ("writer") with one welcome message, verification, the organisation,
+/// and an empty scout inbox.
+fn agentmail_api(rt: &tokio::runtime::Runtime, server: &MockServer) {
+    let mount = |mock: Mock| rt.block_on(mock.mount(server));
     let plain = |body: serde_json::Value| ResponseTemplate::new(200).set_body_json(body);
     mount(
         Mock::given(method("POST"))
@@ -1058,6 +1058,22 @@ fn an_agentmail_organisation_is_created_its_second_agent_added_and_synced_over_t
         b"From: Ada <ada@example.com>\r\nTo: writer@agentmail.to\r\nSubject: Welcome\r\n\r\nHello Writer\r\n".to_vec(),
     )));
 
+    for path_ in ["/v0/inboxes/scout@agentmail.to/messages", "/v0/inboxes/scout@agentmail.to/events"] {
+        let body = if path_.ends_with("events") {
+            json!({ "count": 0, "events": [] })
+        } else {
+            json!({ "count": 0, "messages": [] })
+        };
+        mount(Mock::given(method("GET")).and(path(path_)).respond_with(plain(body)));
+    }
+}
+
+#[test]
+fn an_agentmail_organisation_is_created_its_second_agent_added_and_synced_over_the_api() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    agentmail_api(&rt, &server);
+    let inbox = "/v0/inboxes/writer@agentmail.to";
     let (_t, core, secrets) = core("agentmail-api");
     *core.agent_mail.base.lock().unwrap() = Some(server.uri());
     let scout = block_on(core.clone().create_agent_mailbox(
@@ -1107,4 +1123,48 @@ fn an_agentmail_organisation_is_created_its_second_agent_added_and_synced_over_t
     );
     assert!(requests.iter().filter(|r| r.url.path() == "/cdn/w1").all(|r| !r.headers.contains_key("authorization")));
     rt.block_on(server.verify());
+}
+
+/// oagc-uys.15: an organisation's agents share one WebSocket (a local
+/// fake), subscribed to both inboxes; an event for one makes that agent
+/// poll at once, long before its next 30 s poll.
+#[test]
+fn agentmail_agents_share_one_websocket_and_an_event_makes_its_agent_poll() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    agentmail_api(&rt, &server);
+    let ws = rt.block_on(provider_agentmail::ws_fake::FakeAgentMailSocket::start());
+
+    let (_t, core, _secrets) = core("agentmail-push");
+    *core.agent_mail.base.lock().unwrap() = Some(server.uri());
+    core.set_agentmail_ws_base(Some(ws.url()));
+    let scout = block_on(core.clone().create_agent_mailbox(
+        AgentService::AgentMail,
+        "Scout".into(),
+        Some("me@example.com".into()),
+        "amw-1".into(),
+    ))
+    .unwrap();
+    let writer =
+        block_on(core.clone().add_agent(scout.account_id.clone(), "Writer".into(), None, "amw-2".into())).unwrap();
+    block_on(core.clone().set_current_account(writer.account_id.clone())).unwrap();
+    assert!(block_on(core.clone().start_all_sync()).unwrap().is_empty());
+    wait_for("the writer's welcome", || inbox_rows(&core) == 1);
+    wait_for("both inboxes subscribed", || ws.subscribed_inboxes().len() == 2);
+    assert_eq!(ws.subscribed_inboxes(), ["scout@agentmail.to", "writer@agentmail.to"]);
+    assert_eq!(ws.connections(), 1, "one socket for the organisation");
+    assert_eq!(ws.keys(), ["am_k"]);
+
+    // Let the polls that follow subscribing finish, then push.
+    std::thread::sleep(Duration::from_millis(800));
+    let lists = |inbox: &str| {
+        let path_ = format!("/v0/inboxes/{inbox}/messages");
+        rt.block_on(server.received_requests()).unwrap().iter().filter(|r| r.url.path() == path_).count()
+    };
+    let (writer_before, scout_before) = (lists("writer@agentmail.to"), lists("scout@agentmail.to"));
+    ws.message_received("writer@agentmail.to", "w2");
+    wait_for("the writer to poll", || lists("writer@agentmail.to") > writer_before);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(lists("scout@agentmail.to"), scout_before, "the scout was not woken");
+    core.stop_sync();
 }

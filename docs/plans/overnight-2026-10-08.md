@@ -191,6 +191,16 @@ The managed subdomain "can receive at any local-part".
    mailbox shows the limits.)*
 6. *(Optional)* **AgentMail WebSocket push** (oagc-uys.15) as the account's push
    source, falling back to polling.
+   *(as built: the docs give `wss://ws.agentmail.to/v0?api_key=…`, a
+   `subscribe` naming several inboxes (ten to a message) and `event`
+   messages carrying the inbox id, so one socket per organisation serves
+   every agent; an event only wakes its agent's poll; reconnect with
+   backoff, catch-up poll on reconnecting, rest 15 minutes after five
+   failures in a row (polling only meanwhile). `tokio-tungstenite` with
+   our own `tokio-rustls` TLS. Tested against a local fake only. Not
+   checked against the real service: whether the key in the query and
+   the header together are accepted, ping/pong (undocumented), and
+   whether `message.sent` arrives for sends through the API.)*
 
 ### Left for the maintainer to check by hand (real accounts; never in automation)
 

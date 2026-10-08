@@ -23,8 +23,11 @@
 
 mod errors;
 pub mod labels;
+pub mod push;
 mod service;
 pub mod wire;
+#[cfg(any(test, feature = "fake-ws"))]
+pub mod ws_fake;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -46,6 +49,7 @@ pub use errors::{
     INBOX_LIMIT, INBOX_PAUSED, NOT_VERIFIED_YET, SENDS_ONLY_TO_HUMAN, USERNAME_TAKEN, agentmail_error, too_large,
 };
 pub use labels::{ARCHIVED, labels};
+pub use push::{AGENTMAIL_WS, AgentMailPush, AgentMailSocket, SocketConfig, SocketState};
 pub use service::{AgentMailService, plan_name, username_of};
 
 pub const AGENTMAIL_API: &str = "https://api.agentmail.to";

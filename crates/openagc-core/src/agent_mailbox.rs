@@ -377,6 +377,12 @@ pub(crate) struct AgentMailState {
     /// One rate limiter per service account: its agents share the key's
     /// request limit.
     limiters: Mutex<HashMap<String, Arc<provider_api::RateLimiter>>>,
+    /// Tests: AgentMail's WebSocket on a local fake. With another `base`
+    /// and none here, agents poll only (tests never reach the real one).
+    ws_base: Mutex<Option<String>>,
+    /// One WebSocket per AgentMail organisation, shared by its agents
+    /// while any of them syncs (spec §7.9).
+    sockets: Mutex<HashMap<String, std::sync::Weak<provider_agentmail::AgentMailSocket>>>,
 }
 
 impl Core {
@@ -507,7 +513,8 @@ impl Core {
                 let push: Arc<dyn BackfillSource> = Arc::new(provider_primitive::PrimitivePush(provider.clone()));
                 Ok((provider, Some(push)))
             }
-            // One inbox of the organisation; polled (no push source yet).
+            // One inbox of the organisation: polled, and woken by the
+            // organisation's WebSocket.
             AgentService::AgentMail => {
                 let base = self.agent_mail.base.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 let limiter = self
@@ -520,7 +527,7 @@ impl Core {
                     .clone();
                 let inbox = meta.inbox_id.clone().unwrap_or_else(|| meta.address.clone());
                 let provider = provider_agentmail::AgentMailProvider::for_inbox(
-                    tokens,
+                    tokens.clone(),
                     &meta.address,
                     &inbox,
                     limiter,
@@ -528,9 +535,48 @@ impl Core {
                     base.as_deref().unwrap_or(provider_agentmail::AGENTMAIL_API),
                 )
                 .map_err(service_error)?;
-                Ok((Arc::new(provider), None))
+                let provider = Arc::new(provider);
+                // Push over the organisation's WebSocket; polling carries
+                // on alongside and alone when it fails (spec §7.9).
+                let ws = match &base {
+                    None => Some(provider_agentmail::AGENTMAIL_WS.to_owned()),
+                    Some(_) => self.agent_mail.ws_base.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+                };
+                let push: Option<Arc<dyn BackfillSource>> = match ws {
+                    Some(url) => {
+                        let socket = self.agentmail_socket(&meta.service_account, &url, tokens)?;
+                        Some(Arc::new(provider_agentmail::AgentMailPush::new(provider.clone(), socket, &inbox)))
+                    }
+                    None => None,
+                };
+                Ok((provider, push))
             }
         }
+    }
+
+    /// The WebSocket of `service_account`'s organisation: the live one its
+    /// other agents use, or a new one.
+    fn agentmail_socket(
+        &self,
+        service_account: &str,
+        url: &str,
+        tokens: Arc<StaticToken>,
+    ) -> Result<Arc<provider_agentmail::AgentMailSocket>, CoreError> {
+        let mut sockets = self.agent_mail.sockets.lock().unwrap_or_else(|e| e.into_inner());
+        sockets.retain(|_, socket| socket.strong_count() > 0);
+        if let Some(socket) = sockets.get(service_account).and_then(std::sync::Weak::upgrade) {
+            return Ok(socket);
+        }
+        let socket = provider_agentmail::AgentMailSocket::new(url, tokens, provider_agentmail::SocketConfig::default())
+            .map_err(service_error)?;
+        sockets.insert(service_account.to_owned(), Arc::downgrade(&socket));
+        Ok(socket)
+    }
+
+    /// Tests: AgentMail's WebSocket at a local fake.
+    #[cfg(test)]
+    pub(crate) fn set_agentmail_ws_base(&self, url: Option<String>) {
+        *self.agent_mail.ws_base.lock().unwrap_or_else(|e| e.into_inner()) = url;
     }
 
     /// The fake mailbox behind an agent account in fake mode (tests,

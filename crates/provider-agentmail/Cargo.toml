@@ -7,6 +7,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# A local fake of AgentMail's WebSocket for tests (`ws_fake`).
+fake-ws = []
+
 [dependencies]
 mail-domain.workspace = true
 mail-mime.workspace = true
@@ -20,7 +24,10 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["time", "sync"] }
+tokio = { workspace = true, features = ["time", "sync", "net", "macros", "rt"] }
+tokio-rustls.workspace = true
+tokio-tungstenite.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
