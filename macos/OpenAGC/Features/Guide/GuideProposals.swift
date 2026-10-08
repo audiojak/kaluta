@@ -1,65 +1,39 @@
 import SwiftUI
 
-/// The daily review in the Writing Guide's header (spec §14.10): its
-/// progress, when it last ran and what it examined, Run Now and Pause,
-/// and how much AI drafts get changed.
+/// The daily review over the Writing Guide's list (spec §14.10), only
+/// while there is something to say now: its progress and Pause while it
+/// runs, and why it waits or failed. When it last ran and what it found
+/// is in Learning Settings; Run Review Now in the toolbar's menu.
 struct ReviewStatus: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        review
-    }
-
-    @ViewBuilder private var review: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            if let run = model.analysisProgress?.run, run.status == .running || run.status == .paused {
-                AnalysisRunBar(run: run)
-            } else if let run = model.analysisProgress?.run {
-                Text(Self.summary(run, daily: model.analysisDaily)).font(TypeRole.caption).foregroundStyle(.secondary)
-            } else if !model.analysisDaily {
-                Text("Daily reviews are off. Run Now reviews the AI drafts you sent since the last review.")
-                    .font(TypeRole.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("The first review runs today, once mail has synced. It sends the AI drafts you edited, and what you sent, to your own agent (with All mail I send, also the day's sent mail).")
-                    .font(TypeRole.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let waiting = model.analysisProgress?.waiting {
-                Label(waiting, systemImage: "exclamationmark.triangle")
-                    .font(TypeRole.caption)
-                    .foregroundStyle(Tone.caution)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = model.analysisError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(TypeRole.caption)
-                    .foregroundStyle(Tone.caution)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let metrics = model.analysis.metrics, metrics.compared > 0 {
-                Text(Self.metricsText(metrics)).font(TypeRole.caption).foregroundStyle(.secondary)
-            }
-            HStack(spacing: Space.m) {
-                Button("Run Now") { Task { await model.runAnalysisNow() } }
-                    .disabled(model.analysisRunActive)
-                    .hoverHelp(model.analysisRunActive ? "A review is in progress"
-                        : "Compare the AI drafts you sent since the last review now")
-                if model.analysisProgress?.waiting != nil {
-                    Button("Agent Settings…") { model.openAgentSettings?() }
-                        .hoverHelp("Connect Claude Code or Codex")
+        let running = model.analysisProgress?.run.flatMap { $0.status == .running || $0.status == .paused ? $0 : nil }
+        if running != nil || model.analysisProgress?.waiting != nil || model.analysisError != nil {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if let run = running {
+                    AnalysisRunBar(run: run)
                 }
-                Spacer(minLength: 0)
-                Button {
-                    model.guideSheet = .analysisSettings
-                } label: {
-                    Label("Learning Settings", systemImage: "gearshape")
+                if let waiting = model.analysisProgress?.waiting {
+                    HStack(spacing: Space.m) {
+                        Label(waiting, systemImage: "exclamationmark.triangle")
+                            .font(TypeRole.caption)
+                            .foregroundStyle(Tone.caution)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Agent Settings…") { model.openAgentSettings?() }
+                            .controlSize(.small)
+                            .hoverHelp("Connect Claude Code or Codex")
+                    }
                 }
-                .labelStyle(.iconOnly)
-                .hoverHelp("The daily review, where facts are learned from, and how long AI drafts are kept")
+                if let error = model.analysisError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(TypeRole.caption)
+                        .foregroundStyle(Tone.caution)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .controlSize(.small)
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
         }
     }
 
@@ -236,153 +210,35 @@ struct ReviewProposalCard: View {
     private static let firstPairs = 3
 }
 
-/// The review flow (spec §14.9, §14.10), in the Writing Guide's detail
-/// from its header's *Review Proposed Rules*: every proposed rule as a
-/// card, the learning runs' and the daily review's, one current. Return
-/// accepts, ⌫ rejects, e edits, j and k move; each decision is one change
-/// that can be undone, and the next card becomes current. Those still
-/// collecting evidence come last, folded.
-struct ProposedRulesView: View {
+/// The chosen row of the Writing Guide's Waiting section, in the detail
+/// (spec §14.10): a learning decision's card, or a proposed rule's with
+/// the messages behind it. The list is the flow.
+struct ProposedRuleDetail: View {
     @Environment(AppModel.self) private var model
-    @FocusState private var focused: Bool
 
     var body: some View {
-        @Bindable var analysis = model.analysis
-        let decisions = model.guide.decisions
-        let proposals = model.analysis.proposals
-        let current = currentTag
-        ScrollViewReader { scroller in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.l) {
-                    ForEach(decisions, id: \.id) { entry in
-                        GuideDecisionCard(entry: entry, isCurrent: AnalysisStore.tag(entry) == current,
-                                          accepted: model.guide.entries.first { $0.id == entry.contradictionOf })
-                            .id(AnalysisStore.tag(entry))
-                            .onTapGesture { model.analysis.selection = AnalysisStore.tag(entry) }
-                            .accessibilityAddTraits(.isButton)
-                    }
-                    ForEach(proposals, id: \.id) { proposal in
-                        card(proposal, current: current)
-                    }
-                    if decisions.isEmpty, proposals.isEmpty {
-                        ContentUnavailableView("Nothing to Decide", systemImage: "checkmark.circle",
-                                               description: Text("Proposed rules from learning and from the daily review wait here."))
-                    }
-                    if !model.analysis.watching.isEmpty {
-                        DisclosureGroup(isExpanded: $analysis.watchingExpanded) {
-                            VStack(alignment: .leading, spacing: Space.l) {
-                                ForEach(model.analysis.watching, id: \.id) { proposal in
-                                    card(proposal, current: current)
-                                }
-                            }
-                            .padding(.top, Space.m)
-                        } label: {
-                            Text(model.analysis.watching.count == 1 ? "1 pattern collecting evidence"
-                                 : "\(model.analysis.watching.count) patterns collecting evidence")
-                                .font(TypeRole.groupLabel)
-                        }
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.l) {
+                if let entry = model.selectedDecision {
+                    GuideDecisionCard(entry: entry, isCurrent: true,
+                                      accepted: model.guide.entries.first { $0.id == entry.contradictionOf })
+                    Text("Return accepts, ⌫ rejects, e edits; each can be undone. The next one waiting is chosen for you.")
+                        .font(TypeRole.caption).foregroundStyle(.secondary)
+                } else if let proposal = model.analysis.selectedProposal {
+                    ReviewProposalCard(proposal: proposal, isCurrent: true)
+                    Text(proposal.watching
+                         ? "Not proposed yet: your edits have shown this, but not often enough. Accepting it now is fine too."
+                         : "Return accepts, ⌫ rejects, e edits; each can be undone. The next one waiting is chosen for you.")
+                        .font(TypeRole.caption).foregroundStyle(.secondary)
+                } else {
+                    ContentUnavailableView("Nothing to Decide", systemImage: "checkmark.circle",
+                                           description: Text("Rules the daily review and learning propose wait here."))
                 }
-                .padding(Space.xxl)
-                .frame(maxWidth: Self.readingWidth, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // The header stays put (design system: headers are safe-area
-            // bars); the cards scroll under it.
-            .columnHeader { header }
-            .onChange(of: current) { _, tag in
-                if let tag { withAnimation { scroller.scrollTo(tag, anchor: .top) } }
-            }
+            .padding(Space.xxl)
+            .frame(maxWidth: Self.readingWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onAppear {
-            focused = true
-            if model.analysis.selection != current { model.analysis.selection = current }
-        }
-        .onKeyPress(.return) { act(.accept) }
-        .onKeyPress(keys: KeyEquivalent.deleteKeys) { _ in act(.reject) }
-        .onKeyPress(characters: .init(charactersIn: "ejk"), phases: .down) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            switch press.characters {
-            case "e": return act(.edit)
-            case "j": move(1)
-            case "k": move(-1)
-            default: return .ignored
-            }
-            return .handled
-        }
-    }
-
-    private func card(_ proposal: AnalysisProposalInfo, current: String?) -> some View {
-        ReviewProposalCard(proposal: proposal, isCurrent: AnalysisStore.tag(proposal) == current)
-            .id(AnalysisStore.tag(proposal))
-            .onTapGesture { model.analysis.selection = AnalysisStore.tag(proposal) }
-            .accessibilityAddTraits(.isButton)
-    }
-
-    private var header: some View {
-        let waiting = model.analysis.rulesWaiting
-        return HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-            VStack(alignment: .leading, spacing: Space.xs) {
-                Text("Proposed Rules").font(TypeRole.title)
-                Text(waiting == 0 ? "Nothing waiting"
-                     : "\(waiting) waiting. Return accepts, ⌫ rejects, e edits; each can be undone.")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: Space.m)
-            if waiting > 0 {
-                Button("Accept All") { Task { await model.acceptAllProposedRules() } }
-                    .controlSize(.small)
-                    .hoverHelp("Accept every proposed rule that goes against none of yours")
-            }
-        }
-        .padding(.horizontal, Space.xxl)
-        .padding(.vertical, Space.m)
-        .frame(maxWidth: Self.readingWidth, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Every card in order, the folded ones only while shown.
-    private var tags: [String] {
-        model.proposedRuleTags + (model.analysis.watchingExpanded ? model.analysis.watching.map(AnalysisStore.tag) : [])
-    }
-
-    /// The chosen card while it is there; else the first.
-    private var currentTag: String? {
-        let all = model.proposedRuleTags + model.analysis.watching.map(AnalysisStore.tag)
-        if let chosen = model.analysis.selection, all.contains(chosen) { return chosen }
-        return tags.first
-    }
-
-    private enum Action { case accept, reject, edit }
-
-    private func act(_ action: Action) -> KeyPress.Result {
-        if let entry = model.guide.decisions.first(where: { AnalysisStore.tag($0) == currentTag }) {
-            switch action {
-            case .accept: Task { await model.acceptDecision(entry) }
-            case .reject: Task { await model.decideProposedRule(reject: entry) }
-            case .edit: model.guideSheet = .edit(entry, category: entry.category)
-            }
-            return .handled
-        }
-        guard let proposal = (model.analysis.proposals + model.analysis.watching)
-            .first(where: { AnalysisStore.tag($0) == currentTag }) else { return .ignored }
-        switch action {
-        case .accept: Task { await model.decideProposedRule(proposal, accept: true) }
-        case .reject: Task { await model.decideProposedRule(proposal, accept: false) }
-        case .edit:
-            guard proposal.op != .remove else { return .ignored }
-            model.guideSheet = .proposal(proposal)
-        }
-        return .handled
-    }
-
-    private func move(_ delta: Int) {
-        let all = tags
-        guard let at = currentTag.flatMap({ all.firstIndex(of: $0) }) else { return }
-        model.analysis.selection = all[min(max(at + delta, 0), all.count - 1)]
     }
 
     private static let readingWidth: CGFloat = 760

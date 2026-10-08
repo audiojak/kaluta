@@ -135,7 +135,9 @@ final class AppModel {
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
             agentShown: agent.isPresented,
-            importantAvailable: !isAgentMailbox))
+            importantAvailable: !isAgentMailbox,
+            inGuide: isGuide,
+            inFacts: isFacts))
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -146,6 +148,7 @@ final class AppModel {
         case (.agent, true):
             agent.isPresented = true
             focusAgentPrompt()
+        case (.guide, true), (.facts, true): guideSheet = .analysisSettings
         default: break
         }
         dismissedTips.insert(tip.rawValue)

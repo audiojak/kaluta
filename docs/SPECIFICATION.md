@@ -2660,10 +2660,11 @@ originals and signature stripped), and each pair records its distance
 
 - *When*: the first chance each calendar day, once the day's first sync
   goes idle after the app opens; the core's scheduler checks open accounts
-  hourly. *Run Now* in the Writing Guide's header runs it on demand.
+  hourly. *Run Review Now* (the Writing Guide's *More* menu, Learning
+  Settings) runs it on demand.
 - *Gate*: a finished learning run and a connected agent. With no agent the
-  review waits and the Writing Guide's header says why ("Connect Claude Code or Codex in
-  Settings › Agents").
+  review waits and the Writing Guide says why over its list ("Connect
+  Claude Code or Codex in Settings › Agents").
 - *How*: a background job in hidden read-only sessions (ADR 0007), in
   batches, recorded batch by batch so it pauses and resumes like a
   learning run; the same two progress bars and time-left estimate.
@@ -2689,21 +2690,34 @@ originals and signature stripped), and each pair records its distance
 - *Cost cap*: at most 50 pairs a day (Settings); the rest wait for the
   next day, oldest first.
 
-**Proposed rules in the Writing Guide** (amended 2026-10-06). The
-Writing Guide's list shows the categories only. Its header has *Review N
-Proposed Rules* when any wait (*N patterns collecting evidence* when only
-those do); it fills the detail with the review flow: every proposed rule
-as a card, the learning runs' decisions (§14.9, with their contradiction
-cards) and the daily reviews' proposed changes alike, each with the
-change (*new*, a change, *remove*), its category and strength ("seen in 4
-replies"), one card current. The current review proposal also shows its
-evidence: side by side snippets of what the AI wrote and what the user
-sent, with the differing words marked (*Why?* shows them all). Return
-accepts, ⌫ rejects, e edits, j and k move; after a decision the next card
-is current. *Accept All* at the top takes every proposed rule that goes
-against none of the user's. Patterns short of the threshold come last,
-folded. Choosing a category leaves the flow. The learning progress bars
-show only while a learning run is going.
+**Proposed rules in the Writing Guide** (amended 2026-10-07). The
+Writing Guide's page behaves like a mailbox. Its list begins with a
+*Waiting for you · N* section: one row per proposed rule, the learning
+runs' decisions (§14.9) first and the daily reviews' proposed changes
+after, each row the statement with a caption (the change: *new*, a change,
+*remove*; its category; its strength, "seen in 4 replies"), then a
+*Collecting evidence · N* section for patterns short of the threshold,
+then the categories. *Accept All* sits in the Waiting section's header
+and takes every proposed rule that goes against none of the user's.
+Choosing a row shows its card in the detail, as a message shows in the
+reader: the change, its actions, and for a review proposal its evidence,
+side by side snippets of what the AI wrote and what the user sent, with
+the differing words marked (*Why?* shows them all). Return accepts, ⌫
+rejects, e edits; after a decision the next row waiting is chosen, and
+when none is left the chosen category shows again. Choosing a category
+leaves the flow. Before 2026-10-07 the header carried a *Review N
+Proposed Rules* button that filled the detail with every card at once;
+the rows replaced it so the page needs no navigation of its own.
+
+The Writing Guide's actions are in the window toolbar when the page is
+open, where the mail actions would be: *Learn from Sent Mail*, a *More*
+menu (*Ask … to Change the Guide…*, *Answer Questions…*, *Run Review
+Now*, merge and export) and *Learning Settings*. The list's subtitle
+says how many entries, how many wait and when learning last ran
+("Learned today"). Over the list, only what is happening now: the
+learning progress bars while a run is going, the review's progress while
+it runs, and why a review waits or failed. What the page is for is a tip
+(§14.3's tip card) shown until the user puts it away.
 
 Each decision is one change on the account's undo stack (§14.6a),
 recorded with the guide's own change so one Undo puts the guide and the
@@ -2715,14 +2729,15 @@ proposed rules, and a red dot shows while there are ones created since
 the user last opened the Writing Guide (an unseen signal, not a count).
 Facts has its own count and dot (§14.11); each page clears only its own.
 
-The Writing Guide's header, under the learning controls, says when the
-review last ran, what it examined (pairs matched, unmatched), the next
-run, *Run Now* and *Pause*, and the progress
-bars while it runs: first the drafts compared ("3 of 10 compared"), then
-*Looking for facts in your sent mail* with no count; a review with no
-edited drafts to compare goes straight to the facts step and says so when
-it finishes. At the top, small: how much AI drafts get changed (the
-median distance over four weeks) and how many were sent as written. The
+Learning Settings (from either page's toolbar, and Settings › Learning)
+says when the review last ran, what it examined (pairs matched,
+unmatched), the next run, how much AI drafts get changed (the median
+distance over four weeks) and how many were sent as written, with *Run
+Review Now* (amended 2026-10-07: these left the Writing Guide's header).
+Over the Writing Guide's list, *Pause* and the progress bars while it
+runs: first the drafts compared ("3 of 10 compared"), then *Looking for
+facts in your sent mail* with no count; a review with no edited drafts to
+compare goes straight to the facts step and says so when it finishes. The
 Writing Guide shows each entry's health: how often drafts that applied it
 were sent unchanged or overridden.
 
@@ -2837,17 +2852,22 @@ left out), so a long list need not sit in every prompt; tool names allow
 no dots.
 
 **The Facts page** (a sidebar entry under the Writing Guide, laid out like
-it; amended 2026-10-05): the header has *Add Fact*, a *Categories* menu
+it; amended 2026-10-07): it behaves like a mailbox. Its actions are in
+the window toolbar when the page is open: *Add Fact*, a *Categories* menu
 (*Add Category…*, *Add Categories › From a Starter Set…*, export and
-merge), *Learning Settings*, *Review N Proposed Facts* when any wait,
-and one line saying where facts are learned from and when the review
-last looked. The review button fills the detail with a review flow like
-the Writing Guide's: one card per proposed fact, category or starter set,
-with the quote it came from, how freely drafts may use it (*Use freely*,
-*Ask before using*, *Never share*; preset to the category's default, or
-the fact's own for a change, applied in the same change), *Accept* and
-*Reject*; Return accepts, ⌫ rejects, j and k move, and *Accept All* sits
-at the top. The list shows facts by category, with a globe on global ones,
+merge) and *Learning Settings*. The list begins with a *Waiting for you ·
+N* section, one row per proposed fact, category or starter set (what it
+would say, with where it comes from as a caption), *Accept All* in its
+header; choosing a row shows its card in the detail, with the quote it
+came from, how freely drafts may use it (*Use freely*, *Ask before
+using*, *Never share*; preset to the category's default, or the fact's
+own for a change, applied in the same change), *Accept* and *Reject*.
+Return accepts, ⌫ rejects; the next row waiting is then chosen. The
+subtitle says how many facts, how many wait and when the review last ran;
+what the page is for, and where facts are learned from, is a tip shown
+until the user puts it away, and Learning Settings. Before 2026-10-07 a
+header over the list held the buttons and a *Review N Proposed Facts*
+button that filled the detail with every card. Below, the list shows facts by category, with a globe on global ones,
 custom categories after the built-in ones in the user's order. The
 sidebar entry counts proposed facts and shows a red dot while one is new.
 On a fact: edit, delete, change *use*, *Make

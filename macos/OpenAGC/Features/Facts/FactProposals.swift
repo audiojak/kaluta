@@ -83,94 +83,22 @@ struct ProposedFactCard: View {
     }
 }
 
-/// The review flow for facts (spec §14.11), in Facts' detail from its
-/// header's *Review Proposed Facts*: every proposed fact as a card, one
-/// current. Return accepts, ⌫ rejects, j and k move; each decision can be
-/// undone, and the next card becomes current.
-struct ProposedFactsView: View {
-    @Environment(AppModel.self) private var model
-    @FocusState private var focused: Bool
+/// The chosen proposed fact, in the detail (spec §14.11): its card, with
+/// the keys that decide it. The list's Waiting section is the flow.
+struct ProposedFactDetail: View {
+    let proposal: AnalysisFactProposalInfo
 
     var body: some View {
-        let proposals = model.analysis.factProposals
-        let current = currentTag
-        ScrollViewReader { scroller in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.l) {
-                    ForEach(proposals, id: \.id) { proposal in
-                        ProposedFactCard(proposal: proposal, isCurrent: AnalysisStore.tag(proposal) == current)
-                            .id(AnalysisStore.tag(proposal))
-                            .onTapGesture { model.facts.selection = AnalysisStore.tag(proposal) }
-                            .accessibilityAddTraits(.isButton)
-                    }
-                    if proposals.isEmpty {
-                        ContentUnavailableView("Nothing to Decide", systemImage: "checkmark.circle",
-                                               description: Text("Facts the daily review finds in your mail wait here."))
-                    }
-                }
-                .padding(Space.xxl)
-                .frame(maxWidth: Self.readingWidth, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.l) {
+                ProposedFactCard(proposal: proposal, isCurrent: true)
+                Text("Return accepts, ⌫ rejects; each can be undone. The next one waiting is chosen for you.")
+                    .font(TypeRole.caption).foregroundStyle(.secondary)
             }
-            // The header stays put (design system: headers are safe-area
-            // bars); the cards scroll under it, and the next card after a
-            // decision comes to rest just below it.
-            .columnHeader { header(proposals) }
-            .onChange(of: current) { _, tag in
-                if let tag { withAnimation { scroller.scrollTo(tag, anchor: .top) } }
-            }
+            .padding(Space.xxl)
+            .frame(maxWidth: Self.readingWidth, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .focusable()
-        .focused($focused)
-        .focusEffectDisabled()
-        .onAppear {
-            focused = true
-            if model.facts.selection != current { model.facts.selection = current }
-        }
-        .onKeyPress(.return) { decide(accept: true) }
-        .onKeyPress(keys: KeyEquivalent.deleteKeys) { _ in decide(accept: false) }
-        .onKeyPress(characters: .init(charactersIn: "jk"), phases: .down) { press in
-            guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            let tags = model.analysis.factProposals.map(AnalysisStore.tag)
-            guard let at = currentTag.flatMap({ tags.firstIndex(of: $0) }) else { return .ignored }
-            model.facts.selection = tags[min(max(at + (press.characters == "j" ? 1 : -1), 0), tags.count - 1)]
-            return .handled
-        }
-    }
-
-    private func header(_ proposals: [AnalysisFactProposalInfo]) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-            VStack(alignment: .leading, spacing: Space.xs) {
-                Text("Proposed Facts").font(TypeRole.title)
-                Text(proposals.isEmpty ? "Nothing waiting"
-                     : "\(proposals.count) waiting. Return accepts, ⌫ rejects; each can be undone.")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: Space.m)
-            if !proposals.isEmpty {
-                Button("Accept All") { Task { await model.decideProposedFacts(proposals, accept: true) } }
-                    .controlSize(.small)
-                    .hoverHelp("Add every proposed fact; one Undo takes them all back")
-            }
-        }
-        .padding(.horizontal, Space.xxl)
-        .padding(.vertical, Space.m)
-        .frame(maxWidth: Self.readingWidth, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The chosen card while it is there; else the first.
-    private var currentTag: String? {
-        let tags = model.analysis.factProposals.map(AnalysisStore.tag)
-        if let chosen = model.facts.selection, tags.contains(chosen) { return chosen }
-        return tags.first
-    }
-
-    private func decide(accept: Bool) -> KeyPress.Result {
-        guard let proposal = model.analysis.factProposal(tagged: currentTag) else { return .ignored }
-        model.facts.selection = currentTag
-        Task { await model.decideProposedFacts([proposal], accept: accept) }
-        return .handled
     }
 
     private static let readingWidth: CGFloat = 720
@@ -199,91 +127,14 @@ struct FactUsePicker: View {
     }
 }
 
-/// Over the Facts list: add a fact, categories, and where facts are learned
-/// from (spec §14.11).
-struct FactsHeader: View {
-    @Environment(AppModel.self) private var model
-    @State private var from: FactsFrom?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            HStack(spacing: Space.m) {
-                Button("Add Fact…") { model.guideSheet = .fact(nil, category: nil) }
-                    .hoverHelp("Write a fact AI drafts may use")
-                Menu {
-                    Button("Add Category…") { model.guideSheet = .newFactCategory } // no-help: menu
-                    Menu("Add Categories From a Starter Set") { // no-help: menu
-                        ForEach(model.core?.factStarterSets() ?? [], id: \.name) { set in
-                            Button(set.name) { Task { await model.addFactStarterSet(set) } } // no-help: menu
-                        }
-                    }
-                    Button("Categories…") { model.guideSheet = .factCategories } // no-help: menu
-                    Divider() // menu
-                    Button("Export as Markdown…") { model.exportFacts(json: false) } // no-help: menu
-                    Button("Export for Another Account…") { model.exportFacts(json: true) } // no-help: menu
-                    Button("Merge Facts from a File…") { model.mergeFactsFromFile() } // no-help: menu
-                } label: {
-                    Label("Categories", systemImage: "folder")
-                }
-                .fixedSize()
-                .hoverHelp("Categories, starter sets, export and merge")
-                Spacer(minLength: 0)
-                if model.reviewsAvailable {
-                    Button {
-                        model.guideSheet = .analysisSettings
-                    } label: {
-                        Label("Learning Settings", systemImage: "gearshape")
-                    }
-                    .labelStyle(.iconOnly)
-                    .hoverHelp("Where facts are learned from, and the daily review")
-                }
-            }
-            .controlSize(.small)
-            let waiting = model.analysis.factProposals.count
-            if waiting > 0 {
-                Button {
-                    model.openFacts(proposed: true)
-                } label: {
-                    Label(waiting == 1 ? "Review 1 Proposed Fact" : "Review \(waiting) Proposed Facts", systemImage: "checklist")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .hoverHelp("Go through the facts found in your mail: Return accepts, ⌫ rejects")
-            }
-            if model.reviewsAvailable, let from {
-                Text(Self.learning(from, run: model.analysisProgress?.run))
-                    .font(TypeRole.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, Space.l)
-        .padding(.vertical, Space.m)
-        .task(id: model.guideSheet == nil) { from = try? await model.core?.analysisFactsFrom() }
-    }
-
-    /// "Each day's review looks for facts in mail written with AI. Last looked today."
-    static func learning(_ from: FactsFrom, run: AnalysisRunInfo?) -> String {
-        let source = switch from {
-        case .off: "Facts are not learned from your mail."
-        case .mailWrittenWithAi: "Each day's review looks for facts in the mail you send that AI helped write."
-        case .allMailISend: "Each day's review looks for facts in all the mail you send."
-        }
-        guard from != .off, let at = run?.finishedAt, run?.status == .done else { return source }
-        let when = Date(timeIntervalSince1970: TimeInterval(at) / 1000)
-        let day = Calendar.current.isDateInToday(when) ? "today" : when.formatted(date: .abbreviated, time: .omitted)
-        return "\(source) Last looked \(day)."
-    }
-}
-
-/// The Facts page's detail: the review flow of proposed facts, or the
+/// The Facts page's detail: the chosen proposed fact's card, or the
 /// chosen fact.
 struct FactsDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.analysis.reviewingFacts {
-            ProposedFactsView()
+        if let proposal = model.selectedFactProposal {
+            ProposedFactDetail(proposal: proposal)
         } else if let fact = model.facts.selected {
             FactDetail(fact: fact, store: model.facts) { model.guideSheet = .fact($0, category: nil) }
         } else {

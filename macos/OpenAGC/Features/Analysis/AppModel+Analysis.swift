@@ -6,6 +6,27 @@ extension AppModel {
     /// The daily review runs once the account has finished a learning run.
     var reviewsAvailable: Bool { analysisProgress?.available == true }
 
+    /// "Reviewed today" or "Reviewed 6 Oct": the list's subtitle, in place
+    /// of a sentence over the list (spec §14.10). Nil before the first review.
+    var reviewedLine: String? {
+        guard reviewsAvailable, let run = analysisProgress?.run, run.status == .done else { return nil }
+        return "Reviewed \(Self.dayWord(run.finishedAt))"
+    }
+
+    /// "Learned today" or "Learned 6 Oct" (spec §14.9). Nil until a run is done.
+    var guideLearnedLine: String? {
+        guard let run = guideProgress?.run, run.status == .done else { return nil }
+        return "Learned \(Self.dayWord(run.finishedAt))"
+    }
+
+    /// "today", "yesterday" or a short date.
+    static func dayWord(_ millis: Int64?) -> String {
+        let when = millis.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? Date()
+        if Calendar.current.isDateInToday(when) { return "today" }
+        if Calendar.current.isDateInYesterday(when) { return "yesterday" }
+        return when.formatted(.dateTime.day().month(.abbreviated))
+    }
+
     /// A daily review in progress (running or paused).
     var analysisRunActive: Bool {
         guard let status = analysisProgress?.run?.status else { return false }
@@ -38,9 +59,33 @@ extension AppModel {
     private func selectNextProposedRule(after tag: String?, in before: [String]) {
         guard let tag, let at = before.firstIndex(of: tag) else { return }
         let left = proposedRuleTags
-        analysis.selection = before[(at + 1)...].first { left.contains($0) }
-            ?? before[..<at].last { left.contains($0) }
+        let next = before[(at + 1)...].first { left.contains($0) } ?? before[..<at].last { left.contains($0) }
+        analysis.selection = next
+        // Nothing left to decide: the list's chosen category shows again.
+        if next == nil { analysis.reviewingRules = false }
     }
+
+    /// Whether `tag` names a proposed rule, a learning decision or a
+    /// pattern still collecting evidence: a row of the list's Waiting
+    /// section, not a category.
+    func isProposedRuleTag(_ tag: String) -> Bool {
+        AnalysisStore.isProposalTag(tag)
+    }
+
+    /// A row of the Writing Guide's list chosen: a proposal shows its card
+    /// in the detail, a category its entries.
+    func chooseGuideRow(_ tag: String?) {
+        if let tag, isProposedRuleTag(tag) {
+            analysis.selection = tag
+            analysis.reviewingRules = true
+        } else {
+            showGuideCategory(tag)
+        }
+    }
+
+    /// The rows of the list's Waiting section, in order: the learning
+    /// decisions, then the review's proposals.
+    var waitingRuleTags: [String] { proposedRuleTags }
 
     /// Accept a learning decision; one that goes against an accepted entry
     /// replaces it, as its default button says.
@@ -84,6 +129,7 @@ extension AppModel {
         if !proposals.isEmpty { await decideAnalysis(proposals, accept: true) }
         await analysis.load()
         analysis.selection = proposedRuleTags.first
+        if analysis.selection == nil { analysis.reviewingRules = false }
     }
 
     /// Looking at a page's proposals: read them, and clear its dot.

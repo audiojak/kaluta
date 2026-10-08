@@ -10,12 +10,20 @@ extension AppModel {
 
     var isFacts: Bool { selectedMailboxID == Self.factsMailboxID && threads.searchQuery == nil }
 
-    /// Open Facts; with `proposed`, its review flow on the first proposed fact.
+    /// Open Facts; with `proposed`, on the first proposed fact (the first
+    /// row of the list's Waiting section).
     func openFacts(proposed: Bool = false) {
         guidePrompt = nil
         selectedMailboxID = Self.factsMailboxID
-        analysis.reviewingFacts = proposed
-        if proposed, let first = analysis.factProposals.first { facts.selection = AnalysisStore.tag(first) }
+        if proposed, let first = analysis.factProposals.first {
+            facts.selection = AnalysisStore.tag(first)
+        }
+        analysis.reviewingFacts = proposed && !analysis.factProposals.isEmpty
+    }
+
+    /// The proposed fact chosen in the list, if a proposal is.
+    var selectedFactProposal: AnalysisFactProposalInfo? {
+        analysis.factProposal(tagged: facts.selection)
     }
 
     /// Apply fact edits in `scope` as one change.
@@ -83,7 +91,10 @@ extension AppModel {
         guard let chosen, let at = before.firstIndex(of: chosen) else { return }
         let left = analysis.factProposals.map(AnalysisStore.tag)
         guard !left.contains(chosen) else { return }
-        facts.selection = before[(at + 1)...].first { left.contains($0) } ?? before[..<at].last { left.contains($0) }
+        let next = before[(at + 1)...].first { left.contains($0) } ?? before[..<at].last { left.contains($0) }
+        facts.selection = next
+        // Nothing left to decide: the chosen fact, if any, shows again.
+        if next == nil { analysis.reviewingFacts = false }
     }
 
     /// Save this account's facts as Markdown or JSON (spec §14.11).

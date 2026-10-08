@@ -166,9 +166,15 @@ is only for "approved". Orange is text or a band's fill, never an error.
   (the writing guide's questions): a number key (1 to 9), the answer, and
   a check on the answer given before. Choosing it answers and goes on, so
   such a question has no Save; *Back* returns to the question before.
-- **Review flows** (proposed rules, proposed facts): cards in the detail,
-  one current (`.card(.attention)`); the current card's Return action is
-  prominent (`.defaultAction(true)`), the others' plain.
+- **Review flows** (proposed rules, proposed facts): the page behaves
+  like a mailbox. What waits is a *Waiting for you · N* section at the
+  top of the list (`WaitingSectionHeader`, with *Accept All* as a link
+  button), one row per proposal with a symbol, the statement and a
+  caption; the chosen row's card shows in the detail
+  (`.card(.attention)`, its Return action `.defaultAction(true)`). Return
+  and ⌫ on the list decide and choose the next row. The page's actions
+  are in the window toolbar, never in a strip over the list; what the
+  page is for is a `TipCard`, never a permanent sentence.
 - **`NewDot`**: the small red dot after a sidebar entry with something
   new since the user last looked (proposed rules on the Writing Guide,
   proposed facts on Facts, spec §14.10). It clears when

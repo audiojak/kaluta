@@ -1,16 +1,30 @@
 import SwiftUI
 
 /// The Facts page's list (spec §14.11), or (global facts) Settings ›
-/// Facts: facts by category, built-ins first then the user's own, a globe
-/// on global ones. Proposed facts are reviewed in the detail, from the
-/// header's *Review Proposed Facts*.
+/// Facts: what waits for a decision first (proposed facts, as rows the
+/// user goes down like mail), then facts by category, built-ins first
+/// then the user's own, a globe on global ones. A proposal's card shows
+/// in the detail; Return accepts, ⌫ rejects, and the next one is chosen.
 struct FactsList: View {
     @Environment(AppModel.self) private var model
     @Bindable var store: FactsStore
     @FocusState private var focused: Bool
 
     var body: some View {
+        let proposals = model.openAccountID == nil ? [] : model.analysis.factProposals
         List(selection: $store.selection) {
+            if !proposals.isEmpty {
+                Section {
+                    ForEach(proposals, id: \.id) { proposal in
+                        ProposedFactRow(proposal: proposal).tag(AnalysisStore.tag(proposal))
+                            .background(FocusRegionProbe(cycle: model.focus, region: .list))
+                    }
+                } header: {
+                    WaitingSectionHeader(count: proposals.count, acceptAllHelp: "Add every proposed fact; one Undo takes them all back") {
+                        Task { await model.decideProposedFacts(proposals, accept: true) }
+                    }
+                }
+            }
             ForEach(store.sections, id: \.category.key) { section in
                 Section {
                     // Global and account ids overlap: rows are told apart by tag.
@@ -31,13 +45,65 @@ struct FactsList: View {
             }
         }
         .onDeleteCommand {
-            if let fact = store.selected { Task { await model.deleteFact(fact) } }
+            if let proposal = model.selectedFactProposal {
+                Task { await model.decideProposedFacts([proposal], accept: false) }
+            } else if let fact = store.selected {
+                Task { await model.deleteFact(fact) }
+            }
         }
-        // A fact chosen: the review flow gives way to it.
+        .onKeyPress(.return) {
+            guard let proposal = model.selectedFactProposal else { return .ignored }
+            Task { await model.decideProposedFacts([proposal], accept: true) }
+            return .handled
+        }
+        // Tab from the sidebar (the main window's loop, spec §14.3).
+        .focused($focused)
+        .onChange(of: model.threadListFocusRequests) { focused = true }
+        // What is chosen says what the detail shows: a proposal's card, or a fact.
         .onChange(of: store.selection) { _, tag in
-            if let tag, !AnalysisStore.isFactProposalTag(tag) { model.analysis.reviewingFacts = false }
+            model.analysis.reviewingFacts = tag.map(AnalysisStore.isFactProposalTag) ?? false
         }
         .task(id: model.factsRevision) { await store.load() }
+    }
+}
+
+/// A proposed fact as a row of the Waiting section: what it would say
+/// and where it comes from.
+private struct ProposedFactRow: View {
+    let proposal: AnalysisFactProposalInfo
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Image(systemName: proposal.symbol).foregroundStyle(.tint)
+                .frame(width: Self.symbolWidth)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(proposal.headline).lineLimit(2)
+                Text(proposal.subtitle).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Proposed: \(proposal.headline). \(proposal.subtitle)")
+    }
+
+    private static let symbolWidth: CGFloat = 16
+}
+
+/// The header of a list's Waiting section (spec §14.10, §14.11): the
+/// count, and Accept All.
+struct WaitingSectionHeader: View {
+    let count: Int
+    let acceptAllHelp: String
+    let acceptAll: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Waiting for you · \(count.formatted())")
+            Spacer(minLength: Space.m)
+            Button("Accept All", action: acceptAll)
+                .buttonStyle(.link)
+                .controlSize(.small)
+                .hoverHelp(acceptAllHelp)
+        }
     }
 }
 

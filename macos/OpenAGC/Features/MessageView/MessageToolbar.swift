@@ -7,7 +7,53 @@ struct ListToolbar: ToolbarContent {
     @Environment(AppModel.self) private var model
 
     var body: some ToolbarContent {
-        if model.isTaskList {
+        if model.isFacts {
+            // The Facts page's actions (spec §14.11), in place of its old header.
+            ToolbarItemGroup {
+                Button("Add Fact", systemImage: "plus") { model.guideSheet = .fact(nil, category: nil) }
+                    .help(ToolbarHelp.text(for: "Add Fact", model: model) ?? "")
+                Menu("Categories", systemImage: "folder") {
+                    Button("Add Category…") { model.guideSheet = .newFactCategory } // no-help: menu
+                    Menu("Add Categories From a Starter Set") { // no-help: menu
+                        ForEach(model.core?.factStarterSets() ?? [], id: \.name) { set in
+                            Button(set.name) { Task { await model.addFactStarterSet(set) } } // no-help: menu
+                        }
+                    }
+                    Button("Categories…") { model.guideSheet = .factCategories } // no-help: menu
+                    Divider() // menu
+                    Button("Export as Markdown…") { model.exportFacts(json: false) } // no-help: menu
+                    Button("Export for Another Account…") { model.exportFacts(json: true) } // no-help: menu
+                    Button("Merge Facts from a File…") { model.mergeFactsFromFile() } // no-help: menu
+                }
+                .help(ToolbarHelp.text(for: "Categories", model: model) ?? "")
+                .accessibilityLabel("Categories")
+                Button("Learning Settings", systemImage: "gearshape") { model.guideSheet = .analysisSettings }
+                    .help(ToolbarHelp.text(for: "Learning Settings", model: model) ?? "")
+            }
+        } else if model.isGuide {
+            // The Writing Guide's actions (spec §14.9), in place of its old header.
+            ToolbarItemGroup {
+                Button("Learn from Sent Mail", systemImage: "graduationcap") { model.guideSheet = .learn }
+                    .help(ToolbarHelp.text(for: "Learn from Sent Mail", model: model) ?? "")
+                    .disabled(model.guideRunActive)
+                Menu("More", systemImage: "ellipsis.circle") {
+                    Button("Ask \(model.agent.providerName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
+                    Button("Answer Questions…") { model.guideSheet = .interview(only: nil) } // no-help: menu
+                    if model.reviewsAvailable {
+                        Button("Run Review Now") { Task { await model.runAnalysisNow() } } // no-help: menu
+                            .disabled(model.analysisRunActive)
+                    }
+                    Divider() // menu
+                    Button("Merge a Guide…") { model.guideSheet = .merge } // no-help: menu
+                    Button("Export as Markdown…") { model.exportGuide(json: false) } // no-help: menu
+                    Button("Export for Another Account…") { model.exportGuide(json: true) } // no-help: menu
+                }
+                .help(ToolbarHelp.text(for: "More", model: model) ?? "")
+                .accessibilityLabel("More")
+                Button("Learning Settings", systemImage: "gearshape") { model.guideSheet = .analysisSettings }
+                    .help(ToolbarHelp.text(for: "Learning Settings", model: model) ?? "")
+            }
+        } else if model.isTaskList {
             // The selected task's own actions (spec §14.8).
             ToolbarItemGroup {
                 Button(model.tasks.selected?.done == true ? "Mark as Not Done" : "Mark as Done",
@@ -49,6 +95,20 @@ struct MessageToolbar: ToolbarContent {
     private var noReplyTarget: Bool { !model.isMailOpen || model.replyTargetMessageID == nil || model.isArchive }
 
     var body: some ToolbarContent {
+        // The Writing Guide and Facts pages have no mail to act on: only
+        // the agent's toggle stays, not a row of disabled buttons.
+        if !model.isGuide, !model.isFacts {
+            mailItems
+        }
+        ToolbarItem {
+            Button(model.agent.isPresented ? "Hide Agent" : "Show Agent", systemImage: "sparkles") {
+                model.agent.isPresented.toggle()
+            }
+            .help(ToolbarHelp.text(for: model.agent.isPresented ? "Hide Agent" : "Show Agent", model: model) ?? "")
+        }
+    }
+
+    @ToolbarContentBuilder private var mailItems: some ToolbarContent {
         ToolbarItemGroup {
             Button("Reply", systemImage: "arrowshape.turn.up.left") { model.reply(all: false) }
                 .help(ToolbarHelp.text(for: "Reply", model: model) ?? "")
@@ -88,12 +148,6 @@ struct MessageToolbar: ToolbarContent {
             .disabled(noTargets)
         }
         ToolbarSpacer(.fixed)
-        ToolbarItem {
-            Button(model.agent.isPresented ? "Hide Agent" : "Show Agent", systemImage: "sparkles") {
-                model.agent.isPresented.toggle()
-            }
-            .help(ToolbarHelp.text(for: model.agent.isPresented ? "Hide Agent" : "Show Agent", model: model) ?? "")
-        }
     }
 
     private var allStarred: Bool {
@@ -179,6 +233,12 @@ enum ToolbarHelp {
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
         case "New Routine": "Create a routine that sorts important mail on a schedule"
+        case "Add Fact": "Write a fact AI drafts may use"
+        case "Categories": "Categories, starter sets, export and merge"
+        case "Learning Settings": "The daily review, where facts are learned from, and how long AI drafts are kept"
+        case "Learn from Sent Mail":
+            model.guideRunActive ? "A learning run is in progress" : "Analyse your sent mail to propose rules and guidelines"
+        case "More": "Change, merge or export the guide; run the review now"
         case "Mark as Done": model.tasks.selected?.done == true ? "Open the task again (e)" : "Mark the task done (e)"
         case "Mark as Not Done": "Open the task again (e)"
         case "Category": "Move the task to another category (c)"

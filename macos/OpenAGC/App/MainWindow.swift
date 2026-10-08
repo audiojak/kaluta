@@ -164,15 +164,17 @@ struct MainWindow: View {
         if model.isGuide {
             let accepted = model.guide.acceptedCount
             parts.append(accepted == 1 ? "1 entry" : "\(accepted.formatted()) entries")
-            let proposed = model.analysis.rulesWaiting
-            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
+            let waiting = model.analysis.rulesWaiting
+            if waiting > 0 { parts.append("\(waiting.formatted()) waiting") }
+            if let learned = model.guideLearnedLine { parts.append(learned) }
             return parts.joined(separator: " · ")
         }
         if model.isFacts {
             let count = model.facts.facts.filter { $0.status == .accepted }.count
             parts.append(count == 1 ? "1 fact" : "\(count.formatted()) facts")
-            let proposed = model.analysis.factProposals.count
-            if proposed > 0 { parts.append("\(proposed.formatted()) proposed") }
+            let waiting = model.analysis.factProposals.count
+            if waiting > 0 { parts.append("\(waiting.formatted()) waiting") }
+            if let reviewed = model.reviewedLine { parts.append(reviewed) }
             return parts.joined(separator: " · ")
         }
         if model.isTaskList {
@@ -268,8 +270,7 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             categoryTabs
             taskTabs
-            if model.isGuide { GuideHeader() }
-            if model.isFacts { FactsHeader() }
+            if model.isGuide { GuideActivityStrip() }
             if let tip = model.currentTip {
                 TipCard(systemImage: tip.systemImage, title: tip.title, text: tip.text, action: tip.action,
                         actionHelp: tip.actionHelp, dismiss: tip.dismiss,

@@ -117,12 +117,22 @@ struct FactsMergeTests {
         }
         #expect(model.analysis.factProposals.map(\.id) == [proposal.id])
 
-        // Facts is a page of its own; opening it on its proposals chooses the first.
+        // Facts is a page of its own; opening it on its proposals chooses the
+        // first row of the list's Waiting section, whose card the detail shows.
         model.openFacts(proposed: true)
         #expect(model.isFacts && !model.isGuide && model.analysis.reviewingFacts)
         #expect(model.facts.selection == AnalysisStore.tag(proposal))
+        #expect(model.selectedFactProposal?.id == proposal.id)
         await model.facts.load()
         #expect(model.facts.selection == AnalysisStore.tag(proposal), "loading the facts keeps a proposal chosen")
+        // Deciding the only one waiting leaves nothing chosen and ends the review.
+        await model.decideProposedFacts([proposal], accept: false)
+        #expect(model.selectedFactProposal == nil && !model.analysis.reviewingFacts)
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where model.analysis.factProposals.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        model.openFacts(proposed: true)
 
         // Accepted as "ask before using": the user's choice, not the fact's own.
         #expect(model.analysis.use(of: proposal) == .free)

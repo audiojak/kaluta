@@ -49,8 +49,9 @@ struct AnalysisTests {
         #expect(model.selectedDecision?.id == first.id)
     }
 
-    /// The review flow's keys as the keyboard sends them: ⌫ is DEL
-    /// (U+007F), which `.onKeyPress(.delete)` never matched.
+    /// The review's keys on the list, as the keyboard sends them: ⌫ is
+    /// DEL (U+007F), which `.onKeyPress(.delete)` never matched; the list
+    /// takes it as its delete command.
     @Test func theDeleteKeyRejectsTheCurrentProposedRule() async throws {
         let model = try await reviewed()
         model.openProposedRules()
@@ -60,10 +61,12 @@ struct AnalysisTests {
         let window = ReviewKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 600), styleMask: [.titled],
                                      backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: ProposedRulesView().environment(model))
+        window.contentView = NSHostingView(rootView: GuideView().environment(model))
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         try await Task.sleep(for: .milliseconds(300))
+        model.focusThreadList()
+        try await Task.sleep(for: .milliseconds(200))
         let delete = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
                                       timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                                       context: nil, characters: "\u{7F}", charactersIgnoringModifiers: "\u{7F}",
@@ -85,13 +88,25 @@ struct AnalysisTests {
         await model.decideProposedRule(reject: first)
         #expect(!model.guide.decisions.contains { $0.id == first.id })
         #expect(model.analysis.selection == tags[1], "the next proposed rule")
-        // A category chosen: the review flow gives way to it; the header's
-        // button brings it back.
+        // A category row chosen: the review gives way to it; a Waiting row
+        // brings it back.
         #expect(model.analysis.reviewingRules)
-        model.showGuideCategory("A1")
+        model.chooseGuideRow("A1")
         #expect(!model.analysis.reviewingRules && model.guide.selectedCategory == "A1")
-        model.openProposedRules()
+        model.chooseGuideRow(tags[1])
         #expect(model.analysis.reviewingRules && model.analysis.selection == tags[1])
+        #expect(model.isProposedRuleTag(tags[1]) && !model.isProposedRuleTag("A1"))
+    }
+
+    /// Once the last row waiting is decided, the chosen category shows again.
+    @Test func decidingTheLastProposedRuleLeavesTheReview() async throws {
+        let model = try await reviewed()
+        model.openProposedRules()
+        for entry in model.guide.decisions { await model.decideProposedRule(reject: entry) }
+        for proposal in model.analysis.proposals { await model.decideProposedRule(proposal, accept: false) }
+        #expect(model.proposedRuleTags.isEmpty)
+        #expect(!model.analysis.reviewingRules, "nothing left: the categories show")
+        #expect(model.guide.selectedCategory != nil)
     }
 
     @Test func acceptingChangesTheGuideAndUndoPutsItBack() async throws {
