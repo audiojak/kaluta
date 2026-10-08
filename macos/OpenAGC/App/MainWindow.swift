@@ -86,6 +86,7 @@ struct MainWindow: View {
             model.openThreadWindow = { openWindow(id: "thread", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
             model.openSyncDebugger = { openWindow(id: "sync-debugger") }
+            model.openCleanUp = { openWindow(id: "cleanup") }
             model.openAgentSettings = {
                 model.settingsTab = .agents
                 openSettings()

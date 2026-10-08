@@ -224,6 +224,11 @@ enum ToolbarHelp {
         case "Mark as Junk": "Mark as Junk: move to Spam (⇧⌘J)"
         case "Not Junk": "Not Junk: move back to the Inbox (⇧⌘J)"
         case "Label": "Label (l)"
+        // Clean Up's toolbar (spec §14.12); its Archive is the same "Archive (e)".
+        case "Trash": "Move every message in the ticked groups to the Trash (⌫)"
+        case "Spam": "Mark every message in the ticked groups as spam (!)"
+        case "Move": "Move every message in the ticked groups to the Inbox or a label"
+        case "Scope": "Clean up the Inbox, or all mail but Spam and Trash"
         case "Star": "Star (s)"
         case "Unstar": "Unstar (s)"
         case "Show Agent": "Show \(model.agent.providerName) (⌥⌘I)"

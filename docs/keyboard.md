@@ -44,6 +44,20 @@ this list under **Help › Keyboard Shortcuts** (⇧⌘/). It is generated from
 | `c` | New message |
 | `/` | Search mail |
 
+## In Clean Up's groups
+
+*Mailbox › Clean Up Mailbox…* opens Clean Up (no shortcut: it is used a few
+times a year). Ticks, not the highlight, are what these act on.
+
+| Keys | Action |
+|---|---|
+| `↑ ↓  or  j k` | Previous or next group (`⇧` and `⌘` highlight several) |
+| `Space` | Tick or untick the highlighted groups |
+| `e` | Archive every message in the ticked groups |
+| `#  or  ⌫` | Move them to the Trash |
+| `!` | Mark them as spam |
+| `⌘Z  ⇧⌘Z` | Undo or redo, as in the mail window |
+
 ## Writing
 
 | Keys | Action |

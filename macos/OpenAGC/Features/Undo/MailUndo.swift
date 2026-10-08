@@ -56,11 +56,16 @@ struct UndoableAction: Equatable {
 
 /// The acknowledgement shown after an action, with a way back.
 struct UndoNotice: Identifiable, Equatable {
+    /// The window whose action it acknowledges, which shows it: the mail
+    /// window, or Clean Up (spec §14.12).
+    enum Origin: Equatable { case mail, cleanUp }
+
     let id = UUID()
     let text: String
     let accountID: String
     /// False for a notice that reports a failure: nothing to undo.
     var offersUndo = true
+    var origin: Origin = .mail
 }
 
 /// Undo for the user's mail actions (spec §14.6a): one undo stack per
@@ -204,13 +209,14 @@ final class MailUndo {
     /// notice's text; undo and redo run the given steps, in order with any
     /// other undo.
     func record(accountID: String, actionName: String, noticeText: String, showNotice: Bool = true,
+                origin: UndoNotice.Origin = .mail,
                 undo: @escaping @MainActor () async -> Void, redo: @escaping @MainActor () async -> Void) {
         let manager = manager(for: accountID)
         manager.beginUndoGrouping()
         registerSteps(actionName: actionName, undo: undo, redo: redo, on: manager)
         manager.endUndoGrouping()
         revision += 1
-        if showNotice { show(noticeText, accountID: accountID) }
+        if showNotice { show(noticeText, accountID: accountID, origin: origin) }
     }
 
     private func registerSteps(actionName: String, undo: @escaping @MainActor () async -> Void,
@@ -234,8 +240,8 @@ final class MailUndo {
     /// Show a notice, replacing any other; VoiceOver hears it without
     /// focus moving (WCAG 4.1.3).
     func show(_ text: String, accountID: String, for duration: Duration = noticeDuration, pausable: Bool = true,
-              offersUndo: Bool = true) {
-        notice = UndoNotice(text: text, accountID: accountID, offersUndo: offersUndo)
+              offersUndo: Bool = true, origin: UndoNotice.Origin = .mail) {
+        notice = UndoNotice(text: text, accountID: accountID, offersUndo: offersUndo, origin: origin)
         remaining = duration
         noticePausable = pausable
         pauses.remove(.hover)

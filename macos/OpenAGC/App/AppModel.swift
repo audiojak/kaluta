@@ -28,6 +28,18 @@ final class AppModel {
         return 1 - Double(pending + headers) / Double(syncTotal)
     }
 
+    /// The Clean Up window's title: "Clean Up — you@example.com".
+    var cleanUpTitle: String {
+        guard let id = openAccountID else { return "Clean Up" }
+        if id == Self.demoAccountID { return "Clean Up — Demo Mailbox" }
+        let account = accounts.first { $0.id == id }
+        return "Clean Up — " + (account?.email ?? accountEmail ?? "Mailbox")
+    }
+
+    /// Clean Up cleans the open account; not an imported mailbox, which
+    /// is read-only.
+    var canCleanUp: Bool { isMailOpen && !isArchive }
+
     /// The sidebar's heading for the open account's own mailboxes.
     var accountSectionTitle: String {
         if openAccountID == Self.demoAccountID { return "Demo Mailbox" }
@@ -299,6 +311,8 @@ final class AppModel {
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
     @ObservationIgnored var openSyncDebugger: (() -> Void)?
+    /// Opens the Clean Up window; set by the main window.
+    @ObservationIgnored var openCleanUp: (() -> Void)?
 
     let notifier: NewMailNotifier
     let mailboxes: MailboxStore
@@ -350,6 +364,8 @@ final class AppModel {
     let facts: FactsStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
+    /// The Clean Up window's state (spec §14.12).
+    let cleanUp: CleanUpStore
     let core: CoreClient?
 
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
@@ -381,6 +397,7 @@ final class AppModel {
         analysis = AnalysisStore(core: core)
         facts = FactsStore(core: core)
         undo = MailUndo(core: core)
+        cleanUp = CleanUpStore(core: core, undo: undo)
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
             Task { await self?.threads.refresh() }
@@ -1454,6 +1471,7 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
+            cleanUp.mailChanged()
             if mailboxID == "DRAFT" { await refreshFailedSends() }
             // A category tab may have gained its first thread or lost its
             // last: then the Inbox shows another narrowing.
@@ -1490,8 +1508,9 @@ final class AppModel {
             case .offline: syncDisplay = .offline(message: message)
             case .error: syncDisplay = .error(message: message)
             }
-        case let .outboxStatus(_, failed):
+        case let .outboxStatus(pending, failed):
             failedChanges = failed
+            cleanUp.outboxChanged(pending: pending, accountID: tagged.accountID)
             await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))

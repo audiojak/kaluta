@@ -240,6 +240,52 @@ the message the consequence, the destructive button with
 AppKit (the mismatched-link warning); its safe choice is first and the
 default.
 
+### Clean Up
+
+A window of its own for clearing a mailbox in bulk (spec §14.12;
+`Features/CleanUp/`), opened from *Mailbox › Clean Up Mailbox…* and
+*Settings › Accounts › Clean Up…*. Use its pattern, ticks over long
+AppKit lists with the actions in the window toolbar, for any other work
+done over thousands of messages at once.
+
+- **Three columns** in a `NavigationSplitView`: the views as a source
+  list (`CleanUpViewKind.shown`: adding a view is one line), with a slot
+  at its foot (`CleanUpSidebarFooter`) for the progress card; the groups;
+  the messages of the ticked groups. The window cleans the main window's
+  open account and says which in its title ("Clean Up — you@example.com").
+- **Long lists are AppKit tables** (`CleanUpTables.swift`), in the thread
+  row's type and calm: a group is a checkbox, its title
+  (`rowSender`), a second line in `rowSecondary`, secondary ("address ·
+  aka other names", Sender and People only), and its count right-aligned
+  in `rowCount`, secondary (every row has one, so not the accent). A
+  message is sender and date over the subject, with its size on the
+  subject line in the Size view. Hairlines inset to the text, as thread
+  rows.
+- **Ticks, not the highlight.** Rows highlight as in the mail lists
+  (click, arrows, ⇧ and ⌘, ⌘A); the checkbox or Space ticks, and only
+  ticked groups fill the messages column and are acted on. Ticks stay
+  while the filter changes (groups found by several filters can go
+  together); changing the view or acting clears them.
+- **Headers are column headers:** the filter field ("Type a sender…";
+  none in Time and Size) over the groups, and "**813 messages** in
+  **2 groups**" with *Untick All* over the messages.
+- **Actions in the window toolbar**, never in a strip over the list: the
+  *Inbox / All Mail* segmented control at the leading edge; then a
+  spinner with "Archiving 813 messages…" while an action runs, or
+  "Sending changes to Gmail… N left" while the outbox drains; then
+  *Archive*, *Trash* and *Spam* in one glass group and *Move* (the Inbox
+  and the labels) after a fixed spacer. Disabled, not hidden, with
+  nothing ticked.
+- **Undo** is the app's: one entry per action on the account's stack
+  (⌘Z works from this window too), acknowledged by `UndoNoticeView(origin:
+  .cleanUp)` floating over the groups. A notice carries its window's
+  origin, so the mail window does not show Clean Up's and the other way
+  round.
+- **Empty states** are `ContentUnavailableView`: "No Groups Ticked" over
+  the messages, the view's own ("No Senders", "No One You've Written To")
+  over the groups, and the search one when the filter matches nothing.
+  Errors are a `Tone.failure` line under the filter.
+
 ### Rows with a due day
 
 The task list's rows are the thread row's calm style: the title where the
@@ -429,3 +475,6 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
 | ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
 | ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |
+| ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
+| ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
+| ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |

@@ -1157,6 +1157,41 @@ final class CoreClient: Sendable {
         try await call { try await core.setSyncWindow(window: window) }
     }
 
+    // MARK: Clean Up (spec §14.12)
+
+    // Every call names its account: the window cleans one account,
+    // whatever the main window shows.
+
+    /// The groups of `view` in `scope`, filtered by `filter`, in the core's order.
+    func cleanupGroups(accountID: String, view: CleanupView, scope: CleanupScope,
+                       filter: String) async throws(CoreClientError) -> [CleanupGroup] {
+        try await call { try await core.cleanupGroups(accountId: accountID, view: view, scope: scope, filter: filter) }
+    }
+
+    /// A page of the messages in the groups named by `keys`, newest first.
+    func cleanupMessages(accountID: String, view: CleanupView, scope: CleanupScope, keys: [String],
+                         offset: UInt32, limit: UInt32) async throws(CoreClientError) -> [CleanupMessage] {
+        try await call {
+            try await core.cleanupMessages(accountId: accountID, view: view, scope: scope, keys: keys,
+                                           offset: offset, limit: limit)
+        }
+    }
+
+    /// How many messages the groups named by `keys` hold now.
+    func cleanupCount(accountID: String, view: CleanupView, scope: CleanupScope,
+                      keys: [String]) async throws(CoreClientError) -> UInt64 {
+        try await call { try await core.cleanupCount(accountId: accountID, view: view, scope: scope, keys: keys) }
+    }
+
+    /// Apply `action` to every message in the groups named by `keys`, as
+    /// they are now: one undoable action (undone with `undo(_:)`).
+    func cleanupApply(accountID: String, view: CleanupView, scope: CleanupScope, keys: [String],
+                      action: CleanupAction) async throws(CoreClientError) -> CleanupResult {
+        try await call {
+            try await core.cleanupApply(accountId: accountID, view: view, scope: scope, keys: keys, action: action)
+        }
+    }
+
     /// Which part of the download range gets full messages over IMAP.
     func bodyWindow(for accountID: String) async throws(CoreClientError) -> BodyWindow {
         try await call { try await core.bodyWindowFor(accountId: accountID) }
@@ -1309,6 +1344,12 @@ typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow
 typealias UndoToken = OpenAGCCore.UndoToken
+typealias CleanupView = OpenAGCCore.CleanupView
+typealias CleanupScope = OpenAGCCore.CleanupScope
+typealias CleanupAction = OpenAGCCore.CleanupAction
+typealias CleanupGroup = OpenAGCCore.CleanupGroup
+typealias CleanupMessage = OpenAGCCore.CleanupMessage
+typealias CleanupResult = OpenAGCCore.CleanupResult
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService

@@ -286,6 +286,12 @@ C3. **The Clean Up window** (oagc-merk.3) — the menu item and Settings button,
     Subject, Time, Size), toolbar actions, keys, undo, empty states.
     Tests, snapshots light and dark (demo account with bulk demo mail),
     design-system entries, the Keyboard Shortcuts window.
+    *(as built: ticks are separate from the highlight (checkbox or
+    Space); Settings' Clean Up… switches the mail window to the account
+    first; undo notices carry the window they belong to; the demo's
+    services sign with other names now and then and its messages have
+    varied sizes, so the window looks real; the progress card's slot is
+    `CleanUpSidebarFooter`.)*
 C4. **Loading every header on open** (oagc-merk.4) — set the window to *Everything*,
     show the header load, the no-IMAP confirmation. Tests with the IMAP
     fake.

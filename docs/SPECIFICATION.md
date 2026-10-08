@@ -3033,6 +3033,22 @@ the toolbar can show what is left to reach Gmail; the local write needs
 no progress of its own. `cleanup_progress` (the card's numbers) is left
 for the progress card's issue.)*
 
+*(Implemented 2026-10-08, window: `Features/CleanUp/`. Sender, People
+I've Emailed, Subject, Time and Size are listed; Mailing Lists, Social
+and Promotions join with their issues. Highlighting and ticking are
+separate: rows highlight as in the mail lists, the checkbox or Space
+ticks, and only ticks fill the messages column and are acted on; ticks
+stay while the filter changes and clear when the view changes or an
+action succeeds. Keys in the groups list: Space, `e`, `⌫` or `#`, `!`,
+`j`/`k`. The menu item has no shortcut. *Settings › Accounts › Clean
+Up…* switches the mail window to that account first, since the window
+cleans the open account; imported mailboxes, being read-only, have no
+Clean Up. The undo notice shows in the window that acted (a notice
+carries its origin) and ⌘Z there undoes from the account's stack. The
+messages column fetches pages of 200 as rows come into view. While the
+window is open, changes from sync or the mail window refresh it at most
+every 2 s.)*
+
 ---
 
 ## 15. Security Model and Threat Model

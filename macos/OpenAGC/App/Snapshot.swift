@@ -26,6 +26,12 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotCleanUp <view>      open Clean Up on a view (sender,
+///                                       people, subject, time, size) with its
+///                                       largest group ticked, and capture it
+///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
+///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
+///                                       undo notice)
 ///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
 ///                                       fake agent on the demo mailbox, accept
 ///                                       some proposals, and show the Writing
@@ -131,6 +137,24 @@ enum Snapshot {
                 model.openSyncDebugger?()
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
+            }
+            if let view = defaults.string(forKey: "OpenAGCSnapshotCleanUp"), let model = delegate.model {
+                model.openCleanUp?()
+                try? await Task.sleep(for: .milliseconds(800))
+                let store = model.cleanUp
+                store.view = CleanUpViewKind(rawValue: view) ?? .sender
+                if defaults.string(forKey: "OpenAGCSnapshotCleanUpScope") == "all" { store.scope = .allMail }
+                await store.open(accountID: model.openAccountID)
+                if let largest = store.groups.first {
+                    store.setTicked(true, keys: [largest.key])
+                    await store.refreshMessages()
+                }
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpArchive") {
+                    model.undo.runsClock = false
+                    await store.apply(.archive)
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+                window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("cleanup") ?? false) }
             }
             if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
                 await model.agent.loadProviders()

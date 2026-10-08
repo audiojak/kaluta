@@ -63,8 +63,11 @@ struct ShortcutGuideTests {
         let all = KeyboardShortcutGuide.groups.flatMap(\.shortcuts)
         let menu = all.filter { !$0.inThreadList }.map(\.keys)
         #expect(Set(menu).count == menu.count, "menu shortcuts clash: \(menu)")
-        let list = all.filter(\.inThreadList).map(\.keys)
-        #expect(Set(list).count == list.count)
+        // Single keys act in one list each: unique within their group.
+        for group in KeyboardShortcutGuide.groups {
+            let list = group.shortcuts.filter(\.inThreadList).map(\.keys)
+            #expect(Set(list).count == list.count, "\(group.title): \(list)")
+        }
         #expect(all.count >= 25)
     }
 }

@@ -37,7 +37,12 @@ struct AccountSettings: View {
             Section("Accounts") {
                 switch model.accountState {
                 case .open(let id) where id == AppModel.demoAccountID:
-                    LabeledContent("Account") { Text("Demo mailbox (nothing leaves this Mac)") }
+                    LabeledContent("Account") {
+                        HStack(spacing: Space.m) {
+                            Text("Demo mailbox (nothing leaves this Mac)")
+                            CleanUpButton(accountID: id)
+                        }
+                    }
                 case .open:
                     ForEach(model.accounts, id: \.id) { account in
                         AccountRow(account: account, onRemove: { removing = account })
@@ -142,6 +147,25 @@ extension AccountSettings {
 
 /// One account in Settings › Accounts (spec §7.7): who it is, whether it
 /// is syncing, how far back it downloads, and Remove….
+/// Settings › Accounts › Clean Up…: the Clean Up window on this account,
+/// which the mail window switches to first (Clean Up cleans the open
+/// account, spec §14.12).
+struct CleanUpButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+    let accountID: String
+
+    var body: some View {
+        Button("Clean Up…") {
+            Task {
+                if accountID != model.openAccountID { await model.switchAccount(to: accountID) }
+                openWindow(id: "cleanup")
+            }
+        }
+        .hoverHelp("Archive, move or trash this account's mail in bulk, grouped by sender, subject, time or size")
+    }
+}
+
 struct AccountRow: View {
     @Environment(AppModel.self) private var model
     let account: AccountSummary
@@ -257,6 +281,9 @@ struct AccountRow: View {
                         }
                     }
                     .hoverHelp("Sign in to Google again for this account")
+                }
+                if account.kind != .archive {
+                    CleanUpButton(accountID: account.id)
                 }
                 Button("Remove…", role: .destructive, action: onRemove)
                     .hoverHelp(account.kind == .agent ? "Remove this mailbox from OpenAGC; it stays at Primitive"

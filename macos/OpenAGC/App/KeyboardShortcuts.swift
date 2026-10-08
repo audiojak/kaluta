@@ -7,7 +7,8 @@ enum KeyboardShortcutGuide {
     struct Shortcut: Hashable {
         let keys: String
         let action: String
-        /// Menu shortcuts share one namespace; single keys work in the list.
+        /// Menu shortcuts share one namespace; single keys work in the list
+        /// their group names (the thread list, Clean Up's groups).
         let inThreadList: Bool
     }
 
@@ -56,6 +57,13 @@ enum KeyboardShortcutGuide {
             .init(keys: "/", action: "Search mail", inThreadList: true),
             .init(keys: "t", action: "New task from the email (Claude suggests it)", inThreadList: true),
             .init(keys: "⇧T", action: "Create tasks for the highlighted emails, or the latest 20", inThreadList: true),
+        ]),
+        Group(title: "In Clean Up's groups", shortcuts: [
+            .init(keys: "↑ ↓  or  j k", action: "Previous or next group (⇧ and ⌘ highlight several)", inThreadList: true),
+            .init(keys: "Space", action: "Tick or untick the highlighted groups", inThreadList: true),
+            .init(keys: "e", action: "Archive every message in the ticked groups", inThreadList: true),
+            .init(keys: "#  or  ⌫", action: "Move them to the Trash", inThreadList: true),
+            .init(keys: "!", action: "Mark them as spam", inThreadList: true),
         ]),
         Group(title: "Writing", shortcuts: [
             .init(keys: "⇧⌘D  or  ⌘↩", action: "Send", inThreadList: false),
