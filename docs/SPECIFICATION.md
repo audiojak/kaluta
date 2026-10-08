@@ -3188,7 +3188,7 @@ keep their own order.
 | Subject | identical subject, as stored (`Re:` kept) | the subject, or "(no subject)" |
 | Mailing Lists | `List-Id` | the list's most used name (else its id); other names as aka; the id below |
 | Time | Today, Yesterday, This Week, Last Week, then calendar months, newest first | "Today" … "September 2026" |
-| Social | sender domain, among messages with `CATEGORY_SOCIAL` | the domain; the senders' names as aka |
+| Social | sender domain, among messages with `CATEGORY_SOCIAL` | the domain; the senders' names below (not aka: many senders share a domain) |
 | Promotions | sender domain, among messages with `CATEGORY_PROMOTIONS` | as Social |
 | Size | Tiny < 1 KB, Small 1–10 KB, Medium 10–100 KB, Large 100 KB–1 MB, Extra Large 1–10 MB, Jumbo > 10 MB | the bucket, smallest first |
 
@@ -3340,6 +3340,15 @@ empty Inbox is 100 %. Migration `0019_cleanup_progress` indexes
 `internal_date`. The card is `CleanUpProgressCard` at the foot of the
 views and refreshes with the groups: after every action, undo and redo,
 and when mail changes.)*
+
+*(Implemented 2026-10-08, Social and Promotions: listed between Time and
+Size, filtered with "Type a domain…". A domain group's second line names
+its senders, most used first, three at most ("Status Alerts, Billing and
+2 more"), rather than calling them aka, since many senders share a
+domain; the filter still finds a domain by a sender's name. When the
+view is empty the window says whether the scope has none ("No promotions
+in the Inbox.") or the mailbox has no mail in that category at all, as
+IMAP-only, imported and agent mailboxes, which Gmail does not sort.)*
 
 ---
 

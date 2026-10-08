@@ -28,7 +28,8 @@ import os
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
 ///   -OpenAGCSnapshotCleanUp <view>      open Clean Up on a view (sender,
-///                                       people, subject, time, size) with its
+///                                       people, subject, mailingList, time,
+///                                       social, promotions, size) with its
 ///                                       largest group ticked, and capture it
 ///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
 ///   -OpenAGCSnapshotCleanUpProgress YES …with a month of sample history on

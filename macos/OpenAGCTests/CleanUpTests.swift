@@ -22,8 +22,10 @@ struct CleanUpTests {
         }
     }
 
-    @Test func theWindowListsTheFiveReadyViews() {
-        #expect(CleanUpViewKind.shown == [.sender, .people, .subject, .time, .size])
+    @Test func theWindowListsTheReadyViews() {
+        #expect(CleanUpViewKind.shown == [.sender, .people, .subject, .time, .social, .promotions, .size])
+        #expect(CleanUpViewKind.social.filterPrompt == "Type a domain…")
+        #expect(CleanUpViewKind.promotions.isCategory && !CleanUpViewKind.sender.isCategory)
         #expect(CleanUpViewKind.sender.filterPrompt == "Type a sender…")
         #expect(CleanUpViewKind.time.filterPrompt == nil)
         #expect(CleanUpViewKind.size.filterPrompt == nil)
@@ -172,6 +174,50 @@ struct CleanUpTests {
         #expect(store.error == nil)
         #expect(model.undo.notice?.text.contains("“Receipts”") == true)
         #expect(!store.groups.contains { $0.key == first.key })
+    }
+
+    // MARK: Social and Promotions (spec §14.12)
+
+    @Test func socialAndPromotionsGroupGmailsCategoriesByDomain() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        for view in [CleanUpViewKind.social, .promotions] {
+            store.view = view
+            await store.reload()
+            #expect(!store.groups.isEmpty, "the demo's services are sorted into \(view.title)")
+            #expect(!store.noCategoryMail)
+            for group in store.groups {
+                #expect(group.title == group.key, "titled by the domain")
+                #expect(!group.title.contains("@"))
+                #expect(group.aka.isEmpty)
+            }
+            let named = try #require(store.groups.first { $0.detail != nil })
+            #expect(CleanUpGroupRowView.detailLine(named) == named.detail, "the senders' names, no aka")
+        }
+        // Ticking a domain lists its category mail and acts on it.
+        store.view = .promotions
+        await store.reload()
+        let domain = try #require(store.groups.first)
+        store.toggle(domain.key)
+        await store.refreshMessages()
+        #expect(store.messageCount == Int(domain.count))
+        await eventually { store.message(at: 0) != nil }
+        #expect(store.message(at: 0)?.from?.email.hasSuffix("@" + domain.key) == true)
+        await store.apply(.archive)
+        #expect(model.undo.notice?.text == "Archived \(Int(domain.count).formatted()) messages from \(domain.title)")
+        store.filter = String(domain.key.prefix(5))
+        await store.loadGroups()
+        #expect(!store.groups.contains { $0.key == domain.key }, "out of the Inbox")
+    }
+
+    @Test func emptyCategoryViewsSayWhy() {
+        let none = CleanUpGroupsColumnText.empty(.social, scope: .inbox, noCategoryMail: true)
+        #expect(none == "This view groups the mail Gmail sorts into Social, by the sender's domain. This mailbox has none.")
+        #expect(CleanUpGroupsColumnText.empty(.promotions, scope: .inbox, noCategoryMail: false)
+            == "No promotions in the Inbox.")
+        #expect(CleanUpGroupsColumnText.empty(.social, scope: .allMail, noCategoryMail: false)
+            == "No social mail outside Spam and Trash.")
+        #expect(CleanUpGroupsColumnText.empty(.sender, scope: .inbox, noCategoryMail: false) == "The Inbox is empty.")
     }
 
     // MARK: The progress card (spec §14.12)

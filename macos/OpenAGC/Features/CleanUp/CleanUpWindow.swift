@@ -125,13 +125,26 @@ private struct CleanUpGroupsColumn: View {
                 ContentUnavailableView.search(text: store.filter)
             } else {
                 ContentUnavailableView(store.view.emptyTitle, systemImage: store.view.symbol,
-                                       description: Text(Self.emptyText(store.view, scope: store.scope)))
+                                       description: Text(CleanUpGroupsColumnText.empty(
+                                           store.view, scope: store.scope, noCategoryMail: store.noCategoryMail)))
             }
         }
     }
+}
 
-    static func emptyText(_ view: CleanUpViewKind, scope: CleanupScope) -> String {
+/// What the groups column says when it has no groups.
+enum CleanUpGroupsColumnText {
+    static func empty(_ view: CleanUpViewKind, scope: CleanupScope, noCategoryMail: Bool) -> String {
         if view == .people { return "Senders you have written to are listed here." }
+        if view.isCategory {
+            let category = view == .social ? "Social" : "Promotions"
+            if noCategoryMail {
+                return "This view groups the mail Gmail sorts into \(category), by the sender's domain. "
+                    + "This mailbox has none."
+            }
+            let what = view == .social ? "social mail" : "promotions"
+            return scope == .inbox ? "No \(what) in the Inbox." : "No \(what) outside Spam and Trash."
+        }
         return scope == .inbox ? "The Inbox is empty." : "There is no mail outside Spam and Trash."
     }
 }

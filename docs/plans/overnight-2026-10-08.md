@@ -365,6 +365,9 @@ C5. **The progress card** (oagc-merk.5) — `inbox_history` written at the first
     "opened" call; self-snapshots cannot see the sidebar, so the card is
     captured alone with `-OpenAGCSnapshotCleanUpCard`.)*
 C6. **Social and Promotions views** (oagc-merk.6).
+    *(as built: a domain group's second line names its senders, three at
+    most, instead of "aka"; the empty state tells "none in the Inbox"
+    from "no such category in this mailbox".)*
 C7. **Mailing Lists view and Unsubscribe** (oagc-merk.7) — group by `List-Id`;
     *Unsubscribe* for groups whose messages carry `List-Unsubscribe`:
     the one-click POST (RFC 8058) after a confirmation that names the

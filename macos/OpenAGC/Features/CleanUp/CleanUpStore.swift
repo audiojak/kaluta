@@ -6,10 +6,9 @@ import os
 enum CleanUpViewKind: String, CaseIterable, Identifiable {
     case sender, people, subject, mailingList, time, social, promotions, size
 
-    /// The views the window lists, in order. Mailing Lists (C7), Social
-    /// and Promotions (C6) join with a line each when their groups are
-    /// ready.
-    static let shown: [CleanUpViewKind] = [.sender, .people, .subject, .time, .size]
+    /// The views the window lists, in order. Mailing Lists (C7) joins
+    /// when its groups are ready.
+    static let shown: [CleanUpViewKind] = [.sender, .people, .subject, .time, .social, .promotions, .size]
 
     var id: String { rawValue }
 
@@ -59,6 +58,9 @@ enum CleanUpViewKind: String, CaseIterable, Identifiable {
         case .subject, .time: false
         }
     }
+
+    /// Groups Gmail's category of that name by sender domain.
+    var isCategory: Bool { self == .social || self == .promotions }
 
     /// The messages column shows each message's size.
     var showsSize: Bool { self == .size }
@@ -124,6 +126,10 @@ final class CleanUpStore {
 
     private(set) var groups: [CleanupGroup] = []
     private(set) var groupsLoaded = false
+    /// Social or Promotions is empty because the account has no mail in
+    /// that category at all (no Gmail categories: IMAP-only and agent
+    /// mailboxes), not only none in the scope.
+    private(set) var noCategoryMail = false
     /// Ticked groups' keys, in the order they were ticked.
     private(set) var tickedKeys: [String] = []
     /// The ticked groups as last seen, for their titles when filtered away.
@@ -225,8 +231,20 @@ final class CleanUpStore {
             do {
                 let loaded = try await core.cleanupGroups(accountID: accountID, view: view.core, scope: scope,
                                                           filter: filter)
+                // An empty category view: none in the Inbox, or none at
+                // all (a mailbox without Gmail's categories)?
+                var none = false
+                if loaded.isEmpty, view.isCategory, filter.isEmpty {
+                    if scope == .allMail {
+                        none = true
+                    } else {
+                        none = try await core.cleanupGroups(accountID: accountID, view: view.core, scope: .allMail,
+                                                            filter: "").isEmpty
+                    }
+                }
                 guard isCurrent(), accountID == self.accountID else { return }
                 groups = loaded
+                noCategoryMail = none
                 groupsLoaded = true
                 for group in loaded where tickedGroups[group.key] != nil { tickedGroups[group.key] = group }
             } catch {

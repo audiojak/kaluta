@@ -252,9 +252,49 @@ fn social_and_promotions_group_by_sender_domain() {
     let social = groups(&db, View::Social, Scope::Inbox);
     assert_eq!(summary(&social), [("friendbook.example".into(), 2)]);
     assert_eq!(social[0].title, "friendbook.example");
-    assert_eq!(social[0].aka, ["Friendbook", "Friendbook Alerts"]);
+    assert_eq!(social[0].detail.as_deref(), Some("Friendbook, Friendbook Alerts"), "the senders' names");
+    assert!(social[0].aka.is_empty(), "senders of a domain are not aka one another");
     assert_eq!(summary(&groups(&db, View::Promotions, Scope::Inbox)), [("shop.example".into(), 1)]);
     assert_eq!(ids(&db, View::Social, Scope::Inbox, &["friendbook.example", "shop.example"]), ["f1", "f2"]);
+    // The filter finds a domain by a sender's name too.
+    let q = query(View::Social, Scope::Inbox);
+    let found = db.read_blocking(move |c| cleanup::groups(c, &q, "alerts")).unwrap();
+    assert_eq!(summary(&found), [("friendbook.example".into(), 2)]);
+    // Archived mail is out of the Inbox's groups, in All Mail's.
+    store(&db, vec![msg("f3", ("Pics", "pics@photos.example"), "New", NOW, &["CATEGORY_SOCIAL"])]);
+    assert_eq!(groups(&db, View::Social, Scope::Inbox).len(), 1);
+    assert_eq!(groups(&db, View::Social, Scope::AllMail).len(), 2);
+}
+
+#[test]
+fn a_domain_with_many_senders_names_three() {
+    let db = open("domain-senders");
+    let names = ["Ann", "Bo", "Cy", "Di", "Ed"];
+    store(
+        &db,
+        names
+            .iter()
+            .enumerate()
+            .flat_map(|(i, name)| {
+                // Ann sends most, then Bo, and so on.
+                (0..(names.len() - i)).map(move |j| {
+                    msg(&format!("{name}{j}"), (name, "news@shop.example"), "s", NOW, &["INBOX", "CATEGORY_PROMOTIONS"])
+                })
+            })
+            .collect(),
+    );
+    let promotions = groups(&db, View::Promotions, Scope::Inbox);
+    assert_eq!(promotions[0].detail.as_deref(), Some("Ann, Bo, Cy and 2 more"));
+}
+
+#[test]
+fn no_categories_no_groups() {
+    // An IMAP-only or agent mailbox: no category labels at all.
+    let db = open("no-categories");
+    store(&db, vec![msg("x", ("Sam", "sam@example.com"), "Hi", NOW, &["INBOX"])]);
+    assert!(groups(&db, View::Social, Scope::AllMail).is_empty());
+    assert!(groups(&db, View::Promotions, Scope::AllMail).is_empty());
+    assert!(ids(&db, View::Promotions, Scope::AllMail, &["example.com"]).is_empty());
 }
 
 #[test]

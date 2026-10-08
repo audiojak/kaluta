@@ -71,7 +71,8 @@ pub struct Group {
     /// [`MAX_AKA`].
     pub aka: Vec<String>,
     /// A secondary line: the address (Sender, People), the list id
-    /// (Mailing Lists), the range of sizes (Size).
+    /// (Mailing Lists), the senders' names (Social, Promotions), the range
+    /// of sizes (Size).
     pub detail: Option<String>,
     pub count: u64,
 }
@@ -481,7 +482,9 @@ enum Titled {
     /// By the most used name (else the key), the key as detail: senders
     /// and lists.
     ByName,
-    /// By the key (a domain), every name as aka.
+    /// By the key (a domain); the senders' names, most used first, as
+    /// the detail line ("Friendbook, Friendbook Alerts and 2 more"): many
+    /// senders share a domain, so they are not "aka" one another.
     ByKey,
 }
 
@@ -507,13 +510,32 @@ fn named(conn: &Connection, sql: &str, params: &[Value], titled: Titled) -> Stor
             let mut names: Vec<(String, u64)> = names.into_iter().collect();
             names.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             let mut names = names.into_iter().map(|(n, _)| n);
-            let (title, detail) = match titled {
-                Titled::ByName => (names.next().unwrap_or_else(|| key.clone()), Some(key.clone())),
-                Titled::ByKey => (key.clone(), None),
-            };
-            Group { title, aka: names.take(MAX_AKA).collect(), detail, count, key }
+            match titled {
+                Titled::ByName => {
+                    let title = names.next().unwrap_or_else(|| key.clone());
+                    Group { title, aka: names.take(MAX_AKA).collect(), detail: Some(key.clone()), count, key }
+                }
+                Titled::ByKey => {
+                    let names: Vec<String> = names.collect();
+                    Group { title: key.clone(), aka: vec![], detail: senders_line(&names), count, key }
+                }
+            }
         })
         .collect())
+}
+
+/// Names shown on a domain group's second line before "and N more".
+const SENDERS_SHOWN: usize = 3;
+
+/// "Friendbook", "Friendbook, Friendbook Alerts", "A, B, C and 2 more";
+/// none without names.
+fn senders_line(names: &[String]) -> Option<String> {
+    let shown = names.iter().take(SENDERS_SHOWN).cloned().collect::<Vec<_>>().join(", ");
+    match names.len() {
+        0 => None,
+        n if n <= SENDERS_SHOWN => Some(shown),
+        n => Some(format!("{shown} and {} more", n - SENDERS_SHOWN)),
+    }
 }
 
 /// The day boundaries of the Time view, in UTC milliseconds.
