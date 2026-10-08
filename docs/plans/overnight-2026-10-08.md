@@ -151,6 +151,15 @@ The managed subdomain "can receive at any local-part".
    split inbound by recipient and sent by sender, unmatched mail to the
    first agent, domains on the service account. Wiremock tests with two
    agents on one fake account.
+   *(as built: adding an agent and domains on the service account came
+   with oagc-uys.12; this issue split the mail. Unmatched mail goes to the
+   oldest agent with a local user label *To Other Addresses*, only while
+   the account has several agents; no per-address label, since the To
+   line names it. Unmatched sent mail (From no agent's address, say a send
+   with a copied key) goes there too. Routing is read from disk as each
+   agent syncs, not fixed at start. No shared poller: `/changes` cursors
+   are the client's and not consumed, so each agent polls with its own;
+   the agents share one rate limiter instead.)*
 4. **`provider-agentmail`: service and provider** (oagc-uys.6, retitled)
    — sign-up, verify, add inbox, list, raw, labels both ways, events,
    send with the duplicate-send guard, error mapping. Wiremock fake of
@@ -165,7 +174,13 @@ The managed subdomain "can receive at any local-part".
 ### Left for the maintainer to check by hand (real accounts; never in automation)
 
 - Primitive: a send `from` a second local part goes out as that address;
-  the email listing's `to_email` is the envelope recipient.
+  the email listing's `to_email` is the envelope recipient (a message to
+  two agents of one account: one record or two?); whether the listing
+  rows (`GET /emails`, `GET /sent-emails`) carry `to_email` and
+  `from_header` (if not, each agent fetches every new record to decide,
+  which works but costs requests); that two long-polls on one key with
+  the same `since` cursor both get the change (reading does not consume
+  it).
 - AgentMail: the labels a received and a sent message carry (`received`,
   `sent`?); whether `unread` is set on arrival; the error for a taken
   username and for the fourth inbox on the free plan.

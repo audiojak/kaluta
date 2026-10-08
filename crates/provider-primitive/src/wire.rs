@@ -65,20 +65,26 @@ pub struct Claimed {
     pub limits: Limits,
 }
 
-/// A row of `GET /emails`.
+/// A row of `GET /emails`. `to_email` when the listing carries it (the
+/// record does; the row is not documented), to leave other agents' mail
+/// out before fetching.
 #[derive(Debug, Deserialize)]
 pub struct InboundRow {
     pub id: String,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub to_email: Option<String>,
 }
 
-/// A row of `GET /sent-emails`.
+/// A row of `GET /sent-emails`, with `from_header` when it carries it.
 #[derive(Debug, Deserialize)]
 pub struct SentRow {
     pub id: String,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub from_header: Option<String>,
 }
 
 /// `GET /emails/{id}`.

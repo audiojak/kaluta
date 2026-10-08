@@ -65,9 +65,14 @@ fn the_agents_prompt_says_whose_mailbox_it_is_and_the_one_recipient_rule() {
         service_account: "a1".into(),
         inbox_id: None,
     };
-    let prompt = agent_prompt(&meta);
+    let prompt = agent_prompt(&meta, &[]);
     assert!(prompt.contains("goes out as Scout <scout@abc.primitive.email>"));
     assert!(prompt.contains("exactly one recipient"));
+    assert!(!prompt.contains("sending limits"), "alone, nothing is shared");
+    let shared = agent_prompt(&meta, &["Writer".into()]);
+    assert!(shared.contains("shares its service account's sending limits"), "{shared}");
+    assert!(shared.contains("another agent, Writer"));
+    assert!(agent_prompt(&meta, &["Writer".into(), "Clerk".into()]).contains("2 other agents (Writer, Clerk)"));
 }
 
 #[test]
@@ -705,5 +710,144 @@ fn a_second_agent_syncs_its_own_fake_mailbox() {
     )
     .unwrap();
     wait_for("the delivered mail", || inbox_rows(&core) == 1);
+    core.stop_sync();
+}
+
+#[test]
+fn each_agent_knows_its_addresses_the_others_and_whether_it_is_the_first() {
+    let (t, core, _secrets) = core("routing");
+    core.debug_use_fake_agent_mail(true);
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "rt-1".into())).unwrap();
+    let service = scout.account_id.clone();
+    let writer = block_on(core.clone().add_agent(service.clone(), "Writer".into(), None, "rt-2".into())).unwrap();
+    let added = block_on(core.add_service_account_domain(service.clone(), "agents.example.com".into())).unwrap();
+    block_on(core.check_service_account_domain(service.clone(), added.id)).unwrap();
+    // Use This Address: the writer moves to the service account's domain.
+    block_on(core.clone().set_agent_address(writer.account_id.clone(), "writer@agents.example.com".into())).unwrap();
+    // Another service account's agent is no concern of theirs.
+    block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Other".into(), "rt-3".into())).unwrap();
+
+    let routing = |id: &str| primitive_routing(&t.0, id, &core.agent_meta(id).unwrap());
+    let s = routing(&scout.account_id);
+    assert_eq!(s.own, vec!["scout@demo.primitive.email".to_owned()]);
+    assert_eq!(s.others, vec!["writer@agents.example.com".to_owned(), "writer@demo.primitive.email".to_owned()]);
+    assert!(s.catch_all, "the first agent");
+    let w = routing(&writer.account_id);
+    assert_eq!(w.own, vec!["writer@agents.example.com".to_owned(), "writer@demo.primitive.email".to_owned()]);
+    assert_eq!(w.others, vec!["scout@demo.primitive.email".to_owned()]);
+    assert!(!w.catch_all);
+    assert_eq!(core.fellow_agents(&scout.account_id, &core.agent_meta(&scout.account_id).unwrap()), vec!["Writer"]);
+
+    // The first goes: the writer is alone and takes what no agent has.
+    let writer_meta = core.agent_meta(&writer.account_id).unwrap();
+    block_on(core.remove_account(scout.account_id.clone())).unwrap();
+    let w = primitive_routing(&t.0, &writer.account_id, &writer_meta);
+    assert!(w.catch_all && w.others.is_empty());
+}
+
+fn stored(core: &Arc<Core>, account: &str, id: &str) -> Option<Vec<LabelId>> {
+    let db = block_on(core.store_for(account)).unwrap();
+    let id = MessageId::new(id);
+    db.read_blocking(move |c| mail_store::read::get_message(c, &id)).unwrap().map(|m| m.label_ids)
+}
+
+#[test]
+fn two_primitive_agents_sync_only_their_own_mail_and_one_keeps_syncing_when_the_other_goes() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    let mount = |mock: Mock| rt.block_on(mock.mount(&server));
+    mount(Mock::given(method("POST")).and(path("/agent/accounts")).respond_with(ok(json!({
+        "api_key": "prim_k", "address": "abc.primitive.email", "plan": "agent", "limits": limits()
+    }))));
+    mount(
+        Mock::given(path("/changes"))
+            .and(query_param("since", "start"))
+            .respond_with(ok(json!({ "changes": [], "next_cursor": "c0", "has_more": false, "baseline": true }))),
+    );
+    // Nothing new until later; a long-poll answers after a moment.
+    mount(
+        Mock::given(path("/changes"))
+            .respond_with(
+                ok(json!({ "changes": [], "next_cursor": "c0", "has_more": false, "baseline": false }))
+                    .set_delay(Duration::from_millis(50)),
+            )
+            .with_priority(10),
+    );
+    mount(Mock::given(path("/emails")).respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "success": true, "meta": { "total": 3, "limit": 100, "cursor": null }, "data": [
+            { "id": "i1", "thread_id": null, "to_email": "scout@abc.primitive.email" },
+            { "id": "i2", "thread_id": null, "to_email": "writer@abc.primitive.email" },
+            { "id": "i3", "thread_id": null, "to_email": "sales@abc.primitive.email" }
+        ]
+    }))));
+    mount(Mock::given(path("/sent-emails")).respond_with(ResponseTemplate::new(200).set_body_json(json!({
+        "success": true, "meta": { "total": 1, "limit": 100, "cursor": null },
+        "data": [{ "id": "o1", "thread_id": null }]
+    }))));
+    for (id, to) in [
+        ("i1", "scout@abc.primitive.email"),
+        ("i2", "writer@abc.primitive.email"),
+        ("i3", "sales@abc.primitive.email"),
+        ("i4", "scout@abc.primitive.email"),
+        ("i5", "writer+later@abc.primitive.email"),
+    ] {
+        mount(Mock::given(path(format!("/emails/{id}"))).respond_with(ok(json!({
+            "id": id, "thread_id": null, "status": "completed", "received_at": "2026-10-08T10:00:00Z", "to_email": to
+        }))));
+        mount(Mock::given(path(format!("/emails/{id}/raw"))).respond_with(ResponseTemplate::new(200).set_body_raw(
+            format!("From: Ada <ada@example.com>\r\nTo: {to}\r\nSubject: {id}\r\n\r\nHello\r\n").into_bytes(),
+            "message/rfc822",
+        )));
+    }
+    mount(Mock::given(path("/sent-emails/o1")).respond_with(ok(json!({
+        "id": "o1", "thread_id": null, "created_at": "2026-10-08T11:00:00Z",
+        "from_header": "\"Writer\" <writer@abc.primitive.email>", "to_header": "ada@example.com", "subject": "o1"
+    }))));
+
+    let (_t, core, _secrets) = core("primitive-two");
+    *core.agent_mail.base.lock().unwrap() = Some(server.uri());
+    let scout =
+        block_on(core.clone().create_agent_mailbox(AgentService::Primitive, "Scout".into(), "tw-1".into())).unwrap();
+    let writer =
+        block_on(core.clone().add_agent(scout.account_id.clone(), "Writer".into(), None, "tw-2".into())).unwrap();
+    let (s, w) = (scout.account_id.clone(), writer.account_id.clone());
+    block_on(core.clone().set_current_account(s.clone())).unwrap();
+    assert!(block_on(core.clone().start_all_sync()).unwrap().is_empty());
+
+    wait_for("each agent's mail", || {
+        stored(&core, &s, "in:i3").is_some()
+            && stored(&core, &w, "in:i2").is_some()
+            && stored(&core, &w, "out:o1").is_some()
+    });
+    assert!(stored(&core, &s, "in:i1").is_some());
+    assert!(
+        stored(&core, &s, "in:i3").unwrap().contains(&LabelId::new(provider_primitive::OTHER_ADDRESSES_LABEL)),
+        "mail to an address no agent has goes to the first agent, marked"
+    );
+    for (account, id) in [(&s, "in:i2"), (&s, "out:o1"), (&w, "in:i1"), (&w, "in:i3")] {
+        assert_eq!(stored(&core, account, id), None, "{id} is not in {account}'s store");
+    }
+
+    // The first agent goes; the writer keeps syncing, and is now alone.
+    block_on(core.remove_account(s.clone())).unwrap();
+    mount(
+        Mock::given(path("/changes"))
+            .and(query_param("since", "c0"))
+            .respond_with(ok(json!({
+                "changes": [
+                    { "kind": "email.visible", "email_id": "i4", "thread_id": null },
+                    { "kind": "email.visible", "email_id": "i5", "thread_id": null }
+                ],
+                "next_cursor": "c0", "has_more": false, "baseline": false
+            })))
+            .with_priority(1),
+    );
+    wait_for("the new mail", || stored(&core, &w, "in:i4").is_some() && stored(&core, &w, "in:i5").is_some());
+    assert_eq!(
+        stored(&core, &w, "in:i4").unwrap(),
+        vec![LabelId::new("INBOX"), LabelId::new("UNREAD")],
+        "the removed agent's address has no agent now: the writer takes it, unmarked while alone"
+    );
     core.stop_sync();
 }

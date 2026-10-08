@@ -1263,6 +1263,36 @@ the key as a Bearer token).
   message, and the sidebar footer shows it after "Trying again shortly".
 - No drafts at the service: drafts stay on the Mac until sent. No server
   search: search is the local index (§8), which holds the whole mailbox.
+- **Several agents on one account** (ADR 0015). Primitive lists all of an
+  account's mail as one inbox, so each agent's provider keeps its share:
+  received mail whose recipient is one of the agent's addresses (its
+  address, and its managed one after *Use This Address*), sent mail whose
+  From is one of them. Addresses compare without case and without a
+  `+tag`. Mail to or from an address no agent has goes to the service
+  account's first agent (the oldest); while the account has several
+  agents it is labelled *To Other Addresses* (a local user label, listed
+  in that agent's sidebar), and the To line says which address. Each
+  agent long-polls the change feed with its own cursor.
+
+*(Implemented 2026-10-08, oagc-uys.13: `provider-primitive/src/routing.rs`;
+the core gives each provider a routing read from the agents on disk as it
+syncs (`primitive_routing`), so an agent added or removed is seen without
+restarting the others; when the first agent is removed, the next oldest
+takes unclaimed mail. The recipient is the record's `to_email` (taken as
+the envelope recipient), else the raw message's `Delivered-To`,
+`X-Original-To`, `To` and `Cc`; a message with neither is the first
+agent's. Listing rows that carry `to_email` or `from_header` are filtered
+before fetching; the rest are decided when fetched, and another agent's
+message comes back as not found, which the sync engine drops. With one
+agent nothing is marked. `GET /changes` takes the client's cursor
+(`since=`) and reading does not consume it, so the agents' long-polls do
+not take changes from each other; every agent wakes on every change and
+fetches the new records to decide (N agents read each new message's
+record N times: accepted for now). The agents of a service account share
+one rate limiter, as they share the key's request limit. Sends go from
+the agent's own address whatever the composer's From says. The agent's
+system prompt names the other agents whose sends count against the same
+limits.)*
 
 **Sending (Primitive).** `POST /v1/send-mail` with the From address, one
 recipient, subject, text and HTML bodies, `in_reply_to` and `references`

@@ -237,21 +237,68 @@ pub(crate) fn rename_meta(dir: &Path, name: &str) -> Result<(), CoreError> {
 pub(crate) type SyncSources = (Arc<dyn MailProvider>, Option<Arc<dyn BackfillSource>>);
 
 /// Appended to the agent's system prompt in an agent mailbox: whose
-/// mailbox it is and what its service allows.
-pub(crate) fn agent_prompt(meta: &AgentMeta) -> String {
+/// mailbox it is and what its service allows. `others` names the other
+/// agents of its service account, whose sends count against the same
+/// limits.
+pub(crate) fn agent_prompt(meta: &AgentMeta, others: &[String]) -> String {
     let limits = match meta.service {
         AgentService::Primitive => {
             "Each message goes to exactly one recipient (no Cc or Bcc): to write to several people, \
              write to each separately. Drafts stay on this Mac until sent."
         }
     };
+    let shared = match others {
+        [] => String::new(),
+        [one] => format!(
+            " This mailbox shares its service account's sending limits (per hour and per day) with the \
+             mailbox of another agent, {one}: its sends count against them too."
+        ),
+        many => format!(
+            " This mailbox shares its service account's sending limits (per hour and per day) with the \
+             mailboxes of {} other agents ({}): their sends count against them too.",
+            many.len(),
+            many.join(", ")
+        ),
+    };
     format!(
         "\n\n## This is an agent's mailbox\n\nThis mailbox, {address}, belongs to an agent called \
          {name}, not to the user. Mail you send from it goes out as {name} <{address}>. Write as \
-         {name}, on the user's behalf. {limits}\n",
+         {name}, on the user's behalf. {limits}{shared}\n",
         address = meta.address,
         name = meta.name,
     )
+}
+
+/// The agent's addresses: its address, and the service's own one when it
+/// has moved to an own domain.
+fn addresses_of(meta: &AgentMeta) -> Vec<String> {
+    let mut out = vec![meta.address.clone()];
+    out.extend(meta.managed_address.clone().filter(|m| *m != meta.address));
+    out
+}
+
+/// Which of its Primitive account's mail is `account_id`'s, from the
+/// agents on disk now (spec §7.9, ADR 0015): its own addresses, the other
+/// agents', and whether it is the service account's first agent (the
+/// oldest), which keeps mail to addresses no agent has. `fallback` is the
+/// agent as its sync started, should its directory be gone (being removed).
+pub(crate) fn primitive_routing(
+    data_dir: &Path,
+    account_id: &str,
+    fallback: &AgentMeta,
+) -> provider_primitive::Routing {
+    let agents: Vec<(String, AgentMeta)> = service_account::agents_on_disk(data_dir)
+        .into_iter()
+        .filter(|(_, m)| m.service_account == fallback.service_account)
+        .collect();
+    let first = agents.iter().min_by(|a, b| (a.1.created_at, &a.0).cmp(&(b.1.created_at, &b.0))).map(|(id, _)| id);
+    let own =
+        agents.iter().find(|(id, _)| id == account_id).map_or_else(|| addresses_of(fallback), |(_, m)| addresses_of(m));
+    provider_primitive::Routing {
+        own,
+        others: agents.iter().filter(|(id, _)| id != account_id).flat_map(|(_, m)| addresses_of(m)).collect(),
+        catch_all: first.is_none_or(|f| f == account_id),
+    }
 }
 
 /// A six-digit code standing on its own in `text`.
@@ -302,6 +349,9 @@ pub(crate) struct AgentMailState {
     records: Mutex<()>,
     /// Held while an agent is added, so two cannot take one address.
     adding: tokio::sync::Mutex<()>,
+    /// One rate limiter per service account: its agents share the key's
+    /// request limit.
+    limiters: Mutex<HashMap<String, Arc<provider_api::RateLimiter>>>,
 }
 
 impl Core {
@@ -396,10 +446,25 @@ impl Core {
         match meta.service {
             AgentService::Primitive => {
                 let base = self.agent_mail.base.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let limiter = self
+                    .agent_mail
+                    .limiters
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(meta.service_account.clone())
+                    .or_insert_with(provider_primitive::rate_limiter)
+                    .clone();
+                // Which mail is this agent's, read from disk as it syncs, so
+                // agents added or removed later are seen (spec §7.9).
+                let (data_dir, id, agent) = (self.data_path(), account_id.to_owned(), meta.clone());
+                let routing: provider_primitive::RoutingSource =
+                    Arc::new(move || primitive_routing(&data_dir, &id, &agent));
                 let provider = Arc::new(
-                    provider_primitive::PrimitiveProvider::with_base(
+                    provider_primitive::PrimitiveProvider::for_agent(
                         tokens,
                         &meta.address,
+                        routing,
+                        limiter,
                         provider_api::RetryPolicy::default(),
                         base.as_deref().unwrap_or(provider_primitive::PRIMITIVE_API),
                     )
@@ -423,6 +488,15 @@ impl Core {
         self.effective_account_id()
             .and_then(|id| self.agent_meta(&id))
             .is_some_and(|m| m.send_mode == AgentSendMode::Freely)
+    }
+
+    /// The names of the other agents on `meta`'s service account.
+    pub(crate) fn fellow_agents(&self, account_id: &str, meta: &AgentMeta) -> Vec<String> {
+        service_account::agents_on_disk(&self.data_path())
+            .into_iter()
+            .filter(|(id, m)| id != account_id && m.service_account == meta.service_account)
+            .map(|(_, m)| m.name)
+            .collect()
     }
 
     /// The From display name for sends: the agent's name.

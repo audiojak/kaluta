@@ -135,7 +135,8 @@ impl Core {
     /// note (§7.8) and its writing guide (§14.9) when there is one.
     pub(crate) fn system_prompt_for_session(&self, shipped: &Path, session_dir: &Path, guide: &str) -> PathBuf {
         let archive = self.effective_account_id().is_some_and(|id| self.is_archive(&id));
-        let agent = self.effective_account_id().and_then(|id| self.agent_meta(&id));
+        let agent =
+            self.effective_account_id().and_then(|id| self.agent_meta(&id).map(|m| (self.fellow_agents(&id, &m), m)));
         if !archive && agent.is_none() && guide.is_empty() {
             return shipped.to_path_buf();
         }
@@ -143,8 +144,8 @@ impl Core {
         if archive {
             text.push_str(ARCHIVE_PROMPT);
         }
-        if let Some(agent) = agent {
-            text.push_str(&crate::agent_mailbox::agent_prompt(&agent));
+        if let Some((others, agent)) = agent {
+            text.push_str(&crate::agent_mailbox::agent_prompt(&agent, &others));
         }
         if !guide.is_empty() {
             text.push_str("\n\n## Writing guide\n\n");

@@ -7,7 +7,15 @@
 //!
 //! Primitive has no drafts, labels or server search, takes one recipient
 //! per send, and keeps its change feed 7 days.
+//!
+//! Several agents share one Primitive account (ADR 0015): each agent's
+//! provider keeps the mail addressed to it and the mail it sent
+//! ([`routing`]). The change feed's cursor is the client's (`since=`), not
+//! consumed by reading, so each agent long-polls with a cursor of its own
+//! and none takes changes from another; one rate limiter per account
+//! ([`PrimitiveProvider::for_agent`]) keeps them under the key's limit.
 
+pub mod routing;
 mod wire;
 
 use std::sync::{Arc, Mutex};
@@ -23,6 +31,7 @@ use provider_api::{
     ProviderError, ProviderResult, RateLimiter, RetryPolicy, SendRule, SignedUp, SyncCursor, TokenSource,
     VerificationStarted,
 };
+pub use routing::{Keep, OTHER_ADDRESSES_LABEL, Routing, RoutingSource};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -45,8 +54,9 @@ const SNIPPET_CHARS: usize = 200;
 const INBOUND: &str = "in:";
 const OUTBOUND: &str = "out:";
 
-/// The agent plan allows 120 requests a minute; stay under it.
-fn limiter() -> Arc<RateLimiter> {
+/// The agent plan allows 120 requests a minute; stay under it. One per
+/// Primitive account: its agents share it, as they share the key.
+pub fn rate_limiter() -> Arc<RateLimiter> {
     Arc::new(RateLimiter::new(100, 20))
 }
 
@@ -59,12 +69,14 @@ pub fn outbound_id(uuid: &str) -> MessageId {
     MessageId(format!("{OUTBOUND}{uuid}"))
 }
 
-/// One synced Primitive mailbox.
+/// One synced agent on a Primitive account.
 pub struct PrimitiveProvider {
     http: HttpClient,
     base: String,
-    /// The mailbox's own address (From for sends).
+    /// The agent's address (From for sends).
     address: String,
+    /// Which of the account's mail is this agent's.
+    routing: RoutingSource,
     /// The newest change cursor seen, for long-polling without consuming.
     last_cursor: Mutex<Option<String>>,
 }
@@ -74,19 +86,39 @@ impl PrimitiveProvider {
         Self::with_base(tokens, address, RetryPolicy::default(), PRIMITIVE_API)
     }
 
-    /// For tests: another base URL and retry policy.
+    /// For tests: another base URL and retry policy. The agent is alone on
+    /// its account: all the account's mail is its own.
     pub fn with_base(
         tokens: Arc<dyn TokenSource>,
         address: &str,
         retry: RetryPolicy,
         base: &str,
     ) -> ProviderResult<Self> {
+        let only = Routing::only(address);
+        Self::for_agent(tokens, address, Arc::new(move || only.clone()), rate_limiter(), retry, base)
+    }
+
+    /// One agent of an account with several: `routing` says which mail is
+    /// its own (read again as it syncs), `limiter` is the account's.
+    pub fn for_agent(
+        tokens: Arc<dyn TokenSource>,
+        address: &str,
+        routing: RoutingSource,
+        limiter: Arc<RateLimiter>,
+        retry: RetryPolicy,
+        base: &str,
+    ) -> ProviderResult<Self> {
         Ok(Self {
-            http: HttpClient::new(tokens, limiter(), retry)?,
+            http: HttpClient::new(tokens, limiter, retry)?,
             base: base.trim_end_matches('/').to_owned(),
             address: address.to_owned(),
+            routing,
             last_cursor: Mutex::new(None),
         })
+    }
+
+    fn routing(&self) -> Routing {
+        (self.routing)()
     }
 
     fn url(&self, path: &str) -> String {
@@ -107,16 +139,22 @@ impl PrimitiveProvider {
         self.http.json(1, priority, |c| c.get(&url).query(query)).await
     }
 
-    async fn fetch_one(&self, id: &MessageId, priority: Priority) -> ProviderResult<Option<FetchedMessage>> {
+    /// A message, if it is this agent's (`None` too when it is gone).
+    async fn fetch_one(
+        &self,
+        id: &MessageId,
+        priority: Priority,
+        routing: &Routing,
+    ) -> ProviderResult<Option<FetchedMessage>> {
         let result = if let Some(uuid) = id.as_str().strip_prefix(INBOUND) {
-            self.fetch_inbound(uuid, priority).await
+            self.fetch_inbound(uuid, priority, routing).await
         } else if let Some(uuid) = id.as_str().strip_prefix(OUTBOUND) {
-            self.fetch_outbound(uuid, priority).await
+            self.fetch_outbound(uuid, priority, routing).await
         } else {
             return Ok(None);
         };
         match result {
-            Ok(m) => Ok(Some(m)),
+            Ok(m) => Ok(m),
             // Deleted between listing and fetching.
             Err(ProviderError::NotFound(_)) => Ok(None),
             Err(e) => Err(e),
@@ -124,10 +162,25 @@ impl PrimitiveProvider {
     }
 
     /// A received message: its record (thread, time) and its raw MIME;
-    /// the record's own fields when the raw form is gone.
-    async fn fetch_inbound(&self, uuid: &str, priority: Priority) -> ProviderResult<FetchedMessage> {
+    /// the record's own fields when the raw form is gone. `None` when it
+    /// is another agent's: by the record's recipient, else by the raw
+    /// message's.
+    async fn fetch_inbound(
+        &self,
+        uuid: &str,
+        priority: Priority,
+        routing: &Routing,
+    ) -> ProviderResult<Option<FetchedMessage>> {
         let record: wire::Envelope<wire::Inbound> = self.get(&format!("emails/{uuid}"), &[], priority).await?;
         let record = record.data;
+        let by_record = record
+            .to_email
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+            .map(|t| routing.keeps(routing::addresses_in(t).iter().map(String::as_str)));
+        if by_record == Some(None) {
+            return Ok(None);
+        }
         let url = self.url(&format!("emails/{uuid}/raw"));
         let raw = if record.content_discarded_at.is_some() {
             None
@@ -138,16 +191,36 @@ impl PrimitiveProvider {
                 Err(e) => return Err(e),
             }
         };
-        Ok(inbound_message(&record, raw.as_deref()))
+        let keep = match by_record {
+            Some(keep) => keep,
+            None => {
+                let named = raw.as_deref().map(routing::raw_recipients).unwrap_or_default();
+                routing.keeps(named.iter().map(String::as_str))
+            }
+        };
+        let Some(keep) = keep else { return Ok(None) };
+        Ok(Some(marked(inbound_message(&record, raw.as_deref()), keep, routing)))
     }
 
-    async fn fetch_outbound(&self, uuid: &str, priority: Priority) -> ProviderResult<FetchedMessage> {
+    /// A sent message, if this agent sent it (or no agent did, for the
+    /// first agent).
+    async fn fetch_outbound(
+        &self,
+        uuid: &str,
+        priority: Priority,
+        routing: &Routing,
+    ) -> ProviderResult<Option<FetchedMessage>> {
         let record: wire::Envelope<wire::Sent> = self.get(&format!("sent-emails/{uuid}"), &[], priority).await?;
-        Ok(outbound_message(&record.data))
+        let from = routing::addresses_in(&record.data.from_header);
+        let Some(keep) = routing.keeps(from.iter().map(String::as_str)) else { return Ok(None) };
+        Ok(Some(marked(outbound_message(&record.data), keep, routing)))
     }
 
     /// Long-poll the change feed from the newest cursor seen: whether
-    /// anything changed within `max`.
+    /// anything changed within `max`. The cursor is this provider's own:
+    /// other agents of the account poll the same feed with theirs, and a
+    /// change to another agent's mail wakes this one too (its sync then
+    /// finds nothing of its own).
     pub async fn wait_for_change(&self, max: Duration) -> ProviderResult<bool> {
         let cursor = self.last_cursor.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(cursor) = cursor else {
@@ -180,6 +253,13 @@ impl PrimitiveProvider {
         if let Some(since) = since {
             query.push(("date_from", since));
         }
+        // Rows that say whose they are are kept or left out here; the others
+        // are decided when fetched.
+        let routing = self.routing();
+        let ours = |addresses: Option<&String>| match addresses.filter(|a| !a.trim().is_empty()) {
+            Some(a) => routing.keeps(routing::addresses_in(a).iter().map(String::as_str)).is_some(),
+            None => true,
+        };
         match source {
             Source::Inbound => {
                 let page: wire::Envelope<Vec<wire::InboundRow>> =
@@ -188,6 +268,7 @@ impl PrimitiveProvider {
                 let ids = page
                     .data
                     .into_iter()
+                    .filter(|r| ours(r.to_email.as_ref()))
                     .map(|r| {
                         let id = inbound_id(&r.id);
                         let thread = ThreadId(r.thread_id.unwrap_or_else(|| id.as_str().to_owned()));
@@ -203,6 +284,7 @@ impl PrimitiveProvider {
                 let ids = page
                     .data
                     .into_iter()
+                    .filter(|r| ours(r.from_header.as_ref()))
                     .map(|r| {
                         let id = outbound_id(&r.id);
                         let thread = ThreadId(r.thread_id.unwrap_or_else(|| id.as_str().to_owned()));
@@ -286,6 +368,16 @@ fn snippet(text: &str) -> String {
 
 fn thread_of(thread: Option<&String>, id: &MessageId) -> ThreadId {
     ThreadId(thread.cloned().unwrap_or_else(|| id.as_str().to_owned()))
+}
+
+/// Mail no agent's address is on, kept by the first agent, carries the
+/// marker label while the account has several agents.
+fn marked(mut m: FetchedMessage, keep: Keep, routing: &Routing) -> FetchedMessage {
+    if keep == Keep::Unclaimed && routing.marks() {
+        m.label_ids.push(LabelId::new(OTHER_ADDRESSES_LABEL));
+        m.label_ids.sort();
+    }
+    m
 }
 
 /// A received message from its record and raw MIME. Rejected mail is
@@ -545,7 +637,9 @@ impl MailProvider for PrimitiveProvider {
     }
 
     async fn list_labels(&self) -> ProviderResult<Vec<Label>> {
-        Ok(labels())
+        let mut all = labels();
+        all.extend(self.routing().label());
+        Ok(all)
     }
 
     async fn list_message_ids(&self, filter: &ListFilter, page: Option<PageToken>) -> ProviderResult<IdPage> {
@@ -570,14 +664,16 @@ impl MailProvider for PrimitiveProvider {
         Ok(IdPage { ids, next, estimated_total: total })
     }
 
+    /// The messages that are this agent's; others' are left out, as if gone.
     async fn fetch_messages(&self, ids: &[MessageId], priority: Priority) -> ProviderResult<Vec<FetchedMessage>> {
+        let routing = self.routing();
         let mut out = Vec::with_capacity(ids.len());
         let mut pending = ids.iter();
         let mut running = FuturesUnordered::new();
         loop {
             while running.len() < FETCH_CONCURRENCY {
                 match pending.next() {
-                    Some(id) => running.push(self.fetch_one(id, priority)),
+                    Some(id) => running.push(self.fetch_one(id, priority, &routing)),
                     None => break,
                 }
             }
@@ -592,6 +688,8 @@ impl MailProvider for PrimitiveProvider {
         }
     }
 
+    /// The feed is the account's: every agent sees every arrival and
+    /// sending, and [`Self::fetch_messages`] leaves out what is another's.
     async fn changes_since(&self, cursor: &SyncCursor) -> ProviderResult<ChangeSet> {
         let mut since = cursor.0.clone();
         let mut changes = Vec::new();
