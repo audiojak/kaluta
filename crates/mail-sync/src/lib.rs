@@ -14,7 +14,8 @@ pub use compose::{draft_for_editing, forward_draft, reply_draft, schedule_draft_
 pub use convert::to_incoming;
 pub use engine::{
     BACKFILL_BATCH, BodyWindow, ExternalLabelChange, INBOX_PHASES, IncrementalReport, KEY_BODY_WINDOW, KEY_WINDOW,
-    NewMail, Phase, SyncEngine, SyncObserver, SyncPhase, SyncProgress, SyncWindow, phases_for,
+    NewMail, Phase, SyncEngine, SyncObserver, SyncPhase, SyncProgress, SyncWindow, load_every_header_stored,
+    phases_for,
 };
 pub use error::{SyncError, SyncResult};
 pub use mail_store::undo::MessageDiff;

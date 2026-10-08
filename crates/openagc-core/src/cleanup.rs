@@ -329,5 +329,8 @@ impl Core {
     }
 }
 
+mod load;
+pub use load::{CleanupLoadEstimate, CleanupLoadStatus};
+
 #[cfg(test)]
 mod tests;

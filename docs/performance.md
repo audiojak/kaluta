@@ -49,7 +49,10 @@ The largest sender's first 200 messages: 6.0 ms; its count: 1.7 ms
 (budget 50 ms each). All Mail scans the views' covering indexes and
 leaves out Spam, Trash and drafts through one small set of ids; the
 Inbox is driven from its label. A debug build takes about three times as
-long, still under budget.
+long, still under budget. Leaving optimistic local copies of sent mail
+out of scope (oagc-merk.4, a range on the `gmail_id` index) left every
+figure within run-to-run noise (rerun 2026-10-08: Sender 19.1/14.4 ms,
+Time 15.5/41.3 ms).
 
 **Clean Up's apply (Rust, release; 2026-10-08).** Trashing 20,000
 messages (the biggest senders that fit, in All Mail) in one transaction,

@@ -1498,6 +1498,7 @@ final class AppModel {
             }
         case let .syncStatus(state, pending, headers, message):
             refreshTransport()
+            cleanUp.syncChanged(pending: pending, headers: headers, accountID: tagged.accountID)
             switch state {
             case .idle:
                 syncDisplay = .idle

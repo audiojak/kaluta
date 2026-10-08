@@ -16,7 +16,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params, params_from_i
 use crate::error::StoreResult;
 use crate::outbox::OutboxOp;
 use crate::undo::{self, MessageDiff};
-use crate::write::{MailWriter, ThreadChanges};
+use crate::write::{LOCAL_PREFIX, MailWriter, ThreadChanges};
 
 /// How groups are formed (the window's left column).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,7 +71,7 @@ pub struct Group {
     /// [`MAX_AKA`].
     pub aka: Vec<String>,
     /// A secondary line: the address (Sender, People), the list id
-    /// (Mailing Lists).
+    /// (Mailing Lists), the range of sizes (Size).
     pub detail: Option<String>,
     pub count: u64,
 }
@@ -90,14 +90,15 @@ pub struct CleanupMessage {
 pub const MAX_AKA: usize = 5;
 
 /// Size buckets: key, title, smallest size in bytes (decimal units, as
-/// macOS shows sizes). Each runs up to the next one's start.
-pub const SIZE_BUCKETS: &[(&str, &str, u64)] = &[
-    ("tiny", "Tiny", 0),
-    ("small", "Small", 1_000),
-    ("medium", "Medium", 10_000),
-    ("large", "Large", 100_000),
-    ("extra_large", "Extra Large", 1_000_000),
-    ("jumbo", "Jumbo", 10_000_000),
+/// macOS shows sizes), and the range as the group's second line. Each
+/// runs up to the next one's start.
+pub const SIZE_BUCKETS: &[(&str, &str, u64, &str)] = &[
+    ("tiny", "Tiny", 0, "Less than 1 KB"),
+    ("small", "Small", 1_000, "1 KB to 10 KB"),
+    ("medium", "Medium", 10_000, "10 KB to 100 KB"),
+    ("large", "Large", 100_000, "100 KB to 1 MB"),
+    ("extra_large", "Extra Large", 1_000_000, "1 MB to 10 MB"),
+    ("jumbo", "Jumbo", 10_000_000, "More than 10 MB"),
 ];
 
 const SOCIAL: &str = "CATEGORY_SOCIAL";
@@ -233,13 +234,11 @@ pub fn count(conn: &Connection, q: &Query, keys: &[String]) -> StoreResult<u64> 
 }
 
 /// Every message in the groups named by `keys`, as they are now: what an
-/// action applies to. Optimistic local copies of sent mail are left out.
+/// action applies to, the same messages [`count`] counts.
 pub fn message_ids(conn: &Connection, q: &Query, keys: &[String]) -> StoreResult<Vec<MessageId>> {
     let mut params = Vec::new();
     let filter = selection_sql(conn, q, keys, &mut params)?;
-    // Optimistic copies of sent mail are not the provider's yet.
-    let sql =
-        format!("SELECT m.gmail_id FROM messages m WHERE {filter} AND m.gmail_id NOT LIKE 'local-%' ORDER BY m.id");
+    let sql = format!("SELECT m.gmail_id FROM messages m WHERE {filter} ORDER BY m.id");
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(&params), |r| Ok(MessageId(r.get(0)?)))?;
     Ok(rows.collect::<Result<_, _>>()?)
@@ -457,14 +456,14 @@ fn size_groups(conn: &Connection, scope: &str, params: &[Value]) -> StoreResult<
         .iter()
         .enumerate()
         .rev()
-        .map(|(i, (_, _, min))| format!("WHEN m.size_estimate >= {min} THEN {i} "))
+        .map(|(i, (_, _, min, _))| format!("WHEN m.size_estimate >= {min} THEN {i} "))
         .collect();
     let sql =
         format!("SELECT CASE {cases}ELSE 0 END AS b, COUNT(*) FROM messages m WHERE {scope} GROUP BY b ORDER BY b");
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map(params_from_iter(params), |r| {
-        let (key, title, _) = SIZE_BUCKETS[r.get::<_, i64>(0)?.clamp(0, SIZE_BUCKETS.len() as i64 - 1) as usize];
-        Ok(group(key, title, r.get(1)?))
+        let (key, title, _, range) = SIZE_BUCKETS[r.get::<_, i64>(0)?.clamp(0, SIZE_BUCKETS.len() as i64 - 1) as usize];
+        Ok(Group { detail: Some(range.to_owned()), ..group(key, title, r.get(1)?) })
     })?;
     Ok(rows.collect::<Result<_, _>>()?)
 }
@@ -517,8 +516,20 @@ fn label_rowid(conn: &Connection, gmail_id: &str) -> StoreResult<i64> {
 }
 
 /// The scope as a condition on `m`, its values appended to `params`.
+/// Optimistic local copies of sent mail (ids starting `local-`, replaced
+/// when Gmail's copy syncs back) are never in scope: they are not the
+/// provider's to change yet, so groups, counts and actions all leave them
+/// out and the numbers shown are the numbers changed.
 fn scope_sql(conn: &Connection, scope: Scope, params: &mut Vec<Value>) -> StoreResult<String> {
-    Ok(match scope {
+    // A range on the unique `gmail_id` index: the few local copies, once.
+    params.push(Value::Text(LOCAL_PREFIX.to_owned()));
+    params.push(Value::Text(LOCAL_PREFIX.trim_end_matches('-').to_owned() + "."));
+    let local = format!(
+        "m.id NOT IN (SELECT id FROM messages WHERE gmail_id >= ?{} AND gmail_id < ?{})",
+        params.len() - 1,
+        params.len()
+    );
+    let scope = match scope {
         Scope::Inbox => {
             params.push(Value::Integer(label_rowid(conn, system_labels::INBOX)?));
             format!("m.id IN (SELECT message_id FROM message_labels WHERE label_id = ?{})", params.len())
@@ -537,7 +548,8 @@ fn scope_sql(conn: &Connection, scope: Scope, params: &mut Vec<Value>) -> StoreR
                 n - 1
             )
         }
-    })
+    };
+    Ok(format!("{scope} AND {local}"))
 }
 
 /// Scope and membership in the groups named by `keys`, as a condition on `m`.
@@ -570,7 +582,7 @@ fn selection_sql(conn: &Connection, q: &Query, keys: &[String], params: &mut Vec
         }
         View::Size => {
             let buckets = keys.iter().filter_map(|k| {
-                let i = SIZE_BUCKETS.iter().position(|(key, _, _)| key == k)?;
+                let i = SIZE_BUCKETS.iter().position(|(key, _, _, _)| key == k)?;
                 let end = SIZE_BUCKETS.get(i + 1).map_or(i64::MAX, |b| b.2 as i64);
                 Some((SIZE_BUCKETS[i].2 as i64, end))
             });

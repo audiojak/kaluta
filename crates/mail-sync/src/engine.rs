@@ -52,17 +52,19 @@ pub enum BodyWindow {
     #[default]
     Month,
     HalfYear,
+    Year,
     /// Everything in the sync window.
     Window,
 }
 
 impl BodyWindow {
-    pub const ALL: [BodyWindow; 3] = [Self::Month, Self::HalfYear, Self::Window];
+    pub const ALL: [BodyWindow; 4] = [Self::Month, Self::HalfYear, Self::Year, Self::Window];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Month => "30d",
             Self::HalfYear => "6m",
+            Self::Year => "1y",
             Self::Window => "window",
         }
     }
@@ -76,7 +78,20 @@ impl BodyWindow {
         match self {
             Self::Month => Some(3),
             Self::HalfYear => Some(4),
+            Self::Year => Some(5),
             Self::Window => None,
+        }
+    }
+
+    /// The body window that keeps bodies where they are when the sync
+    /// window widens from `window`: "the whole window" becomes the span
+    /// `window` covered, so a wider window brings headers, not bodies.
+    pub fn kept_from(self, window: SyncWindow) -> Self {
+        match (self, window) {
+            (Self::Window, SyncWindow::Month) => Self::Month,
+            (Self::Window, SyncWindow::HalfYear) => Self::HalfYear,
+            (Self::Window, SyncWindow::Year) => Self::Year,
+            (body, _) => body,
         }
     }
 }
@@ -151,6 +166,31 @@ const KEY_EMAIL: &str = "account_email";
 pub const KEY_WINDOW: &str = "sync_window";
 pub const KEY_BODY_WINDOW: &str = "body_window";
 const KEY_TIERS: &str = "queue_tiers";
+
+/// [`SyncEngine::load_every_header`] for an account that is not syncing:
+/// the window and body window are stored, and the queue's tiering is
+/// marked stale so the next start lists the wider window
+/// ([`SyncEngine::ensure_tiers`]). Returns false when the window was
+/// *Everything* already.
+pub async fn load_every_header_stored(db: &Db) -> SyncResult<bool> {
+    Ok(db
+        .write(|tx| {
+            let window = read::sync_state(tx, KEY_WINDOW)?.as_deref().and_then(SyncWindow::parse).unwrap_or_default();
+            if window == SyncWindow::Everything {
+                return Ok(false);
+            }
+            let body = read::sync_state(tx, KEY_BODY_WINDOW)?
+                .as_deref()
+                .and_then(BodyWindow::parse)
+                .unwrap_or_default()
+                .kept_from(window);
+            read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
+            read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
+            read::set_sync_state(tx, KEY_TIERS, "stale")?;
+            Ok(true)
+        })
+        .await?)
+}
 
 /// Receives what sync changed; the core turns it into UI events.
 pub trait SyncObserver: Send + Sync {
@@ -640,6 +680,12 @@ impl SyncEngine {
         self.set_backfill_source(Arc::new(RestBackfill(self.provider.clone())));
     }
 
+    /// Whether the backfill source fetches headers cheaply now (IMAP, not
+    /// refused): older mail can then come down as headers only.
+    pub fn cheap_headers(&self) -> bool {
+        self.backfill.read().unwrap_or_else(|e| e.into_inner()).cheap_headers()
+    }
+
     /// The backfill source's name, for diagnostics.
     pub fn backfill_source_name(&self) -> &'static str {
         self.backfill.read().unwrap_or_else(|e| e.into_inner()).name()
@@ -725,6 +771,27 @@ impl SyncEngine {
     pub async fn set_window(&self, window: SyncWindow) -> SyncResult<()> {
         self.db.write(move |tx| read::set_sync_state(tx, KEY_WINDOW, window.as_str())).await?;
         self.relist_window().await
+    }
+
+    /// Download every header (Clean Up, spec §14.12): the window becomes
+    /// *Everything* and the body window keeps bodies where they were
+    /// ([`BodyWindow::kept_from`]), so with cheap headers the older mail
+    /// is listed for headers only. Returns false when the window was
+    /// *Everything* already (nothing changes).
+    pub async fn load_every_header(&self) -> SyncResult<bool> {
+        let window = self.window().await?;
+        if window == SyncWindow::Everything {
+            return Ok(false);
+        }
+        let body = self.body_window().await?.kept_from(window);
+        self.db
+            .write(move |tx| {
+                read::set_sync_state(tx, KEY_BODY_WINDOW, body.as_str())?;
+                read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())
+            })
+            .await?;
+        self.relist_window().await?;
+        Ok(true)
     }
 
     /// Which part of the window gets full messages when headers are cheap.

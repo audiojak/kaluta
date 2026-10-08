@@ -43,6 +43,15 @@ pub mod cost {
     pub const LABELS_CREATE: u32 = 5;
 }
 
+/// About how long the backfill takes to download `messages` whole over
+/// the API: one `messages.get` each, at the rate limiter's refill rate
+/// (250 a minute). Clean Up states it before loading all mail without
+/// IMAP (spec §14.12).
+pub fn rest_download_seconds(messages: u64) -> u64 {
+    let per_minute = u64::from(provider_api::rate_limit::GMAIL_UNITS_PER_MINUTE / cost::MESSAGES_GET).max(1);
+    (messages * 60).div_ceil(per_minute)
+}
+
 /// Concurrent `messages.get` calls; the rate limiter paces them.
 const FETCH_CONCURRENCY: usize = 8;
 /// Gmail's `batchModify` accepts at most 1,000 ids.

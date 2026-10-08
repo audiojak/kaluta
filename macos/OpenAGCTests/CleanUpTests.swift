@@ -188,4 +188,81 @@ struct CleanUpTests {
         store.outboxChanged(pending: 3, accountID: model.openAccountID)
         #expect(store.pending == 3)
     }
+
+    // MARK: Loading every header (spec §14.12)
+
+    private func status(window: SyncWindow, cheap: Bool, gmail: Bool = true) -> CleanupLoadStatus {
+        CleanupLoadStatus(hasSyncWindow: gmail, window: window, cheapHeaders: cheap, headersWaiting: 0,
+                          bodiesWaiting: 0)
+    }
+
+    @Test func openingDecidesWhetherToWidenAskOrDoNothing() {
+        #expect(CleanUpLoadPlan.of(status(window: .halfYear, cheap: true), declined: false) == .widen, "IMAP: at once")
+        #expect(CleanUpLoadPlan.of(status(window: .year, cheap: true), declined: true) == .widen,
+                "Not Now is about the API's cost only")
+        #expect(CleanUpLoadPlan.of(status(window: .month, cheap: false), declined: false) == .ask, "the API: ask first")
+        #expect(CleanUpLoadPlan.of(status(window: .month, cheap: false), declined: true) == .nothing,
+                "Not Now holds for the session")
+        #expect(CleanUpLoadPlan.of(status(window: .everything, cheap: true), declined: false) == .nothing)
+        #expect(CleanUpLoadPlan.of(status(window: .everything, cheap: false), declined: false) == .nothing)
+        #expect(CleanUpLoadPlan.of(status(window: .halfYear, cheap: false, gmail: false), declined: false) == .nothing,
+                "imported, agent and demo mailboxes have no sync window")
+    }
+
+    /// A store with no core: the band's and the question's logic alone.
+    private func bare() -> CleanUpStore {
+        CleanUpStore(core: nil, undo: MailUndo(core: nil))
+    }
+
+    @Test func theDemoHasNothingToLoadAndItsSizeGroupsShowTheirRange() async throws {
+        let model = try await demo()
+        let store = model.cleanUp
+        #expect(store.headerLoad == nil)
+        #expect(store.loadQuestion == nil)
+        let status = try await #require(model.core).cleanupLoadStatus(accountID: try #require(model.openAccountID))
+        #expect(!status.hasSyncWindow)
+
+        store.view = .size
+        await store.reload()
+        #expect(CleanUpViewKind.size.hasDetailLine)
+        let detail = try #require(store.groups.first).detail
+        #expect(["Less than 1 KB", "1 KB to 10 KB", "10 KB to 100 KB", "100 KB to 1 MB", "1 MB to 10 MB",
+                 "More than 10 MB"].contains(detail ?? ""))
+    }
+
+    @Test func theBandCountsHeadersAsSyncReportsThem() {
+        let store = bare()
+        store.headerLoad = CleanUpHeaderLoad(total: 43_000, remaining: 43_000, widened: true)
+        #expect(store.headerLoad?.text == "Loading headers for all mail — 0 of 43,000")
+        store.syncChanged(pending: 900, headers: 41_800, accountID: nil)
+        #expect(store.headerLoad?.text == "Loading headers for all mail — 1,200 of 43,000", "bodies are not counted")
+        store.syncChanged(pending: 0, headers: 10, accountID: "someone-else")
+        #expect(store.headerLoad?.remaining == 41_800, "another account's sync")
+        store.syncChanged(pending: 0, headers: 0, accountID: nil)
+        #expect(store.headerLoad?.done == true)
+        #expect(store.headerLoad?.text == "Headers for all mail are on this Mac", "the note stays until put away")
+        store.dismissHeaderLoad()
+        #expect(store.headerLoad == nil)
+
+        // Over the API everything comes down whole; a load found under way
+        // (not started here) goes when it is done.
+        store.headerLoad = CleanUpHeaderLoad(total: 10, remaining: 10, whole: true, widened: false)
+        store.syncChanged(pending: 4, headers: 0, accountID: nil)
+        #expect(store.headerLoad?.text == "Loading all mail — 6 of 10")
+        store.syncChanged(pending: 0, headers: 0, accountID: nil)
+        #expect(store.headerLoad == nil)
+    }
+
+    @Test func notNowIsRememberedForTheSession() {
+        let store = bare()
+        store.loadQuestion = CleanUpLoadQuestion(accountID: "acct", messages: 38_412, seconds: 9_219)
+        #expect(store.loadQuestion?.message == "Clean Up groups the mail on this Mac. 38,412 older messages are still "
+            + "only in Gmail; over the Gmail API they take about 2 hours, 34 minutes to download.")
+        store.answerLoadQuestion(load: false)
+        #expect(store.loadQuestion == nil)
+        #expect(store.declinedLoads.contains("acct"))
+        #expect(CleanUpLoadQuestion(accountID: "acct", messages: nil, seconds: nil).message.contains("all older mail"))
+        #expect(CleanUpLoadQuestion.duration(30) == "a minute")
+        #expect(CleanUpLoadQuestion.duration(3 * 86_400 + 7_200) == "3 days, 2 hours")
+    }
 }

@@ -54,7 +54,10 @@ pub use agents::{
 };
 pub use archive::{ImportStatus, MailboxScan};
 pub use attachments::AttachmentFileInfo;
-pub use cleanup::{CleanupAction, CleanupGroup, CleanupMessage, CleanupResult, CleanupScope, CleanupView};
+pub use cleanup::{
+    CleanupAction, CleanupGroup, CleanupLoadEstimate, CleanupLoadStatus, CleanupMessage, CleanupResult, CleanupScope,
+    CleanupView,
+};
 pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
 pub use error::{CoreError, ErrorKind};

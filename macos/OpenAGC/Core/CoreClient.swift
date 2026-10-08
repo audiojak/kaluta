@@ -1192,6 +1192,24 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// Where the account's download stands, for loading every header when
+    /// Clean Up opens (spec §14.12).
+    func cleanupLoadStatus(accountID: String) async throws(CoreClientError) -> CleanupLoadStatus {
+        try await call { try await core.cleanupLoadStatus(accountId: accountID) }
+    }
+
+    /// Set the account's sync window to Everything, keeping bodies where
+    /// they were; false when it was Everything already.
+    func cleanupLoadEveryHeader(accountID: String) async throws(CoreClientError) -> Bool {
+        try await call { try await core.cleanupLoadEveryHeader(accountId: accountID) }
+    }
+
+    /// Without IMAP: how many messages loading all mail would download, and
+    /// about how long it would take.
+    func cleanupLoadEstimate(accountID: String) async throws(CoreClientError) -> CleanupLoadEstimate {
+        try await call { try await core.cleanupLoadEstimate(accountId: accountID) }
+    }
+
     /// Which part of the download range gets full messages over IMAP.
     func bodyWindow(for accountID: String) async throws(CoreClientError) -> BodyWindow {
         try await call { try await core.bodyWindowFor(accountId: accountID) }
@@ -1350,6 +1368,8 @@ typealias CleanupAction = OpenAGCCore.CleanupAction
 typealias CleanupGroup = OpenAGCCore.CleanupGroup
 typealias CleanupMessage = OpenAGCCore.CleanupMessage
 typealias CleanupResult = OpenAGCCore.CleanupResult
+typealias CleanupLoadStatus = OpenAGCCore.CleanupLoadStatus
+typealias CleanupLoadEstimate = OpenAGCCore.CleanupLoadEstimate
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService

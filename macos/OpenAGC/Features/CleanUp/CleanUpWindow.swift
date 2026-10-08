@@ -25,6 +25,9 @@ struct CleanUpWindow: View {
         .focusedSceneValue(\.isCleanUpWindow, true)
         .frame(minWidth: 900, minHeight: 520)
         .task(id: model.openAccountID) { await store.open(accountID: model.openAccountID) }
+        .sheet(item: Binding(get: { store.loadQuestion }, set: { if $0 == nil { store.answerLoadQuestion(load: false) } })) {
+            CleanUpLoadDialog(question: $0)
+        }
         .onAppear {
             store.isShown = true
             ToolbarToolTips.install(model: model)
@@ -96,6 +99,9 @@ private struct CleanUpGroupsColumn: View {
                         .hoverHelp("Show only the groups whose name, other names or address contain this")
                 }
             }
+            if let load = store.headerLoad {
+                CleanUpLoadBand(load: load)
+            }
             if let error = store.error {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(TypeRole.meta)
@@ -121,6 +127,70 @@ private struct CleanUpGroupsColumn: View {
     static func emptyText(_ view: CleanUpViewKind, scope: CleanupScope) -> String {
         if view == .people { return "Senders you have written to are listed here." }
         return scope == .inbox ? "The Inbox is empty." : "There is no mail outside Spam and Trash."
+    }
+}
+
+/// Every header loading (spec §14.12): how far it has got and, when Clean
+/// Up widened the sync window, that it did and where to change it. An info
+/// band over the groups, since the groups fill as the headers arrive.
+struct CleanUpLoadBand: View {
+    @Environment(AppModel.self) private var model
+    let load: CleanUpHeaderLoad
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Image(systemName: load.done ? "checkmark.circle" : "arrow.down.circle")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(load.text)
+                if load.widened {
+                    Text(CleanUpHeaderLoad.note)
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+            if load.listing {
+                ProgressView().controlSize(.small)
+            } else if !load.done {
+                ProgressView(value: load.fraction)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .frame(width: 80)
+                    .accessibilityLabel("Headers loaded")
+            } else {
+                Button("OK") { model.cleanUp.dismissHeaderLoad() }
+                    .controlSize(.small)
+                    .hoverHelp("Hide this note")
+            }
+        }
+        .font(TypeRole.meta)
+        .bandBackground(.info)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Asked before loading all mail without IMAP (spec §14.12): how much
+/// there is and how long it takes over the Gmail API.
+struct CleanUpLoadDialog: View {
+    @Environment(AppModel.self) private var model
+    let question: CleanUpLoadQuestion
+
+    var body: some View {
+        Dialog(title: "Load All Mail", message: question.message) {
+            Text(CleanUpLoadQuestion.detail)
+                .font(TypeRole.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } buttons: {
+            CancelButton(title: "Not Now", help: "Clean up the mail already on this Mac (Esc)") {
+                model.cleanUp.answerLoadQuestion(load: false)
+            }
+            Button("Load All Mail") { model.cleanUp.answerLoadQuestion(load: true) }
+                .keyboardShortcut(.defaultAction)
+                .hoverHelp("Download every message from Gmail; the groups fill as it arrives (Return)")
+        }
     }
 }
 

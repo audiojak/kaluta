@@ -11,6 +11,7 @@ use provider_api::fake::FakeProvider;
 use provider_api::{FetchedBody, FetchedMessage};
 
 use super::*;
+use crate::account::SyncWindow;
 use crate::{CoreConfig, CoreEvent, EventListener};
 
 const NOW: i64 = 1_790_000_000_000;
@@ -342,4 +343,165 @@ fn the_demo_mailbox_cleans_up_locally() {
     assert_eq!(block_on(core.outbox_status()).unwrap().pending, 0, "no provider, no outbox");
     block_on(core.undo_action(done.undo.unwrap())).unwrap();
     assert_eq!(count(&core), biggest.count);
+}
+
+/// Registers "acct" as a Gmail account, with IMAP granted or not.
+fn register_gmail(core: &Core, imap: bool) {
+    crate::registry::save_index(
+        &core.data_path(),
+        &[crate::registry::IndexEntry {
+            id: "acct".into(),
+            kind: crate::registry::AccountKind::Gmail,
+            email: "me@example.com".into(),
+            display_name: None,
+            avatar_file: None,
+            added_at: 0,
+            imap: imap.then_some(true),
+            named_by_user: false,
+            service: None,
+        }],
+    )
+    .unwrap();
+}
+
+/// A message `age_days` old, as the API lists it (no body: IMAP has it).
+fn aged(id: &str, age_days: i64, labels: &[&str]) -> FetchedMessage {
+    let mut m = message(id, &format!("t-{id}"), "news@example.com", labels);
+    m.internal_date = NOW - age_days * 86_400_000;
+    m
+}
+
+fn body_state(core: &Core, id: &str) -> Option<String> {
+    let db = block_on(core.store_for("acct")).unwrap();
+    let id = id.to_owned();
+    db.read_blocking(move |c| {
+        Ok(c.query_row("SELECT body_state FROM messages WHERE gmail_id = ?1", [id], |r| r.get(0)).ok())
+    })
+    .unwrap()
+}
+
+#[test]
+fn opening_clean_up_over_imap_loads_every_header_and_no_body_beyond_the_body_window() {
+    use provider_gmail::imap::{ImapConfig, ImapEndpoint};
+    use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer};
+
+    let (_temp, core, _events) = core("load-imap");
+    register_gmail(&core, true);
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    // Six months (the default) and bodies for the last 30 days (the default).
+    let ages = [
+        ("inbox", 1, true),
+        ("recent", 10, false),
+        ("spring", 100, false),
+        ("lastyear", 250, false),
+        ("old", 900, false),
+    ];
+    let id = |n: usize| 0x1a0000000000001u64 + n as u64;
+    crate::runtime::runtime().block_on(async {
+        let server = FakeImapServer::start("tok").await;
+        server.set_now(NOW);
+        let rest = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+        for (n, (name, age, inbox)) in ages.iter().enumerate() {
+            let labels: &[&str] = if *inbox { &["INBOX"] } else { &[] };
+            let mut m = aged(&format!("{:x}", id(n)), *age, labels);
+            m.body = None;
+            rest.seed(m);
+            let date = chrono::DateTime::from_timestamp_millis(NOW - age * 86_400_000).unwrap().to_rfc2822();
+            server.add(FakeImapMessage {
+                uid: n as u32 + 1,
+                msgid: id(n),
+                thrid: id(n),
+                labels: if *inbox { vec!["\\Inbox".into()] } else { vec![] },
+                flags: vec!["\\Seen".into()],
+                raw: format!(
+                    "From: News <news@example.com>\r\nTo: me@example.com\r\nSubject: {name}\r\nMessage-ID: <{name}@example.com>\r\nDate: {date}\r\n\r\nBody of {name}\r\n"
+                )
+                .into_bytes(),
+            });
+        }
+        let config = ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), ..ImapConfig::gmail("me@example.com") };
+        let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
+        core.start_sync_with_backfill(rest.clone(), imap).unwrap();
+        let settled = |core: &Arc<Core>, stored: u64| {
+            let core = core.clone();
+            async move {
+                for _ in 0..400 {
+                    let status = core.cleanup_load_status("acct".into()).await.unwrap();
+                    let groups = core
+                        .cleanup_groups("acct".into(), CleanupView::Size, CleanupScope::AllMail, String::new())
+                        .await
+                        .unwrap();
+                    if groups.iter().map(|g| g.count).sum::<u64>() == stored
+                        && status.headers_waiting + status.bodies_waiting == 0
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                panic!("sync did not settle at {stored} messages");
+            }
+        };
+        settled(&core, 3).await;
+        let hex = |n: usize| format!("{:x}", id(n));
+        assert_eq!(body_state(&core, &hex(0)).as_deref(), Some("full"), "the Inbox in full");
+        assert_eq!(body_state(&core, &hex(1)).as_deref(), Some("full"), "the last 30 days in full");
+        assert_eq!(body_state(&core, &hex(2)).as_deref(), Some("metadata"), "the rest of six months: headers");
+        assert_eq!(body_state(&core, &hex(4)), None, "outside the window");
+        let bodies = server.body_fetches();
+
+        let status = core.cleanup_load_status("acct".into()).await.unwrap();
+        assert!(status.has_sync_window && status.cheap_headers, "{status:?}");
+        assert_eq!(status.window, SyncWindow::HalfYear);
+
+        // Opening Clean Up: every header, no body.
+        assert!(core.cleanup_load_every_header("acct".into()).await.unwrap());
+        settled(&core, 5).await;
+        assert_eq!(core.cleanup_load_status("acct".into()).await.unwrap().window, SyncWindow::Everything);
+        assert_eq!(core.body_window_for("acct".into()).await.unwrap(), crate::account::BodyWindow::Month, "unchanged");
+        assert_eq!(body_state(&core, &hex(3)).as_deref(), Some("metadata"));
+        assert_eq!(body_state(&core, &hex(4)).as_deref(), Some("metadata"));
+        assert_eq!(server.body_fetches(), bodies, "no body downloaded for the older mail");
+        assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "nothing over the API");
+        assert!(!core.cleanup_load_every_header("acct".into()).await.unwrap(), "already everything");
+    });
+    core.stop_sync();
+}
+
+#[test]
+fn without_imap_clean_up_can_say_how_much_older_mail_there_is_and_how_long_it_takes() {
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
+    fake.seed(aged("inbox", 1, &["INBOX"]));
+    fake.seed(aged("recent", 10, &[]));
+    for n in 0..3 {
+        fake.seed(aged(&format!("old{n}"), 400 + n, &[]));
+    }
+    let (temp, core, _events) = core("load-rest");
+    register_gmail(&core, false);
+    block_on(core.clone().open_account("acct".into())).unwrap();
+    block_on(core.set_sync_window_for("acct".into(), SyncWindow::Month)).unwrap();
+    core.start_sync_with(fake.clone()).unwrap();
+    wait_until("the month synced", || all_mail_count(&core) == 2);
+    let status = block_on(core.cleanup_load_status("acct".into())).unwrap();
+    assert!(status.has_sync_window && !status.cheap_headers, "the API: headers are not cheap");
+    assert_eq!(status.window, SyncWindow::Month);
+    let estimate = block_on(core.cleanup_load_estimate("acct".into())).unwrap();
+    assert_eq!(estimate.messages, Some(3), "Gmail's count less what is here");
+    assert_eq!(estimate.seconds, Some(1), "250 a minute");
+    assert_eq!(provider_gmail::rest_download_seconds(43_000), 10_320, "about 2.9 hours for a large mailbox");
+
+    // Load All Mail: every message, whole.
+    assert!(block_on(core.cleanup_load_every_header("acct".into())).unwrap());
+    wait_until("all mail downloaded", || all_mail_count(&core) == 5);
+    assert_eq!(body_state(&core, "old0").as_deref(), Some("full"), "over the API a header costs a whole message");
+    core.stop_sync();
+    drop(temp);
+}
+
+#[test]
+fn imported_and_demo_mailboxes_have_nothing_to_load() {
+    let (_temp, core, _events) = core("load-none");
+    block_on(core.clone().open_account("demo".into())).unwrap();
+    let status = block_on(core.cleanup_load_status("demo".into())).unwrap();
+    assert!(!status.has_sync_window);
+    assert!(block_on(core.cleanup_load_every_header("demo".into())).is_err());
 }

@@ -32,6 +32,10 @@ import os
 ///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
 ///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
 ///                                       undo notice)
+///   -OpenAGCSnapshotCleanUpLoad loading|ask  …showing every header loading
+///                                       (the band) or the question asked
+///                                       without IMAP (the sheet), sample
+///                                       numbers: the demo has no sync window
 ///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
 ///                                       fake agent on the demo mailbox, accept
 ///                                       some proposals, and show the Writing
@@ -153,8 +157,17 @@ enum Snapshot {
                     model.undo.runsClock = false
                     await store.apply(.archive)
                 }
+                let load = defaults.string(forKey: "OpenAGCSnapshotCleanUpLoad")
+                if load == "loading" {
+                    store.headerLoad = CleanUpHeaderLoad(total: 43_118, remaining: 31_406, widened: true)
+                } else if load == "ask", let account = model.openAccountID {
+                    store.loadQuestion = CleanUpLoadQuestion(accountID: account, messages: 38_412, seconds: 9_219)
+                }
                 try? await Task.sleep(for: .milliseconds(1200))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("cleanup") ?? false) }
+                if load == "ask", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                    window = sheet
+                }
             }
             if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
                 await model.agent.loadProviders()
@@ -306,6 +319,7 @@ enum Snapshot {
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
             delegate.model?.agentMailboxSheet = nil
+            delegate.model?.cleanUp.loadQuestion = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)

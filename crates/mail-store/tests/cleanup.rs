@@ -288,6 +288,49 @@ fn size_buckets_run_from_tiny_to_jumbo() {
         ]
     );
     assert_eq!(ids(&db, View::Size, Scope::Inbox, &["jumbo", "tiny", "nonsense"]), ["j1", "j2", "t"]);
+    let ranges: Vec<_> = groups(&db, View::Size, Scope::Inbox).into_iter().filter_map(|g| g.detail).collect();
+    assert_eq!(
+        ranges,
+        ["Less than 1 KB", "1 KB to 10 KB", "10 KB to 100 KB", "100 KB to 1 MB", "1 MB to 10 MB", "More than 10 MB"],
+        "each bucket's range is its second line"
+    );
+}
+
+/// An optimistic copy of mail just sent (`local-…`) is not Gmail's yet:
+/// an action would leave it alone, so the groups and the count leave it
+/// out too, and the numbers shown are the numbers changed.
+#[test]
+fn local_copies_of_sent_mail_are_neither_counted_nor_acted_on() {
+    let db = open("local-copies");
+    store(
+        &db,
+        vec![
+            msg("sent1", ("Me", "me@example.com"), "s", NOW - DAY, &["SENT", "INBOX"]),
+            msg("local-abc", ("Me", "me@example.com"), "s", NOW, &["SENT", "INBOX"]),
+            msg("other", ("A", "a@example.com"), "s", NOW, &["INBOX"]),
+        ],
+    );
+    for scope in [Scope::Inbox, Scope::AllMail] {
+        let sender = groups(&db, View::Sender, scope);
+        assert_eq!(summary(&sender), [("a@example.com".into(), 1), ("me@example.com".into(), 1)], "{scope:?}");
+        let q = query(View::Sender, scope);
+        let k = keys(&["me@example.com"]);
+        let counted = db.read_blocking(move |c| cleanup::count(c, &q, &k)).unwrap();
+        let acted = ids(&db, View::Sender, scope, &["me@example.com"]);
+        assert_eq!((counted, acted.as_slice()), (1, ["sent1".to_owned()].as_slice()), "{scope:?}");
+        let q = query(View::Sender, scope);
+        let k = keys(&["me@example.com"]);
+        let shown = db.read_blocking(move |c| cleanup::messages(c, &q, &k, 0, 10)).unwrap();
+        assert_eq!(shown.len(), 1, "{scope:?}");
+        let sizes: u64 = groups(&db, View::Size, scope).iter().map(|g| g.count).sum();
+        assert_eq!(sizes, 2, "{scope:?}");
+    }
+    // Applying to the group changes exactly what was counted.
+    let q = query(View::Sender, Scope::Inbox);
+    let applied = db
+        .write_blocking(move |tx| cleanup::apply(tx, &q, &keys(&["me@example.com"]), &[], &[LabelId::new("INBOX")]))
+        .unwrap();
+    assert_eq!(applied.diffs.len(), 1);
 }
 
 #[test]

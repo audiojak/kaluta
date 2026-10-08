@@ -186,7 +186,8 @@ struct AccountRow: View {
     static let suggestIMAPAbove: UInt64 = 20_000
 
     static let bodyWindowChoices: [(BodyWindow, String)] = [
-        (.month, "Last 30 days"), (.halfYear, "Last 6 months"), (.window, "Everything downloaded"),
+        (.month, "Last 30 days"), (.halfYear, "Last 6 months"), (.year, "Last year"),
+        (.window, "Everything downloaded"),
     ]
 
     /// Whether to suggest IMAP: a large mailbox still on the API.

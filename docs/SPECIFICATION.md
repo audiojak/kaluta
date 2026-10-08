@@ -707,7 +707,14 @@ background" with a progress figure from the queue depth.
   keeps what is stored. Mail outside the window stays on the server and is
   not searchable locally (server-side search is a follow-up).
   *(Amended 2026-10-08: opening Clean Up, §14.12, sets the window to
-  everything, headers only, and says so; without IMAP it asks first.)*
+  everything, headers only, and says so; without IMAP it asks first.
+  Implemented: `SyncEngine::load_every_header` stores *Everything* and a
+  body window that keeps bodies where they were (*the whole window*
+  becomes the old window's span; Settings gains *Full messages for: Last
+  year*), then re-lists the window's phases, so with IMAP the older mail
+  lands in the headers-only tier and the body backfill never fetches it.
+  An account not syncing stores both and marks its queue's tiering stale,
+  so the next start lists the wider window.)*
 - *Order.* The queue drains in listing order within a priority, i.e. newest
   first (`backfill_queue.seq`); it used to order by Gmail id, which is oldest
   first. Fetches triggered by history (mail the user touched elsewhere) go to
@@ -2978,7 +2985,9 @@ sets the account's sync window to *Everything* when it is narrower
 load's progress; the window says the setting changed, and Settings ›
 Accounts shows it. Without IMAP, where headers cost as much as whole
 messages, the window states the message count and how long the download
-will take, and asks before starting.
+will take, and asks before starting. *(Decided 2026-10-08: this is the
+one exception to changing the setting without asking; the user's *Not
+Now* holds until the app quits.)*
 
 **Mailing lists from new mail only.** `List-Id`, `List-Unsubscribe` and
 `List-Unsubscribe-Post` are stored from 2026-10-08 on (§6.2), on every
@@ -3048,6 +3057,33 @@ carries its origin) and ⌘Z there undoes from the account's stack. The
 messages column fetches pages of 200 as rows come into view. While the
 window is open, changes from sync or the mail window refresh it at most
 every 2 s.)*
+
+*(Implemented 2026-10-08, loading every header: `cleanup_load_status`,
+`cleanup_load_every_header` and `cleanup_load_estimate`. On opening, a
+Gmail account whose window is narrower than *Everything* and whose
+headers are cheap (IMAP granted and not refused just now) is widened at
+once; otherwise the window asks with the count (Gmail's
+`messagesTotal` less the messages stored) and the time at the rate the
+backfill runs over the API (5,000 units a minute, 20 per
+`messages.get`: 250 messages a minute), or "all older mail" when Gmail
+cannot be asked. Widening keeps bodies where they were: a body window of
+"the whole window" becomes the span the old window covered (a new *Last
+year* body window exists for that), so the older mail is queued for
+headers only and no body outside the body window is fetched (tested
+against the IMAP fake and `FakeProvider`). An info band over the groups
+shows "Loading headers for all mail — N of M" from `SyncStatus`'s
+headers count (over the API, "Loading all mail", counting whole
+messages) and says the sync window is now *Everything*; the groups fill
+as headers arrive. Imported mailboxes, agent mailboxes and the demo have
+no sync window and load nothing. If IMAP is refused part way, the engine
+promotes the headers-only tier to whole downloads as for any
+*Everything* account (§7.4).*
+
+*Also 2026-10-08: Size groups show their range as the second line ("Less
+than 1 KB" … "More than 10 MB"), and optimistic local copies of sent
+mail are out of scope everywhere (groups, counts, messages, actions), so
+"N messages in M groups" counts exactly what an action may change; the
+result's count and notice still give only the messages that changed.)*
 
 ---
 

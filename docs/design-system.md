@@ -256,7 +256,8 @@ done over thousands of messages at once.
 - **Long lists are AppKit tables** (`CleanUpTables.swift`), in the thread
   row's type and calm: a group is a checkbox, its title
   (`rowSender`), a second line in `rowSecondary`, secondary ("address ·
-  aka other names", Sender and People only), and its count right-aligned
+  aka other names" in Sender and People; the bucket's range, "1 KB to
+  10 KB", in Size), and its count right-aligned
   in `rowCount`, secondary (every row has one, so not the accent). A
   message is sender and date over the subject, with its size on the
   subject line in the Size view. Hairlines inset to the text, as thread
@@ -276,6 +277,17 @@ done over thousands of messages at once.
   *Archive*, *Trash* and *Spam* in one glass group and *Move* (the Inbox
   and the labels) after a fixed spacer. Disabled, not hidden, with
   nothing ticked.
+- **Loading every header** (spec §14.12): an info band (`CleanUpLoadBand`,
+  `.bandBackground(.info)`) under the filter, over the groups, since the
+  groups fill as headers arrive: "Loading headers for all mail — 11,712
+  of 43,118" with a small linear bar (a known total), and under it, in
+  `TypeRole.caption`, secondary, that the account's sync window is now
+  Everything and where to change it. While Gmail is searched, a small
+  spinner and "Finding older mail in Gmail…"; when done, the note stays
+  with *OK* until put away. Without IMAP the window first asks with a
+  `Dialog` ("Load All Mail": the count and the time as its message, the
+  consequence as a caption, *Not Now* (Esc) and *Load All Mail* (Return)).
+  Not in the toolbar: the toolbar's status is for actions and the outbox.
 - **Undo** is the app's: one entry per action on the account's stack
   (⌘Z works from this window too), acknowledged by `UndoNoticeView(origin:
   .cleanUp)` floating over the groups. A notice carries its window's
@@ -478,3 +490,5 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
 | ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |
+| ![Clean Up loading every header, light](design/cleanup-load-light.png) | ![Clean Up loading every header, dark](design/cleanup-load-dark.png) |
+| ![Clean Up asking before loading all mail without IMAP, light](design/cleanup-ask-light.png) | ![Clean Up asking before loading all mail without IMAP, dark](design/cleanup-ask-dark.png) |

@@ -295,6 +295,14 @@ C3. **The Clean Up window** (oagc-merk.3) — the menu item and Settings button,
 C4. **Loading every header on open** (oagc-merk.4) — set the window to *Everything*,
     show the header load, the no-IMAP confirmation. Tests with the IMAP
     fake.
+    *(as built: "cheap headers" means IMAP granted and not refused just
+    now; a body window of "the whole window" is pinned to the old
+    window's span (new *Last year* body window) so widening fetches no
+    bodies; the progress is an info band over the groups, not the
+    toolbar (self-snapshots cannot show the toolbar's glass, and the
+    groups are what fill); Size groups show their range; local copies of
+    sent mail are out of Clean Up's scope everywhere, so counts and
+    actions agree.)*
 
 *(Then feature 1, then:)*
 

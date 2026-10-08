@@ -51,11 +51,12 @@ enum CleanUpViewKind: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Group rows have a second line (the address, other names).
+    /// Group rows have a second line (the address, other names; a size
+    /// bucket's range).
     var hasDetailLine: Bool {
         switch self {
-        case .sender, .people, .mailingList, .social, .promotions: true
-        case .subject, .time, .size: false
+        case .sender, .people, .mailingList, .social, .promotions, .size: true
+        case .subject, .time: false
         }
     }
 
@@ -137,8 +138,16 @@ final class CleanUpStore {
     var error: String?
     /// Changes still waiting to go to the provider (the outbox).
     private(set) var pending: UInt32 = 0
+    /// Every header loading (spec §14.12), shown in a band over the groups.
+    var headerLoad: CleanUpHeaderLoad?
+    /// Asking before loading all mail without IMAP (a sheet).
+    var loadQuestion: CleanUpLoadQuestion?
+    /// Accounts whose user said Not Now this session.
+    @ObservationIgnored var declinedLoads: Set<String> = []
+    /// Accounts whose sync window Clean Up widened this session.
+    @ObservationIgnored var widenedLoads: Set<String> = []
 
-    @ObservationIgnored private let core: CoreClient?
+    @ObservationIgnored let core: CoreClient?
     @ObservationIgnored private let undo: MailUndo
     @ObservationIgnored private var pages: [Int: [CleanupMessage]] = [:]
     @ObservationIgnored private var loadingPages: Set<Int> = []
@@ -146,7 +155,7 @@ final class CleanUpStore {
     @ObservationIgnored private let countLoads = LatestLoad()
     /// Bumped whenever the pages are dropped; a page that arrives after is ignored.
     @ObservationIgnored private var pageEpoch = 0
-    @ObservationIgnored private let logger = Logger(subsystem: "ai.actual.openagc", category: "cleanup")
+    @ObservationIgnored let logger = Logger(subsystem: "ai.actual.openagc", category: "cleanup")
     /// Bumped when a page arrives, so the table redraws its rows.
     private(set) var pageRevision = 0
 
@@ -179,8 +188,11 @@ final class CleanUpStore {
             groupsLoaded = false
             error = nil
             pending = 0
+            headerLoad = nil
+            loadQuestion = nil
         }
         await reload()
+        await prepareHeaderLoad()
     }
 
     /// The groups and the ticked groups' messages, as they are now.
@@ -382,6 +394,163 @@ final class CleanUpStore {
     func outboxChanged(pending: UInt32, accountID: String?) {
         guard accountID == nil || accountID == self.accountID else { return }
         self.pending = pending
+    }
+}
+
+// MARK: Loading every header (spec §14.12)
+
+/// What opening Clean Up does about mail outside the sync window.
+enum CleanUpLoadPlan: Equatable {
+    /// Nothing to load: every header is here or on its way, the account
+    /// has no sync window (imported, agent, demo), or the user said Not
+    /// Now this session.
+    case nothing
+    /// IMAP: headers are cheap, so the window becomes Everything at once.
+    case widen
+    /// The Gmail API: headers cost as much as whole messages, so ask first.
+    case ask
+
+    static func of(_ status: CleanupLoadStatus, declined: Bool) -> CleanUpLoadPlan {
+        guard status.hasSyncWindow, status.window != .everything else { return .nothing }
+        if status.cheapHeaders { return .widen }
+        return declined ? .nothing : .ask
+    }
+}
+
+/// The header load Clean Up started or found under way, for the band
+/// over the groups.
+struct CleanUpHeaderLoad: Equatable {
+    /// The window's phases are being listed (Gmail is searched).
+    var listing = false
+    /// Messages waiting when the load began, or the most seen since.
+    var total: UInt64 = 0
+    var remaining: UInt64 = 0
+    /// Without IMAP every message comes down whole: count bodies too.
+    var whole = false
+    /// Clean Up changed the sync window: the band says so.
+    var widened = false
+
+    var done: Bool { !listing && remaining == 0 }
+    var fraction: Double { total == 0 ? 1 : Double(total - min(remaining, total)) / Double(total) }
+
+    /// "Loading headers for all mail — 1,200 of 43,000".
+    var text: String {
+        if listing { return "Finding older mail in Gmail…" }
+        if done { return whole ? "All mail is on this Mac" : "Headers for all mail are on this Mac" }
+        let what = whole ? "Loading all mail" : "Loading headers for all mail"
+        return "\(what) — \((total - min(remaining, total)).formatted()) of \(total.formatted())"
+    }
+
+    static let note = "This account's sync window is now Everything; change it in Settings › Accounts."
+}
+
+/// The question asked before loading all mail without IMAP.
+struct CleanUpLoadQuestion: Identifiable, Equatable {
+    var id: String { accountID }
+    let accountID: String
+    /// Messages in Gmail not on this Mac, if Gmail said.
+    let messages: UInt64?
+    let seconds: UInt64?
+
+    var message: String {
+        guard let messages, let seconds else {
+            return "Clean Up groups the mail on this Mac. Downloading all older mail from Gmail over the Gmail API "
+                + "can take hours for a large mailbox."
+        }
+        let count = messages == 1 ? "1 older message is" : "\(messages.formatted()) older messages are"
+        return "Clean Up groups the mail on this Mac. \(count) still only in Gmail; over the Gmail API they take "
+            + "about \(Self.duration(seconds)) to download."
+    }
+
+    static let detail = "The account's sync window becomes Everything (Settings › Accounts) and Clean Up fills as "
+        + "the mail arrives. Signing in again for IMAP there makes downloads much faster."
+
+    /// "2 hours, 52 minutes"; "a minute" for anything shorter.
+    static func duration(_ seconds: UInt64) -> String {
+        guard seconds >= 60 else { return "a minute" }
+        let formatter = DateComponentsFormatter()
+        formatter.unitsStyle = .full
+        formatter.maximumUnitCount = 2
+        formatter.allowedUnits = seconds >= 86_400 ? [.day, .hour] : [.hour, .minute]
+        // Rounded to whole minutes, so the count is not falsely exact.
+        let minutes = (seconds + 59) / 60
+        return formatter.string(from: TimeInterval(minutes * 60)) ?? "\(minutes) minutes"
+    }
+}
+
+extension CleanUpStore {
+    /// Opening Clean Up loads every header (spec §14.12): with IMAP the
+    /// sync window becomes Everything at once; over the API the user is
+    /// asked first, once a session; a load already under way is shown.
+    func prepareHeaderLoad() async {
+        guard let core, let accountID,
+              let status = try? await core.cleanupLoadStatus(accountID: accountID),
+              accountID == self.accountID else { return }
+        switch CleanUpLoadPlan.of(status, declined: declinedLoads.contains(accountID)) {
+        case .widen:
+            await loadAllMail(whole: false)
+        case .ask:
+            let estimate = try? await core.cleanupLoadEstimate(accountID: accountID)
+            guard accountID == self.accountID else { return }
+            loadQuestion = CleanUpLoadQuestion(accountID: accountID, messages: estimate?.messages,
+                                               seconds: estimate?.seconds)
+        case .nothing:
+            // Reopened while a load runs: show it again.
+            let waiting = status.cheapHeaders ? status.headersWaiting : status.headersWaiting + status.bodiesWaiting
+            if status.hasSyncWindow, status.window == .everything, waiting > 0 || widenedLoads.contains(accountID) {
+                headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: !status.cheapHeaders,
+                                               widened: widenedLoads.contains(accountID))
+            }
+        }
+    }
+
+    /// The answer to the question: Load All Mail, or Not Now (remembered
+    /// until the app quits).
+    func answerLoadQuestion(load: Bool) {
+        guard let question = loadQuestion else { return }
+        loadQuestion = nil
+        if load {
+            Task { await loadAllMail(whole: true) }
+        } else {
+            declinedLoads.insert(question.accountID)
+        }
+    }
+
+    /// Widen the sync window to Everything and follow the download.
+    func loadAllMail(whole: Bool) async {
+        guard let core, let accountID else { return }
+        headerLoad = CleanUpHeaderLoad(listing: true, whole: whole, widened: true)
+        do {
+            _ = try await core.cleanupLoadEveryHeader(accountID: accountID)
+            widenedLoads.insert(accountID)
+            let status = try await core.cleanupLoadStatus(accountID: accountID)
+            guard accountID == self.accountID else { return }
+            let waiting = whole ? status.headersWaiting + status.bodiesWaiting : status.headersWaiting
+            headerLoad = CleanUpHeaderLoad(total: waiting, remaining: waiting, whole: whole, widened: true)
+        } catch {
+            logger.error("loading every header failed: \(error.message, privacy: .private)")
+            headerLoad = nil
+            self.error = error.message
+        }
+    }
+
+    /// The open account's sync progress (a `.syncStatus` event): the
+    /// header load's count follows it.
+    func syncChanged(pending: UInt32, headers: UInt32, accountID: String?) {
+        guard accountID == nil || accountID == self.accountID, var load = headerLoad, !load.listing else { return }
+        let remaining = UInt64(headers) + (load.whole ? UInt64(pending) : 0)
+        load.remaining = remaining
+        load.total = max(load.total, remaining)
+        if load.done, !load.widened {
+            headerLoad = nil
+        } else {
+            headerLoad = load
+        }
+    }
+
+    /// Put the band away (its OK, once the load is done).
+    func dismissHeaderLoad() {
+        headerLoad = nil
     }
 }
 

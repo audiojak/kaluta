@@ -292,6 +292,58 @@ async fn with_cheap_headers_only_the_inbox_and_the_body_window_get_bodies() {
     assert_consistent(&db);
 }
 
+/// Clean Up (spec §14.12) loads every header: the window becomes
+/// Everything, and older mail comes down as headers only, whatever the
+/// body window was.
+#[tokio::test]
+async fn loading_every_header_widens_the_window_without_bodies_beyond_the_body_window() {
+    for (body, bodies) in [
+        (BodyWindow::Month, &["inbox-unread", "inbox-read", "recent"][..]),
+        // "The whole window" meant six months: it stays six months.
+        (BodyWindow::Window, &["inbox-unread", "inbox-read", "recent", "this-year"][..]),
+    ] {
+        let (fake, db, recorder, engine) = setup(&format!("load-headers-{}", body.as_str()));
+        engine.set_window(SyncWindow::HalfYear).await.unwrap();
+        engine.set_body_window(body).await.unwrap();
+        seed_mailbox(&fake);
+        let source = Arc::new(CountingSource::cheap(&fake));
+        engine.set_backfill_source(source.clone());
+        engine.bootstrap_prepare().await.unwrap();
+        engine.bootstrap_list_rest().await.unwrap();
+        while engine.headers_pass(100).await.unwrap() > 0 {}
+        engine.backfill_all().await.unwrap();
+        assert_eq!(body_state(&db, "ancient"), None, "outside the six months: not listed");
+        let fetched = source.bodies();
+
+        assert!(engine.load_every_header().await.unwrap());
+        assert_eq!(engine.window().await.unwrap(), SyncWindow::Everything);
+        let kept = if body == BodyWindow::Window { BodyWindow::HalfYear } else { body };
+        assert_eq!(engine.body_window().await.unwrap(), kept, "bodies stay where they were");
+        assert_eq!(db.read(queue::counts).await.unwrap(), (0, 1), "the older mail is queued for headers only");
+        assert_eq!(recorder.progress.lock().unwrap().last().map(|p| p.headers), Some(1), "reported");
+
+        while engine.headers_pass(100).await.unwrap() > 0 {}
+        assert_eq!(engine.backfill_all().await.unwrap(), 0, "no bodies to fetch");
+        assert_eq!(source.bodies(), fetched, "no body fetched for the older mail");
+        assert_eq!(body_state(&db, "ancient").as_deref(), Some("metadata"), "its headers are stored");
+        let full: Vec<String> = db
+            .read(|c| {
+                let mut stmt =
+                    c.prepare("SELECT gmail_id FROM messages WHERE body_state = 'full' ORDER BY gmail_id")?;
+                let rows = stmt.query_map([], |r| r.get(0))?.collect::<Result<Vec<String>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .unwrap();
+        let mut want: Vec<String> = bodies.iter().map(|s| (*s).to_owned()).collect();
+        want.sort();
+        assert_eq!(full, want, "bodies for the Inbox and the body window only");
+
+        assert!(!engine.load_every_header().await.unwrap(), "already everything: nothing to do");
+        assert_consistent(&db);
+    }
+}
+
 #[tokio::test]
 async fn refresh_under_tiers_brings_header_only_labels_current_without_bodies() {
     let (fake, db, _recorder, engine) = setup("tiers-refresh");

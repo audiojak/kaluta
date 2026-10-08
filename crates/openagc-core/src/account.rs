@@ -347,6 +347,7 @@ impl From<mail_sync::SyncWindow> for SyncWindow {
 pub enum BodyWindow {
     Month,
     HalfYear,
+    Year,
     /// Everything in the sync window.
     Window,
 }
@@ -356,6 +357,7 @@ impl From<BodyWindow> for mail_sync::BodyWindow {
         match w {
             BodyWindow::Month => Self::Month,
             BodyWindow::HalfYear => Self::HalfYear,
+            BodyWindow::Year => Self::Year,
             BodyWindow::Window => Self::Window,
         }
     }
@@ -366,6 +368,7 @@ impl From<mail_sync::BodyWindow> for BodyWindow {
         match w {
             mail_sync::BodyWindow::Month => Self::Month,
             mail_sync::BodyWindow::HalfYear => Self::HalfYear,
+            mail_sync::BodyWindow::Year => Self::Year,
             mail_sync::BodyWindow::Window => Self::Window,
         }
     }
