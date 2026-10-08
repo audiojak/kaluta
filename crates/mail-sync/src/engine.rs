@@ -1259,12 +1259,27 @@ impl SyncEngine {
     }
 
     /// Label list changes are not in history; refresh them wholesale.
+    ///
+    /// When labels live on this Mac ([`MailProvider::labels_are_local`]),
+    /// the user labels in the store are the truth: the provider's list only
+    /// adds labels that are missing, and nothing the user made is dropped
+    /// or renamed. Otherwise the provider's list is the truth (Gmail).
     pub async fn refresh_labels(&self) -> SyncResult<()> {
-        let labels = self.provider.list_labels().await?;
-        let keep: Vec<LabelId> = labels.iter().map(|l| l.id.clone()).collect();
+        let local = self.provider.labels_are_local();
+        let mut labels = self.provider.list_labels().await?;
+        let mut keep: Vec<LabelId> = labels.iter().map(|l| l.id.clone()).collect();
         let changes = self
             .db
             .write(move |tx| {
+                if local {
+                    let user: BTreeSet<LabelId> = read::list_labels(tx)?
+                        .into_iter()
+                        .filter(|l| l.kind == mail_domain::LabelKind::User)
+                        .map(|l| l.id)
+                        .collect();
+                    labels.retain(|l| !user.contains(&l.id));
+                    keep.extend(user);
+                }
                 let mut w = MailWriter::new(tx);
                 w.upsert_labels(&labels)?;
                 w.retain_labels(&keep)?;

@@ -169,3 +169,42 @@ async fn a_sent_message_with_the_services_own_message_id_leaves_no_duplicate() {
     assert_eq!(messages, 1, "one sent message, not the local copy as well: {sent:?}");
     assert!(db.read(consistency::check).await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_label_made_on_this_mac_survives_the_next_sync_start() {
+    let (_fake, db, engine) = setup("refresh").await;
+    // A label made on this Mac (as `create_label` does on an agent
+    // mailbox), put on thread a.
+    let label = Label {
+        id: LabelId::new("Local_Receipts"),
+        name: "Receipts".into(),
+        kind: mail_domain::LabelKind::User,
+        color: None,
+        visible: true,
+    };
+    let id = label.id.clone();
+    db.write(move |tx| {
+        let mut w = mail_store::MailWriter::new(tx);
+        w.upsert_labels(&[label])?;
+        w.finish()
+    })
+    .await
+    .unwrap();
+    engine
+        .apply_change(
+            LocalChange::Labels { thread_ids: vec![ThreadId::new("a")], add: vec![id.clone()], remove: vec![] },
+            true,
+        )
+        .await
+        .unwrap();
+    engine.drain_outbox().await.unwrap();
+
+    // Sync starts again: the label list is refreshed from the provider,
+    // which does not know the label.
+    engine.refresh_labels().await.unwrap();
+    let labels = db.read(read::list_labels).await.unwrap();
+    assert!(labels.iter().any(|l| l.id == id && l.name == "Receipts"), "the label stays: {labels:?}");
+    let threads = db.read(move |c| read::list_threads(c, id.as_str(), None, 10)).await.unwrap().rows;
+    assert_eq!(threads.iter().map(|t| t.id.0.as_str()).collect::<Vec<_>>(), vec!["a"], "and so does its thread");
+    assert!(db.read(consistency::check).await.unwrap().is_empty());
+}
