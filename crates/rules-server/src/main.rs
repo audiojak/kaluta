@@ -15,6 +15,8 @@
 //! it; turns on OAuth sign-in with connect codes).
 //! `OPENAGC_RULES_REGISTRATION_TOKEN`, only from the environment, makes
 //! registering a mailbox need that bearer token.
+//! `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` refuses plaintext snapshots (the
+//! project-hosted server sets it; spec §10.6, encryption at rest).
 //!
 //! Plain HTTP: put it behind a TLS proxy (`docs/rules-server.md`).
 
@@ -145,6 +147,8 @@ fn serve(args: &Args) -> ExitCode {
         rate_limit_per_minute: args.rate_limit,
         registration_token: env("OPENAGC_RULES_REGISTRATION_TOKEN"),
         public_url: args.public_url.clone(),
+        require_encryption: env("OPENAGC_RULES_REQUIRE_ENCRYPTION")
+            .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes")),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(r) => r,

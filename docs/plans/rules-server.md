@@ -1,6 +1,6 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); steps 1 to 7 done, the server built, the
+Status: decided (2026-10-08); steps 1 to 8 done, the server built, the
 app publishing to it, OAuth with connect codes, *Connect a Cloud Agent…*,
 `check_draft`, `report_send` and the app recording reports (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
@@ -327,5 +327,17 @@ the headers beta use them.
    a report needs `to`, and `message_id` is optional; reports are kept on
    this Mac before the first learning run but not recorded as
    compositions then, as ADR 0013 says.)*
-8. Encryption at rest.
+8. Encryption at rest. *(Done 2026-10-09, oagc-gmn7.7: the `rules-crypto` crate;
+   each push sealed under a fresh key wrapped per agent key; agent keys made
+   by the server while it holds the credential, stored wrapped under
+   HKDF-SHA256 of it and sealed to the app's X25519 key; OAuth grants'
+   tokens carry the grant's secret; reports sealed to the app;
+   `OPENAGC_RULES_REQUIRE_ENCRYPTION`; on by default in the app, with
+   *Advanced* › *Encrypt on the server* when the server allows plaintext;
+   spec §10.6 *Encryption at rest*. Decided while building: no key is
+   wrapped under a connect code (about 49 bits, brute-forced from a leaked
+   database within its 10 minutes); a grant gets its key with its first
+   tokens instead, and the app wraps for it when it sees it in the list.
+   The per-push key is the rotation: a revoked agent opens nothing
+   published after its revocation.)*
 9. The project-hosted instance: operations notes, backups, the price.

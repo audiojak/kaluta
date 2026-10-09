@@ -371,6 +371,10 @@ impl RulesServer {
 
     /// With `oauth`, its public URL is its loopback address.
     fn start_with(name: &str, oauth: bool) -> Self {
+        Self::start_full(name, oauth, false)
+    }
+
+    fn start_full(name: &str, oauth: bool, require_encryption: bool) -> Self {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let dir = scratch(&format!("server-{name}"));
         let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
@@ -380,10 +384,20 @@ impl RulesServer {
             rate_limit_per_minute: 0,
             registration_token: None,
             public_url: oauth.then(|| url.clone()),
+            require_encryption,
         };
         let app = rules_server::app(&config).unwrap();
         rt.spawn(async move { axum::serve(listener, app).await });
         Self { rt, url, dir }
+    }
+
+    /// Every byte the server wrote: its database and write-ahead log.
+    fn stored_bytes(&self) -> Vec<u8> {
+        let file = rules_server::db::FILE_NAME;
+        [file.to_owned(), format!("{file}-wal")]
+            .iter()
+            .flat_map(|n| std::fs::read(self.dir.0.join(n)).unwrap_or_default())
+            .collect()
     }
 
     fn key(&self, account: &str) -> String {
@@ -396,7 +410,9 @@ impl RulesServer {
         let address = address.to_owned();
         db.run_now(move |c| {
             let Some(m) = rules_server::db::mailbox_by_address(c, &address)? else { return Ok(None) };
-            Ok(rules_server::db::latest_snapshot(c, m.id)?.map(|s| (s.version, serde_json::from_str(&s.json).unwrap())))
+            // A sealed one's JSON is empty: `Null`.
+            Ok(rules_server::db::latest_snapshot(c, m.id)?
+                .map(|s| (s.version, serde_json::from_str(&s.json).unwrap_or(Value::Null))))
         })
         .unwrap()
     }
@@ -436,7 +452,7 @@ fn publishing_registers_pushes_on_change_and_recovers_a_lost_version() {
     let address = core.agent_meta(&id).unwrap().address;
     assert!(core.rules_publish_status(id.clone()).is_none());
 
-    let s = block_on(core.clone().rules_publish_start(id.clone(), format!("{}/", server.url), None)).unwrap();
+    let s = block_on(core.clone().rules_publish_start(id.clone(), format!("{}/", server.url), None, false)).unwrap();
     assert_eq!((s.enabled, s.version, s.error.as_deref(), s.pending), (true, Some(1), None, false), "{s:?}");
     assert_eq!(s.server_url, server.url);
     let token = secrets.0.lock().unwrap().get(&server.key(&id)).cloned().expect("publisher token in the Keychain");
@@ -524,7 +540,7 @@ fn publishing_registers_pushes_on_change_and_recovers_a_lost_version() {
     std::thread::sleep(Duration::from_millis(600));
     assert_eq!(server.stored(&address).unwrap().0, 10);
     // Publishing again to the same server reuses the token and version.
-    let s = block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap();
+    let s = block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap();
     assert_eq!(s.version, Some(11));
     // Stopping and removing: the server forgets it, this Mac its token.
     block_on(core.rules_publish_stop(id.clone(), true)).unwrap();
@@ -539,7 +555,7 @@ fn a_burst_of_changes_is_one_version_and_versions_survive_a_restart() {
     let (t, core, secrets, id) = setup("burst");
     let address = core.agent_meta(&id).unwrap().address;
     assert_eq!(
-        block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap().version,
+        block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap().version,
         Some(1)
     );
     core.rules.set_waits(Duration::from_millis(400), Duration::from_secs(5), Duration::from_millis(200));
@@ -582,7 +598,7 @@ fn what_a_server_refuses_comes_back_in_words() {
     let address = core.agent_meta(&id).unwrap().address;
     let mount = |m: Mock| rt.block_on(m.mount(&mock));
     let start = |token: Option<&str>| {
-        block_on(core.clone().rules_publish_start(id.clone(), mock.uri(), token.map(str::to_owned)))
+        block_on(core.clone().rules_publish_start(id.clone(), mock.uri(), token.map(str::to_owned), false))
     };
 
     // Registered already (by someone else, or by this Mac before).
@@ -671,7 +687,7 @@ fn removing_the_mailbox_removes_it_from_the_server_and_forgets_the_token() {
     let server = RulesServer::start("remove");
     let (_t, core, secrets, id) = setup("remove");
     let address = core.agent_meta(&id).unwrap().address;
-    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap();
     assert!(server.stored(&address).is_some());
     block_on(core.remove_account(id.clone())).unwrap();
     assert!(server.stored(&address).is_none(), "the server forgot it");
@@ -685,7 +701,7 @@ fn the_app_mints_connect_codes_and_tokens_lists_agents_and_revokes_them() {
     let address = core.agent_meta(&id).unwrap().address;
     let refused = block_on(core.rules_connect_code_mint(id.clone(), "Routine".into())).unwrap_err();
     assert_eq!(refused.kind(), ErrorKind::InvalidInput, "not published yet");
-    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap();
 
     let before = mail_sync::now_millis();
     let code = block_on(core.rules_connect_code_mint(id.clone(), "  Weekly   outreach ".into())).unwrap();
@@ -761,7 +777,7 @@ fn the_app_mints_connect_codes_and_tokens_lists_agents_and_revokes_them() {
     // A server without OAuth says so, in words.
     let plain = RulesServer::start_with("agents-plain", false);
     block_on(core.rules_publish_stop(id.clone(), true)).unwrap();
-    block_on(core.clone().rules_publish_start(id.clone(), plain.url.clone(), None)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), plain.url.clone(), None, false)).unwrap();
     let off = block_on(core.rules_connect_code_mint(id.clone(), "Routine".into())).unwrap_err();
     assert!(off.to_string().contains("OPENAGC_RULES_PUBLIC_URL"), "{off}");
     let info = block_on(core.rules_connect_info(id.clone())).unwrap();
@@ -822,7 +838,7 @@ fn cloud_agents_reports_are_pulled_recorded_matched_and_acknowledged() {
     let (_t, core, secrets, id) = setup("reports");
     let address = core.agent_meta(&id).unwrap().address;
     learned(&core, &id);
-    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap();
     let publisher = secrets.0.lock().unwrap().get(&server.key(&id)).cloned().unwrap();
     let (_, minted) = server.call(
         reqwest::Method::POST,
@@ -962,7 +978,7 @@ fn a_report_is_recorded_once_though_pulled_twice_and_not_before_the_first_learni
             .and(path(format!("/v1/mailboxes/{address}/reports/ack")))
             .respond_with(json_response(200, json!({ "deleted": 1 }))),
     );
-    block_on(core.clone().rules_publish_start(id.clone(), mock.uri(), None)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), mock.uri(), None, false)).unwrap();
     assert!(secrets.0.lock().unwrap().values().any(|v| v == "oagc_pub_test"));
     let first = crate::runtime::runtime().block_on(core.rules_pull_reports(&id));
     assert!(matches!(first, Err(Failure::Transient(_))), "{first:?}");
@@ -989,4 +1005,94 @@ fn a_report_is_recorded_once_though_pulled_twice_and_not_before_the_first_learni
     let db = block_on(core.store_for(&id)).unwrap();
     let stored = db.read_blocking(|c| mail_store::cloud_reports::recent(c, 5)).unwrap();
     assert_eq!((stored[0].message_id.clone(), stored[0].sent_at), (None, None), "a Message-ID with a space is none");
+}
+
+fn holds(bytes: &[u8], text: &str) -> bool {
+    bytes.windows(text.len()).any(|w| w == text.as_bytes())
+}
+
+// Encryption at rest (spec §10.6, oagc-gmn7.7), the app's side.
+#[test]
+fn an_encrypted_publication_is_read_by_its_agents_and_the_server_keeps_no_plaintext() {
+    let server = RulesServer::start("sealed");
+    let (_t, core, secrets, id) = setup("sealed");
+    let address = core.agent_meta(&id).unwrap().address;
+    learned(&core, &id);
+    let s = block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, true)).unwrap();
+    assert_eq!((s.version, s.encrypted, s.error.as_deref()), (Some(1), true, None), "{s:?}");
+    {
+        let kept = secrets.0.lock().unwrap();
+        assert!(kept.contains_key(&keys::rules_report_key(&id)) && kept.contains_key(&keys::rules_snapshot_key(&id)));
+    }
+    let stored = server.stored_bytes();
+    for plain in ["circle back", "Call her Annie", "Be formal with customers"] {
+        assert!(!holds(&stored, plain), "the server holds {plain:?}");
+    }
+
+    // A token minted in the app reads at once: minting wraps the newest key.
+    let token = block_on(core.rules_agent_token_mint(id.clone(), "A script".into())).unwrap();
+    let guide = format!("/v1/m/{address}/guide?to=ann@acme.com");
+    let (code, answer) = server.call(reqwest::Method::GET, &guide, &token.token, None, None);
+    assert_eq!(code, 200, "{answer}");
+    assert!(answer["writing_guide"].as_str().unwrap().contains("Call her Annie"));
+
+    // Its report is sealed at rest, and recorded readable here.
+    let body = "Hi Ann, let's circle back on Friday (okapi-91).";
+    let (code, filed) = server.call(
+        reqwest::Method::POST,
+        &format!("/v1/m/{address}/reports"),
+        &token.token,
+        Some(json!({ "message_id": "<s1@agents.example>", "to": ["ann@acme.com"], "subject": "Plan",
+                     "body_markdown": body })),
+        None,
+    );
+    assert_eq!(code, 202, "{filed}");
+    assert!(!holds(&server.stored_bytes(), "okapi-91"));
+    block_on(core.rules_publish_now(id.clone())).unwrap();
+    let reports = block_on(core.rules_reports(id.clone(), 10)).unwrap();
+    assert_eq!(reports.len(), 1);
+    assert_eq!((reports[0].subject.as_str(), reports[0].to.clone()), ("Plan", vec!["ann@acme.com".to_owned()]));
+    assert_eq!(reports[0].guide_check, ["Uses “circle back”, which your rules ban"]);
+    let composition = reported(&core, &id);
+    assert!(composition[0].ai_text.as_deref().is_some_and(|t| t.contains("okapi-91")));
+
+    // Revoked in the app: refused; a second agent reads the next version.
+    let other = block_on(core.rules_agent_token_mint(id.clone(), "Another".into())).unwrap();
+    block_on(core.rules_agent_revoke(id.clone(), token.id.clone())).unwrap();
+    let pushed = block_on(core.rules_publish_now(id.clone())).unwrap();
+    assert!(pushed.encrypted);
+    assert_eq!(server.call(reqwest::Method::GET, &guide, &token.token, None, None).0, 401);
+    let (code, answer) = server.call(reqwest::Method::GET, &guide, &other.token, None, None);
+    assert_eq!((code, answer["version"].as_i64()), (200, pushed.version), "{answer}");
+}
+
+#[test]
+fn publications_from_before_encryption_and_on_a_server_that_requires_it_go_encrypted() {
+    let server = RulesServer::start("migrate");
+    let (_t, core, _secrets, id) = setup("migrate");
+    let address = core.agent_meta(&id).unwrap().address;
+    let s = block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None, false)).unwrap();
+    assert!(!s.encrypted);
+    assert!(holds(&server.stored_bytes(), "Call her Annie"));
+    // As a record written before encryption reads: no choice made.
+    let path = record_path(&core.data_path(), &id);
+    let mut record: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    record.as_object_mut().unwrap().remove("encrypt");
+    std::fs::write(&path, record.to_string()).unwrap();
+    // Nothing changed, yet it pushes, encrypted, and the plaintext goes.
+    assert!(crate::runtime::runtime().block_on(core.rules_push(&id, false)).unwrap());
+    let s = status(&core, &id);
+    assert_eq!((s.version, s.encrypted), (Some(2), true));
+    assert!(!holds(&server.stored_bytes(), "Call her Annie"));
+    assert_eq!(server.stored(&address).map(|(v, _)| v), Some(2));
+
+    // A server that requires encryption: the sheet hides the switch, and a
+    // publication with it off is encrypted anyway.
+    let required = RulesServer::start_full("migrate-required", false, true);
+    assert_eq!(block_on(core.rules_server_encryption(required.url.clone())).unwrap(), RulesEncryption::Required);
+    assert_eq!(block_on(core.rules_server_encryption(server.url.clone())).unwrap(), RulesEncryption::Optional);
+    block_on(core.rules_publish_stop(id.clone(), true)).unwrap();
+    let s = block_on(core.clone().rules_publish_start(id.clone(), required.url.clone(), None, false)).unwrap();
+    assert_eq!((s.version.is_some(), s.encrypted, s.error.as_deref()), (true, true, None), "{s:?}");
+    assert!(!holds(&required.stored_bytes(), "Call her Annie"));
 }

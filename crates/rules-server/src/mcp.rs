@@ -185,9 +185,9 @@ impl RulesMcp {
             Ok(c) => c,
             Err(e) => return tool_error("invalid_arguments", e),
         };
-        let snapshot = match crate::rest::latest(&self.state, auth.mailbox_id).await {
-            Ok(Some(s)) => s,
-            Ok(None) => return tool_error("not_published", "nothing has been published to this mailbox yet"),
+        let snapshot = match crate::crypto::snapshot_for(&self.state, auth).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(not_read)) => return tool_error(not_read.code(), not_read.message()),
             Err(_) => return tool_error("failed", "the server failed; see its log"),
         };
         let answer = match call {

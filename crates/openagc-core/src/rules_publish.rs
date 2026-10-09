@@ -85,6 +85,19 @@ pub struct RulesPublication {
     pub error: Option<String>,
     /// A change waits to be pushed.
     pub pending: bool,
+    /// The last version went encrypted (spec §10.6, encryption at rest).
+    pub encrypted: bool,
+}
+
+/// Whether a rules server keeps snapshots encrypted at rest (spec §10.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RulesEncryption {
+    /// It refuses plaintext: every publication there is encrypted.
+    Required,
+    /// The publisher chooses (on by default).
+    Optional,
+    /// An older server that cannot store encrypted snapshots.
+    Unsupported,
 }
 
 /// Exactly what a push sends, for the publish sheet.
@@ -218,6 +231,20 @@ struct Record {
     /// never pushed anywhere.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     sample: bool,
+    /// Push encrypted (spec §10.6). Unset in records from before
+    /// encryption: those encrypt at their next push.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    encrypt: Option<bool>,
+    /// The key id of the last version pushed encrypted; `None` when it went
+    /// in plaintext.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key_id: Option<String>,
+}
+
+impl Record {
+    fn encrypts(&self) -> bool {
+        self.encrypt.unwrap_or(true)
+    }
 }
 
 fn record_path(data_dir: &Path, account_id: &str) -> PathBuf {
@@ -768,7 +795,11 @@ impl Core {
         let (plain, _) = self.rules_snapshot(account_id).await?;
         let address = plain.mailbox.address.clone();
         let content = digest(&plain);
-        if !force && record.error.is_none() && record.content.as_deref() == Some(content.as_str()) {
+        let mut encrypt = record.encrypts();
+        // A publication from before encryption, or one turned to it, goes
+        // encrypted now even if nothing changed.
+        let migrating = encrypt && record.key_id.is_none();
+        if !force && !migrating && record.error.is_none() && record.content.as_deref() == Some(content.as_str()) {
             return Ok(false);
         }
         let key = keys::rules_publish_token(&server.key, account_id);
@@ -781,10 +812,18 @@ impl Core {
         let mut registered_again = false;
         let mut expected = (record.last_version > 0).then_some(record.last_version);
         let mut version = record.last_version + 1;
+        let mut sealing: Option<encryption::Sealing> = None;
         for _ in 0..ATTEMPTS {
             let published_at = mail_sync::now_millis();
             let snapshot = Snapshot { version, published_at, ..plain.clone() }.hashed(&record.salt);
-            let body = snapshot.to_json().map_err(|e| Failure::Final(e.to_string()))?;
+            let body = if encrypt {
+                if sealing.is_none() {
+                    sealing = Some(self.rules_sealing(account_id, &server, &address, &token).await?);
+                }
+                sealing.as_ref().map_or_else(|| Err(Failure::Final("not sealed".into())), |s| s.body(&snapshot))?
+            } else {
+                snapshot.to_json().map_err(|e| Failure::Final(e.to_string()))?
+            };
             let mut request = client(&self.rules)?
                 .put(server.endpoint(&["v1", "mailboxes", &address, "snapshot"]))
                 .bearer_auth(&token)
@@ -799,14 +838,17 @@ impl Core {
             }
             match a.status {
                 200 | 201 => {
+                    let key_id = sealing.as_ref().map(|s| s.key_id.clone());
                     self.update_rules_record(account_id, |r| {
                         r.last_version = version;
                         r.published_at = Some(published_at);
                         r.error = None;
                         r.content = Some(content.clone());
                         r.salt.clone_from(&record.salt);
+                        r.encrypt = Some(encrypt);
+                        r.key_id = key_id;
                     })?;
-                    tracing::info!(account = account_id, version, "published to the rules server");
+                    tracing::info!(account = account_id, version, encrypted = encrypt, "published to the rules server");
                     return Ok(true);
                 }
                 // Another version is current (a push this Mac lost track
@@ -821,11 +863,27 @@ impl Core {
                     registered_again = true;
                     token = self.rules_register_again(account_id, &server, &address, &key, &mut record).await?;
                     expected = None;
+                    // A new registration has no agents to wrap for.
+                    sealing = None;
                 }
                 401 => {
                     return Err(Failure::Final(format!(
                         "{host} no longer accepts this Mac's publisher token for {address}. The server's operator \
                          can forget the mailbox (openagc-rules forget-mailbox); then publish again."
+                    )));
+                }
+                // The server requires encryption: this publication encrypts
+                // from now on.
+                422 if !encrypt && a.body["error"] == "encryption_required" => {
+                    encrypt = true;
+                    self.update_rules_record(account_id, |r| r.encrypt = Some(true))?;
+                }
+                // A server from before encryption reads the push as a
+                // plaintext snapshot without its schema.
+                422 if encrypt && a.says().contains("schema_version") => {
+                    return Err(Failure::Final(format!(
+                        "{host} runs an older openagc-rules that cannot keep the guide encrypted. Its operator can \
+                         update it; or stop publishing and publish again with encryption off."
                     )));
                 }
                 422 => return Err(Failure::Final(format!("{host} refused the snapshot: {}", a.says()))),
@@ -872,6 +930,7 @@ impl Core {
             let _ = runtime::run(async move { send(request, &host).await.map_err(Failure::into_error) }).await;
         }
         let _ = self.secrets.delete(key);
+        self.rules_forget_keys(account_id);
         self.rules.set_pending(account_id, false);
     }
 
@@ -941,6 +1000,7 @@ impl Core {
             published_at: r.published_at,
             error: r.error,
             pending: r.enabled && self.rules.is_pending(account_id),
+            encrypted: r.key_id.is_some(),
         })
     }
 }
@@ -1008,6 +1068,7 @@ impl Core {
         account_id: String,
         server_url: String,
         registration_token: Option<String>,
+        encrypt: bool,
     ) -> Result<RulesPublication, CoreError> {
         if self.headless {
             return Err(CoreError::new(ErrorKind::PermissionDenied, "OpenAGC publishes; open it"));
@@ -1027,7 +1088,7 @@ impl Core {
             let same = existing.as_ref().filter(|r| r.server_url == server.url);
             let has_token = core.secrets.get(key.clone())?.is_some();
             let record = match same {
-                Some(r) if has_token => Record { enabled: true, ..r.clone() },
+                Some(r) if has_token => Record { enabled: true, encrypt: Some(encrypt), ..r.clone() },
                 _ => {
                     let _guard = core.rules.pushing.lock().await;
                     let token = core
@@ -1048,6 +1109,7 @@ impl Core {
                         salt: new_salt()?,
                         // Versions only go up, even on a server that forgot.
                         last_version: same.map_or(0, |r| r.last_version),
+                        encrypt: Some(encrypt),
                         ..Record::default()
                     }
                 }
@@ -1093,6 +1155,7 @@ impl Core {
             }
         }
         self.secrets.delete(key)?;
+        self.rules_forget_keys(&account_id);
         {
             let _guard = self.rules.records.lock().unwrap_or_else(|e| e.into_inner());
             let _ = std::fs::remove_file(self.rules_record_path(&account_id));
@@ -1167,6 +1230,26 @@ impl Core {
         })
     }
 
+    /// Whether the rules server at `server_url` keeps snapshots encrypted at
+    /// rest, requires it, or is too old to (spec §10.6), for the publish
+    /// sheet: `GET /v1/server`, no token.
+    pub async fn rules_server_encryption(&self, server_url: String) -> Result<RulesEncryption, CoreError> {
+        let server = parse_server(&server_url)?;
+        let client = client(&self.rules).map_err(Failure::into_error)?;
+        let request = client.get(server.endpoint(&["v1", "server"]));
+        let host = server.host.clone();
+        let a = runtime::run(async move { send(request, &host).await.map_err(Failure::into_error) }).await?;
+        if let Some(f) = transient(&server.host, &a) {
+            return Err(f.into_error());
+        }
+        match (a.status, a.body["encryption"].as_str()) {
+            (200, Some("required")) => Ok(RulesEncryption::Required),
+            (200, Some(_)) => Ok(RulesEncryption::Optional),
+            (404 | 405, _) => Ok(RulesEncryption::Unsupported),
+            _ => Err(CoreError::new(ErrorKind::Network, format!("{} does not look like a rules server", server.host))),
+        }
+    }
+
     /// A one-time connect code for an agent named `name` (spec §10.6): the
     /// user types it on the rules server's sign-in page when connecting a
     /// claude.ai connector or cloud routine. It works once, for 10 minutes,
@@ -1199,6 +1282,18 @@ impl Core {
         let a = self
             .rules_manage(&account_id, reqwest::Method::POST, &["agent-tokens"], Some(json!({ "name": name })))
             .await?;
+        // The server made its key at minting: give it the newest snapshot
+        // key now, so it reads at once (best effort; the next sync retries).
+        if let Some(core) = self.me.upgrade() {
+            let account = account_id.clone();
+            let _ = runtime::run(async move {
+                if let Err(f) = core.rules_rewrap(&account).await {
+                    tracing::warn!(account = account.as_str(), error = f.message(), "snapshot key not wrapped");
+                }
+                Ok::<_, CoreError>(())
+            })
+            .await;
+        }
         match (a["id"].as_str(), a["token"].as_str()) {
             (Some(id), Some(token)) if !token.is_empty() => Ok(RulesAgentToken {
                 id: id.to_owned(),
@@ -1214,6 +1309,9 @@ impl Core {
     /// included, oldest first.
     pub async fn rules_agents(&self, account_id: String) -> Result<Vec<RulesAgent>, CoreError> {
         let a = self.rules_manage(&account_id, reqwest::Method::GET, &["agent-tokens"], None).await?;
+        // A connector that signed in since the last push needs the newest
+        // snapshot key (spec §10.6); the sheet asks every few seconds.
+        self.rules_rewrap_soon(&account_id, &a);
         Ok(a["agent_tokens"].as_array().map(|list| list.iter().filter_map(rules_agent).collect()).unwrap_or_default())
     }
 
@@ -1247,6 +1345,9 @@ impl Core {
             error,
             content: None,
             sample: true,
+            encrypt: Some(true),
+            // Shown as published in plaintext, as the docs' pictures are.
+            key_id: None,
         };
         {
             let _guard = self.rules.records.lock().unwrap_or_else(|e| e.into_inner());
@@ -1257,6 +1358,7 @@ impl Core {
     }
 }
 
+mod encryption;
 mod reports;
 pub use reports::{CloudReportInfo, CloudReportMatch};
 

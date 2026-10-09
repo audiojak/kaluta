@@ -45,6 +45,7 @@ pub async fn start_with(rate_limit_per_minute: u32, registration_token: Option<&
         rate_limit_per_minute,
         registration_token: registration_token.map(str::to_owned),
         public_url: oauth.then(|| base.clone()),
+        require_encryption: false,
     };
     let app = rules_server::app(&config).expect("app");
     tokio::spawn(async move { axum::serve(listener, app).await });
@@ -153,4 +154,140 @@ pub async fn call(client: &RunningService<rmcp::RoleClient, ()>, tool: &'static 
     let result = client.call_tool(CallToolRequestParams::new(tool).with_arguments(args)).await.expect("tool call");
     assert_ne!(result.is_error, Some(true), "{result:?}");
     result.structured_content.expect("a structured answer")
+}
+
+/// With `require_encryption` set as given (and no OAuth).
+pub async fn start_requiring(require_encryption: bool) -> Server {
+    let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let config = Config {
+        data_dir: dir.clone(),
+        rate_limit_per_minute: 0,
+        registration_token: None,
+        public_url: Some(base.clone()),
+        require_encryption,
+    };
+    let app = rules_server::app(&config).expect("app");
+    tokio::spawn(async move { axum::serve(listener, app).await });
+    Server { base, dir, http: reqwest::Client::new() }
+}
+
+/// What the app does to publish encrypted (spec §10.6): its own key pair,
+/// and the newest snapshot key with its id.
+pub struct SealingApp {
+    pub key: rules_crypto::AppKey,
+    pub snapshot_key: Option<(rules_crypto::SecretKey, String)>,
+}
+
+impl SealingApp {
+    pub fn new() -> Self {
+        Self { key: rules_crypto::AppKey::generate(), snapshot_key: None }
+    }
+
+    /// Wraps of `key` for each live agent whose key the server sealed to
+    /// this app, as the app makes them: `only_unreadable` leaves out agents
+    /// that can read the newest version already.
+    fn wraps(
+        &self,
+        agents: &[Value],
+        key: &rules_crypto::SecretKey,
+        key_id: &str,
+        only_unreadable: bool,
+    ) -> Vec<rules_crypto::KeyWrap> {
+        use rules_crypto as seal;
+        agents
+            .iter()
+            .filter(|a| a["revoked_at"].is_null() && !(only_unreadable && a["readable"] == true))
+            .filter_map(|a| {
+                let id = a["id"].as_str()?;
+                let sealed = seal::unb64(a["agent_key"].as_str()?).ok()?;
+                let agent = seal::open_agent_key_for_app(&self.key, &sealed, id).ok()?;
+                Some(seal::KeyWrap {
+                    agent_id: id.to_owned(),
+                    wrap: seal::b64(&seal::wrap_snapshot_key(&agent, key, id, key_id)),
+                })
+            })
+            .collect()
+    }
+}
+
+impl Server {
+    pub async fn agents(&self, publisher: &str) -> Value {
+        let r = self.get(Some(publisher), &format!("/v1/mailboxes/{MAILBOX}/agent-tokens")).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        r.json().await.unwrap()
+    }
+
+    /// Push `snapshot` encrypted under a fresh key wrapped for the live
+    /// agents, as the app does.
+    pub async fn push_sealed(
+        &self,
+        publisher: &str,
+        app: &mut SealingApp,
+        snapshot: &Snapshot,
+        if_match: Option<&str>,
+    ) -> (StatusCode, Value) {
+        use rules_crypto as seal;
+        let agents = self.agents(publisher).await;
+        let key = seal::SecretKey::random();
+        let key_id = seal::new_key_id();
+        let json = snapshot.to_json().unwrap();
+        let body = seal::SealedSnapshot {
+            encryption: seal::ENCRYPTION_VERSION,
+            key_id: key_id.clone(),
+            version: snapshot.version,
+            published_at: snapshot.published_at,
+            address: MAILBOX.into(),
+            ciphertext: seal::b64(&seal::seal_snapshot(&key, &key_id, MAILBOX, snapshot.version, &json)),
+            app_key: app.key.public_base64(),
+            wraps: app.wraps(agents["agent_tokens"].as_array().unwrap(), &key, &key_id, false),
+        };
+        let answer = self.publish(publisher, if_match, serde_json::to_string(&body).unwrap()).await;
+        if answer.0 == StatusCode::OK {
+            app.snapshot_key = Some((key, key_id));
+        }
+        answer
+    }
+
+    /// Wrap the newest snapshot key for agents that cannot read it yet, as
+    /// the app does when it sees them in the list. How many were stored.
+    pub async fn rewrap(&self, publisher: &str, app: &SealingApp) -> i64 {
+        let agents = self.agents(publisher).await;
+        let (key, key_id) = app.snapshot_key.as_ref().expect("pushed");
+        assert_eq!(agents["key_id"], key_id.as_str());
+        let wraps = app.wraps(agents["agent_tokens"].as_array().unwrap(), key, key_id, true);
+        let r = self
+            .http
+            .post(self.url(&format!("/v1/mailboxes/{MAILBOX}/snapshot/keys")))
+            .bearer_auth(publisher)
+            .json(&json!({ "key_id": key_id, "wraps": wraps }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        r.json::<Value>().await.unwrap()["stored"].as_i64().unwrap()
+    }
+
+    /// Every byte the server has written: its database and write-ahead log.
+    pub fn stored_bytes(&self) -> Vec<u8> {
+        let mut all = Vec::new();
+        for name in [rules_server::db::FILE_NAME.to_owned(), format!("{}-wal", rules_server::db::FILE_NAME)] {
+            all.extend(std::fs::read(self.dir.join(name)).unwrap_or_default());
+        }
+        all
+    }
+
+    /// A copy of the database as it stands, as a backup would be.
+    pub fn backup(&self) -> rusqlite::Connection {
+        let to = self.dir.join(format!("backup-{}.sqlite3", rules_server::tokens::new_id()));
+        let c = rusqlite::Connection::open(self.dir.join(rules_server::db::FILE_NAME)).unwrap();
+        c.execute("VACUUM INTO ?1", [to.to_string_lossy()]).unwrap();
+        rusqlite::Connection::open(to).unwrap()
+    }
+}
+
+/// Whether `haystack` holds `needle` anywhere.
+pub fn contains(haystack: &[u8], needle: &str) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle.as_bytes())
 }

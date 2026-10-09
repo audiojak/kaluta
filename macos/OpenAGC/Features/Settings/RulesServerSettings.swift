@@ -81,7 +81,8 @@ struct RulesServerRow: View {
         case (true, let published?): state = status.pending ? "\(published) · a change waits to go" : published
         case (true, nil): state = status.error == nil ? "Publishing…" : "Not published yet"
         }
-        return "\(status.serverUrl) · \(state)"
+        let sealed = status.encrypted && status.version != nil ? " · encrypted" : ""
+        return "\(status.serverUrl) · \(state)\(sealed)"
     }
 
     private func publishNow() async {
@@ -122,6 +123,10 @@ struct PublishRulesSheet: View {
 
     @State private var serverURL = ""
     @State private var registrationToken = ""
+    /// Encryption at rest (spec §10.6): on unless the user turns it off,
+    /// which the server must allow.
+    @State private var encrypt = true
+    @State private var encryption: RulesEncryption?
     @State private var preview: RulesPreview?
     @State private var error: String?
     @State private var working = false
@@ -145,6 +150,22 @@ struct PublishRulesSheet: View {
                         .hoverHelp("Open the rules server's guide: running it, TLS with Caddy, backups")
                 }
                 .font(TypeRole.caption)
+                if let note = Self.encryptionNote(encryption) {
+                    Text(note).font(TypeRole.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                // Only a server that leaves it to the publisher offers the choice.
+                if encryption == .optional || encryption == .unsupported {
+                    DisclosureGroup("Advanced") {
+                        VStack(alignment: .leading, spacing: Space.xs) {
+                            Toggle("Encrypt on the server", isOn: $encrypt)
+                                .hoverHelp("Keep the guide, facts and agents' reports encrypted in the server's database; agents read them with their own token")
+                            Text(Self.encryptCaption).font(TypeRole.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .font(TypeRole.meta)
+                }
             }
             if let preview {
                 RulesPreviewList(preview: preview)
@@ -182,6 +203,31 @@ struct PublishRulesSheet: View {
             }
         }
         .onAppear { focused = true }
+        .task(id: serverURL) { await readEncryption() }
+    }
+
+    static let encryptCaption = "Protects what the server stores, such as its backups. Whoever runs the server can still read it while answering an agent."
+
+    /// What the sheet says about the server's encryption, if anything.
+    static func encryptionNote(_ encryption: RulesEncryption?) -> String? {
+        switch encryption {
+        case .required: "This server keeps what you publish encrypted; agents read it with their own token."
+        case .unsupported: "This server runs an older openagc-rules that cannot keep what you publish encrypted: turn encryption off under Advanced, or ask its operator to update it."
+        case .optional, nil: nil
+        }
+    }
+
+    /// Ask the server, a moment after the address stops changing.
+    private func readEncryption() async {
+        encryption = nil
+        let address = serverURL.trimmingCharacters(in: .whitespaces)
+        guard !address.isEmpty, let core = model.core else { return }
+        try? await Task.sleep(for: .milliseconds(600))
+        guard !Task.isCancelled else { return }
+        let found = try? await core.rulesServerEncryption(address)
+        guard !Task.isCancelled else { return }
+        encryption = found
+        if found == .required { encrypt = true }
     }
 
     static func message(_ name: String) -> String {
@@ -199,7 +245,8 @@ struct PublishRulesSheet: View {
         do {
             let token = registrationToken.trimmingCharacters(in: .whitespaces)
             let status = try await core.rulesPublishStart(accountID, serverURL: serverURL,
-                                                          registrationToken: token.isEmpty ? nil : token)
+                                                          registrationToken: token.isEmpty ? nil : token,
+                                                          encrypt: encryption == .required || encrypt)
             onPublished(status)
             dismiss()
         } catch {

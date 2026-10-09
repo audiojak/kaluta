@@ -13,8 +13,8 @@ behind your own TLS proxy. Spec §10.6, ADR 0016, plan
 one-time connect codes for claude.ai connectors and cloud routines), the
 app publishes to it (an agent mailbox's Settings, *Rules server* ›
 *Publish to a Rules Server…*), connects agents to it (*Cloud agents* ›
-*Connect a Cloud Agent…*) and pulls their reports at each sync. Encryption
-at rest comes next.
+*Connect a Cloud Agent…*) and pulls their reports at each sync, and what
+it stores is encrypted at rest (below).
 
 ## What it holds, and what it never holds
 
@@ -59,9 +59,45 @@ an address it was asked about or what a snapshot says: each request is
 logged as its method, route pattern (`/v1/m/{address}/guide`), status,
 time and the token's id (`agent:3f9c…`, `publisher:1`).
 
-**Not yet:** encryption at rest (spec §10.6). Until it comes, whoever can
-read the SQLite file or a backup of it can read what was published (rules,
-guidelines, shared facts), though not the addresses.
+### Encryption at rest
+
+The app publishes encrypted by default (spec §10.6). Then the file and its
+backups hold no guide, fact or report in the clear, and no key that opens
+them:
+
+- Each published version is sealed (XChaCha20-Poly1305) under a fresh key.
+- Each agent has its own key, made by the server while it holds that
+  agent's credential and stored only wrapped under a key derived from the
+  credential (HKDF-SHA256 of the whole agent token, or of a secret an OAuth
+  grant's tokens carry after a dot, which the server never stores) and
+  sealed to the app's public key. The app wraps each version's key for
+  each live agent. An agent's request unwraps its key, the version's key
+  and the version in memory, and nothing unwrapped is written.
+- Reports are sealed by the server to the app's public key when they come
+  (X25519, HKDF-SHA256, XChaCha20-Poly1305): once stored, the server
+  cannot read them; the app opens them when it pulls.
+- Revoking an agent deletes its keys and wraps, and every later version
+  has a key never wrapped for it: its token opens nothing published after
+  its revocation, whatever copy of the file it is joined with.
+- An agent connected between two pushes is given the newest key when the
+  app next sees it (in *Connect a Cloud Agent…*, Settings, or after a
+  sync); until then it is told `not_readable`.
+- A mailbox's first encrypted push deletes its plaintext versions
+  (SQLite's `secure_delete` is on, and the write-ahead log is
+  checkpointed). Connect codes never wrap a key: about 49 bits are too few
+  to protect one at rest.
+
+What it does **not** do: protect against whoever runs the server and
+changes its code. The server must see the guide to answer `guide_rules`,
+and the draft or report body to check it, so while it answers it holds
+them in the clear, and a changed build could keep them, or the tokens.
+Encryption at rest covers a leaked file or backup, not a hostile operator.
+
+Set `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` to refuse plaintext snapshots
+(the project-hosted server does). Without it, a publication can be
+plaintext (*Advanced* › *Encrypt on the server* off in the app's publish
+sheet), and then whoever can read the file or a backup can read what was
+published (rules, guidelines, shared facts), though not the addresses.
 
 ## Run it
 
@@ -78,6 +114,7 @@ openagc-rules --data-dir /var/lib/openagc-rules
 | `--rate-limit` | `OPENAGC_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registration has one bucket of its own. |
 | `--public-url` | `OPENAGC_RULES_PUBLIC_URL` | unset | The server's address as agents reach it, an origin alone (`https://rules.example.com`; `http://` only to `127.0.0.1` or `localhost`). Turns on OAuth sign-in with connect codes, which claude.ai connectors and cloud routines need; the OAuth issuer and the `/mcp` resource are made from it. |
 | | `OPENAGC_RULES_REGISTRATION_TOKEN` | unset | When set, registering a mailbox needs `Authorization: Bearer <it>`. Set it on any server strangers can reach. |
+| | `OPENAGC_RULES_REQUIRE_ENCRYPTION` | unset | `1` refuses plaintext snapshots (422 `encryption_required`) and reports for a mailbox that never published encrypted (409 `not_encrypted`); `GET /v1/server` says so, and the app then offers no choice. |
 
 Other commands:
 
@@ -148,7 +185,9 @@ docker exec openagc-rules /openagc-rules backup /tmp/backup.sqlite3
 docker cp openagc-rules:/tmp/backup.sqlite3 ./rules-$(date +%F).sqlite3
 ```
 
-A backup holds what the live file holds (above); keep it as private. To
+A backup holds what the live file holds (above): with encryption at rest,
+sealed versions and reports, wrapped keys and hashes; keep it as private
+all the same. To
 restore, stop the server and put the copy in place as `rules.sqlite3`. Losing
 the database loses nothing that matters: the app publishes again, though
 agents need new tokens.
@@ -288,8 +327,8 @@ connect an agent are forgotten after a week.
   its CSRF check. A stolen connect code is worth one agent until revoked,
   and only within its 10 minutes.
 - **The operator** (you, or the project for a hosted server) can read what
-  was published, now from the file and, once encryption at rest comes,
-  still during requests. Only what the publish sheet lists leaves the Mac.
+  was published during requests, and from the file for a publication with
+  encryption off. Only what the publish sheet lists leaves the Mac.
 
 ## The API
 
@@ -304,13 +343,14 @@ a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 | Call | Body | Answer |
 |---|---|---|
 | `POST /v1/mailboxes` | `{"address"}` | 201 `{"address", "publisher_token"}`, once; 409 `already_registered`. Needs the registration token when one is set |
-| `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
+| `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1), or encrypted: `{"encryption": 1, "key_id", "version", "published_at", "address", "ciphertext", "app_key", "wraps": [{"agent_id", "wrap"}]}` (`rules_crypto::SealedSnapshot`, byte strings in base64) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
+| `POST /v1/mailboxes/{address}/snapshot/keys` | `{"key_id", "wraps": [{"agent_id", "wrap"}]}` | `{"stored"}`: the app's wraps of a kept version's key for agents that connected after it; 404 `unknown_key` |
 | `GET /v1/mailboxes/{address}/snapshot/version` | | The same, `version` null before the first push |
 | `POST /v1/mailboxes/{address}/agent-tokens` | `{"name"}` | 201 `{"id", "name", "created_at", "revoked_at", "token"}`; the token is shown only here |
-| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at", "last_used_at"}]}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`); `last_used_at` is when it was last let in, to the minute, or null |
+| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at", "last_used_at", "agent_key", "readable"}], "key_id"}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`); `last_used_at` is when it was last let in, to the minute, or null; `agent_key` its key sealed to the app (null until it has one), `readable` whether it can read the newest version; `key_id` the newest version's key id, null when it is plaintext |
 | `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204; revokes a token or a grant (and its OAuth tokens) |
 | `POST /v1/mailboxes/{address}/connect-codes` | `{"name"}` | 201 `{"id", "name", "code", "expires_at"}`; the code is shown only here. 409 `oauth_off` without a public URL, 429 `too_many_codes` with 10 unused |
-| `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>` | | `{"reports": [{"id", "agent_id", "agent_name", "agent_kind", "received_at", "message_id", "to", "subject", "sent_at", "body_markdown", "checked_version", "check": {"version", "guide_check"}}], "pending", "dropped", "more"}`, oldest first, after the cursor (0 for all), at most `limit` (100 by default, 500 at most) |
+| `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>` | | `{"reports": [{"id", "agent_id", "agent_name", "agent_kind", "received_at", "message_id", "to", "subject", "sent_at", "body_markdown", "checked_version", "check": {"version", "guide_check"}, "sealed"}], "pending", "dropped", "more"}`; with encryption at rest `sealed` holds the Message-ID, recipients, subject, body and check sealed to the app, and those fields are empty, oldest first, after the cursor (0 for all), at most `limit` (100 by default, 500 at most) |
 | `POST /v1/mailboxes/{address}/reports/ack` | `{"up_to_id"}` | `{"deleted"}`; the reports up to that id are gone |
 | `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots, its tokens and its reports are gone |
 
@@ -319,8 +359,10 @@ later one sends `If-Match` with the current version (`5` or `"5"`) and a
 higher `version` in the body. Answers: 428 `if_match_required` and 412
 `version_mismatch` carry `current_version` (read it and push again), 409
 `version_not_newer`, 422 `invalid_snapshot` (unknown `schema_version`, a
-plain address, not JSON) or `mailbox_mismatch` (the snapshot's
-`mailbox.address` is not the path's). The newest five versions are kept.
+plain address, not JSON; for an encrypted push, a bad key id, box, public
+key or wrap, or another mailbox) or `mailbox_mismatch` (the snapshot's
+`mailbox.address` is not the path's), or `encryption_required`. The newest
+five versions are kept.
 
 ### For agents (agent token)
 
@@ -351,10 +393,14 @@ text (Markdown read as mailbox mode renders it) against the banned and
 required phrases and length limits of the entries that apply to those
 recipients and that type; no model is asked. Before anything is published
 the reading tools and `check_draft` answer `not_published`; `report_send`
-still queues (with an empty check). Every call takes one request from the
+still queues (with an empty check). An agent that does not have the
+newest encrypted version's key yet gets `not_readable` (409 over REST)
+until the app gives it. Every call takes one request from the
 agent's rate limit.
 
-`GET /healthz` answers `ok` when the database answers.
+`GET /healthz` answers `ok` when the database answers. `GET /v1/server`,
+without a token, answers `{"encryption": "required" | "optional",
+"version"}`.
 
 ### OAuth (with `OPENAGC_RULES_PUBLIC_URL`)
 

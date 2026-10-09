@@ -6,9 +6,11 @@
 //!   against the mailbox named in the path.
 //! - Agent tokens, `oagc_agt_<id>_<secret>`: the id (16 hex digits, not
 //!   secret) finds the row and names the token in logs and reports.
-//! - OAuth access and refresh tokens, `oagc_oat_<secret>` and
-//!   `oagc_ort_<secret>`, and authorization codes (`<secret>` alone):
-//!   found by their hash.
+//! - OAuth access and refresh tokens, `oagc_oat_<secret>.<grant secret>`
+//!   and `oagc_ort_<secret>.<grant secret>`, and authorization codes
+//!   (`<secret>` alone): found by their hash. The grant secret, the same in
+//!   all of a grant's tokens, is what its key is wrapped under (spec §10.6,
+//!   encryption at rest); the server keeps it nowhere.
 //! - Connect codes, typed by a person: ten characters from an alphabet
 //!   without look-alikes, grouped `ABCDE-FGHJK`; also kept as hashes.
 
@@ -54,14 +56,22 @@ pub fn agent_token(id: &str) -> String {
     format!("{AGENT_PREFIX}{id}_{}", secret())
 }
 
-/// A new OAuth access token.
-pub fn access_token() -> String {
-    format!("{ACCESS_PREFIX}{}", secret())
+/// A new OAuth access token carrying its grant's secret.
+pub fn access_token(grant_secret: &str) -> String {
+    format!("{ACCESS_PREFIX}{}.{grant_secret}", secret())
 }
 
-/// A new OAuth refresh token.
-pub fn refresh_token() -> String {
-    format!("{REFRESH_PREFIX}{}", secret())
+/// A new OAuth refresh token carrying its grant's secret.
+pub fn refresh_token(grant_secret: &str) -> String {
+    format!("{REFRESH_PREFIX}{}.{grant_secret}", secret())
+}
+
+/// The grant secret an OAuth access or refresh token carries after its dot
+/// (spec §10.6, encryption at rest); `None` for one made before them.
+pub fn grant_secret_of(token: &str) -> Option<&str> {
+    let (_, secret) = token.split_once('.')?;
+    (secret.len() == 43 && secret.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+        .then_some(secret)
 }
 
 /// A new OAuth client id (public, not secret).

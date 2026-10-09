@@ -794,10 +794,22 @@ enum Exchange {
     Replayed(String),
 }
 
-/// Store a new access and refresh token for a grant.
-fn issue(c: &rusqlite::Connection, grant_id: &str, resource: &str, now: i64) -> rusqlite::Result<(String, String)> {
-    let access = tokens::access_token();
-    let refresh = tokens::refresh_token();
+/// Store a new access and refresh token for a grant, both carrying the
+/// grant's secret, and make the grant's key if it has none (spec §10.6,
+/// encryption at rest): this is the one moment the server holds the
+/// secret without a request from the agent.
+fn issue(
+    c: &rusqlite::Connection,
+    grant_id: &str,
+    resource: &str,
+    now: i64,
+    secret: &str,
+) -> rusqlite::Result<(String, String)> {
+    let access = tokens::access_token(secret);
+    let refresh = tokens::refresh_token(secret);
+    if let Some((grant, _)) = db::agent_token(c, grant_id)? {
+        crate::crypto::agent_key(c, grant_id, grant.mailbox_id, &crate::crypto::CredentialSecret::new(secret))?;
+    }
     let row = |kind: &str, ttl| OAuthTokenRow {
         kind: kind.to_owned(),
         grant_id: grant_id.to_owned(),
@@ -887,7 +899,9 @@ async fn token(
                     } else if !tokens::same(&row.resource, &resource) || !live_grant(&tx, &row.grant_id, &client_id)? {
                         Exchange::Refused("the grant was revoked")
                     } else {
-                        let (access, refresh) = issue(&tx, &row.grant_id, &resource, now)?;
+                        // The grant's secret is made here, with its first tokens.
+                        let secret = zeroize::Zeroizing::new(crate::crypto::grant_secret());
+                        let (access, refresh) = issue(&tx, &row.grant_id, &resource, now, &secret)?;
                         Exchange::Issued { grant_id: row.grant_id, access, refresh }
                     };
                     tx.commit()?;
@@ -900,6 +914,11 @@ async fn token(
                 return token_error(StatusCode::BAD_REQUEST, "invalid_request", "send refresh_token");
             };
             let token_hash = tokens::hash(refresh);
+            // Refreshing keeps the grant's secret; a token from before grant
+            // secrets gets one now (and the grant a new key).
+            let secret = zeroize::Zeroizing::new(
+                tokens::grant_secret_of(refresh).map_or_else(crate::crypto::grant_secret, str::to_owned),
+            );
             state
                 .db
                 .run(move |c| {
@@ -919,7 +938,7 @@ async fn token(
                         Exchange::Refused("the grant was revoked or is another client's")
                     } else {
                         db::use_oauth_token(&tx, &token_hash, now)?;
-                        let (access, refresh) = issue(&tx, &row.grant_id, &resource, now)?;
+                        let (access, refresh) = issue(&tx, &row.grant_id, &resource, now, &secret)?;
                         Exchange::Issued { grant_id: row.grant_id, access, refresh }
                     };
                     tx.commit()?;

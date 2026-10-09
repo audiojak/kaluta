@@ -102,26 +102,64 @@ pub(crate) fn invalid(message: String) -> ApiError {
 /// found.
 pub(crate) async fn file(state: &AppState, auth: &AgentAuth, a: ReportArgs) -> Result<Value, ApiError> {
     let (message_id, to, sent_at) = validate(&a).map_err(invalid)?;
-    let snapshot = crate::rest::latest(state, auth.mailbox_id).await?;
+    let mailbox_id = auth.mailbox_id;
+    let app_key = state.db.run(move |c| db::app_key(c, mailbox_id)).await?;
+    if app_key.is_none() && state.require_encryption {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "not_encrypted",
+            "this server keeps reports only for a mailbox that has published encrypted; OpenAGC does so when it \
+             next publishes",
+        ));
+    }
+    // Checked against the newest version this agent can read, if any.
+    let snapshot = crate::crypto::snapshot_for(state, auth).await?.ok();
     let (check_version, guide_check) = match &snapshot {
         Some(s) => (Some(s.version), answers::guide_check(s, &to, None, &a.subject, &a.body_markdown)),
         None => (None, vec![]),
     };
     let now = db::now_ms();
-    let row = ReportRow {
+    let subject = a.subject.trim().to_owned();
+    let mut row = ReportRow {
         id: 0,
-        mailbox_id: auth.mailbox_id,
+        mailbox_id,
         agent_id: auth.token_id.clone(),
         received_at: now,
         message_id,
         recipients: to,
-        subject: a.subject.trim().to_owned(),
+        subject,
         sent_at,
         body_markdown: a.body_markdown,
         checked_version: a.checked_version,
         check_version,
         guide_check: guide_check.clone(),
+        sealed: None,
     };
+    // With encryption at rest, what the agent wrote is sealed to the app:
+    // once stored, the server cannot read it.
+    if let Some(key) = app_key.as_deref().and_then(|k| rules_crypto::app_public_key(k).ok()) {
+        let content = zeroize::Zeroizing::new(
+            serde_json::to_vec(&json!({
+                "message_id": row.message_id,
+                "to": row.recipients,
+                "subject": row.subject,
+                "body_markdown": row.body_markdown,
+                "guide_check": row.guide_check,
+            }))
+            .map_err(ApiError::internal)?,
+        );
+        let ctx = rules_crypto::report_context(&auth.address, &auth.token_id);
+        let sealed = rules_crypto::seal_for_app(&key, &content, &ctx).map_err(ApiError::internal)?;
+        row = ReportRow {
+            message_id: None,
+            recipients: vec![],
+            subject: String::new(),
+            body_markdown: String::new(),
+            guide_check: vec![],
+            sealed: Some(sealed),
+            ..row
+        };
+    }
     let id = state
         .db
         .run(move |c| {
@@ -158,6 +196,9 @@ fn report_json(r: &ReportRow, agent_name: &str, agent_kind: &str) -> Value {
         "body_markdown": r.body_markdown,
         "checked_version": r.checked_version,
         "check": { "version": r.check_version, "guide_check": r.guide_check },
+        // Sealed to the app: its Message-ID, recipients, subject, body and
+        // check, in place of the empty fields above.
+        "sealed": r.sealed.as_deref().map(rules_crypto::b64),
     })
 }
 

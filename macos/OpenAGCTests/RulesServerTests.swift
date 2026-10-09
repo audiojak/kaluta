@@ -101,6 +101,16 @@ struct RulesServerTests {
         #expect(RulesServerRow.statusLine(first) == "https://rules.example.com · Publishing…")
         first.error = "Could not reach rules.example.com"
         #expect(RulesServerRow.statusLine(first) == "https://rules.example.com · Not published yet")
+        // Encrypted at rest (spec §10.6), once a version went.
+        var sealed = status
+        sealed.encrypted = true
+        #expect(RulesServerRow.statusLine(sealed, now: threeMinutesAgo.addingTimeInterval(180))
+            == "https://rules.example.com · Version 12, published 3 minutes ago · encrypted")
+        first.encrypted = true
+        #expect(!RulesServerRow.statusLine(first).contains("encrypted"))
+        #expect(PublishRulesSheet.encryptionNote(.optional) == nil)
+        #expect(PublishRulesSheet.encryptionNote(.required)?.contains("encrypted") == true)
+        #expect(PublishRulesSheet.encryptionNote(.unsupported)?.contains("Advanced") == true)
 
         // Stopping keeps the record (agents read the last version).
         try await core.rulesPublishStop(id, removeFromServer: false)

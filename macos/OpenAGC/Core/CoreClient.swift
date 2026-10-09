@@ -311,13 +311,19 @@ final class CoreClient: Sendable {
         try await call { try await core.rulesPreview(accountId: accountID) }
     }
 
-    /// Register on the server (the first time) and publish now and on every change.
-    func rulesPublishStart(_ accountID: String, serverURL: String,
-                           registrationToken: String?) async throws(CoreClientError) -> RulesPublication {
+    /// Register on the server (the first time) and publish now and on every change,
+    /// encrypted at rest unless `encrypt` is off (spec §10.6).
+    func rulesPublishStart(_ accountID: String, serverURL: String, registrationToken: String?,
+                           encrypt: Bool = true) async throws(CoreClientError) -> RulesPublication {
         try await call {
             try await core.rulesPublishStart(accountId: accountID, serverUrl: serverURL,
-                                             registrationToken: registrationToken)
+                                             registrationToken: registrationToken, encrypt: encrypt)
         }
+    }
+
+    /// Whether the server requires, offers or cannot do encryption at rest.
+    func rulesServerEncryption(_ serverURL: String) async throws(CoreClientError) -> RulesEncryption {
+        try await call { try await core.rulesServerEncryption(serverUrl: serverURL) }
     }
 
     /// Stop publishing; with `removeFromServer`, the server forgets the mailbox.
@@ -1589,6 +1595,7 @@ typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
 typealias AgentVerification = OpenAGCCore.AgentVerification
 typealias ServiceAccountSummary = OpenAGCCore.ServiceAccountSummary
 typealias RulesPublication = OpenAGCCore.RulesPublication
+typealias RulesEncryption = OpenAGCCore.RulesEncryption
 typealias RulesPreview = OpenAGCCore.RulesPreview
 typealias RulesPreviewEntry = OpenAGCCore.RulesPreviewEntry
 typealias RulesPreviewFact = OpenAGCCore.RulesPreviewFact

@@ -245,6 +245,8 @@ impl Core {
         };
         let db = self.store_for(account_id).await?;
         let client = client(&self.rules)?;
+        // Reports sealed to this Mac (spec §10.6, encryption at rest).
+        let app = self.rules_app_key(account_id, false)?;
         let mut after = 0_i64;
         let mut new = 0;
         for _ in 0..MAX_PAGES {
@@ -264,7 +266,13 @@ impl Core {
             }
             let listed = a.body["reports"].as_array().cloned().unwrap_or_default();
             let Some(last) = listed.iter().filter_map(|r| r["id"].as_i64()).max() else { break };
-            let reports: Vec<NewReport> = listed.iter().filter_map(|r| parse(r, &server.url)).collect();
+            let opened: Vec<Value> =
+                listed.iter().filter_map(|r| encryption::opened_report(app.as_ref(), &address, r.clone())).collect();
+            if opened.len() < listed.len() {
+                // Sealed to a key this Mac no longer has: nothing can open them.
+                tracing::warn!(account = account_id, lost = listed.len() - opened.len(), "reports that do not open");
+            }
+            let reports: Vec<NewReport> = opened.iter().filter_map(|r| parse(r, &server.url)).collect();
             if a.body["dropped"].as_i64().is_some_and(|n| n > 0) {
                 tracing::warn!(account = account_id, dropped = %a.body["dropped"], "the server dropped reports for room");
             }
@@ -288,6 +296,13 @@ impl Core {
             if a.body["more"] != true {
                 break;
             }
+        }
+        // Agents that connected since the last push get the newest snapshot
+        // key (spec §10.6); at most once a minute, with the pull.
+        if record.key_id.is_some()
+            && let Err(f) = self.rules_rewrap(account_id).await
+        {
+            tracing::warn!(account = account_id, error = f.message(), "snapshot key not wrapped for new agents");
         }
         // Reports pulled before whose mail has come in since.
         let now = mail_sync::now_millis();

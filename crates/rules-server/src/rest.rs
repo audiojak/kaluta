@@ -9,7 +9,12 @@
 //! - `PUT /v1/mailboxes/{address}/snapshot` with `If-Match: <current
 //!   version>` (none for the first): a full snapshot whose version is
 //!   higher. 412 with `current_version` when the version does not match.
+//!   An encrypted push is `rules_crypto::SealedSnapshot` (spec
+//!   §10.6, encryption at rest): the box, its key wrapped per agent and the
+//!   app's public key; refused plaintext with `require_encryption`.
 //! - `GET /v1/mailboxes/{address}/snapshot/version`.
+//! - `POST /v1/mailboxes/{address}/snapshot/keys` `{"key_id", "wraps"}`:
+//!   a kept version's key wrapped for agents that connected after it.
 //! - `POST /v1/mailboxes/{address}/agent-tokens` `{"name"}`: mint; answers
 //!   the token once. `GET` lists the mailbox's agents, static tokens
 //!   (`kind` `token`) and OAuth grants (`kind` `oauth`) alike;
@@ -19,6 +24,8 @@
 //! - `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>`: the
 //!   reports agents filed, oldest first; `POST …/reports/ack`
 //!   `{"up_to_id"}` deletes those the app has recorded.
+//!
+//! Anyone: `GET /v1/server`, whether the server requires encryption.
 //!
 //! Agents and scripts, `Authorization: Bearer <agent token>`:
 //! - `GET /v1/m/{address}/guide?to=&to=&message_type=` and
@@ -44,10 +51,12 @@ use crate::{AgentAuth, ApiError, AppState, TokenSlot, agent_auth, normalize_addr
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
+        .route("/v1/server", get(server_info))
         .route("/v1/mailboxes", post(register))
         .route("/v1/mailboxes/{address}", delete(forget))
         .route("/v1/mailboxes/{address}/snapshot", put(publish))
         .route("/v1/mailboxes/{address}/snapshot/version", get(version))
+        .route("/v1/mailboxes/{address}/snapshot/keys", post(snapshot_keys))
         .route("/v1/mailboxes/{address}/agent-tokens", post(mint).get(list_tokens))
         .route("/v1/mailboxes/{address}/agent-tokens/{id}", delete(revoke))
         .route("/v1/mailboxes/{address}/connect-codes", post(connect_code))
@@ -65,6 +74,13 @@ async fn healthz(State(state): State<AppState>) -> Response {
         Ok(_) => (StatusCode::OK, "ok\n").into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
+}
+
+/// What the server asks of publishers, without a token: whether it
+/// requires snapshots to be encrypted (spec §10.6).
+async fn server_info(State(state): State<AppState>) -> Json<Value> {
+    let encryption = if state.require_encryption { "required" } else { "optional" };
+    Json(json!({ "encryption": encryption, "version": env!("CARGO_PKG_VERSION") }))
 }
 
 /// A body that is not the JSON asked for.
@@ -178,7 +194,9 @@ fn version_body(latest: Option<&SnapshotRow>, kept: &[i64]) -> Value {
 
 /// What a push came to, decided in one transaction.
 enum Pushed {
-    Stored(Vec<i64>),
+    /// The versions kept, and how many plaintext ones an encrypted push
+    /// replaced.
+    Stored(Vec<i64>, usize),
     Mismatch(Option<i64>),
     NeedsIfMatch(i64),
     NotNewer(i64),
@@ -194,16 +212,34 @@ async fn publish(
     let m = publisher(&state, &headers, &address, &slot).await?;
     let expected = if_match(&headers)?;
     let invalid = |code, message: String| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, code, message);
-    let snapshot = Snapshot::from_json(&body).map_err(|e| invalid("invalid_snapshot", e.to_string()))?;
-    if normalize_address(&snapshot.mailbox.address).as_deref() != Some(m.address.as_str()) {
-        return Err(invalid("mailbox_mismatch", "the snapshot is for another mailbox".into()));
-    }
-    if snapshot.version < 1 {
+    let is_sealed = serde_json::from_str::<Value>(&body).is_ok_and(|v| v.get("encryption").is_some());
+    let (row, sealed) = if is_sealed {
+        let (row, sealed) = sealed_push(&body, &m.address).map_err(|e| invalid("invalid_snapshot", e))?;
+        (row, Some(sealed))
+    } else {
+        if state.require_encryption {
+            return Err(invalid(
+                "encryption_required",
+                "this server stores only encrypted snapshots (OPENAGC_RULES_REQUIRE_ENCRYPTION); turn encryption \
+                 on in OpenAGC"
+                    .into(),
+            ));
+        }
+        let snapshot = Snapshot::from_json(&body).map_err(|e| invalid("invalid_snapshot", e.to_string()))?;
+        if normalize_address(&snapshot.mailbox.address).as_deref() != Some(m.address.as_str()) {
+            return Err(invalid("mailbox_mismatch", "the snapshot is for another mailbox".into()));
+        }
+        // Stored as this build writes it: fields it does not know are dropped.
+        let json = snapshot.to_json().map_err(ApiError::internal)?;
+        (
+            SnapshotRow { version: snapshot.version, json, published_at: snapshot.published_at, ..Default::default() },
+            None,
+        )
+    };
+    if row.version < 1 {
         return Err(invalid("invalid_snapshot", "a snapshot's version starts at 1".into()));
     }
-    // Stored as this build writes it: fields it does not know are dropped.
-    let json = snapshot.to_json().map_err(ApiError::internal)?;
-    let row = SnapshotRow { version: snapshot.version, json, published_at: snapshot.published_at };
+    let (version, published_at) = (row.version, row.published_at);
     let pushed = state
         .db
         .run(move |c| {
@@ -216,21 +252,31 @@ async fn publish(
                 (Some(c), _) if row.version <= c => Pushed::NotNewer(c),
                 _ => {
                     db::insert_snapshot(&tx, m.id, &row, db::now_ms())?;
-                    Pushed::Stored(db::versions(&tx, m.id)?)
+                    let mut plain_dropped = 0;
+                    if let Some(s) = &sealed {
+                        db::set_app_key(&tx, m.id, &s.app_key)?;
+                        db::insert_snapshot_keys(&tx, m.id, row.key_id.as_deref().unwrap_or_default(), &s.wraps)?;
+                        plain_dropped = db::delete_plain_snapshots(&tx, m.id)?;
+                    }
+                    Pushed::Stored(db::versions(&tx, m.id)?, plain_dropped)
                 }
             };
             tx.commit()?;
+            if matches!(outcome, Pushed::Stored(_, n) if n > 0) {
+                // The deleted plaintext pages are zeroed (secure_delete);
+                // their copies in the write-ahead log go too.
+                c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+            }
             Ok(outcome)
         })
         .await?;
     let current = |v: Option<i64>| json!({ "current_version": v });
     match pushed {
-        Pushed::Stored(kept) => {
-            tracing::info!(mailbox = m.id, version = snapshot.version, "snapshot published");
-            let latest =
-                SnapshotRow { version: snapshot.version, json: String::new(), published_at: snapshot.published_at };
+        Pushed::Stored(kept, _) => {
+            tracing::info!(mailbox = m.id, version, encrypted = is_sealed, "snapshot published");
+            let latest = SnapshotRow { version, published_at, ..Default::default() };
             let mut response = Json(version_body(Some(&latest), &kept)).into_response();
-            response.headers_mut().insert(header::ETAG, etag(snapshot.version));
+            response.headers_mut().insert(header::ETAG, etag(version));
             Ok(response)
         }
         Pushed::Mismatch(v) => Err(ApiError::new(
@@ -250,6 +296,111 @@ async fn publish(
                 .with(current(Some(v))))
         }
     }
+}
+
+/// An encrypted push's wraps and public key, checked.
+struct SealedPush {
+    app_key: String,
+    wraps: Vec<(String, Vec<u8>)>,
+}
+
+fn valid_key_id(k: &str) -> bool {
+    (1..=64).contains(&k.len()) && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+fn valid_agent_id(id: &str) -> bool {
+    id.len() == 16 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// The app's wraps of a snapshot key, read from base64.
+fn wraps_of(wraps: &[rules_crypto::KeyWrap]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if wraps.len() > 1000 {
+        return Err("too many wraps".into());
+    }
+    wraps
+        .iter()
+        .map(|w| {
+            let bytes = rules_crypto::unb64(&w.wrap).map_err(|e| format!("wrap for {}: {e}", w.agent_id))?;
+            if !valid_agent_id(&w.agent_id) || bytes.len() > 256 {
+                return Err(format!("not a wrap for an agent: {}", w.agent_id));
+            }
+            Ok((w.agent_id.clone(), bytes))
+        })
+        .collect()
+}
+
+/// An encrypted push (`rules_crypto::SealedSnapshot`), checked as far
+/// as the server can without a key: its mailbox, version, key id, box,
+/// public key and wraps.
+fn sealed_push(body: &str, address: &str) -> Result<(SnapshotRow, SealedPush), String> {
+    let s: rules_crypto::SealedSnapshot = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    if s.encryption != rules_crypto::ENCRYPTION_VERSION {
+        return Err(format!("encryption {} is not one this server knows", s.encryption));
+    }
+    if normalize_address(&s.address).as_deref() != Some(address) {
+        return Err("the snapshot is for another mailbox".into());
+    }
+    if !valid_key_id(&s.key_id) {
+        return Err("key_id is 1 to 64 letters, digits, - or _".into());
+    }
+    let sealed = rules_crypto::unb64(&s.ciphertext).map_err(|e| format!("ciphertext: {e}"))?;
+    if sealed.len() < 40 {
+        return Err("ciphertext: too short".into());
+    }
+    let public = rules_crypto::app_public_key(&s.app_key).map_err(|e| format!("app_key: {e}"))?;
+    // A key nothing can be sealed to (a low-order point) is refused now.
+    rules_crypto::seal_for_app(&public, b"", b"check").map_err(|_| "app_key: not usable".to_owned())?;
+    let wraps = wraps_of(&s.wraps)?;
+    let row = SnapshotRow {
+        version: s.version,
+        json: String::new(),
+        published_at: s.published_at,
+        key_id: Some(s.key_id),
+        sealed: Some(sealed),
+    };
+    Ok((row, SealedPush { app_key: s.app_key, wraps }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KeysBody {
+    key_id: String,
+    wraps: Vec<rules_crypto::KeyWrap>,
+}
+
+/// `POST …/snapshot/keys`: the app's wraps of a kept snapshot's key for
+/// agents that connected after it was pushed.
+async fn snapshot_keys(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Json<Value>, ApiError> {
+    let m = publisher(&state, &headers, &address, &slot).await?;
+    let b: KeysBody = parse_json(&body)?;
+    let invalid = |message: String| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "invalid_wraps", message);
+    if !valid_key_id(&b.key_id) {
+        return Err(invalid("key_id is 1 to 64 letters, digits, - or _".into()));
+    }
+    let wraps = wraps_of(&b.wraps).map_err(invalid)?;
+    let stored = state
+        .db
+        .run(move |c| {
+            let tx = c.transaction()?;
+            if !db::has_key_id(&tx, m.id, &b.key_id)? {
+                return Ok(None);
+            }
+            let n = db::insert_snapshot_keys(&tx, m.id, &b.key_id, &wraps)?;
+            tx.commit()?;
+            Ok(Some(n))
+        })
+        .await?;
+    let Some(stored) = stored else {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "unknown_key", "no kept snapshot is sealed under that key"));
+    };
+    tracing::info!(mailbox = m.id, stored, "snapshot keys wrapped for agents");
+    Ok(Json(json!({ "stored": stored })))
 }
 
 async fn version(
@@ -289,6 +440,17 @@ fn agent_name(b: &MintBody) -> Result<String, ApiError> {
 /// An agent as listed: a static token, or an OAuth grant with the name its
 /// client registered under.
 fn token_json(t: &AgentTokenRow, client_name: Option<&str>, last_used_at: Option<i64>) -> Value {
+    token_json_with(t, client_name, last_used_at, None)
+}
+
+/// With encryption at rest: the agent's key sealed to the app (for the app
+/// to wrap snapshot keys under) and whether it can read the newest version.
+fn token_json_with(
+    t: &AgentTokenRow,
+    client_name: Option<&str>,
+    last_used_at: Option<i64>,
+    keys: Option<&(Option<Vec<u8>>, bool)>,
+) -> Value {
     let mut v = json!({
         "id": t.id,
         "name": t.name,
@@ -299,6 +461,10 @@ fn token_json(t: &AgentTokenRow, client_name: Option<&str>, last_used_at: Option
     });
     if t.kind == db::KIND_OAUTH {
         v["client_name"] = json!(client_name);
+    }
+    if let Some((app_seal, readable)) = keys {
+        v["agent_key"] = app_seal.as_deref().map_or(Value::Null, |s| json!(rules_crypto::b64(s)));
+        v["readable"] = json!(readable);
     }
     v
 }
@@ -326,7 +492,18 @@ async fn mint(
         client_id: None,
     };
     let stored = row.clone();
-    state.db.run(move |c| db::insert_agent_token(c, &stored)).await?;
+    let secret = crate::crypto::CredentialSecret::new(&token);
+    state
+        .db
+        .run(move |c| {
+            let tx = c.transaction()?;
+            db::insert_agent_token(&tx, &stored)?;
+            // Its key now, while the server holds the token, so the app can
+            // wrap the newest snapshot key for it at once.
+            crate::crypto::agent_key(&tx, &stored.id, stored.mailbox_id, &secret)?;
+            tx.commit()
+        })
+        .await?;
     tracing::info!(mailbox = m.id, token = %row.id, "agent token minted");
     let mut answer = token_json(&row, None, None);
     answer["token"] = json!(token);
@@ -340,9 +517,20 @@ async fn list_tokens(
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
-    let rows = state.db.run(move |c| db::agent_tokens(c, m.id)).await?;
-    let agents: Vec<Value> = rows.iter().map(|(t, client, used)| token_json(t, client.as_deref(), *used)).collect();
-    Ok(Json(json!({ "agent_tokens": agents })))
+    let (rows, keys, key_id) = state
+        .db
+        .run(move |c| {
+            let keys: std::collections::HashMap<String, (Option<Vec<u8>>, bool)> = db::agent_readability(c, m.id)?
+                .into_iter()
+                .map(|(id, seal, readable)| (id, (seal, readable)))
+                .collect();
+            Ok((db::agent_tokens(c, m.id)?, keys, db::latest_snapshot(c, m.id)?.and_then(|s| s.key_id)))
+        })
+        .await?;
+    let agents: Vec<Value> =
+        rows.iter().map(|(t, client, used)| token_json_with(t, client.as_deref(), *used, keys.get(&t.id))).collect();
+    // The newest snapshot's key id, when it is encrypted.
+    Ok(Json(json!({ "agent_tokens": agents, "key_id": key_id })))
 }
 
 async fn revoke(
@@ -467,15 +655,6 @@ async fn ack_reports(
 }
 
 /// The agent token's mailbox, which must be the one in the path.
-async fn agent_mailbox(
-    state: &AppState,
-    headers: &HeaderMap,
-    address: &str,
-    slot: &TokenSlot,
-) -> Result<i64, ApiError> {
-    Ok(agent_in_path(state, headers, address, slot).await?.mailbox_id)
-}
-
 /// The agent let in, whose mailbox must be the one in the path.
 async fn agent_in_path(
     state: &AppState,
@@ -497,10 +676,10 @@ async fn check(
     headers: HeaderMap,
     body: String,
 ) -> Result<Json<Value>, ApiError> {
-    let mailbox = agent_mailbox(&state, &headers, &address, &slot).await?;
+    let auth = agent_in_path(&state, &headers, &address, &slot).await?;
     let args: CheckArgs = parse_json(&body)?;
     answers::check_draft_args(&args).map_err(crate::reports::invalid)?;
-    Ok(Json(answers::check_draft(&published(&state, mailbox).await?, &args)))
+    Ok(Json(answers::check_draft(&crate::crypto::published(&state, &auth).await?, &args)))
 }
 
 async fn report(
@@ -514,19 +693,6 @@ async fn report(
     let args: ReportArgs = parse_json(&body)?;
     let answer = crate::reports::file(&state, &auth, args).await?;
     Ok((StatusCode::ACCEPTED, Json(answer)).into_response())
-}
-
-/// The newest snapshot, or why there is none to read.
-async fn published(state: &AppState, mailbox_id: i64) -> Result<Snapshot, ApiError> {
-    latest(state, mailbox_id).await?.ok_or_else(|| {
-        ApiError::new(StatusCode::NOT_FOUND, "not_published", "nothing has been published to this mailbox yet")
-    })
-}
-
-/// A mailbox's newest snapshot, read back.
-pub(crate) async fn latest(state: &AppState, mailbox_id: i64) -> Result<Option<Snapshot>, ApiError> {
-    let row = state.db.run(move |c| db::latest_snapshot(c, mailbox_id)).await?;
-    row.map(|r| Snapshot::from_json(&r.json).map_err(ApiError::internal)).transpose()
 }
 
 /// The query's pairs, in order (`to` may repeat).
@@ -545,7 +711,7 @@ async fn guide(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    let mailbox = agent_mailbox(&state, &headers, &address, &slot).await?;
+    let auth = agent_in_path(&state, &headers, &address, &slot).await?;
     let mut args = GuideArgs::default();
     for (k, v) in query_pairs(query.as_deref()) {
         match k.as_str() {
@@ -557,7 +723,7 @@ async fn guide(
         }
     }
     answers::check_guide_args(&args).map_err(|m| ApiError::new(StatusCode::BAD_REQUEST, "invalid_arguments", m))?;
-    Ok(Json(answers::guide_rules(&published(&state, mailbox).await?, &args)))
+    Ok(Json(answers::guide_rules(&crate::crypto::published(&state, &auth).await?, &args)))
 }
 
 async fn facts(
@@ -567,7 +733,7 @@ async fn facts(
     RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    let mailbox = agent_mailbox(&state, &headers, &address, &slot).await?;
+    let auth = agent_in_path(&state, &headers, &address, &slot).await?;
     let mut args = FactsArgs::default();
     for (k, v) in query_pairs(query.as_deref()) {
         let v = Some(v).filter(|v| !v.is_empty());
@@ -577,5 +743,5 @@ async fn facts(
             other => return Err(unknown_parameter(other)),
         }
     }
-    Ok(Json(answers::facts_lookup(&published(&state, mailbox).await?, &args)))
+    Ok(Json(answers::facts_lookup(&crate::crypto::published(&state, &auth).await?, &args)))
 }

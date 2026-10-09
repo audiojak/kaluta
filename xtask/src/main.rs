@@ -53,6 +53,9 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         // The guide's check and renderers, shared by the core and the rules
         // server (spec §10.6): pure, no internal crates.
         ("writing-guide", &[][..]),
+        // Encryption at rest on the rules server, shared by the core and the
+        // server (spec §10.6): pure, no internal crates.
+        ("rules-crypto", &[][..]),
         (
             "openagc-core",
             &[
@@ -70,6 +73,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
                 "agent-mcp",
                 "permissions",
                 "writing-guide",
+                "rules-crypto",
             ][..],
         ),
         // Mailbox mode runs the core headless when the app is closed
@@ -77,7 +81,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ("openagc-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "openagc-core"][..]),
         // The rules server for cloud agents (spec §10.6): the guide's
         // renderers and nothing of the app's (never the core or a store).
-        ("rules-server", &["writing-guide"][..]),
+        ("rules-server", &["writing-guide", "rules-crypto"][..]),
         ("uniffi-bindgen-swift", &[][..]),
         ("xtask", &["mail-domain", "mail-store", "agent-mcp", "agent-api", "permissions"][..]),
     ])
@@ -90,7 +94,14 @@ const UNIFFI_ALLOWED: &[&str] = &["openagc-core", "uniffi-bindgen-swift"];
 /// Crates held to a fixed list of external dependencies, so they stay pure:
 /// the writing guide's check and renderers run in the rules server, which
 /// has no store, runtime or UniFFI of the app's (spec §10.6).
-const EXTERNAL_ALLOWED: &[(&str, &[&str])] = &[("writing-guide", &["serde", "serde_json", "sha2", "thiserror"])];
+const EXTERNAL_ALLOWED: &[(&str, &[&str])] = &[
+    ("writing-guide", &["serde", "serde_json", "sha2", "thiserror"]),
+    // Computation and the OS's random numbers only.
+    (
+        "rules-crypto",
+        &["base64", "chacha20poly1305", "getrandom", "hkdf", "serde", "sha2", "thiserror", "x25519-dalek", "zeroize"],
+    ),
+];
 
 fn check_deps() -> Result<()> {
     let out = Command::new(env!("CARGO"))

@@ -566,3 +566,79 @@ async fn without_a_public_url_oauth_is_off_and_tokens_work_as_before() {
     let (_, agent) = s.mint(&publisher, "Script").await;
     assert!(s.mcp(&agent).await.is_ok());
 }
+
+// Encryption at rest (spec §10.6, oagc-gmn7.7): a grant's tokens carry its
+// secret, which its key is wrapped under; refreshing keeps it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_connectors_tokens_carry_its_grant_secret_and_read_encrypted_snapshots() {
+    use rules_crypto as seal;
+    let t = setup().await;
+    // Connected while the mailbox was plaintext: no key yet.
+    let (c, access, refresh) = t.connected("Weekly outreach routine").await;
+    let secret = rules_server::tokens::grant_secret_of(&access).expect("a grant secret").to_owned();
+    assert_eq!(rules_server::tokens::grant_secret_of(&refresh), Some(secret.as_str()));
+    let grant = t.agents().await[0].clone();
+    let grant_id = grant["id"].as_str().unwrap().to_owned();
+
+    let mut app = common::SealingApp::new();
+    let (status, body) = t.s.push_sealed(&t.publisher, &mut app, &snapshot(2), Some("1")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let client = connect(&t.s, &access).await;
+    let refused = client
+        .call_tool(rmcp::model::CallToolRequestParams::new("guide_rules").with_arguments(serde_json::Map::new()))
+        .await
+        .unwrap();
+    assert_eq!(refused.is_error, Some(true), "its key is made now; the app has not wrapped for it yet");
+    assert_eq!(t.s.rewrap(&t.publisher, &app).await, 1);
+    assert_eq!(call(&client, "guide_rules", json!({})).await["version"], 2);
+
+    // Refreshed: new tokens, the same secret, still reading.
+    let (status, tokens) = t.refresh(&c, &refresh).await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
+    let access2 = tokens["access_token"].as_str().unwrap();
+    assert_eq!(rules_server::tokens::grant_secret_of(access2), Some(secret.as_str()));
+    assert_eq!(call(&connect(&t.s, access2).await, "guide_rules", json!({})).await["version"], 2);
+    // The server keeps no grant secret and no token.
+    let stored = t.s.stored_bytes();
+    for kept in [secret.as_str(), access2, &access, &refresh] {
+        assert!(!common::contains(&stored, kept), "the database holds a secret");
+    }
+    let key_wrap: Vec<u8> =
+        t.s.backup().query_row("SELECT key_wrap FROM agent_tokens WHERE id = ?1", [&grant_id], |r| r.get(0)).unwrap();
+    assert!(seal::unwrap_agent_key(&seal::credential_key(&secret, &grant_id), &key_wrap, &grant_id).is_ok());
+    assert!(seal::unwrap_agent_key(&seal::credential_key(access2, &grant_id), &key_wrap, &grant_id).is_err());
+
+    // A connector that signs in after the mailbox is encrypted has its key
+    // from its first tokens, before it makes any request.
+    let (_, later, _) = t.connected("Daily digest").await;
+    let agents = t.agents().await;
+    let new = agents.iter().find(|a| a["name"] == "Daily digest").unwrap();
+    assert!(new["agent_key"].is_string());
+    assert_eq!(t.s.rewrap(&t.publisher, &app).await, 1);
+    assert_eq!(call(&connect(&t.s, &later).await, "guide_rules", json!({})).await["version"], 2);
+
+    // Revoked: its key and wraps go.
+    let r =
+        t.s.http
+            .delete(t.s.url(&format!("/v1/mailboxes/{MAILBOX}/agent-tokens/{grant_id}")))
+            .bearer_auth(&t.publisher)
+            .send()
+            .await
+            .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    let left: (Option<Vec<u8>>, i64) = t
+        .s
+        .backup()
+        .query_row(
+            "SELECT key_wrap, (SELECT COUNT(*) FROM snapshot_keys WHERE agent_id = ?1) FROM agent_tokens WHERE id = ?1",
+            [&grant_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(left, (None, 0));
+}
+
+async fn connect(s: &Server, token: &str) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
+    let config = StreamableHttpClientTransportConfig::with_uri(s.url("/mcp")).auth_header(token);
+    ().serve(StreamableHttpClientTransport::from_config(config)).await.expect("connect")
+}

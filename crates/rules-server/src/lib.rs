@@ -16,6 +16,11 @@
 //!   code the app minted, never a password ([`oauth`]). On only with a
 //!   public URL set.
 //!
+//! - **Encryption at rest** (`crypto`, `rules_crypto`): sealed
+//!   snapshots whose key the app wraps per agent, agent keys wrapped under
+//!   each agent's credential, reports sealed to the app. Plaintext only in
+//!   memory, during a request.
+//!
 //! The app is the source of truth and the only writer: it registers a
 //! mailbox, pushes full snapshots whose version only goes up, and mints
 //! and revokes agent tokens. The server holds copies, hashes of tokens and
@@ -26,6 +31,7 @@
 //! snapshot format, and never on `openagc-core` (`cargo xtask check-deps`).
 
 pub mod answers;
+mod crypto;
 pub mod db;
 pub mod limit;
 mod mcp;
@@ -69,6 +75,9 @@ pub struct Config {
     /// (an origin, no path): the OAuth issuer, and the base of the `/mcp`
     /// resource tokens are bound to. Unset, OAuth is off.
     pub public_url: Option<String>,
+    /// Refuse plaintext snapshots, and reports for a mailbox that never
+    /// pushed an encrypted one (the project-hosted server sets it).
+    pub require_encryption: bool,
 }
 
 /// Why the server cannot start with these settings.
@@ -85,6 +94,7 @@ pub(crate) struct Inner {
     pub limiter: RateLimiter,
     pub registration_token_hash: Option<String>,
     pub oauth: Option<oauth::OAuth>,
+    pub require_encryption: bool,
 }
 
 /// What every handler shares.
@@ -112,6 +122,7 @@ pub fn app(config: &Config) -> Result<Router, StartError> {
         limiter: RateLimiter::new(config.rate_limit_per_minute),
         registration_token_hash: config.registration_token.as_deref().map(tokens::hash),
         oauth,
+        require_encryption: config.require_encryption,
     }));
     Ok(rest::router(state.clone())
         .merge(oauth::router(state.clone()))
@@ -253,12 +264,15 @@ impl IntoResponse for ApiError {
 }
 
 /// An agent that was let in, by a static token or an OAuth access token:
-/// its id (the token's, or the grant's), and its mailbox.
+/// its id (the token's, or the grant's), its mailbox, and its key, opened
+/// with its credential for this request (spec §10.6, encryption at rest),
+/// once the mailbox has pushed encrypted.
 #[derive(Debug, Clone)]
 pub(crate) struct AgentAuth {
     pub token_id: String,
     pub mailbox_id: i64,
     pub address: String,
+    pub key: Option<rules_crypto::SecretKey>,
 }
 
 /// Check an agent's token and take one request from its bucket. OAuth
@@ -272,7 +286,7 @@ pub(crate) async fn agent_auth(
 ) -> Result<AgentAuth, ApiError> {
     let token = tokens::bearer(headers).ok_or_else(|| ApiError::unauthorized(false))?;
     let presented = tokens::hash(token);
-    let (id, mailbox_id, address) = if token.starts_with(tokens::ACCESS_PREFIX) {
+    let (id, mailbox_id, address, secret) = if token.starts_with(tokens::ACCESS_PREFIX) {
         let resource = match &state.oauth {
             Some(o) if oauth_ok => o.resource.clone(),
             _ => return Err(ApiError::unauthorized(true)),
@@ -294,7 +308,10 @@ pub(crate) async fn agent_auth(
         if !live {
             return Err(ApiError::unauthorized(true));
         }
-        (grant.id, grant.mailbox_id, address)
+        // A token made before grant secrets carries none: the grant gets
+        // its key at its next refresh.
+        let secret = tokens::grant_secret_of(token).map(crypto::CredentialSecret::new);
+        (grant.id, grant.mailbox_id, address, secret)
     } else {
         let id = tokens::agent_token_id(token).ok_or_else(|| ApiError::unauthorized(true))?.to_owned();
         let found = state.db.run({
@@ -305,7 +322,7 @@ pub(crate) async fn agent_auth(
         if row.kind != db::KIND_TOKEN || row.revoked_at.is_some() || !tokens::same(&presented, &row.token_hash) {
             return Err(ApiError::unauthorized(true));
         }
-        (id, row.mailbox_id, address)
+        (id, row.mailbox_id, address, Some(crypto::CredentialSecret::new(token)))
     };
     if let Some(slot) = slot {
         slot.set(format!("agent:{id}"));
@@ -316,7 +333,14 @@ pub(crate) async fn agent_auth(
     if let Err(e) = state.db.run(move |c| db::touch_agent(c, &used, db::now_ms())).await {
         tracing::warn!(token = %id, "could not note the agent's use: {e}");
     }
-    Ok(AgentAuth { token_id: id, mailbox_id, address })
+    let key = match secret {
+        Some(secret) => {
+            let agent = id.clone();
+            state.db.run(move |c| crypto::agent_key(c, &agent, mailbox_id, &secret)).await?
+        }
+        None => None,
+    };
+    Ok(AgentAuth { token_id: id, mailbox_id, address, key })
 }
 
 /// A mailbox address as stored: trimmed and lower-cased, and shaped like

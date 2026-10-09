@@ -111,6 +111,27 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX reports_by_time ON reports(received_at);
     ALTER TABLE mailboxes ADD COLUMN reports_dropped INTEGER NOT NULL DEFAULT 0;
 ",
+    // Encryption at rest (spec §10.6, oagc-gmn7.7): the app's public key per
+    // mailbox; a sealed snapshot's key id and box (its `json` left empty);
+    // each agent's key wrapped under its credential and sealed to the app;
+    // each push's snapshot key wrapped per agent; a report's sealed box.
+    "
+    ALTER TABLE mailboxes ADD COLUMN app_key TEXT;
+    ALTER TABLE snapshots ADD COLUMN key_id TEXT;
+    ALTER TABLE snapshots ADD COLUMN sealed BLOB;
+    ALTER TABLE agent_tokens ADD COLUMN key_wrap BLOB;
+    ALTER TABLE agent_tokens ADD COLUMN app_seal BLOB;
+    CREATE TABLE snapshot_keys (
+        mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+        key_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+        wrap BLOB NOT NULL,
+        PRIMARY KEY (key_id, agent_id)
+    );
+    CREATE INDEX snapshot_keys_by_agent ON snapshot_keys(agent_id);
+    CREATE INDEX snapshot_keys_by_mailbox ON snapshot_keys(mailbox_id);
+    ALTER TABLE reports ADD COLUMN sealed BLOB;
+",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -152,6 +173,9 @@ impl Db {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", true)?;
+        // What is deleted is overwritten, so a plaintext snapshot replaced by
+        // an encrypted one does not linger in free pages.
+        conn.pragma_update(None, "secure_delete", true)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn)?;
         Ok(Self { conn: Arc::new(Mutex::new(conn)) })
@@ -231,20 +255,154 @@ pub fn delete_mailbox(c: &Connection, id: i64) -> rusqlite::Result<bool> {
     Ok(c.execute("DELETE FROM mailboxes WHERE id = ?1", [id])? == 1)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SnapshotRow {
     pub version: i64,
+    /// The snapshot's JSON; empty when it is sealed.
     pub json: String,
     pub published_at: i64,
+    /// A sealed snapshot's key id and box (`rules_crypto`).
+    pub key_id: Option<String>,
+    pub sealed: Option<Vec<u8>>,
+}
+
+const SNAPSHOT_COLUMNS: &str = "version, json, published_at, key_id, sealed";
+
+fn snapshot_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotRow> {
+    Ok(SnapshotRow {
+        version: r.get(0)?,
+        json: r.get(1)?,
+        published_at: r.get(2)?,
+        key_id: r.get(3)?,
+        sealed: r.get(4)?,
+    })
 }
 
 pub fn latest_snapshot(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Option<SnapshotRow>> {
     c.query_row(
-        "SELECT version, json, published_at FROM snapshots WHERE mailbox_id = ?1 ORDER BY version DESC LIMIT 1",
+        &format!("SELECT {SNAPSHOT_COLUMNS} FROM snapshots WHERE mailbox_id = ?1 ORDER BY version DESC LIMIT 1"),
         [mailbox_id],
-        |r| Ok(SnapshotRow { version: r.get(0)?, json: r.get(1)?, published_at: r.get(2)? }),
+        snapshot_row,
     )
     .optional()
+}
+
+/// The newest snapshot `agent` can read: a plaintext one, or a sealed one
+/// whose key is wrapped for it (with that wrap). With no agent, plaintext
+/// ones only.
+pub fn readable_snapshot(
+    c: &Connection,
+    mailbox_id: i64,
+    agent: Option<&str>,
+) -> rusqlite::Result<Option<(SnapshotRow, Option<Vec<u8>>)>> {
+    c.query_row(
+        "SELECT s.version, s.json, s.published_at, s.key_id, s.sealed, k.wrap FROM snapshots s \
+         LEFT JOIN snapshot_keys k ON k.key_id = s.key_id AND k.agent_id = ?2 \
+         WHERE s.mailbox_id = ?1 AND (s.sealed IS NULL OR k.wrap IS NOT NULL) ORDER BY s.version DESC LIMIT 1",
+        params![mailbox_id, agent.unwrap_or_default()],
+        |r| Ok((snapshot_row(r)?, r.get(5)?)),
+    )
+    .optional()
+}
+
+/// The mailbox's public key for sealing to the app, if it pushed one.
+pub fn app_key(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Option<String>> {
+    Ok(c.query_row("SELECT app_key FROM mailboxes WHERE id = ?1", [mailbox_id], |r| r.get(0)).optional()?.flatten())
+}
+
+/// Keep the app's public key. A new one makes every agent's key sealed to
+/// the old one useless: those seals go, and each is made again at the
+/// agent's next request.
+pub fn set_app_key(c: &Connection, mailbox_id: i64, key: &str) -> rusqlite::Result<()> {
+    let n =
+        c.execute("UPDATE mailboxes SET app_key = ?2 WHERE id = ?1 AND app_key IS NOT ?2", params![mailbox_id, key])?;
+    if n > 0 {
+        c.execute("UPDATE agent_tokens SET app_seal = NULL WHERE mailbox_id = ?1", [mailbox_id])?;
+    }
+    Ok(())
+}
+
+/// Bytes that may not be stored yet.
+pub type MaybeBytes = Option<Vec<u8>>;
+
+/// An agent's key, wrapped under its credential and sealed to the app.
+pub fn agent_keys(c: &Connection, agent_id: &str) -> rusqlite::Result<(MaybeBytes, MaybeBytes)> {
+    Ok(c.query_row("SELECT key_wrap, app_seal FROM agent_tokens WHERE id = ?1", [agent_id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })
+    .optional()?
+    .unwrap_or((None, None)))
+}
+
+/// Store an agent's new key (both forms); its wraps of earlier snapshot
+/// keys were under the old one and go.
+pub fn set_agent_keys(
+    c: &Connection,
+    agent_id: &str,
+    key_wrap: &[u8],
+    app_seal: Option<&[u8]>,
+) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE agent_tokens SET key_wrap = ?2, app_seal = ?3 WHERE id = ?1 AND revoked_at IS NULL",
+        params![agent_id, key_wrap, app_seal],
+    )?;
+    c.execute("DELETE FROM snapshot_keys WHERE agent_id = ?1", [agent_id])?;
+    Ok(())
+}
+
+pub fn set_app_seal(c: &Connection, agent_id: &str, app_seal: &[u8]) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE agent_tokens SET app_seal = ?2 WHERE id = ?1 AND revoked_at IS NULL AND key_wrap IS NOT NULL",
+        params![agent_id, app_seal],
+    )?;
+    Ok(())
+}
+
+/// Store the app's wraps of the snapshot key `key_id` for the mailbox's
+/// live agents (others are skipped). How many were stored.
+pub fn insert_snapshot_keys(
+    c: &Connection,
+    mailbox_id: i64,
+    key_id: &str,
+    wraps: &[(String, Vec<u8>)],
+) -> rusqlite::Result<usize> {
+    let mut stored = 0;
+    for (agent_id, wrap) in wraps {
+        stored += c.execute(
+            "INSERT OR REPLACE INTO snapshot_keys (mailbox_id, key_id, agent_id, wrap) \
+             SELECT ?1, ?2, id, ?4 FROM agent_tokens WHERE id = ?3 AND mailbox_id = ?1 AND revoked_at IS NULL",
+            params![mailbox_id, key_id, agent_id, wrap],
+        )?;
+    }
+    Ok(stored)
+}
+
+/// Whether the mailbox keeps a snapshot sealed under `key_id`.
+pub fn has_key_id(c: &Connection, mailbox_id: i64, key_id: &str) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM snapshots WHERE mailbox_id = ?1 AND key_id = ?2)",
+        params![mailbox_id, key_id],
+        |r| r.get(0),
+    )
+}
+
+/// Each of the mailbox's agents' key sealed to the app, and whether the
+/// newest snapshot is readable to it (plaintext, or its key wrapped for it).
+pub fn agent_readability(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<(String, MaybeBytes, bool)>> {
+    let mut stmt = c.prepare(
+        "SELECT t.id, t.app_seal, \
+         COALESCE((SELECT s.sealed IS NULL OR EXISTS (SELECT 1 FROM snapshot_keys k \
+                   WHERE k.key_id = s.key_id AND k.agent_id = t.id) \
+                   FROM snapshots s WHERE s.mailbox_id = t.mailbox_id ORDER BY s.version DESC LIMIT 1), 0) \
+         FROM agent_tokens t WHERE t.mailbox_id = ?1",
+    )?;
+    stmt.query_map([mailbox_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+}
+
+/// A mailbox's plaintext snapshots go once it publishes encrypted ones.
+/// How many went.
+pub fn delete_plain_snapshots(c: &Connection, mailbox_id: i64) -> rusqlite::Result<usize> {
+    c.execute("DELETE FROM snapshots WHERE mailbox_id = ?1 AND sealed IS NULL", [mailbox_id])
 }
 
 /// The versions kept, newest first.
@@ -256,13 +414,20 @@ pub fn versions(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<i64>> {
 /// Store a snapshot and drop all but the newest [`KEEP_VERSIONS`].
 pub fn insert_snapshot(c: &Connection, mailbox_id: i64, row: &SnapshotRow, now: i64) -> rusqlite::Result<()> {
     c.execute(
-        "INSERT INTO snapshots (mailbox_id, version, json, published_at, received_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![mailbox_id, row.version, row.json, row.published_at, now],
+        "INSERT INTO snapshots (mailbox_id, version, json, published_at, received_at, key_id, sealed) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![mailbox_id, row.version, row.json, row.published_at, now, row.key_id, row.sealed],
     )?;
     c.execute(
         "DELETE FROM snapshots WHERE mailbox_id = ?1 AND version NOT IN \
          (SELECT version FROM snapshots WHERE mailbox_id = ?1 ORDER BY version DESC LIMIT ?2)",
         params![mailbox_id, KEEP_VERSIONS],
+    )?;
+    // Wraps of keys no kept snapshot uses.
+    c.execute(
+        "DELETE FROM snapshot_keys WHERE mailbox_id = ?1 AND key_id NOT IN \
+         (SELECT key_id FROM snapshots WHERE mailbox_id = ?1 AND key_id IS NOT NULL)",
+        [mailbox_id],
     )?;
     Ok(())
 }
@@ -380,6 +545,10 @@ pub fn revoke_grant(c: &Connection, id: &str, now: i64) -> rusqlite::Result<()> 
 fn forget_grant_secrets(c: &Connection, id: &str) -> rusqlite::Result<()> {
     c.execute("DELETE FROM oauth_tokens WHERE grant_id = ?1", [id])?;
     c.execute("DELETE FROM oauth_codes WHERE grant_id = ?1", [id])?;
+    // Its key, in both forms, and every snapshot key wrapped for it: no
+    // copy of the database made from now on holds anything it can open.
+    c.execute("UPDATE agent_tokens SET key_wrap = NULL, app_seal = NULL WHERE id = ?1", [id])?;
+    c.execute("DELETE FROM snapshot_keys WHERE agent_id = ?1", [id])?;
     Ok(())
 }
 
@@ -604,6 +773,9 @@ pub struct ReportRow {
     pub check_version: Option<i64>,
     /// What that check found (`guide_check`'s messages).
     pub guide_check: Vec<String>,
+    /// The Message-ID, recipients, subject, body and check sealed to the app
+    /// (the fields above then empty), for a mailbox with a public key.
+    pub sealed: Option<Vec<u8>>,
 }
 
 /// Store a report, dropping the mailbox's oldest beyond `max_pending`
@@ -611,8 +783,8 @@ pub struct ReportRow {
 pub fn insert_report(c: &Connection, r: &ReportRow, max_pending: i64) -> rusqlite::Result<i64> {
     c.execute(
         "INSERT INTO reports (mailbox_id, agent_id, received_at, message_id, recipients, subject, sent_at, \
-         body_markdown, checked_version, check_version, guide_check) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+         body_markdown, checked_version, check_version, guide_check, sealed) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             r.mailbox_id,
             r.agent_id,
@@ -625,6 +797,7 @@ pub fn insert_report(c: &Connection, r: &ReportRow, max_pending: i64) -> rusqlit
             r.checked_version,
             r.check_version,
             serde_json::to_string(&r.guide_check).unwrap_or_else(|_| "[]".into()),
+            r.sealed,
         ],
     )?;
     let id = c.last_insert_rowid();
@@ -650,7 +823,7 @@ pub fn reports(c: &Connection, mailbox_id: i64, after: i64, limit: i64) -> rusql
     let mut stmt = c.prepare(
         "SELECT r.id, r.mailbox_id, r.agent_id, r.received_at, r.message_id, r.recipients, r.subject, r.sent_at, \
          r.body_markdown, r.checked_version, r.check_version, r.guide_check, \
-         COALESCE(t.name, ''), COALESCE(t.kind, 'token') \
+         COALESCE(t.name, ''), COALESCE(t.kind, 'token'), r.sealed \
          FROM reports r LEFT JOIN agent_tokens t ON t.id = r.agent_id \
          WHERE r.mailbox_id = ?1 AND r.id > ?2 ORDER BY r.id LIMIT ?3",
     )?;
@@ -671,6 +844,7 @@ pub fn reports(c: &Connection, mailbox_id: i64, after: i64, limit: i64) -> rusql
                 checked_version: r.get(9)?,
                 check_version: r.get(10)?,
                 guide_check: serde_json::from_str(&check).unwrap_or_default(),
+                sealed: r.get(14)?,
             },
             r.get(12)?,
             r.get(13)?,
@@ -777,7 +951,12 @@ mod tests {
         db.run_now(|c| {
             let id = insert_mailbox(c, "a@x.com", "h", 1)?.unwrap();
             for v in 1..=7 {
-                insert_snapshot(c, id, &SnapshotRow { version: v, json: "{}".into(), published_at: v }, v)?;
+                insert_snapshot(
+                    c,
+                    id,
+                    &SnapshotRow { version: v, json: "{}".into(), published_at: v, ..Default::default() },
+                    v,
+                )?;
             }
             assert_eq!(versions(c, id)?, [7, 6, 5, 4, 3]);
             assert_eq!(latest_snapshot(c, id)?.unwrap().version, 7);
@@ -824,6 +1003,7 @@ mod tests {
                 checked_version: Some(3),
                 check_version: Some(3),
                 guide_check: vec!["Uses “circle back”, which your rules ban".into()],
+                sealed: None,
             };
             let ids: Vec<i64> = (1..=5).map(|at| insert_report(c, &report(at), 3)).collect::<Result<_, _>>()?;
             let listed = reports(c, id, 0, 100)?;
