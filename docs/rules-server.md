@@ -141,7 +141,8 @@ openagc-rules --data-dir /var/lib/openagc-rules
 | `--listen` | `OPENAGC_RULES_LISTEN` | `127.0.0.1:8787` | Plain HTTP. Keep it on loopback behind a proxy. |
 | `--data-dir` | `OPENAGC_RULES_DATA_DIR` | `./data` | Holds `rules.sqlite3`. Made mode 0700, the file 0600. |
 | `--log` | `OPENAGC_RULES_LOG` | `info` | The server's own log level (`debug` adds health checks). Dependencies log at `warn`. |
-| `--rate-limit` | `OPENAGC_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registration has one bucket of its own. |
+| `--rate-limit` | `OPENAGC_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registering a mailbox counts per client address, at the same rate; failed sign-ins are refused for a minute after 30 from one address (also off with `0`). |
+| `--trusted-proxy` | `OPENAGC_RULES_TRUSTED_PROXY` | unset | Your TLS proxy's address or network as the server sees it (`127.0.0.1`, `172.16.0.0/12`; comma-separated, or the flag repeated). Its `X-Forwarded-For` then names each client, for the limits on strangers (below). Unset, the client is the peer: behind a proxy, every stranger counts as the proxy. |
 | `--public-url` | `OPENAGC_RULES_PUBLIC_URL` | unset | The server's address as agents reach it, an origin alone (`https://rules.example.com`; `http://` only to `127.0.0.1` or `localhost`). Turns on OAuth sign-in with connect codes, which claude.ai connectors and cloud routines need; the OAuth issuer and the `/mcp` resource are made from it. |
 | | `OPENAGC_RULES_REGISTRATION_TOKEN` | unset | When set, registering a mailbox needs `Authorization: Bearer <it>`. Set it on any server strangers can reach. |
 | | `OPENAGC_RULES_REQUIRE_ENCRYPTION` | unset | `1` refuses plaintext snapshots (422 `encryption_required`) and reports for a mailbox that never published encrypted (409 `not_encrypted`); `GET /v1/server` says so, and the app then offers no choice. |
@@ -166,6 +167,7 @@ docker run -d --name openagc-rules --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v openagc-rules:/data \
   -e OPENAGC_RULES_REGISTRATION_TOKEN="$(openssl rand -hex 32)" \
   -e OPENAGC_RULES_PUBLIC_URL=https://rules.example.com \
+  -e OPENAGC_RULES_TRUSTED_PROXY=172.16.0.0/12 \
   openagc-rules
 ```
 
@@ -185,7 +187,17 @@ rules.example.com {
 }
 ```
 
-Caddy gets and renews the certificate. Do not log request headers at the
+Caddy gets and renews the certificate, and adds the client's address to
+`X-Forwarded-For` (replacing whatever the client sent, unless you tell
+Caddy to trust upstream proxies). Tell the server to believe it:
+`OPENAGC_RULES_TRUSTED_PROXY=127.0.0.1` for Caddy on the same host, or the
+Docker bridge (`172.16.0.0/12`) when the server runs in Docker with
+`-p 127.0.0.1:8787:8787`, which is where Caddy's connections appear to come
+from. The server reads the header right to left and takes the first
+address that is not a trusted proxy, so a client cannot choose its own by
+sending the header; without the setting it ignores the header. The limits
+on strangers (registering, the sign-in page, connect codes, failed
+sign-ins) then count per client, and one stranger cannot use up everyone's. Do not log request headers at the
 proxy: they carry the bearer tokens (and, on the sign-in page, the CSRF
 cookie). Caddy's default access log does not record `Authorization` or
 `Cookie`; keep it that way. It does record query strings, which on
@@ -321,8 +333,13 @@ Limits: a connect code is ten characters from 31 without look-alikes (no
 0, 1, I, L or O; case, spaces and the dash do not matter), single use,
 10 minutes, kept as a hash; a mailbox may have 10 unused at once. A
 sign-in page closes after 5 wrong codes; an app (OAuth client) that sends
-5 wrong codes is locked out for an hour; the whole server checks at most
-30 codes a minute. Access tokens last an hour; refresh tokens 30 days and
+5 wrong codes is locked out for an hour from that client address (a
+client id is public, so a lockout for everyone would let anyone lock out
+your connector); one address may try 10 codes a minute, and the whole
+server takes at most 60 wrong codes a minute (right ones do not count).
+Registrations are 10 a minute per address and 120 across the server;
+sign-in pages 30 a minute per address and 600 across the server. Behind a
+proxy these need `OPENAGC_RULES_TRUSTED_PROXY` (above). Access tokens last an hour; refresh tokens 30 days and
 change at every refresh, with the grant's secret (the access tokens from
 before stop), and a refresh token or authorization code used twice revokes
 the agent (someone else has a copy). Clients that never
@@ -365,7 +382,11 @@ connect an agent are forgotten after a week.
 
 ## The API
 
-All bodies are JSON. Errors are `{"error": "<code>", "message": "…"}`; a
+All bodies are JSON. Errors are `{"error": "<code>", "message": "…"}`.
+Every publisher call answers an address that is not registered as it
+answers a wrong token, 401 `invalid_token`: only the mailbox's publisher
+token tells the two apart (the app registers again when a push gets a 401
+and the address turns out to be free). A
 401 carries `WWW-Authenticate: Bearer realm="openagc-rules"` (with
 `error="invalid_token"` for a token that is unknown or revoked, and at
 `/mcp` with OAuth on `resource_metadata="<public URL>/.well-known/oauth-protected-resource", scope="rules"`),
@@ -448,7 +469,7 @@ authorization server, issuer `<public URL>`.
 |---|---|
 | `GET /.well-known/oauth-protected-resource` (also `…/mcp`) | RFC 9728: `resource`, `authorization_servers`, `scopes_supported: ["rules"]` |
 | `GET /.well-known/oauth-authorization-server` | RFC 8414: the endpoints below, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `grant_types_supported: ["authorization_code", "refresh_token"]` |
-| `POST /oauth/register` | RFC 7591, JSON: `redirect_uris` (1 to 10; `https://`, or `http://` to a loopback address), `client_name`. Every client is public (`token_endpoint_auth_method` `none`). 201 with `client_id`; 400 `invalid_redirect_uri` or `invalid_client_metadata`; 30 a minute across the server |
-| `GET /oauth/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exactly as registered; a loopback one with any port), `code_challenge` with `code_challenge_method=S256` (required), `state`, `resource` (this server's `/mcp`, if given). An unknown client or return address is shown on the page, never redirected to; other errors go back with `error` and `state`. Otherwise the sign-in page |
+| `POST /oauth/register` | RFC 7591, JSON: `redirect_uris` (1 to 10; `https://`, or `http://` to a loopback address), `client_name`. Every client is public (`token_endpoint_auth_method` `none`). 201 with `client_id`; 400 `invalid_redirect_uri` or `invalid_client_metadata`; 10 a minute per client address, 120 across the server |
+| `GET /oauth/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exactly as registered; a loopback one with any port), `code_challenge` with `code_challenge_method=S256` (required), `state`, `resource` (this server's `/mcp`, if given). Every error in the request (an unknown client or return address, no PKCE, another `response_type` or `resource`, a client locked out from this address) is shown on the page, never redirected: anyone can register a client with any `https://` return address, and a redirect before the user has used the page would make the server a redirector for whoever wrote the link (RFC 9700 §4.11.2). Otherwise the sign-in page |
 | `POST /oauth/authorize` | The sign-in page's form (its CSRF cookie, its Origin). 303 to the return address with `code`, `state` and `iss`, or `error=access_denied` |
 | `POST /oauth/token` | Form-encoded. `grant_type=authorization_code` with `code`, `redirect_uri`, `client_id`, `code_verifier` (and `resource`); `grant_type=refresh_token` with `refresh_token`, `client_id`. 200 `{"access_token", "token_type": "Bearer", "expires_in": 3600, "refresh_token", "scope": "rules"}`; errors are RFC 6749's (`invalid_grant`, `invalid_client`, `invalid_request`, `unsupported_grant_type`, `invalid_target`) |

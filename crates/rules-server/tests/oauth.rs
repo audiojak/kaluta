@@ -428,13 +428,16 @@ async fn the_authorization_request_is_checked_before_and_after_the_return_addres
     assert_eq!(r.status(), StatusCode::BAD_REQUEST);
     assert!(r.headers().get("location").is_none());
 
-    // Then errors go back to the client, with its state.
+    // Then errors are shown too, never sent to the return address: anyone
+    // can register a client with any https:// address, and a redirect
+    // before the user has used the page would make this an open
+    // redirector (RFC 9700 §4.11.2).
     let refused = async |extra: &[(&str, &str)]| {
         let r = t.web.get(t.authorize_url(&c, CLAUDE_CALLBACK, extra)).send().await.unwrap();
-        assert_eq!(r.status(), StatusCode::FOUND, "{extra:?}");
-        let q = query(r.headers()["location"].to_str().unwrap());
-        assert_eq!(q["state"], "st-123");
-        q["error"].clone()
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{extra:?}");
+        assert!(r.headers().get("location").is_none(), "no redirect: {extra:?}");
+        let html = r.text().await.unwrap();
+        html.split("cannot be used (").nth(1).unwrap().split(')').next().unwrap().to_owned()
     };
     assert_eq!(refused(&[("code_challenge", "")]).await, "invalid_request", "PKCE is required");
     assert_eq!(refused(&[("code_challenge_method", "plain")]).await, "invalid_request", "S256 only");
@@ -475,11 +478,12 @@ async fn wrong_connect_codes_lock_the_page_then_the_client_and_expired_codes_fai
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     assert_eq!(query(r.headers()["location"].to_str().unwrap())["error"], "access_denied");
 
-    // The client is locked: even the right code does not get it in now.
+    // The client is locked from here: even the right code does not get it
+    // in now, and the page says so rather than redirecting.
     let good = t.connect_code("Routine").await;
     let r = t.web.get(t.authorize_url(&c, CLAUDE_CALLBACK, &[])).send().await.unwrap();
-    assert_eq!(r.status(), StatusCode::FOUND);
-    assert_eq!(query(r.headers()["location"].to_str().unwrap())["error"], "access_denied");
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    assert!(r.headers().get("location").is_none());
     // Another client still can, with that code.
     let other = t.register("Claude", CLAUDE_CALLBACK).await;
     t.authorize(&other, &good).await;
@@ -661,4 +665,102 @@ async fn a_connectors_tokens_carry_its_grant_secret_and_read_encrypted_snapshots
 async fn connect(s: &Server, token: &str) -> rmcp::service::RunningService<rmcp::RoleClient, ()> {
     let config = StreamableHttpClientTransportConfig::with_uri(s.url("/mcp")).auth_header(token);
     ().serve(StreamableHttpClientTransport::from_config(config)).await.expect("connect")
+}
+
+/// Behind a proxy the server trusts, `X-Forwarded-For` names the client.
+fn from(r: reqwest::RequestBuilder, address: &str) -> reqwest::RequestBuilder {
+    r.header("X-Forwarded-For", address)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_address_cannot_block_sign_in_for_everyone_else() {
+    let s = common::start_trusting(0, &["127.0.0.1"]).await;
+    let publisher = s.registered().await;
+    assert_eq!(s.publish(&publisher, None, snapshot(1).to_json().unwrap()).await.0, StatusCode::OK);
+    let t = Setup { s, publisher, web: http() };
+    const STRANGER: &str = "203.0.113.9";
+    const USER: &str = "198.51.100.7";
+    let register = async |address: &str| {
+        from(t.web.post(t.s.url("/oauth/register")), address)
+            .json(&json!({ "client_name": "Claude", "redirect_uris": [CLAUDE_CALLBACK] }))
+            .send()
+            .await
+            .unwrap()
+    };
+
+    // Registrations: the stranger's run out; the user's do not.
+    let mut stranger_clients = vec![];
+    for _ in 0..rules_server::oauth::REGISTRATIONS_PER_ADDRESS_PER_MINUTE {
+        let r = register(STRANGER).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let id = r.json::<Value>().await.unwrap()["client_id"].as_str().unwrap().to_owned();
+        stranger_clients.push(Client { id, redirect: CLAUDE_CALLBACK.into(), verifier: verifier() });
+    }
+    assert_eq!(register(STRANGER).await.status(), StatusCode::TOO_MANY_REQUESTS);
+    let r = register(USER).await;
+    assert_eq!(r.status(), StatusCode::CREATED, "another address registers");
+    let user = Client {
+        id: r.json::<Value>().await.unwrap()["client_id"].as_str().unwrap().to_owned(),
+        redirect: CLAUDE_CALLBACK.into(),
+        verifier: verifier(),
+    };
+
+    // The stranger opens the user's client's page (its id is public) and
+    // tries codes until the client is locked: locked for the stranger only.
+    let page = async |c: &Client, address: &str| {
+        let r = from(t.web.get(t.authorize_url(c, &c.redirect, &[])), address).send().await.unwrap();
+        let status = r.status();
+        let cookie = r.headers().get("set-cookie").map(|v| v.to_str().unwrap().split(';').next().unwrap().to_owned());
+        let html = r.text().await.unwrap();
+        let request = html.split("name=\"request\" value=\"").nth(1).map(|r| r.split('"').next().unwrap().to_owned());
+        (status, request, cookie)
+    };
+    let submit = async |request: &str, cookie: &str, code: &str, address: &str| {
+        from(t.web.post(t.s.url("/oauth/authorize")), address)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Cookie", cookie)
+            .header("Origin", &t.s.base)
+            .body(form(&[("request", request), ("connect_code", code), ("action", "allow")]))
+            .send()
+            .await
+            .unwrap()
+    };
+    let (_, request, cookie) = page(&user, STRANGER).await;
+    let (request, cookie) = (request.unwrap(), cookie.unwrap());
+    for _ in 0..rules_server::oauth::TRIES_PER_CLIENT {
+        let _ = submit(&request, &cookie, "ABCDE-FGHJK", STRANGER).await;
+    }
+    assert_eq!(page(&user, STRANGER).await.0, StatusCode::FORBIDDEN, "locked for the stranger");
+    let code = t.connect_code("Weekly outreach routine").await;
+    let (status, request, cookie) = page(&user, USER).await;
+    assert_eq!(status, StatusCode::OK, "not for the user");
+    let r = submit(&request.unwrap(), &cookie.unwrap(), &code, USER).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert!(query(r.headers()["location"].to_str().unwrap()).contains_key("code"), "the user connects");
+
+    // Codes tried from one address run out; the user's next try does not.
+    let mut refused = false;
+    for mine in &stranger_clients[..3] {
+        // Fewer than the lockout's tries on each client.
+        let (_, request, cookie) = page(mine, STRANGER).await;
+        let (request, cookie) = (request.unwrap(), cookie.unwrap());
+        for _ in 0..4 {
+            let html = submit(&request, &cookie, "ABCDE-FGHJK", STRANGER).await.text().await.unwrap();
+            refused |= html.contains("Too many codes were tried from here");
+        }
+    }
+    assert!(refused, "at most {} codes a minute from one address", rules_server::oauth::CODES_PER_ADDRESS_PER_MINUTE);
+    let code = t.connect_code("Daily digest").await;
+    let second = t.register("Claude", CLAUDE_CALLBACK).await;
+    let (_, request, cookie) = page(&second, USER).await;
+    let r = submit(&request.unwrap(), &cookie.unwrap(), &code, USER).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER, "another address still signs in");
+
+    // Consent pages from one address run out too, not everyone's.
+    let mut busy = false;
+    for _ in 0..rules_server::oauth::CONSENTS_PER_ADDRESS_PER_MINUTE {
+        busy |= page(&stranger_clients[3], STRANGER).await.0 == StatusCode::TOO_MANY_REQUESTS;
+    }
+    assert!(busy);
+    assert_eq!(page(&second, USER).await.0, StatusCode::OK);
 }

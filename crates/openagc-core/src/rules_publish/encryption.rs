@@ -151,8 +151,10 @@ impl Core {
         }
         match a.status {
             200 => Ok(a.body),
-            // Forgotten by the server: the push registers again.
-            404 => Ok(json!({ "agent_tokens": [] })),
+            // Forgotten by the server (401 as for a wrong token; 404 from
+            // older servers): the push registers again, or says the token
+            // is refused.
+            401 | 404 => Ok(json!({ "agent_tokens": [] })),
             _ => Err(Failure::Final(format!("{} did not list the agents: {}", server.host, a.says()))),
         }
     }

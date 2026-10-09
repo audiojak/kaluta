@@ -4,6 +4,9 @@
 //! - `POST /v1/mailboxes` `{"address"}`: register; answers the publisher
 //!   token once. The first registration of an address wins; later ones are
 //!   refused (409). With a registration token set, registering needs it.
+//!
+//! Every publisher call answers 401 for an address that is not registered,
+//! as for a wrong token: only the mailbox's token tells the two apart.
 //! - `DELETE /v1/mailboxes/{address}`: forget the mailbox, its snapshots
 //!   and its agent tokens.
 //! - `PUT /v1/mailboxes/{address}/snapshot` with `If-Match: <current
@@ -109,12 +112,18 @@ async fn register(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response, ApiError> {
-    state.limiter.take("register").map_err(ApiError::too_many)?;
+    // Per client address: one stranger cannot use up everyone's.
+    state.limiter.take(&format!("register:{}", slot.client())).map_err(ApiError::too_many)?;
     if let Some(expected) = &state.registration_token_hash {
-        let given = tokens::bearer(&headers);
-        if !given.is_some_and(|t| tokens::same(&tokens::hash(t), expected)) {
-            return Err(ApiError::unauthorized(given.is_some()));
-        }
+        let check = async {
+            let given = tokens::bearer(&headers);
+            if given.is_some_and(|t| tokens::same(&tokens::hash(t), expected)) {
+                Ok(())
+            } else {
+                Err(ApiError::unauthorized(given.is_some()))
+            }
+        };
+        crate::limit_failed_auth(&state, Some(&slot), check).await?;
         slot.set("registration".into());
     }
     let b: RegisterBody = parse_json(&body)?;
@@ -136,7 +145,9 @@ async fn register(
     Ok((StatusCode::CREATED, Json(json!({ "address": address, "publisher_token": token }))).into_response())
 }
 
-/// The mailbox in the path, if the publisher token is its own.
+/// The mailbox in the path, if the publisher token is its own. An address
+/// that is not registered is answered as a wrong token is (401), so nobody
+/// learns which addresses are registered without that mailbox's token.
 async fn publisher(
     state: &AppState,
     headers: &HeaderMap,
@@ -146,13 +157,16 @@ async fn publisher(
     let address = address_in_path(address)?;
     let token = tokens::bearer(headers).ok_or_else(|| ApiError::unauthorized(false))?;
     let presented = tokens::hash(token);
-    let row = state.db.run(move |c| db::mailbox_by_address(c, &address)).await?;
-    let Some(row) = row else {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_registered", "no such mailbox on this server"));
+    let check = async {
+        let row = state.db.run(move |c| db::mailbox_by_address(c, &address)).await?;
+        // Compared against something either way: the same work for both.
+        let expected = row.as_ref().map_or_else(|| tokens::hash(""), |r| r.publisher_token_hash.clone());
+        match row {
+            Some(row) if tokens::same(&presented, &expected) => Ok(row),
+            _ => Err(ApiError::unauthorized(true)),
+        }
     };
-    if !tokens::same(&presented, &row.publisher_token_hash) {
-        return Err(ApiError::unauthorized(true));
-    }
+    let row = crate::limit_failed_auth(state, Some(slot), check).await?;
     slot.set(format!("publisher:{}", row.id));
     state.limiter.take(&format!("publisher:{}", row.id)).map_err(ApiError::too_many)?;
     Ok(row)

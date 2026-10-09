@@ -46,7 +46,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use axum::Router;
-use axum::extract::{MatchedPath, Request};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -79,7 +79,16 @@ pub struct Config {
     /// Refuse plaintext snapshots, and reports for a mailbox that never
     /// pushed an encrypted one (the project-hosted server sets it).
     pub require_encryption: bool,
+    /// Proxies whose `X-Forwarded-For` names the client (addresses or CIDR
+    /// networks, `OPENAGC_RULES_TRUSTED_PROXY`): limits for strangers count
+    /// per client address, which behind a proxy is otherwise the proxy's.
+    pub trusted_proxies: Vec<String>,
 }
+
+/// Failed sign-ins (a bearer token that is unknown, revoked or wrong) a
+/// minute from one client address before it is refused without a look at
+/// the database. Off with the rate limit.
+pub const FAILED_AUTH_PER_MINUTE: u32 = 30;
 
 /// Why the server cannot start with these settings.
 #[derive(Debug, thiserror::Error)]
@@ -88,11 +97,16 @@ pub enum StartError {
     Db(#[from] DbError),
     #[error("public URL: {0}")]
     PublicUrl(String),
+    #[error("trusted proxy: {0}")]
+    TrustedProxy(String),
 }
 
 pub(crate) struct Inner {
     pub db: Db,
     pub limiter: RateLimiter,
+    /// Failed sign-ins per client address ([`FAILED_AUTH_PER_MINUTE`]).
+    pub failed_auth: RateLimiter,
+    pub trusted_proxies: Vec<limit::Cidr>,
     pub registration_token_hash: Option<String>,
     pub oauth: Option<oauth::OAuth>,
     pub require_encryption: bool,
@@ -116,21 +130,29 @@ pub fn app(config: &Config) -> Result<Router, StartError> {
         Some(url) => Some(oauth::OAuth::new(&oauth::public_base(url).map_err(StartError::PublicUrl)?)),
         None => None,
     };
+    let trusted_proxies = limit::parse_trusted(&config.trusted_proxies).map_err(StartError::TrustedProxy)?;
     let db = Db::open(&config.data_dir)?;
     sweep_reports_hourly(&db);
+    let failed_per_minute = if config.rate_limit_per_minute == 0 { 0 } else { FAILED_AUTH_PER_MINUTE };
     let state = AppState(Arc::new(Inner {
         db,
         limiter: RateLimiter::new(config.rate_limit_per_minute),
+        failed_auth: RateLimiter::new(failed_per_minute),
+        trusted_proxies,
         registration_token_hash: config.registration_token.as_deref().map(tokens::hash),
         oauth,
         require_encryption: config.require_encryption,
     }));
     Ok(rest::router(state.clone())
         .merge(oauth::router(state.clone()))
-        .merge(mcp::router(state))
+        .merge(mcp::router(state.clone()))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
-        .layer(axum::middleware::from_fn(log_requests)))
+        .layer(axum::middleware::from_fn_with_state(state, log_requests)))
 }
+
+// Serve it with `into_make_service_with_connect_info::<SocketAddr>()`, so
+// the limits on strangers know each request's peer (`limit::client_key`);
+// without it every request counts as one client.
 
 /// How often reports the app never pulled are swept once 30 days old.
 pub const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
@@ -154,24 +176,38 @@ fn sweep_reports_hourly(db: &Db) {
 }
 
 /// Which token a request was made with, for its log line: filled in by
-/// whichever check accepted it. Never the token itself.
-#[derive(Clone, Default)]
-pub(crate) struct TokenSlot(Arc<OnceLock<String>>);
+/// whichever check accepted it. Never the token itself. It also carries
+/// the client's address as a bucket key (never logged).
+#[derive(Clone)]
+pub(crate) struct TokenSlot(Arc<OnceLock<String>>, Arc<str>);
+
+impl Default for TokenSlot {
+    fn default() -> Self {
+        Self(Arc::default(), Arc::from("unknown"))
+    }
+}
 
 impl TokenSlot {
     pub fn set(&self, who: String) {
         let _ = self.0.set(who);
+    }
+
+    /// The client's address, for the limits on strangers.
+    pub fn client(&self) -> &str {
+        &self.1
     }
 }
 
 /// One line per request: method, route pattern (never the path, which
 /// holds an address, or the query, which holds recipients), status, time
 /// and the token's id.
-async fn log_requests(mut req: Request, next: Next) -> Response {
+async fn log_requests(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let started = Instant::now();
     let method = req.method().clone();
     let route = req.extensions().get::<MatchedPath>().map_or_else(|| "-".to_owned(), |p| p.as_str().to_owned());
-    let slot = TokenSlot::default();
+    let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0);
+    let client = limit::client_key(peer, req.headers(), &state.trusted_proxies);
+    let slot = TokenSlot(Arc::default(), Arc::from(client));
     req.extensions_mut().insert(slot.clone());
     let response = next.run(req).await;
     let token = slot.0.get().map_or("-", String::as_str);
@@ -276,10 +312,39 @@ pub(crate) struct AgentAuth {
     pub key: Option<rules_crypto::SecretKey>,
 }
 
+/// Run a sign-in check for the client in `slot`, refusing it before any
+/// database work once it has failed [`FAILED_AUTH_PER_MINUTE`] times in a
+/// minute, and counting a refused token against it.
+pub(crate) async fn limit_failed_auth<T>(
+    state: &AppState,
+    slot: Option<&TokenSlot>,
+    check: impl std::future::Future<Output = Result<T, ApiError>>,
+) -> Result<T, ApiError> {
+    let client = slot.map_or("unknown", TokenSlot::client);
+    let key = format!("failed:{client}");
+    state.failed_auth.peek(&key).map_err(ApiError::too_many)?;
+    let outcome = check.await;
+    if let Err(e) = &outcome
+        && e.code == "invalid_token"
+    {
+        let _ = state.failed_auth.take(&key);
+    }
+    outcome
+}
+
 /// Check an agent's token and take one request from its bucket. OAuth
 /// access tokens are bound to the `/mcp` resource: they are taken only
 /// where `oauth_ok` (at `/mcp`), and only for this server's resource.
 pub(crate) async fn agent_auth(
+    state: &AppState,
+    headers: &http::HeaderMap,
+    slot: Option<&TokenSlot>,
+    oauth_ok: bool,
+) -> Result<AgentAuth, ApiError> {
+    limit_failed_auth(state, slot, agent_auth_checked(state, headers, slot, oauth_ok)).await
+}
+
+async fn agent_auth_checked(
     state: &AppState,
     headers: &http::HeaderMap,
     slot: Option<&TokenSlot>,

@@ -22,7 +22,11 @@
 //!   PKCE S256 only; the consent page shows the client's name and where it
 //!   goes back to and asks for the connect code. Its only cookie carries the
 //!   CSRF token. `state` is passed through; `resource` (RFC 8707) must be
-//!   this server's.
+//!   this server's. Errors in the request are shown on a page, never
+//!   redirected: only the consent form's answers go back to the client.
+//! - Strangers' limits count per client address (`limit::client_key`):
+//!   registrations, consent pages, connect codes tried and lockouts, each
+//!   under a larger ceiling for the whole server (wrong codes only).
 //! - `POST /oauth/token`: the code for an access token (an hour) and a
 //!   refresh token (30 days), with the PKCE verifier; refresh tokens rotate,
 //!   with the grant's secret (its key rewrapped, its older access tokens
@@ -62,19 +66,26 @@ pub const CONNECT_CODE_TTL_MS: i64 = 600_000;
 pub const CONSENT_TTL_MS: i64 = 600_000;
 /// Wrong connect codes on one consent page before it closes.
 pub const TRIES_PER_CONSENT: u32 = 5;
-/// Wrong connect codes from one client before it is locked out…
+/// Wrong connect codes for one client from one address before that client
+/// is locked out there (strangers elsewhere cannot lock it for everyone)…
 pub const TRIES_PER_CLIENT: u32 = 5;
 /// …for this long.
 pub const CLIENT_LOCK_MS: i64 = 3_600_000;
-/// Connect codes checked a minute across the whole server, right or
-/// wrong: a ceiling on guessing.
-pub const WRONG_CODES_PER_MINUTE: u32 = 30;
+/// Connect codes one address may try a minute, right or wrong.
+pub const CODES_PER_ADDRESS_PER_MINUTE: u32 = 10;
+/// Wrong connect codes a minute across the whole server: a ceiling on
+/// guessing from many addresses. Right codes never count against it.
+pub const WRONG_CODES_PER_MINUTE: u32 = 60;
 /// Unused connect codes a mailbox may have at once.
 pub const LIVE_CODES_PER_MAILBOX: i64 = 10;
-/// Registrations a minute across the whole server.
-const REGISTRATIONS_PER_MINUTE: u32 = 30;
-/// Consent pages opened a minute across the whole server.
-const CONSENTS_PER_MINUTE: u32 = 120;
+/// Registrations a minute from one address…
+pub const REGISTRATIONS_PER_ADDRESS_PER_MINUTE: u32 = 10;
+/// …and across the whole server.
+const REGISTRATIONS_PER_MINUTE: u32 = 120;
+/// Consent pages opened a minute from one address…
+pub const CONSENTS_PER_ADDRESS_PER_MINUTE: u32 = 30;
+/// …and across the whole server.
+const CONSENTS_PER_MINUTE: u32 = 600;
 const MAX_PENDING: usize = 10_000;
 const MAX_REDIRECT_URIS: usize = 10;
 const MAX_CLIENT_NAME: usize = 100;
@@ -89,8 +100,11 @@ pub struct OAuth {
     pending: Mutex<HashMap<String, Pending>>,
     failures: Mutex<HashMap<String, ClientFailures>>,
     wrong_codes: RateLimiter,
+    code_checks: RateLimiter,
     registrations: RateLimiter,
+    registrations_all: RateLimiter,
     consents: RateLimiter,
+    consents_all: RateLimiter,
 }
 
 /// A consent page waiting for its connect code.
@@ -136,6 +150,13 @@ pub fn public_base(input: &str) -> Result<String, String> {
     Ok(url.origin().ascii_serialization())
 }
 
+/// A client's lockout is per address: a client id is public (it is in the
+/// authorization URL), so a lockout for everyone would let anyone lock out
+/// someone else's connector.
+fn lock_key(client_id: &str, address: &str) -> String {
+    format!("{client_id} {address}")
+}
+
 fn is_loopback(host: &str) -> bool {
     matches!(host, "127.0.0.1" | "[::1]" | "::1" | "localhost")
 }
@@ -149,8 +170,11 @@ impl OAuth {
             pending: Mutex::new(HashMap::new()),
             failures: Mutex::new(HashMap::new()),
             wrong_codes: RateLimiter::new(WRONG_CODES_PER_MINUTE),
-            registrations: RateLimiter::new(REGISTRATIONS_PER_MINUTE),
-            consents: RateLimiter::new(CONSENTS_PER_MINUTE),
+            code_checks: RateLimiter::new(CODES_PER_ADDRESS_PER_MINUTE),
+            registrations: RateLimiter::new(REGISTRATIONS_PER_ADDRESS_PER_MINUTE),
+            registrations_all: RateLimiter::new(REGISTRATIONS_PER_MINUTE),
+            consents: RateLimiter::new(CONSENTS_PER_ADDRESS_PER_MINUTE),
+            consents_all: RateLimiter::new(CONSENTS_PER_MINUTE),
         }
     }
 
@@ -159,18 +183,20 @@ impl OAuth {
         format!("{}/.well-known/oauth-protected-resource", self.issuer)
     }
 
-    fn locked(&self, client_id: &str, now: i64) -> bool {
+    /// Whether `client_id` is locked out for requests from `address`.
+    fn locked(&self, client_id: &str, address: &str, now: i64) -> bool {
         let failures = self.failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        failures.get(client_id).and_then(|f| f.locked_until).is_some_and(|until| until > now)
+        failures.get(&lock_key(client_id, address)).and_then(|f| f.locked_until).is_some_and(|until| until > now)
     }
 
-    /// Count a wrong connect code against a client; true when that locks it.
-    fn count_failure(&self, client_id: &str, now: i64) -> bool {
+    /// Count a wrong connect code against a client from an address; true
+    /// when that locks it there.
+    fn count_failure(&self, client_id: &str, address: &str, now: i64) -> bool {
         let mut failures = self.failures.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if failures.len() > MAX_PENDING {
             failures.retain(|_, f| f.locked_until.is_some_and(|u| u > now) || now - f.since < CLIENT_LOCK_MS);
         }
-        let f = failures.entry(client_id.to_owned()).or_default();
+        let f = failures.entry(lock_key(client_id, address)).or_default();
         if now - f.since >= CLIENT_LOCK_MS {
             *f = ClientFailures { count: 0, since: now, locked_until: None };
         }
@@ -289,7 +315,9 @@ pub fn redirect_matches(registered: &str, given: &str) -> bool {
 
 async fn register(State(state): State<AppState>, Extension(slot): Extension<TokenSlot>, body: String) -> Response {
     let o = oauth(&state);
-    if let Err(wait) = o.registrations.take("register") {
+    if let Err(wait) =
+        o.registrations.take(&format!("register:{}", slot.client())).and_then(|()| o.registrations_all.take("all"))
+    {
         return crate::ApiError::too_many(wait).into_response();
     }
     let Ok(Value::Object(meta)) = serde_json::from_str::<Value>(&body) else {
@@ -519,12 +547,8 @@ fn back_to(o: &OAuth, redirect_uri: &str, state: Option<&str>, pairs: &[(&str, &
     r
 }
 
-/// Send the browser back with an error: 302 from the request, 303 from
-/// the form (so the browser follows it with a GET).
-fn back_with_error(o: &OAuth, redirect_uri: &str, state: Option<&str>, code: &str, why: &str) -> Response {
-    back_to(o, redirect_uri, state, &[("error", code), ("error_description", why)], StatusCode::FOUND)
-}
-
+/// Send the browser back with an error from the consent form (303, so the
+/// browser follows it with a GET): only once the user has used the page.
 fn form_back_with_error(o: &OAuth, p: &Pending, code: &str, why: &str) -> Response {
     back_to(
         o,
@@ -542,7 +566,10 @@ async fn authorize(
     RawQuery(query): RawQuery,
 ) -> Response {
     let o = oauth(&state);
-    if o.consents.take("authorize").is_err() {
+    if o.consents.take(&format!("consent:{}", slot.client())).is_err() {
+        return error_page(StatusCode::TOO_MANY_REQUESTS, "Too many sign-in pages from here; try again in a minute.");
+    }
+    if o.consents_all.take("all").is_err() {
         return error_page(StatusCode::TOO_MANY_REQUESTS, "This server is busy; try again in a minute.");
     }
     let q = match params(query.as_deref().unwrap_or_default()) {
@@ -569,8 +596,13 @@ async fn authorize(
         None if client.redirect_uris.len() == 1 => client.redirect_uris[0].clone(),
         None => return error_page(StatusCode::BAD_REQUEST, "The app did not say where to return (redirect_uri)."),
     };
-    let st = q.get("state").map(String::as_str);
-    let fail = |code: &str, why: &str| back_with_error(o, &redirect_uri, st, code, why);
+    // Anyone can register a client with any https:// return address, so an
+    // error sent there before the user has used this page would make the
+    // server a redirector for whoever wrote the link (RFC 9700 §4.11.2):
+    // errors are shown here; only the form's answers go back.
+    let fail = |code: &str, why: &str| {
+        error_page(StatusCode::BAD_REQUEST, &format!("The app's request cannot be used ({code}): {why}."))
+    };
     if q.get("response_type").map(String::as_str) != Some("code") {
         return fail("unsupported_response_type", "only response_type=code is supported");
     }
@@ -585,8 +617,11 @@ async fn authorize(
         return fail("invalid_target", "this server issues tokens only for its own /mcp");
     }
     let now = now_ms();
-    if o.locked(&client.id, now) {
-        return fail("access_denied", "too many wrong connect codes from this app; try again in an hour");
+    if o.locked(&client.id, slot.client(), now) {
+        return error_page(
+            StatusCode::FORBIDDEN,
+            "Too many wrong connect codes were tried for this app from here. Try again in an hour.",
+        );
     }
     let request = tokens::secret();
     let csrf = tokens::secret();
@@ -663,7 +698,8 @@ async fn consent(
     if form.get("action").map(String::as_str) == Some("deny") {
         return with_clear(form_back_with_error(o, &p, "access_denied", "the user said no"));
     }
-    if o.locked(&p.client_id, now) {
+    let address = slot.client().to_owned();
+    if o.locked(&p.client_id, &address, now) {
         return with_clear(form_back_with_error(
             o,
             &p,
@@ -671,14 +707,16 @@ async fn consent(
             "too many wrong connect codes from this app; try again in an hour",
         ));
     }
-    if o.wrong_codes.take("check").is_err() {
-        // Not counted against anyone: the server as a whole is being tried.
-        let r = consent_page(
-            o,
-            &request,
-            &p,
-            Some("Too many codes were tried on this server just now. Wait a minute and try again."),
-        );
+    let busy = if o.code_checks.take(&format!("codes:{address}")).is_err() {
+        Some("Too many codes were tried from here just now. Wait a minute and try again.")
+    } else if o.wrong_codes.peek("all").is_err() {
+        // Not counted against this page: the server as a whole is being tried.
+        Some("Too many wrong codes were tried on this server just now. Wait a minute and try again.")
+    } else {
+        None
+    };
+    if let Some(message) = busy {
+        let r = consent_page(o, &request, &p, Some(message));
         o.put_pending(request, p);
         return r;
     }
@@ -731,7 +769,8 @@ async fn consent(
     };
     let Some(((mailbox_id, grant_id), auth_code)) = redeemed else {
         p.tries += 1;
-        let locked = o.count_failure(&p.client_id, now);
+        let _ = o.wrong_codes.take("all");
+        let locked = o.count_failure(&p.client_id, &address, now);
         tracing::info!(client = %p.client_id, tries = p.tries, locked, "wrong connect code");
         if locked || p.tries >= TRIES_PER_CONSENT {
             return with_clear(form_back_with_error(o, &p, "access_denied", "too many wrong connect codes"));

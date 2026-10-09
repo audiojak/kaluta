@@ -181,8 +181,17 @@ async fn refusals() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     let (status, _) = s.publish("", None, snapshot(1).to_json().unwrap()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // An address that is not registered answers as a wrong token does:
+    // nobody learns which addresses are registered here.
     let r = s.http.put(s.url("/v1/mailboxes/nobody@x.example/snapshot")).bearer_auth(&publisher).send().await.unwrap();
-    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    let unknown: Value = r.json().await.unwrap();
+    let r = s.http.put(s.url(&format!("/v1/mailboxes/{MAILBOX}/snapshot"))).bearer_auth("oagc_pub_wrong").send().await;
+    let wrong: Value = r.unwrap().json().await.unwrap();
+    assert_eq!(unknown, wrong);
+    for path in ["/v1/mailboxes/nobody@x.example/agent-tokens", "/v1/mailboxes/nobody@x.example/reports"] {
+        assert_eq!(s.get(Some(&publisher), path).await.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
 
     let (_, agent) = s.mint(&publisher, "Routine").await;
     let r = s.get(Some(&agent), &format!("/v1/m/{MAILBOX}/guide")).await;
@@ -308,4 +317,57 @@ async fn a_registration_token_closes_registration_to_strangers() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::CREATED);
     assert_eq!(s.get(None, "/healthz").await.text().await.unwrap(), "ok\n");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn failed_sign_ins_are_limited_per_address_before_the_database() {
+    let s = common::start_trusting(120, &["127.0.0.1"]).await;
+    let publisher = s.registered().await;
+    assert_eq!(s.publish(&publisher, None, snapshot(1).to_json().unwrap()).await.0, StatusCode::OK);
+    let (_, agent) = s.mint(&publisher, "Routine").await;
+    let guide = async |token: &str, address: &str| {
+        s.http
+            .get(s.url(&format!("/v1/m/{MAILBOX}/guide")))
+            .bearer_auth(token)
+            .header("X-Forwarded-For", address)
+            .send()
+            .await
+            .unwrap()
+            .status()
+    };
+    let garbage = |i: u32| format!("oagc_oat_garbage{i}.{}", "x".repeat(43));
+    for i in 0..rules_server::FAILED_AUTH_PER_MINUTE {
+        assert_eq!(guide(&garbage(i), "203.0.113.9").await, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(guide(&garbage(99), "203.0.113.9").await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(guide(&agent, "203.0.113.9").await, StatusCode::TOO_MANY_REQUESTS, "refused before any look");
+    assert_eq!(guide(&agent, "198.51.100.7").await, StatusCode::OK, "another address is not");
+    // Publisher calls count alike, unknown addresses included.
+    let r = s
+        .http
+        .get(s.url("/v1/mailboxes/nobody@x.example/agent-tokens"))
+        .bearer_auth(&publisher)
+        .header("X-Forwarded-For", "203.0.113.9")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+    // Without a trusted proxy, the header is ignored: every request is the
+    // peer's, whatever it claims.
+    let open = common::start_trusting(120, &[]).await;
+    for i in 0..rules_server::FAILED_AUTH_PER_MINUTE {
+        let r = open
+            .http
+            .get(open.url(&format!("/v1/m/{MAILBOX}/guide")))
+            .bearer_auth(garbage(i))
+            .header("X-Forwarded-For", format!("203.0.113.{i}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(
+        open.get(Some(&garbage(0)), &format!("/v1/m/{MAILBOX}/guide")).await.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
 }

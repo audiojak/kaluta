@@ -1,7 +1,7 @@
 //! `openagc-rules`: the rules server for cloud agents (spec §10.6).
 //!
 //! ```text
-//! openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>]
+//! openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
 //! openagc-rules forget-mailbox <address> [--data-dir <dir>]
 //! openagc-rules backup <file> [--data-dir <dir>]
 //! openagc-rules healthcheck [--listen <addr>]
@@ -12,7 +12,10 @@
 //! (default `./data`), `OPENAGC_RULES_LOG` (default `info`),
 //! `OPENAGC_RULES_RATE_LIMIT` (requests per minute per token, default 120),
 //! `OPENAGC_RULES_PUBLIC_URL` (the server's https:// origin as agents reach
-//! it; turns on OAuth sign-in with connect codes).
+//! it; turns on OAuth sign-in with connect codes),
+//! `OPENAGC_RULES_TRUSTED_PROXY` (the TLS proxy's address or CIDR network,
+//! comma-separated, whose `X-Forwarded-For` names the client; the flag
+//! repeats).
 //! `OPENAGC_RULES_REGISTRATION_TOKEN`, only from the environment, makes
 //! registering a mailbox need that bearer token.
 //! `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` refuses plaintext snapshots (the
@@ -29,7 +32,7 @@ use std::time::Duration;
 use rules_server::{Config, Db, db};
 
 const USAGE: &str =
-    "usage: openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>]
+    "usage: openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
        openagc-rules forget-mailbox <address> [--data-dir <dir>]
        openagc-rules backup <file> [--data-dir <dir>]
        openagc-rules healthcheck [--listen <addr>]";
@@ -50,6 +53,7 @@ struct Args {
     log: String,
     rate_limit: u32,
     public_url: Option<String>,
+    trusted_proxies: Vec<String>,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -64,6 +68,7 @@ fn parse_args() -> Result<Args, String> {
         log: env("OPENAGC_RULES_LOG").unwrap_or_else(|| "info".into()),
         rate_limit: 120,
         public_url: env("OPENAGC_RULES_PUBLIC_URL"),
+        trusted_proxies: env("OPENAGC_RULES_TRUSTED_PROXY").into_iter().collect(),
     };
     if let Some(v) = env("OPENAGC_RULES_RATE_LIMIT") {
         args.rate_limit = v.parse().map_err(|_| format!("OPENAGC_RULES_RATE_LIMIT {v:?} is not a number"))?;
@@ -94,6 +99,7 @@ fn parse_args() -> Result<Args, String> {
             "--data-dir" => args.data_dir = PathBuf::from(value()?),
             "--log" => args.log = value()?,
             "--public-url" => args.public_url = Some(value()?),
+            "--trusted-proxy" => args.trusted_proxies.push(value()?),
             "--rate-limit" => {
                 let v = value()?;
                 args.rate_limit = v.parse().map_err(|_| format!("--rate-limit {v:?} is not a number"))?;
@@ -149,6 +155,7 @@ fn serve(args: &Args) -> ExitCode {
         public_url: args.public_url.clone(),
         require_encryption: env("OPENAGC_RULES_REQUIRE_ENCRYPTION")
             .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes")),
+        trusted_proxies: args.trusted_proxies.clone(),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(r) => r,
@@ -178,10 +185,14 @@ fn serve(args: &Args) -> ExitCode {
             rate_limit = config.rate_limit_per_minute,
             registration_open = config.registration_token.is_none(),
             oauth = config.public_url.as_deref().unwrap_or("off"),
+            trusted_proxies = config.trusted_proxies.join(","),
             "openagc-rules {} serving",
             env!("CARGO_PKG_VERSION")
         );
-        match axum::serve(listener, app).with_graceful_shutdown(shutdown()).await {
+        match axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+            .with_graceful_shutdown(shutdown())
+            .await
+        {
             Ok(()) => {
                 tracing::info!("stopped");
                 ExitCode::SUCCESS

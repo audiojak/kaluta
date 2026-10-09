@@ -385,9 +385,12 @@ impl RulesServer {
             registration_token: None,
             public_url: oauth.then(|| url.clone()),
             require_encryption,
+            trusted_proxies: vec![],
         };
         let app = rules_server::app(&config).unwrap();
-        rt.spawn(async move { axum::serve(listener, app).await });
+        rt.spawn(async move {
+            axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await
+        });
         Self { rt, url, dir }
     }
 

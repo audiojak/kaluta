@@ -858,20 +858,23 @@ impl Core {
                     expected = current;
                     version = version.max(current.unwrap_or(0) + 1);
                 }
-                // The server forgot the mailbox: register it again, once.
-                404 if !registered_again => {
+                // The server forgot the mailbox: register it again, once. A
+                // server answers an address it does not have as it answers a
+                // wrong token (401; 404 from older ones), so that nobody
+                // learns which are registered: registering again tells.
+                404 | 401 if !registered_again => {
                     registered_again = true;
-                    token = self.rules_register_again(account_id, &server, &address, &key, &mut record).await?;
+                    token = match self.rules_register_again(account_id, &server, &address, &key, &mut record).await {
+                        Ok(t) => t,
+                        // Still registered: the token is what it refuses.
+                        Err(Failure::Final(_)) if a.status == 401 => return Err(token_refused(&host, &address)),
+                        Err(f) => return Err(f),
+                    };
                     expected = None;
                     // A new registration has no agents to wrap for.
                     sealing = None;
                 }
-                401 => {
-                    return Err(Failure::Final(format!(
-                        "{host} no longer accepts this Mac's publisher token for {address}. The server's operator \
-                         can forget the mailbox (openagc-rules forget-mailbox); then publish again."
-                    )));
-                }
+                401 => return Err(token_refused(&host, &address)),
                 // The server requires encryption: this publication encrypts
                 // from now on.
                 422 if !encrypt && a.body["error"] == "encryption_required" => {
@@ -974,8 +977,9 @@ impl Core {
             401 => Err(CoreError::new(
                 ErrorKind::InvalidInput,
                 format!(
-                    "{host} no longer accepts this Mac's publisher token for {address}. The server's operator can \
-                     forget the mailbox (openagc-rules forget-mailbox); then publish again."
+                    "{host} does not accept this Mac's publisher token for {address}: it may have forgotten the \
+                     mailbox, which Publish Now registers again; if not, its operator can forget it \
+                     (openagc-rules forget-mailbox), and then publish again."
                 ),
             )),
             404 if a.body["error"] == "not_registered" => Err(CoreError::new(
@@ -1004,6 +1008,15 @@ impl Core {
             encrypted: r.key_id.is_some(),
         })
     }
+}
+
+/// A server that refuses this Mac's publisher token for a mailbox it still
+/// has.
+fn token_refused(host: &str, address: &str) -> Failure {
+    Failure::Final(format!(
+        "{host} no longer accepts this Mac's publisher token for {address}. The server's operator can forget the \
+         mailbox (openagc-rules forget-mailbox); then publish again."
+    ))
 }
 
 /// Push each publishing mailbox a moment after its changes stop.
@@ -1147,7 +1160,20 @@ impl Core {
             let request = client.delete(server.endpoint(&["v1", "mailboxes", &address])).bearer_auth(token);
             let host = server.host.clone();
             let answer = runtime::run(async move { send(request, &host).await.map_err(Failure::into_error) }).await?;
-            // Gone already (404) is what was asked for.
+            // Gone already (404, from older servers) is what was asked for.
+            // A 401 is a mailbox gone or a token refused, which the server
+            // does not say apart: nothing is removed here unless it is.
+            if answer.status == 401 {
+                return Err(CoreError::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "{} does not accept this Mac's publisher token for {address}: it may have forgotten the \
+                         mailbox already. Stop publishing without removing it, or ask the server's operator to \
+                         forget it (openagc-rules forget-mailbox).",
+                        server.host
+                    ),
+                ));
+            }
             if !matches!(answer.status, 200 | 204 | 404) {
                 return Err(CoreError::new(
                     ErrorKind::Network,

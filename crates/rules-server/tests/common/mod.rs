@@ -46,9 +46,12 @@ pub async fn start_with(rate_limit_per_minute: u32, registration_token: Option<&
         registration_token: registration_token.map(str::to_owned),
         public_url: oauth.then(|| base.clone()),
         require_encryption: false,
+        trusted_proxies: vec![],
     };
     let app = rules_server::app(&config).expect("app");
-    tokio::spawn(async move { axum::serve(listener, app).await });
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await
+    });
     Server { base, dir, http: reqwest::Client::new() }
 }
 
@@ -156,6 +159,27 @@ pub async fn call(client: &RunningService<rmcp::RoleClient, ()>, tool: &'static 
     result.structured_content.expect("a structured answer")
 }
 
+/// With OAuth on, behind the proxies `trusted` (whose `X-Forwarded-For`
+/// then names the client).
+pub async fn start_trusting(rate_limit_per_minute: u32, trusted: &[&str]) -> Server {
+    let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let config = Config {
+        data_dir: dir.clone(),
+        rate_limit_per_minute,
+        registration_token: None,
+        public_url: Some(base.clone()),
+        require_encryption: false,
+        trusted_proxies: trusted.iter().map(|t| (*t).to_owned()).collect(),
+    };
+    let app = rules_server::app(&config).expect("app");
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await
+    });
+    Server { base, dir, http: reqwest::Client::new() }
+}
+
 /// With `require_encryption` set as given (and no OAuth).
 pub async fn start_requiring(require_encryption: bool) -> Server {
     let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
@@ -173,9 +197,12 @@ pub async fn start_in(dir: PathBuf, require_encryption: bool) -> Server {
         registration_token: None,
         public_url: Some(base.clone()),
         require_encryption,
+        trusted_proxies: vec![],
     };
     let app = rules_server::app(&config).expect("app");
-    tokio::spawn(async move { axum::serve(listener, app).await });
+    tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await
+    });
     Server { base, dir, http: reqwest::Client::new() }
 }
 

@@ -2123,7 +2123,10 @@ RFC 8707 `resource`, which must name this server's `/mcp`). A 401 at
   except a loopback one's port (RFC 8252; Claude Code). claude.ai returns
   to `https://claude.ai/api/mcp/auth_callback`. An unknown client or
   return address is shown on the page, never redirected to. Clients that
-  connect no agent are dropped after a week.
+  connect no agent are dropped after a week. *(Amendment 2026-10-09,
+  oagc-gmn7.16: every error in an authorization request is shown on the
+  page, never redirected, since anyone may register any `https://` return
+  address (RFC 9700 §4.11.2); only the consent form's answers go back.)*
 - *Connect codes* are minted by the publisher (`POST
   /v1/mailboxes/{address}/connect-codes {name}`): ten characters from 31
   without look-alikes, shown `ABCDE-FGHJK`, single use, 10 minutes, kept
@@ -2135,7 +2138,16 @@ RFC 8707 `resource`, which must name this server's `/mcp`). A 401 at
   CSRF token bound to that page (`HttpOnly`, `SameSite=Lax`, `Secure` on
   https), and refuses a form from another Origin. It closes after 5 wrong
   codes; a client with 5 wrong codes is locked out for an hour; the server
-  checks at most 30 codes a minute in all.
+  checks at most 30 codes a minute in all. *(Amendment 2026-10-09,
+  oagc-gmn7.10: limits on strangers count per client address, so one
+  cannot block everyone: the lockout is per client and address; one
+  address tries 10 codes a minute and the server takes 60 wrong ones
+  (right ones uncounted); registrations 10 a minute per address and 120
+  in all; consent pages 30 and 600; failed bearer sign-ins 30 a minute per
+  address, refused before the database. The client address is the peer,
+  or behind a proxy named in `OPENAGC_RULES_TRUSTED_PROXY` the nearest
+  untrusted address in `X-Forwarded-For`, read right to left; an IPv6
+  address counts by its /64.)*
 - *A grant*: the right code makes an agent beside the static tokens
   (same table, `kind` `oauth`), named as the code was, scoped to its
   mailbox, listed (with the client's name) and revoked through the same
@@ -2235,7 +2247,10 @@ at launch the app pushes what changed while it was closed. Each push is
 one version above the last with `If-Match` on it; a 409, 412 or 428 takes
 `current_version` from the answer and pushes above it (up to four tries),
 a 404 (the operator forgot the mailbox) registers again with a new salt,
-and an unreachable, limiting or failing server is tried again a minute
+*(amended 2026-10-09, oagc-gmn7.17: as does a 401, which the server now
+answers for an address it does not have as for a wrong token, so that
+nobody can list registered addresses; if the address is still taken, the
+token was refused and the app says so)*, and an unreachable, limiting or failing server is tried again a minute
 later. Redirects are not followed.
 
 **Reports and retention.** Reports carry what the agent wrote, never
