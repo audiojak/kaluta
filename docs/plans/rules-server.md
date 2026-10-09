@@ -1,6 +1,7 @@
 # Plan: a rules server for cloud agents
 
-Status: draft (2026-10-08), for the maintainer's decisions. Nothing built.
+Status: decided (2026-10-08); nothing built. The maintainer took every
+recommendation below (*Decisions, 2026-10-08*).
 Bead oagc-ikr. Follows [agent-mailboxes.md](agent-mailboxes.md) and
 [headless-mcp.md](headless-mcp.md).
 
@@ -198,26 +199,41 @@ sees them. A send with no report is still reviewed (B).
   server's operator. Controls rows for each.
 - **§0** register row, and ADR 0016.
 
-## Open questions
+## Decisions (maintainer, 2026-10-08)
 
-1. Agent mailboxes only, or the user's own accounts too? (Recommend:
-   agent mailboxes first.)
-2. MCP plus a small REST API (C)?
-3. Snapshot plus a report queue first, proposals later?
-4. Fact defaults: the mailbox's *Use freely* facts shared, *Ask before
-   using* and global facts not?
-5. Audience-group addresses published as salted hashes?
-6. Encryption at rest with the key in the token: required when
-   project-hosted, optional when self-hosted?
-7. Bearer tokens first, or OAuth first if claude.ai connectors cannot
-   carry a header?
-8. The server never sends and never holds a service key: agreed?
-9. Who runs the project-hosted server, where, and at what price (at
-   cost?), and only after self-hosting works?
-10. Reports deleted once the app has pulled them, and after 30 days
-    regardless?
-11. Docker image published to GitHub's registry from this repository's
-    releases?
+Every recommendation above, as answered:
+
+1. **Agent mailboxes only** for now; the user's own accounts are not
+   served.
+2. **MCP for agents plus a small REST API** for the app's publishing and
+   for scripts, one handler set (Transport C).
+3. **A read-only snapshot plus a report queue** first; proposals from
+   cloud agents later, through the same queue.
+4. **Fact defaults:** the mailbox's *Use freely* facts are shared; *Ask
+   before using* and global facts are not; *Never share* never is. Each
+   fact has its own switch.
+5. **Audience-group addresses are published as salted hashes.**
+6. **Encryption at rest, the key wrapped per agent token:** required on
+   the project-hosted server, optional when self-hosted. The docs say it
+   protects data at rest, not from a hostile operator.
+7. **Bearer tokens first, then OAuth with connect codes** — unless the
+   check below finds claude.ai connectors cannot carry a header, in which
+   case OAuth comes first.
+8. **The server never sends and never holds a service key.** Agents
+   check with `check_draft`, send through the service, then
+   `report_send`; the daily review stays the net.
+9. **The project-hosted server comes only after self-hosting works,**
+   priced at cost; who runs it and where is decided then.
+10. **Reports are deleted once the app has pulled them, and after 30 days
+    regardless.**
+11. **A Docker image on GitHub's registry**, built from this repository's
+    releases, beside the static binary.
+
+### Still to check before building
+
+- Whether a claude.ai custom connector (what a cloud routine's
+  `mcp_connections` names, §11.1) can carry a static `Authorization`
+  header. It decides the order of steps 5 and 7.
 
 ## Steps (proposed)
 
