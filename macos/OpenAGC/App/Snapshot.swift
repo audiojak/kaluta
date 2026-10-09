@@ -63,7 +63,7 @@ import os
 ///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
-///   -OpenAGCSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents
+///   -OpenAGCSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents|reports
 ///                                       a new agent mailbox (fake service) with
 ///                                       a guide and facts: the Publish to a
 ///                                       Rules Server sheet with its list, its
@@ -396,6 +396,11 @@ enum Snapshot {
                     let sheet = ConnectCloudAgentSheet(flow: flow)
                         .background(Color(nsColor: .windowBackgroundColor))
                     window = Self.hostingWindow(sheet, width: ConnectCloudAgentSheet.width, height: nil)
+                case "reports":
+                    let list = CloudReportList(accountID: id, calls: SnapshotRulesAgentCalls(oauth: true))
+                    await list.load()
+                    let sheet = CloudReportsSheet(list: list).background(Color(nsColor: .windowBackgroundColor))
+                    window = Self.hostingWindow(sheet, width: CloudReportsSheet.width, height: nil)
                 case "agents":
                     model.rulesAgentCallsOverride = SnapshotRulesAgentCalls(oauth: true)
                     let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
@@ -694,4 +699,21 @@ final class SnapshotRulesAgentCalls: RulesAgentCalls, @unchecked Sendable {
     }
 
     func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {}
+
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo] {
+        [
+            CloudReportInfo(id: 3, agentName: "Weekly outreach routine", agentKind: .connector, to: ["ann@acme.com"],
+                            subject: "Following up on Thursday", sentAt: Self.millis(-2 * 3_600),
+                            guideCheck: ["Uses “circle back”, which your rules ban"], checkedVersion: 12,
+                            matched: .messageId, messageId: "out-3", recorded: true),
+            CloudReportInfo(id: 2, agentName: "Nightly digest script", agentKind: .token, to: ["team@acme.com"],
+                            subject: "Digest for Tuesday", sentAt: Self.millis(-20 * 3_600), guideCheck: [],
+                            checkedVersion: 12, matched: .recipientAndSubject, messageId: "out-2", recorded: true),
+            CloudReportInfo(id: 1, agentName: "Weekly outreach routine", agentKind: .connector,
+                            to: ["bea@globex.com"], subject: "A quick introduction", sentAt: Self.millis(-30 * 3_600),
+                            guideCheck: [], checkedVersion: 11, matched: .notSeen, messageId: nil, recorded: true),
+        ]
+    }
+
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32 { 3 }
 }

@@ -1,8 +1,8 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); steps 1 to 6 done, the server built, the
-app publishing to it, OAuth with connect codes and *Connect a Cloud
-Agent…* (2026-10-09). The maintainer took every
+Status: decided (2026-10-08); steps 1 to 7 done, the server built, the
+app publishing to it, OAuth with connect codes, *Connect a Cloud Agent…*,
+`check_draft`, `report_send` and the app recording reports (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -312,6 +312,20 @@ the headers beta use them.
    lists each agent's `last_used_at`, to the minute. The routine
    instructions leave a hook for step 7's lines.)*
 7. `check_draft` and `report_send`; the app pulls reports at sync and
-   records them (ADR 0013).
+   records them (ADR 0013). *(Done 2026-10-09, oagc-gmn7.6: the server's
+   two tools and their REST, the `reports` table (migration 4) with a
+   10,000 cap per mailbox and an hourly 30-day sweep, `GET …/reports` and
+   `POST …/reports/ack` for the publisher; the core's
+   `rules_publish/reports.rs` pulls after each sync of a publishing agent
+   mailbox and on *Publish Now*, keeps reports in `cloud_reports`
+   (migration 23), records them as AI compositions (`cloud:<agent name>`)
+   once the mailbox records them, acknowledges after recording, and
+   matches them by Message-ID, else recipient, subject and ±10 minutes;
+   Settings shows "N reports this week" and *Show Reports…*, and the
+   routine instructions gained the check and report lines. Decided while
+   building: the spec's `DELETE` of reports is a `POST …/ack` with an id;
+   a report needs `to`, and `message_id` is optional; reports are kept on
+   this Mac before the first learning run but not recorded as
+   compositions then, as ADR 0013 says.)*
 8. Encryption at rest.
 9. The project-hosted instance: operations notes, backups, the price.

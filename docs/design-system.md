@@ -413,7 +413,18 @@ Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
   *Copy* beside it, which says "Copied" for two seconds; tokens and lines
   holding one are copied concealed from clipboard managers. The only
   button is *Done* (Esc); what was shown is forgotten when the sheet
-  closes.
+  closes. Under the agents, a caption line counts the week's reports
+  ("12 reports this week", "No reports this week") with a small *Show
+  Reports…*, which opens *Cloud Agents' Reports*, a `Dialog` 560 wide: a
+  scrolling list (at most 360 high), each report its subject in `heading`
+  over a caption ("Weekly outreach routine · to ann@acme.com · sent 2
+  hours ago"), a caption label for how it matched the sent mail
+  (`checkmark.circle` matched, `clock` waiting, `questionmark.circle`
+  "Reported, not seen in the mailbox" in `Tone.caution`) and one
+  `Tone.caution` label per guide check it broke. A report's strings are
+  the agent's own: `Text(verbatim:)`, never Markdown. *Done* (Esc) only.
+  In Review mode a cloud agent's pair is titled "<agent> reported" over
+  "In the mailbox's sent mail" instead of "AI drafted" and "You sent".
 - **Share with cloud agents**: on an agent mailbox's Facts, a fact's
   detail has the switch (a checkbox `Toggle`) under *Drafts*, with one
   caption line on what it does (a global fact's says every publishing
@@ -622,6 +633,7 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Connect a Cloud Agent: a token shown once, light](design/rules-connect-token-light.png) | ![Connect a Cloud Agent: a token shown once, dark](design/rules-connect-token-dark.png) |
 | ![Connect a Cloud Agent on a server without a public URL, light](design/rules-connect-nourl-light.png) | ![Connect a Cloud Agent on a server without a public URL, dark](design/rules-connect-nourl-dark.png) |
 | ![An agent mailbox's cloud agents, light](design/rules-agents-light.png) | ![An agent mailbox's cloud agents, dark](design/rules-agents-dark.png) |
+| ![Cloud agents' reports, light](design/rules-reports-light.png) | ![Cloud agents' reports, dark](design/rules-reports-dark.png) |
 | ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
 | ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |

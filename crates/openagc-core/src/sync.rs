@@ -84,6 +84,10 @@ impl SyncObserver for EventObserver {
 /// Told about label changes made outside OpenAGC (spec §11.6).
 pub(crate) type ExternalChanges = Arc<dyn Fn(Vec<mail_sync::ExternalLabelChange>) + Send + Sync>;
 
+/// Told after each incremental sync that went through: an agent mailbox
+/// that publishes then pulls its cloud agents' reports (spec §10.6).
+pub(crate) type AfterSync = Arc<dyn Fn() + Send + Sync>;
+
 pub(crate) struct SyncService {
     engine: Arc<SyncEngine>,
     events: EventBus,
@@ -94,6 +98,7 @@ pub(crate) struct SyncService {
     drafts_wake: Notify,
     categories_wake: Notify,
     external: Option<ExternalChanges>,
+    after_sync: Option<AfterSync>,
     tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     settled: Arc<AtomicBool>,
     /// The last day whose Inbox count this service recorded (Clean Up's
@@ -107,6 +112,7 @@ impl SyncService {
         events: EventBus,
         handle: &tokio::runtime::Handle,
         external: Option<ExternalChanges>,
+        after_sync: Option<AfterSync>,
         settled: Arc<AtomicBool>,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
@@ -119,6 +125,7 @@ impl SyncService {
             drafts_wake: Notify::new(),
             categories_wake: Notify::new(),
             external,
+            after_sync,
             tasks: std::sync::Mutex::new(Vec::new()),
             settled,
             inbox_day: std::sync::Mutex::new(String::new()),
@@ -387,6 +394,9 @@ impl SyncService {
                         self.events.emit(CoreEvent::NewMail { messages });
                     }
                     self.record_inbox_day().await;
+                    if let Some(after) = &self.after_sync {
+                        after();
+                    }
                 }
                 Err(SyncError::ResyncStarted) => self.backfill_wake.notify_one(),
                 Err(e) if Self::is_fatal(&e) => {

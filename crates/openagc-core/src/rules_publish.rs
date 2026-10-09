@@ -24,6 +24,10 @@
 //! server's version from its answer and pushes again, so versions only go
 //! up, across restarts too.
 //!
+//! With the publisher token the app also pulls the reports cloud agents
+//! file about what they sent ([`reports`], oagc-gmn7.6), at each sync and on
+//! *Publish Now*, and records them as AI compositions.
+//!
 //! With the publisher token the app also manages the mailbox's agents on
 //! the server (*Connect a Cloud Agent…*, oagc-gmn7.5): it mints agent
 //! tokens and one-time connect codes (which a claude.ai connector's OAuth
@@ -342,6 +346,10 @@ pub(crate) struct RulesState {
     starting: Mutex<()>,
     /// One push or registration at a time.
     pushing: tokio::sync::Mutex<()>,
+    /// One pull of reports at a time.
+    pulling: tokio::sync::Mutex<()>,
+    /// When each account's reports were last pulled at a sync.
+    pulled: Mutex<HashMap<String, std::time::Instant>>,
     /// Record files are read and rewritten under this.
     records: Mutex<()>,
     /// Accounts with a change not pushed yet.
@@ -1110,6 +1118,14 @@ impl Core {
         let id = account_id.clone();
         runtime::run(async move {
             let _ = core.rules_push(&id, true).await;
+            // And the reports cloud agents filed since the last sync.
+            if let Err(f) = core.rules_pull_reports(&id).await {
+                tracing::warn!(
+                    account = id.as_str(),
+                    transient = matches!(f, Failure::Transient(_)),
+                    "reports not pulled"
+                );
+            }
             Ok(())
         })
         .await?;
@@ -1240,6 +1256,9 @@ impl Core {
         Ok(())
     }
 }
+
+mod reports;
+pub use reports::{CloudReportInfo, CloudReportMatch};
 
 #[cfg(test)]
 mod tests;

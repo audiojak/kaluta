@@ -268,6 +268,55 @@ pub fn record(tx: &Transaction<'_>, c: &NewComposition, now: Millis) -> StoreRes
     Ok(tx.last_insert_rowid())
 }
 
+/// What a cloud agent reported sending (spec §10.6): recorded as its AI
+/// composition, with no draft (it was written and sent elsewhere).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportedComposition {
+    /// `cloud:<agent name>`.
+    pub agent: String,
+    pub kind: Kind,
+    pub recipients: Recipients,
+    pub subject: String,
+    /// The body as plain text, and as HTML.
+    pub ai_text: String,
+    pub ai_html: Option<String>,
+    /// The Message-ID the report names, if any, without brackets: the
+    /// daily review pairs the record with the sent message that has it.
+    pub rfc822_message_id: Option<String>,
+    /// When it was sent, as the report says.
+    pub at: Millis,
+}
+
+/// Record a cloud agent's reported send; returns the record's id.
+pub fn record_reported(tx: &Transaction<'_>, c: &ReportedComposition, now: Millis) -> StoreResult<i64> {
+    tx.prepare_cached(
+        "INSERT INTO ai_compositions (created_at, updated_at, source, agent, kind, recipients_json, subject,
+           ai_text, ai_html, rfc822_message_id)
+         VALUES (?1, ?2, 'agent', ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?
+    .execute(params![
+        c.at,
+        now,
+        c.agent,
+        c.kind.as_str(),
+        serde_json::to_string(&c.recipients)?,
+        c.subject,
+        c.ai_text,
+        c.ai_html,
+        c.rfc822_message_id
+    ])?;
+    Ok(tx.last_insert_rowid())
+}
+
+/// Whether a record is a cloud agent's report: those are linked to their
+/// sent message by the report's matching (spec §10.6), never guessed at.
+pub fn is_reported(c: &Composition) -> bool {
+    c.draft_id.is_none() && c.agent.as_deref().is_some_and(|a| a.starts_with(CLOUD_AGENT_PREFIX))
+}
+
+/// A cloud agent's records are `cloud:<its name>`.
+pub const CLOUD_AGENT_PREFIX: &str = "cloud:";
+
 /// The draft's recipients or subject changed without new AI text.
 pub fn update_addressing(
     tx: &Transaction<'_>,

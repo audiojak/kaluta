@@ -362,6 +362,16 @@ final class CoreClient: Sendable {
         try await call { try await core.rulesAgentRevoke(accountId: accountID, agentId: agentID) }
     }
 
+    /// The reports cloud agents filed about what they sent, newest first.
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo] {
+        try await call { try await core.rulesReports(accountId: accountID, limit: limit) }
+    }
+
+    /// How many reports came since `since` (milliseconds since 1970).
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.rulesReportCount(accountId: accountID, since: since) }
+    }
+
     /// Snapshots: a publishing status as if pushed; no server is contacted.
     func debugSetRulesPublication(_ accountID: String, serverURL: String, version: Int64, publishedAt: Int64,
                                   error: String?) throws(CoreClientError) {
@@ -1588,6 +1598,8 @@ typealias RulesConnectCode = OpenAGCCore.RulesConnectCode
 typealias RulesAgentToken = OpenAGCCore.RulesAgentToken
 typealias RulesAgent = OpenAGCCore.RulesAgent
 typealias RulesAgentKind = OpenAGCCore.RulesAgentKind
+typealias CloudReportInfo = OpenAGCCore.CloudReportInfo
+typealias CloudReportMatch = OpenAGCCore.CloudReportMatch
 typealias AgentAdded = OpenAGCCore.AgentAdded
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus

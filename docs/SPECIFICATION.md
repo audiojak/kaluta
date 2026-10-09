@@ -40,7 +40,7 @@ The short version. Everything below elaborates on these.
 | Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent-mail service accounts' API keys, one per service account) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
-| Rules server | *(Amendment 2026-10-08, ADR 0016; decided, not built.)* Cloud agents read an agent mailbox's published guide and shared facts, check drafts and report sends through `openagc-rules`, a separate server in this repository (MCP over HTTP plus a small REST API, SQLite), self-hosted or run by the project; it never holds mail or a key that sends (§10.6) |
+| Rules server | *(Amendment 2026-10-08, ADR 0016; built 2026-10-09, all but encryption at rest.)* Cloud agents read an agent mailbox's published guide and shared facts, check drafts and report sends through `openagc-rules`, a separate server in this repository (MCP over HTTP plus a small REST API, SQLite), self-hosted or run by the project; it never holds mail or a key that sends (§10.6) |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
 | Routines | Structured routine model → generated prompt; runs locally (OpenAGC agent stack) or as a Claude cloud routine created/updated/run through the user's own `claude` CLI (`RemoteTrigger`, verified), with paste hand-off as fallback; ChatGPT by hand-off only; OpenAGC never holds claude.ai/ChatGPT credentials |
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
@@ -2015,8 +2015,9 @@ oagc-gmn7.3: the app's publishing (*Publish to a Rules Server…*, below).
 Implemented 2026-10-09, oagc-gmn7.4: OAuth with one-time connect codes
 (*OAuth*, below). Implemented 2026-10-09, oagc-gmn7.5: *Connect a Cloud
 Agent…* and the list of cloud agents in the app (*Connect a Cloud Agent…*,
-below). Not yet: `check_draft`, `report_send`, reports and encryption at
-rest.)*
+below). Implemented 2026-10-09, oagc-gmn7.6: `check_draft`, `report_send`
+and the report queue on the server, and the app pulling, matching and
+recording reports (*Reports*, below). Not yet: encryption at rest.)*
 
 Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
 machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
@@ -2043,11 +2044,12 @@ agent reads and sends through the service with its key.
 | `guide_rules` | `to`, `message_type` | The guide for those recipients and that type, whose mailbox it is, the name it sends as and the service's limits, from the snapshot, with its version and when it was published |
 | `facts_lookup` | `category`, `query` | The matching facts shared with cloud agents, with the version |
 | `check_draft` | `to`, `message_type`, `subject`, `body_markdown` | `guide_check`: what the draft breaks (banned and required phrases, patterns, length). Deterministic; no model calls |
-| `report_send` | `message_id` or `to`, `subject`, `sent_at`, body, and the snapshot version it was checked against | `{"queued": true}`; the report waits for the app |
+| `report_send` | `message_id`, `to`, `subject`, `sent_at`, body, and the snapshot version it was checked against | `{"queued": true}` with what the server's check found; the report waits for the app |
 
-REST: `PUT` a snapshot (publisher token), `GET` and `DELETE` reports
-(publisher token), and read-only `GET`s of the guide and facts (agent
-token).
+REST: `PUT` a snapshot (publisher token), `GET` reports and acknowledge
+them (publisher token; *amended 2026-10-09, oagc-gmn7.6:* `POST …/ack`
+rather than `DELETE`), read-only `GET`s of the guide and facts, and
+`POST`s of a draft to check and a report (agent token).
 
 *(Implemented 2026-10-09, oagc-gmn7.2.)* MCP is stateless Streamable
 HTTP at `/mcp` (rmcp); every request carries the agent token, which alone
@@ -2179,7 +2181,11 @@ connects:
 - Both end with instructions to paste into the routine's or agent's
   prompt: call `guide_rules` with the recipients and message type before
   writing, and `facts_lookup` for facts, leaving out any marked ask before
-  using. (`check_draft` and `report_send` lines come with them.)
+  using; call `check_draft` on each draft and fix what `guide_check`
+  lists before sending; after sending through the service, call
+  `report_send` with the Message-ID the service gave, the recipients,
+  subject, time, body and `check_draft`'s version *(added 2026-10-09,
+  oagc-gmn7.6)*.
 Codes and tokens live only in the open sheet: never in the Keychain, a
 file or a log, and gone when it closes. The app keeps no list of its own;
 it reads the server's (`rules_agents`).
@@ -2236,6 +2242,55 @@ Message-ID and records them as AI compositions (§14.10, agent
 report is still reviewed. The server deletes a report once the app has
 pulled it, and every report after 30 days regardless. Proposals from
 cloud agents will use the same queue later.
+
+*(Implemented 2026-10-09, oagc-gmn7.6.)*
+- *The server.* `check_draft` answers mailbox mode's `guide_check` (the
+  messages of `writing_guide::check` on the body's text, Markdown read as
+  mailbox mode renders it; the type from `message_type`, else a `Re:` or
+  `Fwd:` subject, else new) with `guide_version`, `version` and
+  `published_at`, held equal to mailbox mode's by a test. `report_send`
+  takes `message_id` (brackets dropped), `to` (1 to 100 addresses),
+  `subject`, `sent_at` (RFC 3339), `body_markdown` (at most 256 KB, as
+  for `check_draft`; 413 `too_large` over REST) and `checked_version`;
+  the server checks the body against its newest snapshot and keeps the
+  report in `reports` (migration 4: the mailbox, the agent's id, when it
+  came, the fields, the check's version and messages) and answers
+  `{"queued": true, "report_id", "guide_check", "version"}`. Each call
+  takes one request from the agent's rate limit. A mailbox keeps at most
+  10,000 reports, dropping the oldest and counting them (`dropped`). The
+  publisher pulls with `GET /v1/mailboxes/{address}/reports?after=&limit=`
+  (oldest first, at most 500, with each agent's name and kind, `pending`,
+  `dropped` and `more`) and acknowledges with `POST …/reports/ack
+  {"up_to_id"}`, which deletes them; an hourly sweep deletes any older
+  than 30 days. Agents' REST: `POST /v1/m/{address}/check` and
+  `POST /v1/m/{address}/reports`. A report is the agent's own words: the
+  server never logs or renders it.
+- *The app* (`rules_publish/reports.rs`). After each incremental sync of
+  a publishing agent mailbox (at most once a minute) and on *Publish
+  Now*, the core pulls the reports page by page, keeps each in the
+  account's store (`cloud_reports`, migration 23, unique by server and
+  report id, so a report pulled twice is kept once), records it as an AI
+  composition when the account records them (source `agent`, agent
+  `cloud:<agent name>`, no draft, the body's text and sanitized HTML, the
+  reported Message-ID, the time it says it was sent), and acknowledges
+  only after that transaction commits. Matching, at each pull and each
+  sync: the sent message (SENT, not a draft) whose Message-ID is the
+  report's; else one to a recipient of the report (To, Cc or Bcc) with
+  its subject (case and spaces aside) sent within 10 minutes of the
+  report's `sent_at` (or when the server took it), the closest; a sent
+  message matches one report. A matched report gives its composition the
+  sent copy's Message-ID, so the daily review pairs them exactly; the
+  review never guesses a cloud report's message by thread or recipient.
+  An unmatched report is looked for for 14 days and after a day is shown
+  as "reported, not seen in the mailbox". Report bodies are cleared with
+  the AI texts (Settings' retention). Strings from a report are sized
+  and single-lined again on arrival, shown with `Text(verbatim:)`, and
+  reach the review's agent only fenced, as every AI text does.
+- *Settings.* Under the cloud agents, "12 reports this week" with *Show
+  Reports…*: each report's subject, agent, recipients, when it was sent,
+  how it matched and what the check found. In Review mode a cloud
+  agent's pair is titled "<agent> reported" over "In the mailbox's sent
+  mail" (`AnalysisPairInfo.agent`).
 
 **What is shared.**
 - Accepted rules and guidelines, with their scope and checks; never
@@ -3401,7 +3456,10 @@ accounts (§7.7) never record or review.
 store with its full text: writing help (each text the agent writes into
 the composer; a rewrite for the guide's checks or for another audience
 updates the same record), the agent column's draft tools (`create_draft`,
-`update_draft`, replies) and routines (the same tools, source *routine*).
+`update_draft`, replies) and routines (the same tools, source *routine*),
+and the sends cloud agents report to a rules server (§10.6, agent
+`cloud:<name>`, no draft; matched by the report's own matching, never
+guessed at).
 The record keeps the source, agent, message type (new, reply, forward),
 draft, thread, recipients (To and Cc, normalised), subject, the user's
 instruction or the agent's prompt, the AI text (plain and HTML), the guide

@@ -10,6 +10,8 @@ protocol RulesAgentCalls: AnyObject, Sendable {
     func rulesAgentTokenMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesAgentToken
     func rulesAgents(_ accountID: String) async throws(CoreClientError) -> [RulesAgent]
     func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError)
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo]
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32
 }
 
 extension CoreClient: RulesAgentCalls {}
@@ -136,7 +138,7 @@ extension CloudAgentFlow {
     }
 
     static func message(_ address: String) -> String {
-        "Let an agent in the cloud read \(address)'s published writing guide and the facts you share with cloud agents. It can read nothing else, and you can revoke it here."
+        "Let an agent in the cloud read \(address)'s published writing guide and the facts you share with cloud agents, check its drafts against the guide and report what it sent. It can do nothing else, and you can revoke it here."
     }
 
     static func noPublicURL(_ host: String) -> String {
@@ -161,7 +163,7 @@ extension CloudAgentFlow {
     }
 
     static func tokenWarning(_ address: String) -> String {
-        "This token is shown only now; OpenAGC does not keep it. Whoever holds it can read \(address)'s published writing guide and shared facts, and nothing else, until you revoke it here."
+        "This token is shown only now; OpenAGC does not keep it. Whoever holds it can read \(address)'s published writing guide and shared facts, check drafts and report sends, and nothing else, until you revoke it here."
     }
 
     /// "Works once, for 9:42 more."
@@ -182,17 +184,16 @@ extension CloudAgentFlow {
             "Before writing each email, call guide_rules with the recipients' addresses (to) and the message type (new, reply or forward), and follow the guide it returns.",
             "When you need a fact about the user or their work (a calendar link, a role, an address), call facts_lookup with a category or a query. Use only facts it returns, and leave out any marked ask before using.",
         ]
-        // oagc-gmn7.6: once the server has check_draft and report_send, add
-        // a line to check each draft with check_draft and fix what it
-        // reports before sending, and one to call report_send after each
-        // send with its Message-ID.
         lines += afterSendLines
         return lines.joined(separator: "\n")
     }
 
-    /// Lines about checking drafts and reporting sends; none until the
-    /// server has the tools (oagc-gmn7.6).
-    static let afterSendLines: [String] = []
+    /// Checking each draft before it goes, and reporting each send after,
+    /// so OpenAGC records it as this agent's (spec §10.6).
+    static let afterSendLines: [String] = [
+        "Before sending each email, call check_draft with the recipients (to), the message type, the subject and the body in Markdown (body_markdown). Fix everything it lists in guide_check, and check again until the list is empty.",
+        "Send through the mailbox's mail service. Then call report_send with the Message-ID the service gave the message (message_id), the recipients (to), the subject, when it was sent (sent_at), the body as sent (body_markdown) and check_draft's version (checked_version).",
+    ]
 }
 
 /// Connect a Cloud Agent… (spec §10.6): name the agent, choose how it
@@ -494,7 +495,140 @@ final class CloudAgentList {
         }
     }
 
-    static let emptyText = "None yet. A connected agent can read this mailbox's published writing guide and shared facts, and nothing else."
+    static let emptyText = "None yet. A connected agent can read this mailbox's published writing guide and shared facts, check drafts and report what it sent, and nothing else."
+}
+
+/// The reports cloud agents filed about what they sent from an agent
+/// mailbox (spec §10.6): the week's count for its Settings row, and the
+/// list. Every string in a report is the agent's own: shown as text, never
+/// followed.
+@MainActor @Observable
+final class CloudReportList {
+    let accountID: String
+    @ObservationIgnored private let calls: any RulesAgentCalls
+    /// Newest first.
+    private(set) var reports: [CloudReportInfo] = []
+    private(set) var weekCount: UInt32?
+    private(set) var loaded = false
+    var error: String?
+
+    static let limit: UInt32 = 100
+    static let week: TimeInterval = 7 * 86_400
+
+    init(accountID: String, calls: any RulesAgentCalls) {
+        self.accountID = accountID
+        self.calls = calls
+    }
+
+    /// How many came in the last seven days.
+    func loadCount(now: Date = .now) async {
+        let since = Int64((now.timeIntervalSince1970 - Self.week) * 1000)
+        weekCount = try? await calls.rulesReportCount(accountID, since: since)
+    }
+
+    func load() async {
+        do throws(CoreClientError) {
+            reports = try await calls.rulesReports(accountID, limit: Self.limit)
+            error = nil
+        } catch {
+            self.error = "Could not list the reports: \(error.message)"
+        }
+        loaded = true
+    }
+
+    /// "12 reports this week".
+    static func countText(_ count: UInt32) -> String {
+        switch count {
+        case 0: "No reports this week"
+        case 1: "1 report this week"
+        default: "\(count) reports this week"
+        }
+    }
+
+    /// How the report stands against the mailbox's sent mail.
+    static func statusText(_ report: CloudReportInfo) -> String {
+        switch report.matched {
+        case .messageId: "Matched to the sent message by its Message-ID"
+        case .recipientAndSubject: "Matched to a sent message by recipient, subject and time"
+        case .waiting: "Waiting for the sent message to sync"
+        case .notSeen: "Reported, not seen in the mailbox"
+        }
+    }
+
+    static func statusSymbol(_ report: CloudReportInfo) -> String {
+        switch report.matched {
+        case .messageId, .recipientAndSubject: "checkmark.circle"
+        case .waiting: "clock"
+        case .notSeen: "questionmark.circle"
+        }
+    }
+
+    /// "Weekly outreach routine · to ann@acme.com · sent 2 hours ago".
+    static func detail(_ report: CloudReportInfo, now: Date = .now) -> String {
+        let sent = DateStyle.relative(Date(timeIntervalSince1970: TimeInterval(report.sentAt) / 1000), to: now)
+        var parts = [report.agentName]
+        if !report.to.isEmpty { parts.append("to \(report.to.joined(separator: ", "))") }
+        parts.append("sent \(sent)")
+        return parts.joined(separator: " · ")
+    }
+
+    static let emptyText = "No reports yet. An agent following the routine's instructions reports each message it sends."
+    static let message = "What cloud agents said they sent, matched to the mailbox's sent mail and checked against the guide when they reported it. Each is recorded as written by its agent, for the daily review."
+}
+
+/// The reports cloud agents filed, from the Cloud agents line (spec §10.6).
+struct CloudReportsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let list: CloudReportList
+
+    static let width: CGFloat = 560
+
+    var body: some View {
+        Dialog(title: "Cloud Agents' Reports", message: CloudReportList.message, width: Self.width) {
+            if list.reports.isEmpty, list.loaded, list.error == nil {
+                Text(CloudReportList.emptyText).foregroundStyle(.secondary)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.l) {
+                    ForEach(list.reports, id: \.id) { report in
+                        row(report)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 360)
+            if let error = list.error {
+                Label(error, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.failure)
+            }
+        } buttons: {
+            CancelButton(title: "Done", help: "Close the reports (Esc)") { dismiss() }
+        }
+        .task { await list.load() }
+    }
+
+    private func row(_ report: CloudReportInfo) -> some View {
+        VStack(alignment: .leading, spacing: Space.hair) {
+            // The agent's own words: verbatim, never read as Markdown.
+            Text(verbatim: report.subject.isEmpty ? "(no subject)" : report.subject).font(TypeRole.heading).lineLimit(1)
+            Text(verbatim: CloudReportList.detail(report)).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
+            Label {
+                Text(CloudReportList.statusText(report))
+            } icon: {
+                Image(systemName: CloudReportList.statusSymbol(report))
+            }
+            .font(TypeRole.caption)
+            .foregroundStyle(report.matched == .notSeen ? AnyShapeStyle(Tone.caution) : AnyShapeStyle(.secondary))
+            ForEach(Array(report.guideCheck.enumerated()), id: \.offset) { _, breach in
+                Label {
+                    Text(verbatim: breach)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+                .font(TypeRole.caption).foregroundStyle(Tone.caution)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// Under the Rules server line while it publishes: Connect a Cloud Agent…
@@ -503,6 +637,8 @@ struct CloudAgentsSection: View {
     @Environment(AppModel.self) private var model
     let account: AccountSummary
     @State private var list: CloudAgentList?
+    @State private var reports: CloudReportList?
+    @State private var showsReports = false
     @State private var flow: CloudAgentFlow?
     @State private var revoking: RulesAgent?
 
@@ -531,12 +667,27 @@ struct CloudAgentsSection: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if let count = reports?.weekCount {
+                HStack(spacing: Space.m) {
+                    Text(CloudReportList.countText(count)).font(TypeRole.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Show Reports…") { showsReports = true }
+                        .controlSize(.small)
+                        .hoverHelp("See what cloud agents reported sending, and whether each reached the mailbox's sent mail")
+                }
+            }
         }
         .task(id: "\(account.id) \(model.rulesRevision)") {
             guard let calls = model.rulesAgentCalls else { return }
             let current = list ?? CloudAgentList(accountID: account.id, calls: calls)
             list = current
+            let counted = reports ?? CloudReportList(accountID: account.id, calls: calls)
+            reports = counted
             await current.load()
+            await counted.loadCount()
+        }
+        .sheet(isPresented: $showsReports) {
+            if let reports { CloudReportsSheet(list: reports) }
         }
         .sheet(item: $flow, onDismiss: { Task { await list?.load() } }) { flow in
             ConnectCloudAgentSheet(flow: flow)

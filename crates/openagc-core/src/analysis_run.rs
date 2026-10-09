@@ -280,7 +280,16 @@ impl Core {
     pub(crate) async fn purge_compositions(&self, now: Millis) -> Result<usize, CoreError> {
         let keep = i64::from(self.analysis_settings().await?.keep_days) * 24 * 60 * 60 * 1000;
         let db = self.db()?;
-        runtime::run(async move { Ok(db.write(move |tx| mail_store::compositions::purge(tx, keep, now)).await?) }).await
+        runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    // Cloud agents' reports keep their bodies as long (spec §10.6).
+                    mail_store::cloud_reports::purge(tx, keep, now)?;
+                    mail_store::compositions::purge(tx, keep, now)
+                })
+                .await?)
+        })
+        .await
     }
 
     /// Whether to try (again) now; records the try.

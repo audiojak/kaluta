@@ -60,6 +60,18 @@ private final class RecordingRulesCalls: RulesAgentCalls, @unchecked Sendable {
         return lock.withLock { listed }
     }
 
+    var reports: [CloudReportInfo] = []
+
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo] {
+        record("reports \(limit)")
+        return lock.withLock { reports }
+    }
+
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32 {
+        record("report count")
+        return UInt32(lock.withLock { reports.filter { $0.sentAt >= since }.count })
+    }
+
     func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {
         record("revoke \(agentID)")
         if failRevoke { throw CoreClientError(kind: .network, message: "Could not reach rules.example.com") }
@@ -119,7 +131,14 @@ struct CloudAgentTests {
         #expect(instructions.contains("You write email as \(address)"))
         #expect(instructions.contains("call guide_rules with the recipients' addresses (to) and the message type"))
         #expect(instructions.contains("call facts_lookup"))
-        #expect(!instructions.contains("check_draft"), "not on the server yet (oagc-gmn7.6)")
+        #expect(instructions.contains("call check_draft with the recipients (to)"))
+        #expect(instructions.contains("guide_check"))
+        #expect(instructions.contains("call report_send with the Message-ID the service gave the message (message_id)"))
+        #expect(instructions.contains("checked_version"))
+        let order = ["guide_rules", "facts_lookup", "check_draft", "report_send"].map {
+            instructions.range(of: $0)!.lowerBound
+        }
+        #expect(order == order.sorted(), "read, check before sending, report after")
 
         flow.forget()
         #expect(flow.code == nil && !flow.isShowing)
@@ -225,6 +244,42 @@ struct CloudAgentTests {
         let code = RulesConnectCode(code: "ABCDE-FGHJK", name: "x", expiresAt: 1_000_000)
         #expect(CloudAgentFlow.expiry(code, now: Date(timeIntervalSince1970: 1_000)) == "This code has expired. New Code makes another.")
         #expect(CloudAgentFlow.expiry(code, now: Date(timeIntervalSince1970: 1_000 - 65)) == "Works once, for 1:05 more.")
+    }
+
+    @Test func reportsAreCountedForTheWeekAndListedWithTheirAgentAndMatch() async throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let ms = { (secondsAgo: TimeInterval) in Int64((now.timeIntervalSince1970 - secondsAgo) * 1000) }
+        let calls = RecordingRulesCalls()
+        calls.reports = [
+            CloudReportInfo(id: 2, agentName: "Weekly outreach routine", agentKind: .connector, to: ["ann@acme.com"],
+                            subject: "**Plan** [click](https://evil.example)", sentAt: ms(3_600),
+                            guideCheck: ["Uses “circle back”, which your rules ban"], checkedVersion: 3,
+                            matched: .messageId, messageId: "out-1", recorded: true),
+            CloudReportInfo(id: 1, agentName: "Nightly digest script", agentKind: .token, to: ["bea@globex.com"],
+                            subject: "Digest", sentAt: ms(8 * 86_400), guideCheck: [], checkedVersion: nil,
+                            matched: .notSeen, messageId: nil, recorded: false),
+        ]
+        let list = CloudReportList(accountID: "a1", calls: calls)
+        await list.loadCount(now: now)
+        #expect(list.weekCount == 1, "the one from eight days ago is not this week's")
+        #expect(CloudReportList.countText(1) == "1 report this week")
+        #expect(CloudReportList.countText(12) == "12 reports this week")
+        #expect(CloudReportList.countText(0) == "No reports this week")
+        await list.load()
+        #expect(calls.calls.last == "reports \(CloudReportList.limit)")
+        #expect(list.reports.map(\.agentName) == ["Weekly outreach routine", "Nightly digest script"])
+        let first = list.reports[0]
+        #expect(CloudReportList.detail(first, now: now).hasPrefix("Weekly outreach routine · to ann@acme.com · sent "))
+        #expect(CloudReportList.statusText(first) == "Matched to the sent message by its Message-ID")
+        #expect(CloudReportList.statusText(list.reports[1]) == "Reported, not seen in the mailbox")
+        #expect(first.subject == "**Plan** [click](https://evil.example)", "kept as the agent wrote it, shown verbatim")
+    }
+
+    @Test func theDailyReviewNamesTheCloudAgentWhoseReportItCompares() {
+        #expect(AnalysisPairCard.aiTitle("cloud:Weekly outreach routine") == "Weekly outreach routine reported")
+        #expect(AnalysisPairCard.sentTitle("cloud:Weekly outreach routine") == "In the mailbox's sent mail")
+        #expect(AnalysisPairCard.aiTitle("claude-code") == "AI drafted")
+        #expect(AnalysisPairCard.aiTitle(nil) == "AI drafted" && AnalysisPairCard.sentTitle(nil) == "You sent")
     }
 
     private func modelWith(_ calls: RecordingRulesCalls) async throws -> AppModel {

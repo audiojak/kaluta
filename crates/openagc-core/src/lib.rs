@@ -74,7 +74,10 @@ pub use mutations::OutboxStatus;
 pub use outside::{OUTSIDE_SOCKET_FILE, QUEUED_MESSAGE, outside_socket};
 pub use registry::{AccountKind, AccountSummary, OrphanedStore};
 pub use routines::{RoutineInfo, RoutinePreviewRow, RoutineRunInfo};
-pub use rules_publish::{RulesPreview, RulesPreviewAudience, RulesPreviewEntry, RulesPreviewFact, RulesPublication};
+pub use rules_publish::{
+    CloudReportInfo, CloudReportMatch, RulesPreview, RulesPreviewAudience, RulesPreviewEntry, RulesPreviewFact,
+    RulesPublication,
+};
 pub use secrets::SecretStore;
 
 /// Configuration the app passes when it creates the core.

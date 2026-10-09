@@ -117,6 +117,9 @@ pub struct AnalysisQueue {
 pub struct AnalysisPairInfo {
     pub composition_id: i64,
     pub created_at: i64,
+    /// Who wrote the AI text: `cloud:<name>` for a cloud agent's report
+    /// (spec §10.6), else the agent's id, if known.
+    pub agent: Option<String>,
     pub kind: String,
     pub subject: String,
     pub to: Vec<String>,
@@ -376,6 +379,7 @@ impl Core {
                         out.push(AnalysisPairInfo {
                             composition_id: r.id,
                             created_at: r.created_at,
+                            agent: r.agent,
                             kind: r.kind.as_str().into(),
                             subject: r.subject,
                             to: r.recipients.to,
