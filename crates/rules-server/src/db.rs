@@ -1,6 +1,9 @@
 //! The server's one SQLite file (spec §10.6): registered mailboxes with
 //! their publisher token's hash, the last few published snapshots of each,
-//! and the agent tokens minted for them (hashes only).
+//! and the agents connected to them: static agent tokens and OAuth grants,
+//! one table (`agent_tokens`, `kind` `token` or `oauth`). For OAuth it also
+//! holds registered clients, connect codes, authorization codes and access
+//! and refresh tokens, every secret as a hash.
 //!
 //! One connection behind a mutex, used from blocking tasks: the server's
 //! writes are a push now and then, and its reads are small.
@@ -17,7 +20,8 @@ pub const FILE_NAME: &str = "rules.sqlite3";
 pub const KEEP_VERSIONS: i64 = 5;
 
 /// Migrations in order; `PRAGMA user_version` records how many have run.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE mailboxes (
         id INTEGER PRIMARY KEY,
         address TEXT NOT NULL UNIQUE,
@@ -41,7 +45,48 @@ const MIGRATIONS: &[&str] = &["
         revoked_at INTEGER
     );
     CREATE INDEX agent_tokens_by_mailbox ON agent_tokens(mailbox_id);
-"];
+",
+    "
+    ALTER TABLE agent_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'token';
+    ALTER TABLE agent_tokens ADD COLUMN client_id TEXT;
+    CREATE TABLE oauth_clients (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        redirect_uris TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+    CREATE TABLE connect_codes (
+        id TEXT PRIMARY KEY,
+        mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        code_hash TEXT NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER
+    );
+    CREATE INDEX connect_codes_by_mailbox ON connect_codes(mailbox_id);
+    CREATE TABLE oauth_codes (
+        code_hash TEXT PRIMARY KEY,
+        grant_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+        client_id TEXT NOT NULL,
+        redirect_uri TEXT NOT NULL,
+        code_challenge TEXT NOT NULL,
+        resource TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER
+    );
+    CREATE TABLE oauth_tokens (
+        token_hash TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        grant_id TEXT NOT NULL REFERENCES agent_tokens(id) ON DELETE CASCADE,
+        resource TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER
+    );
+    CREATE INDEX oauth_tokens_by_grant ON oauth_tokens(grant_id);
+",
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -205,7 +250,15 @@ pub struct AgentTokenRow {
     pub token_hash: String,
     pub created_at: i64,
     pub revoked_at: Option<i64>,
+    /// `token` (a static agent token) or `oauth` (a grant made with a
+    /// connect code, whose tokens are in `oauth_tokens`).
+    pub kind: String,
+    /// The OAuth client a grant was made for.
+    pub client_id: Option<String>,
 }
+
+pub const KIND_TOKEN: &str = "token";
+pub const KIND_OAUTH: &str = "oauth";
 
 fn agent_token_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenRow> {
     Ok(AgentTokenRow {
@@ -215,35 +268,50 @@ fn agent_token_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTokenRow> {
         token_hash: r.get(3)?,
         created_at: r.get(4)?,
         revoked_at: r.get(5)?,
+        kind: r.get(6)?,
+        client_id: r.get(7)?,
     })
 }
 
-const AGENT_TOKEN_COLUMNS: &str = "id, mailbox_id, name, token_hash, created_at, revoked_at";
+const AGENT_TOKEN_COLUMNS: &str = "id, mailbox_id, name, token_hash, created_at, revoked_at, kind, client_id";
 
 /// An agent token with the address of its mailbox.
 pub fn agent_token(c: &Connection, id: &str) -> rusqlite::Result<Option<(AgentTokenRow, String)>> {
     c.query_row(
-        "SELECT t.id, t.mailbox_id, t.name, t.token_hash, t.created_at, t.revoked_at, m.address \
-         FROM agent_tokens t JOIN mailboxes m ON m.id = t.mailbox_id WHERE t.id = ?1",
+        "SELECT t.id, t.mailbox_id, t.name, t.token_hash, t.created_at, t.revoked_at, t.kind, t.client_id, \
+         m.address FROM agent_tokens t JOIN mailboxes m ON m.id = t.mailbox_id WHERE t.id = ?1",
         [id],
-        |r| Ok((agent_token_row(r)?, r.get(6)?)),
+        |r| Ok((agent_token_row(r)?, r.get(8)?)),
     )
     .optional()
 }
 
 pub fn insert_agent_token(c: &Connection, row: &AgentTokenRow) -> rusqlite::Result<()> {
     c.execute(
-        &format!("INSERT INTO agent_tokens ({AGENT_TOKEN_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
-        params![row.id, row.mailbox_id, row.name, row.token_hash, row.created_at, row.revoked_at],
+        &format!("INSERT INTO agent_tokens ({AGENT_TOKEN_COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
+        params![
+            row.id,
+            row.mailbox_id,
+            row.name,
+            row.token_hash,
+            row.created_at,
+            row.revoked_at,
+            row.kind,
+            row.client_id
+        ],
     )?;
     Ok(())
 }
 
-pub fn agent_tokens(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<AgentTokenRow>> {
-    let mut stmt = c.prepare(&format!(
-        "SELECT {AGENT_TOKEN_COLUMNS} FROM agent_tokens WHERE mailbox_id = ?1 ORDER BY created_at, id"
-    ))?;
-    stmt.query_map([mailbox_id], agent_token_row)?.collect()
+/// A mailbox's agents (tokens and grants), each with its OAuth client's
+/// name if it is a grant.
+pub fn agent_tokens(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<(AgentTokenRow, Option<String>)>> {
+    let mut stmt = c.prepare(
+        "SELECT t.id, t.mailbox_id, t.name, t.token_hash, t.created_at, t.revoked_at, t.kind, t.client_id, \
+         c.name FROM agent_tokens t LEFT JOIN oauth_clients c ON c.id = t.client_id WHERE t.mailbox_id = ?1 \
+         ORDER BY t.created_at, t.id",
+    )?;
+    stmt.query_map([mailbox_id], |r| Ok((agent_token_row(r)?, r.get(8)?)))?.collect()
 }
 
 /// Revoke one of the mailbox's agent tokens; false if it has no such
@@ -253,7 +321,221 @@ pub fn revoke_agent_token(c: &Connection, mailbox_id: i64, id: &str, now: i64) -
         "UPDATE agent_tokens SET revoked_at = COALESCE(revoked_at, ?3) WHERE mailbox_id = ?1 AND id = ?2",
         params![mailbox_id, id, now],
     )?;
+    if n == 1 {
+        forget_grant_secrets(c, id)?;
+    }
     Ok(n == 1)
+}
+
+/// Revoke an agent whatever its mailbox: a refresh token or authorization
+/// code used twice.
+pub fn revoke_grant(c: &Connection, id: &str, now: i64) -> rusqlite::Result<()> {
+    c.execute("UPDATE agent_tokens SET revoked_at = COALESCE(revoked_at, ?2) WHERE id = ?1", params![id, now])?;
+    forget_grant_secrets(c, id)
+}
+
+/// A revoked grant's codes and tokens are of no use: drop them. (Its row
+/// stays, revoked, for the app's list; a token presented later finds
+/// nothing.)
+fn forget_grant_secrets(c: &Connection, id: &str) -> rusqlite::Result<()> {
+    c.execute("DELETE FROM oauth_tokens WHERE grant_id = ?1", [id])?;
+    c.execute("DELETE FROM oauth_codes WHERE grant_id = ?1", [id])?;
+    Ok(())
+}
+
+/// A client registered with `POST /oauth/register` (RFC 7591).
+#[derive(Debug, Clone)]
+pub struct ClientRow {
+    pub id: String,
+    pub name: String,
+    pub redirect_uris: Vec<String>,
+    pub created_at: i64,
+}
+
+pub fn insert_client(c: &Connection, row: &ClientRow) -> rusqlite::Result<()> {
+    let uris = serde_json::to_string(&row.redirect_uris).unwrap_or_else(|_| "[]".into());
+    c.execute(
+        "INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![row.id, row.name, uris, row.created_at],
+    )?;
+    Ok(())
+}
+
+pub fn client(c: &Connection, id: &str) -> rusqlite::Result<Option<ClientRow>> {
+    c.query_row("SELECT id, name, redirect_uris, created_at FROM oauth_clients WHERE id = ?1", [id], |r| {
+        let uris: String = r.get(2)?;
+        Ok(ClientRow {
+            id: r.get(0)?,
+            name: r.get(1)?,
+            redirect_uris: serde_json::from_str(&uris).unwrap_or_default(),
+            created_at: r.get(3)?,
+        })
+    })
+    .optional()
+}
+
+/// Clients with no grant are kept this long; then they register again.
+pub const UNUSED_CLIENT_MS: i64 = 7 * 24 * 3_600_000;
+/// Used codes and spent tokens are kept this long past their expiry.
+const SPENT_MS: i64 = 24 * 3_600_000;
+
+/// Drop what has expired: connect and authorization codes, tokens, and
+/// clients that never connected an agent.
+pub fn prune(c: &Connection, now: i64) -> rusqlite::Result<()> {
+    c.execute("DELETE FROM connect_codes WHERE expires_at < ?1", [now - SPENT_MS])?;
+    c.execute("DELETE FROM oauth_codes WHERE expires_at < ?1", [now - SPENT_MS])?;
+    c.execute("DELETE FROM oauth_tokens WHERE expires_at < ?1", [now - SPENT_MS])?;
+    c.execute(
+        "DELETE FROM oauth_clients WHERE created_at < ?1 AND id NOT IN \
+         (SELECT client_id FROM agent_tokens WHERE client_id IS NOT NULL)",
+        [now - UNUSED_CLIENT_MS],
+    )?;
+    Ok(())
+}
+
+/// A connect code minted by the publisher.
+#[derive(Debug, Clone)]
+pub struct ConnectCodeRow {
+    pub id: String,
+    pub mailbox_id: i64,
+    pub name: String,
+    pub code_hash: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
+pub fn insert_connect_code(c: &Connection, row: &ConnectCodeRow) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO connect_codes (id, mailbox_id, name, code_hash, created_at, expires_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![row.id, row.mailbox_id, row.name, row.code_hash, row.created_at, row.expires_at],
+    )?;
+    Ok(())
+}
+
+/// How many of a mailbox's connect codes are unused and unexpired.
+pub fn live_connect_codes(c: &Connection, mailbox_id: i64, now: i64) -> rusqlite::Result<i64> {
+    c.query_row(
+        "SELECT COUNT(*) FROM connect_codes WHERE mailbox_id = ?1 AND used_at IS NULL AND expires_at > ?2",
+        params![mailbox_id, now],
+        |r| r.get(0),
+    )
+}
+
+/// Use a connect code: its mailbox and name, once, if it is unused and
+/// unexpired.
+pub fn redeem_connect_code(c: &Connection, code_hash: &str, now: i64) -> rusqlite::Result<Option<(i64, String)>> {
+    let found = c
+        .query_row(
+            "SELECT id, mailbox_id, name FROM connect_codes \
+             WHERE code_hash = ?1 AND used_at IS NULL AND expires_at > ?2",
+            params![code_hash, now],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)),
+        )
+        .optional()?;
+    let Some((id, mailbox_id, name)) = found else { return Ok(None) };
+    c.execute("UPDATE connect_codes SET used_at = ?2 WHERE id = ?1", params![id, now])?;
+    Ok(Some((mailbox_id, name)))
+}
+
+/// An authorization code, by its hash.
+#[derive(Debug, Clone)]
+pub struct AuthCodeRow {
+    pub grant_id: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub code_challenge: String,
+    pub resource: String,
+    pub expires_at: i64,
+    pub used_at: Option<i64>,
+}
+
+pub fn insert_auth_code(c: &Connection, code_hash: &str, row: &AuthCodeRow) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO oauth_codes (code_hash, grant_id, client_id, redirect_uri, code_challenge, resource, \
+         expires_at, used_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            code_hash,
+            row.grant_id,
+            row.client_id,
+            row.redirect_uri,
+            row.code_challenge,
+            row.resource,
+            row.expires_at,
+            row.used_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn auth_code(c: &Connection, code_hash: &str) -> rusqlite::Result<Option<AuthCodeRow>> {
+    c.query_row(
+        "SELECT grant_id, client_id, redirect_uri, code_challenge, resource, expires_at, used_at \
+         FROM oauth_codes WHERE code_hash = ?1",
+        [code_hash],
+        |r| {
+            Ok(AuthCodeRow {
+                grant_id: r.get(0)?,
+                client_id: r.get(1)?,
+                redirect_uri: r.get(2)?,
+                code_challenge: r.get(3)?,
+                resource: r.get(4)?,
+                expires_at: r.get(5)?,
+                used_at: r.get(6)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub fn use_auth_code(c: &Connection, code_hash: &str, now: i64) -> rusqlite::Result<()> {
+    c.execute("UPDATE oauth_codes SET used_at = ?2 WHERE code_hash = ?1", params![code_hash, now])?;
+    Ok(())
+}
+
+pub const TOKEN_ACCESS: &str = "access";
+pub const TOKEN_REFRESH: &str = "refresh";
+
+/// An OAuth access or refresh token, by its hash.
+#[derive(Debug, Clone)]
+pub struct OAuthTokenRow {
+    pub kind: String,
+    pub grant_id: String,
+    pub resource: String,
+    pub expires_at: i64,
+    pub used_at: Option<i64>,
+}
+
+pub fn insert_oauth_token(c: &Connection, token_hash: &str, row: &OAuthTokenRow, now: i64) -> rusqlite::Result<()> {
+    c.execute(
+        "INSERT INTO oauth_tokens (token_hash, kind, grant_id, resource, created_at, expires_at, used_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![token_hash, row.kind, row.grant_id, row.resource, now, row.expires_at, row.used_at],
+    )?;
+    Ok(())
+}
+
+pub fn oauth_token(c: &Connection, token_hash: &str) -> rusqlite::Result<Option<OAuthTokenRow>> {
+    c.query_row(
+        "SELECT kind, grant_id, resource, expires_at, used_at FROM oauth_tokens WHERE token_hash = ?1",
+        [token_hash],
+        |r| {
+            Ok(OAuthTokenRow {
+                kind: r.get(0)?,
+                grant_id: r.get(1)?,
+                resource: r.get(2)?,
+                expires_at: r.get(3)?,
+                used_at: r.get(4)?,
+            })
+        },
+    )
+    .optional()
+}
+
+/// A refresh token was exchanged: it may not be again.
+pub fn use_oauth_token(c: &Connection, token_hash: &str, now: i64) -> rusqlite::Result<()> {
+    c.execute("UPDATE oauth_tokens SET used_at = ?2 WHERE token_hash = ?1", params![token_hash, now])?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -289,6 +571,33 @@ mod tests {
     }
 
     #[test]
+    fn a_database_from_before_oauth_keeps_its_tokens_as_static_ones() {
+        let dir = scratch();
+        std::fs::create_dir_all(&dir).unwrap();
+        {
+            let c = Connection::open(dir.join(FILE_NAME)).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
+            c.execute(
+                "INSERT INTO mailboxes (address, publisher_token_hash, created_at) VALUES ('a@x.com', 'h', 1)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO agent_tokens (id, mailbox_id, name, token_hash, created_at) \
+                 VALUES ('0123456789abcdef', 1, 'Old', 'h', 1)",
+                [],
+            )
+            .unwrap();
+        }
+        let db = Db::open(&dir).unwrap();
+        let (row, _) = db.run_now(|c| agent_token(c, "0123456789abcdef")).unwrap().unwrap();
+        assert_eq!((row.kind.as_str(), row.client_id), (KIND_TOKEN, None));
+        assert_eq!(db.run_now(|c| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))).unwrap(), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn keeps_the_newest_versions_and_forgets_a_mailbox_whole() {
         let dir = scratch();
         let db = Db::open(&dir).unwrap();
@@ -306,6 +615,8 @@ mod tests {
                 token_hash: "h".into(),
                 created_at: 1,
                 revoked_at: None,
+                kind: KIND_TOKEN.into(),
+                client_id: None,
             };
             insert_agent_token(c, &t)?;
             assert!(revoke_agent_token(c, id, &t.id, 5)?);

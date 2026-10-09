@@ -11,8 +11,11 @@
 //!   higher. 412 with `current_version` when the version does not match.
 //! - `GET /v1/mailboxes/{address}/snapshot/version`.
 //! - `POST /v1/mailboxes/{address}/agent-tokens` `{"name"}`: mint; answers
-//!   the token once. `GET` lists them; `DELETE …/agent-tokens/{id}`
-//!   revokes one.
+//!   the token once. `GET` lists the mailbox's agents, static tokens
+//!   (`kind` `token`) and OAuth grants (`kind` `oauth`) alike;
+//!   `DELETE …/agent-tokens/{id}` revokes either.
+//! - `POST /v1/mailboxes/{address}/connect-codes` `{"name"}`: a one-time
+//!   connect code for the OAuth consent page, answered once (OAuth on only).
 //!
 //! Agents and scripts, `Authorization: Bearer <agent token>`:
 //! - `GET /v1/m/{address}/guide?to=&to=&message_type=` and
@@ -29,7 +32,7 @@ use serde_json::{Value, json};
 use writing_guide::Snapshot;
 
 use crate::answers::{self, FactsArgs, GuideArgs};
-use crate::db::{self, AgentTokenRow, SnapshotRow};
+use crate::db::{self, AgentTokenRow, ConnectCodeRow, SnapshotRow};
 use crate::{ApiError, AppState, TokenSlot, agent_auth, normalize_address, tokens};
 
 pub(crate) fn router(state: AppState) -> Router {
@@ -41,6 +44,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/v1/mailboxes/{address}/snapshot/version", get(version))
         .route("/v1/mailboxes/{address}/agent-tokens", post(mint).get(list_tokens))
         .route("/v1/mailboxes/{address}/agent-tokens/{id}", delete(revoke))
+        .route("/v1/mailboxes/{address}/connect-codes", post(connect_code))
         .route("/v1/m/{address}/guide", get(guide))
         .route("/v1/m/{address}/facts", get(facts))
         .with_state(state)
@@ -259,13 +263,33 @@ struct MintBody {
     name: String,
 }
 
-fn token_json(t: &AgentTokenRow) -> Value {
-    json!({
+/// An agent's name: 1 to 100 characters on one line.
+fn agent_name(b: &MintBody) -> Result<String, ApiError> {
+    let name = b.name.trim().to_owned();
+    if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_name",
+            "an agent's name is 1 to 100 characters on one line",
+        ));
+    }
+    Ok(name)
+}
+
+/// An agent as listed: a static token, or an OAuth grant with the name its
+/// client registered under.
+fn token_json(t: &AgentTokenRow, client_name: Option<&str>) -> Value {
+    let mut v = json!({
         "id": t.id,
         "name": t.name,
+        "kind": t.kind,
         "created_at": answers::time(t.created_at),
         "revoked_at": t.revoked_at.map_or(Value::Null, answers::time),
-    })
+    });
+    if t.kind == db::KIND_OAUTH {
+        v["client_name"] = json!(client_name);
+    }
+    v
 }
 
 async fn mint(
@@ -277,14 +301,7 @@ async fn mint(
 ) -> Result<Response, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
     let b: MintBody = parse_json(&body)?;
-    let name = b.name.trim().to_owned();
-    if name.is_empty() || name.chars().count() > 100 || name.chars().any(char::is_control) {
-        return Err(ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_name",
-            "a token's name is 1 to 100 characters on one line",
-        ));
-    }
+    let name = agent_name(&b)?;
     let id = tokens::new_id();
     let token = tokens::agent_token(&id);
     let row = AgentTokenRow {
@@ -294,11 +311,13 @@ async fn mint(
         token_hash: tokens::hash(&token),
         created_at: db::now_ms(),
         revoked_at: None,
+        kind: db::KIND_TOKEN.into(),
+        client_id: None,
     };
     let stored = row.clone();
     state.db.run(move |c| db::insert_agent_token(c, &stored)).await?;
     tracing::info!(mailbox = m.id, token = %row.id, "agent token minted");
-    let mut answer = token_json(&row);
+    let mut answer = token_json(&row, None);
     answer["token"] = json!(token);
     Ok((StatusCode::CREATED, Json(answer)).into_response())
 }
@@ -311,7 +330,8 @@ async fn list_tokens(
 ) -> Result<Json<Value>, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
     let rows = state.db.run(move |c| db::agent_tokens(c, m.id)).await?;
-    Ok(Json(json!({ "agent_tokens": rows.iter().map(token_json).collect::<Vec<_>>() })))
+    let agents: Vec<Value> = rows.iter().map(|(t, client)| token_json(t, client.as_deref())).collect();
+    Ok(Json(json!({ "agent_tokens": agents })))
 }
 
 async fn revoke(
@@ -324,10 +344,71 @@ async fn revoke(
     let token = id.clone();
     let found = state.db.run(move |c| db::revoke_agent_token(c, m.id, &token, db::now_ms())).await?;
     if !found {
-        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such agent token for this mailbox"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such agent for this mailbox"));
     }
-    tracing::info!(mailbox = m.id, token = %id, "agent token revoked");
+    tracing::info!(mailbox = m.id, token = %id, "agent revoked");
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A one-time connect code for the OAuth consent page: whoever types it
+/// there connects an agent to this mailbox, named `name`.
+async fn connect_code(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Response, ApiError> {
+    let m = publisher(&state, &headers, &address, &slot).await?;
+    if state.oauth.is_none() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "oauth_off",
+            "this server signs agents in with OAuth only when its operator sets its public URL \
+             (OPENAGC_RULES_PUBLIC_URL); use an agent token instead",
+        ));
+    }
+    let name = agent_name(&parse_json(&body)?)?;
+    let code = tokens::connect_code();
+    let now = db::now_ms();
+    let row = ConnectCodeRow {
+        id: tokens::new_id(),
+        mailbox_id: m.id,
+        name,
+        code_hash: tokens::hash(&tokens::normalize_connect_code(&code).unwrap_or_default()),
+        created_at: now,
+        expires_at: now + crate::oauth::CONNECT_CODE_TTL_MS,
+    };
+    let stored = row.clone();
+    let made = state
+        .db
+        .run(move |c| {
+            db::prune(c, now)?;
+            if db::live_connect_codes(c, stored.mailbox_id, now)? >= crate::oauth::LIVE_CODES_PER_MAILBOX {
+                return Ok(false);
+            }
+            db::insert_connect_code(c, &stored)?;
+            Ok(true)
+        })
+        .await?;
+    if !made {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_codes",
+            format!(
+                "this mailbox has {} unused connect codes; use one or let them expire (10 minutes)",
+                crate::oauth::LIVE_CODES_PER_MAILBOX
+            ),
+        ));
+    }
+    tracing::info!(mailbox = m.id, code = %row.id, "connect code minted");
+    let answer = json!({
+        "id": row.id,
+        "name": row.name,
+        "code": code,
+        "expires_at": answers::time(row.expires_at),
+    });
+    Ok((StatusCode::CREATED, Json(answer)).into_response())
 }
 
 /// The agent token's mailbox, which must be the one in the path.
@@ -337,7 +418,7 @@ async fn agent_mailbox(
     address: &str,
     slot: &TokenSlot,
 ) -> Result<i64, ApiError> {
-    let auth = agent_auth(state, headers, Some(slot)).await?;
+    let auth = agent_auth(state, headers, Some(slot), false).await?;
     if normalize_address(address).as_deref() != Some(auth.address.as_str()) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "this token is for another mailbox"));
     }

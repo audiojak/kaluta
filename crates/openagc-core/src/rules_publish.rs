@@ -23,6 +23,13 @@
 //! `If-Match` on the version the server holds; a refused push takes the
 //! server's version from its answer and pushes again, so versions only go
 //! up, across restarts too.
+//!
+//! With the publisher token the app also manages the mailbox's agents on
+//! the server (*Connect a Cloud Agent…*, oagc-gmn7.5): it mints agent
+//! tokens and one-time connect codes (which a claude.ai connector's OAuth
+//! sign-in asks for), lists the agents, static tokens and OAuth grants
+//! alike, and revokes them. Tokens and codes are shown once and kept
+//! nowhere on this Mac.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
@@ -118,6 +125,52 @@ pub struct RulesPreviewAudience {
     pub name: String,
     /// How many addresses and domains, each sent as a salted hash.
     pub members: u32,
+}
+
+/// A one-time connect code for a rules server's OAuth sign-in, shown once
+/// (spec §10.6): whoever types it on the server's consent page connects an
+/// agent, named `name`, to the mailbox.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RulesConnectCode {
+    /// As typed: `ABCDE-FGHJK`.
+    pub code: String,
+    pub name: String,
+    /// When it stops working (10 minutes on), in milliseconds since the
+    /// Unix epoch.
+    pub expires_at: i64,
+}
+
+/// A static agent token, shown once.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RulesAgentToken {
+    pub id: String,
+    pub name: String,
+    /// `oagc_agt_…`, for `Authorization: Bearer`.
+    pub token: String,
+}
+
+/// How an agent reaches a mailbox on a rules server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RulesAgentKind {
+    /// A static bearer token (Claude Code, the Agent SDK, scripts).
+    Token,
+    /// Signed in with OAuth and a connect code (a claude.ai connector, a
+    /// cloud routine).
+    Connector,
+}
+
+/// An agent connected to a mailbox on its rules server.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RulesAgent {
+    pub id: String,
+    /// The name the user gave it.
+    pub name: String,
+    pub kind: RulesAgentKind,
+    /// A connector's app, as it named itself when it registered ("Claude").
+    pub client_name: Option<String>,
+    /// Milliseconds since the Unix epoch.
+    pub created_at: i64,
+    pub revoked_at: Option<i64>,
 }
 
 /// `rules-server.json` in the account directory.
@@ -458,6 +511,31 @@ fn preview_of(snapshot: &Snapshot, facts_kept: u32) -> RulesPreview {
     }
 }
 
+/// An RFC 3339 time from the server, in milliseconds.
+fn millis(v: &Value) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(v.as_str()?).ok().map(|t| t.timestamp_millis())
+}
+
+/// An agent's name: 1 to 100 characters on one line.
+fn agent_name(name: &str) -> Result<String, CoreError> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    if name.is_empty() || name.chars().count() > 100 {
+        return Err(CoreError::new(ErrorKind::InvalidInput, "give the agent a name of up to 100 characters"));
+    }
+    Ok(name)
+}
+
+fn rules_agent(v: &Value) -> Option<RulesAgent> {
+    Some(RulesAgent {
+        id: v["id"].as_str()?.to_owned(),
+        name: v["name"].as_str()?.to_owned(),
+        kind: if v["kind"] == "oauth" { RulesAgentKind::Connector } else { RulesAgentKind::Token },
+        client_name: v["client_name"].as_str().map(str::to_owned),
+        created_at: millis(&v["created_at"])?,
+        revoked_at: millis(&v["revoked_at"]),
+    })
+}
+
 impl Core {
     fn rules_record_path(&self, account_id: &str) -> PathBuf {
         record_path(&self.data_path(), account_id)
@@ -762,6 +840,64 @@ impl Core {
         self.rules.set_pending(account_id, false);
     }
 
+    /// Call the publisher's API for `account_id` on its rules server: the
+    /// method, the path under `/v1/mailboxes/<address>/` and a JSON body.
+    /// The answer when it is a success; otherwise why not, in words.
+    async fn rules_manage(
+        &self,
+        account_id: &str,
+        method: reqwest::Method,
+        segments: &[&str],
+        body: Option<Value>,
+    ) -> Result<Value, CoreError> {
+        let record = self.rules_record(account_id).filter(|r| !r.sample).ok_or_else(|| {
+            CoreError::new(ErrorKind::InvalidInput, "this mailbox does not publish to a rules server; publish it first")
+        })?;
+        let server = parse_server(&record.server_url)?;
+        let address = self.agent_meta_or_err(account_id)?.address;
+        let token = self.secrets.get(keys::rules_publish_token(&server.key, account_id))?.ok_or_else(|| {
+            CoreError::new(
+                ErrorKind::InvalidInput,
+                format!("this Mac has lost its publisher token for {}; Publish Now registers again", server.host),
+            )
+        })?;
+        let mut path = vec!["v1", "mailboxes", address.as_str()];
+        path.extend_from_slice(segments);
+        let client = client(&self.rules).map_err(Failure::into_error)?;
+        let mut request = client.request(method, server.endpoint(&path)).bearer_auth(token);
+        if let Some(b) = body {
+            request = request.json(&b);
+        }
+        let host = server.host.clone();
+        let a = runtime::run(async move { send(request, &host).await.map_err(Failure::into_error) }).await?;
+        let host = &server.host;
+        if let Some(f) = transient(host, &a) {
+            return Err(f.into_error());
+        }
+        match a.status {
+            200..=299 => Ok(a.body),
+            401 => Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "{host} no longer accepts this Mac's publisher token for {address}. The server's operator can \
+                     forget the mailbox (openagc-rules forget-mailbox); then publish again."
+                ),
+            )),
+            404 if a.body["error"] == "not_registered" => Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!("{host} has forgotten {address}; Publish Now registers it again"),
+            )),
+            404 if a.body["error"] == "not_found" => {
+                Err(CoreError::new(ErrorKind::NotFound, format!("{host} has no such agent for {address}")))
+            }
+            404 | 405 => Err(CoreError::new(
+                ErrorKind::InvalidInput,
+                format!("{host} does not offer this; it may run an older openagc-rules"),
+            )),
+            _ => Err(CoreError::new(ErrorKind::InvalidInput, format!("{host}: {}", a.says()))),
+        }
+    }
+
     fn rules_status(&self, account_id: &str) -> Option<RulesPublication> {
         self.rules_record(account_id).map(|r| RulesPublication {
             server_url: r.server_url,
@@ -957,6 +1093,66 @@ impl Core {
     /// last time) for every mailbox that publishes.
     pub fn resume_rules_publishing(&self) {
         self.rules_changed(None);
+    }
+
+    /// A one-time connect code for an agent named `name` (spec §10.6): the
+    /// user types it on the rules server's sign-in page when connecting a
+    /// claude.ai connector or cloud routine. It works once, for 10 minutes,
+    /// and is shown only now. The server must have OAuth on (its operator
+    /// set its public URL); if not, the error says so.
+    pub async fn rules_connect_code_mint(
+        &self,
+        account_id: String,
+        name: String,
+    ) -> Result<RulesConnectCode, CoreError> {
+        let name = agent_name(&name)?;
+        let a = self
+            .rules_manage(&account_id, reqwest::Method::POST, &["connect-codes"], Some(json!({ "name": name })))
+            .await?;
+        let code = a["code"].as_str().filter(|c| !c.is_empty());
+        match (code, millis(&a["expires_at"])) {
+            (Some(code), Some(expires_at)) => Ok(RulesConnectCode {
+                code: code.to_owned(),
+                name: a["name"].as_str().map_or(name, str::to_owned),
+                expires_at,
+            }),
+            _ => Err(CoreError::new(ErrorKind::Network, "the rules server did not answer with a connect code")),
+        }
+    }
+
+    /// A static agent token for an agent named `name`, for Claude Code, the
+    /// Agent SDK or a script (`Authorization: Bearer`). Shown only now.
+    pub async fn rules_agent_token_mint(&self, account_id: String, name: String) -> Result<RulesAgentToken, CoreError> {
+        let name = agent_name(&name)?;
+        let a = self
+            .rules_manage(&account_id, reqwest::Method::POST, &["agent-tokens"], Some(json!({ "name": name })))
+            .await?;
+        match (a["id"].as_str(), a["token"].as_str()) {
+            (Some(id), Some(token)) if !token.is_empty() => Ok(RulesAgentToken {
+                id: id.to_owned(),
+                name: a["name"].as_str().map_or(name, str::to_owned),
+                token: token.to_owned(),
+            }),
+            _ => Err(CoreError::new(ErrorKind::Network, "the rules server did not answer with a token")),
+        }
+    }
+
+    /// The agents connected to an agent mailbox on its rules server: static
+    /// tokens and connectors signed in with a connect code, revoked ones
+    /// included, oldest first.
+    pub async fn rules_agents(&self, account_id: String) -> Result<Vec<RulesAgent>, CoreError> {
+        let a = self.rules_manage(&account_id, reqwest::Method::GET, &["agent-tokens"], None).await?;
+        Ok(a["agent_tokens"].as_array().map(|list| list.iter().filter_map(rules_agent).collect()).unwrap_or_default())
+    }
+
+    /// Revoke an agent, a token or a connector: it stops at its next
+    /// request. Revoking twice is fine.
+    pub async fn rules_agent_revoke(&self, account_id: String, agent_id: String) -> Result<(), CoreError> {
+        if agent_id.is_empty() || !agent_id.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "not an agent id"));
+        }
+        self.rules_manage(&account_id, reqwest::Method::DELETE, &["agent-tokens", &agent_id], None).await?;
+        Ok(())
     }
 
     /// Snapshots and previews: a publishing record as if pushed, with no

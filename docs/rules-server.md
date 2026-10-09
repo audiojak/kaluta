@@ -8,11 +8,11 @@ behind your own TLS proxy. Spec §10.6, ADR 0016, plan
 `docs/plans/rules-server.md`.
 
 *Status:* the server is built (bearer tokens; `guide_rules` and
-`facts_lookup`), and the app publishes to it (an agent mailbox's
-Settings, *Rules server* › *Publish to a Rules Server…*). OAuth for
-claude.ai connectors (oagc-gmn7.4), *Connect a Cloud Agent…*
-(oagc-gmn7.5), `check_draft` and `report_send` (oagc-gmn7.6) and encryption
-at rest come next.
+`facts_lookup`; OAuth sign-in with one-time connect codes for claude.ai
+connectors and cloud routines), and the app publishes to it (an agent
+mailbox's Settings, *Rules server* › *Publish to a Rules Server…*).
+*Connect a Cloud Agent…* in the app (oagc-gmn7.5), `check_draft` and
+`report_send` (oagc-gmn7.6) and encryption at rest come next.
 
 ## What it holds, and what it never holds
 
@@ -27,7 +27,12 @@ It holds, per registered agent mailbox:
   you shared with cloud agents;
 - the **SHA-256 hash** of the mailbox's publisher token, and of each agent
   token, with the agent token's id, its name ("Weekly outreach routine")
-  and when it was made and revoked.
+  and when it was made and revoked;
+- for OAuth: the **clients** that registered (an id, the name they gave,
+  their return addresses), each **agent grant** a connect code made (beside
+  the agent tokens, with the same id, name and times), and the hashes of
+  connect codes, authorization codes and access and refresh tokens until
+  they expire.
 
 Every address a snapshot names (audience-group members, and the people a
 rule or guideline is for) is a **salted hash**: lower-case hex SHA-256 of
@@ -61,6 +66,7 @@ openagc-rules --data-dir /var/lib/openagc-rules
 | `--data-dir` | `OPENAGC_RULES_DATA_DIR` | `./data` | Holds `rules.sqlite3`. Made mode 0700, the file 0600. |
 | `--log` | `OPENAGC_RULES_LOG` | `info` | The server's own log level (`debug` adds health checks). Dependencies log at `warn`. |
 | `--rate-limit` | `OPENAGC_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registration has one bucket of its own. |
+| `--public-url` | `OPENAGC_RULES_PUBLIC_URL` | unset | The server's address as agents reach it, an origin alone (`https://rules.example.com`; `http://` only to `127.0.0.1` or `localhost`). Turns on OAuth sign-in with connect codes, which claude.ai connectors and cloud routines need; the OAuth issuer and the `/mcp` resource are made from it. |
 | | `OPENAGC_RULES_REGISTRATION_TOKEN` | unset | When set, registering a mailbox needs `Authorization: Bearer <it>`. Set it on any server strangers can reach. |
 
 Other commands:
@@ -82,6 +88,7 @@ docker build -f crates/rules-server/Dockerfile -t openagc-rules .
 docker run -d --name openagc-rules --restart unless-stopped \
   -p 127.0.0.1:8787:8787 -v openagc-rules:/data \
   -e OPENAGC_RULES_REGISTRATION_TOKEN="$(openssl rand -hex 32)" \
+  -e OPENAGC_RULES_PUBLIC_URL=https://rules.example.com \
   openagc-rules
 ```
 
@@ -102,8 +109,14 @@ rules.example.com {
 ```
 
 Caddy gets and renews the certificate. Do not log request headers at the
-proxy: they carry the bearer tokens. Caddy's default access log does not
-record `Authorization`; keep it that way.
+proxy: they carry the bearer tokens (and, on the sign-in page, the CSRF
+cookie). Caddy's default access log does not record `Authorization` or
+`Cookie`; keep it that way. It does record query strings, which on
+`/oauth/authorize` hold a client's `state` and PKCE challenge, and on the
+client's return address its authorization code (single use, two
+minutes, and useless without the client's PKCE verifier). Serve the
+server at the root of its host: OAuth's `/.well-known/` addresses must be
+reachable there.
 
 ### Backups
 
@@ -145,6 +158,48 @@ fact's *Share with cloud agents* switch, in the mailbox's Facts.
 *Stop Publishing…* either leaves the last version on the server or removes
 the mailbox from it.
 
+### Connect a claude.ai connector or a cloud routine
+
+Cloud routines reach MCP servers only through the claude.ai connectors on
+the account, and those sign in with OAuth (a fixed `Authorization` header
+is a beta few organisations have). The server is its own minimal
+authorization server: there are no accounts on it and no passwords; the
+sign-in page asks for a **connect code** from OpenAGC. The server needs
+`OPENAGC_RULES_PUBLIC_URL`.
+
+1. In OpenAGC, the agent mailbox's Settings › *Rules server* › *Connect a
+   Cloud Agent…* (oagc-gmn7.5): name the agent ("Weekly outreach
+   routine") and choose a connect code. The code, `ABCDE-FGHJK`, works
+   once, for 10 minutes.
+2. In claude.ai, *Customize › Connectors › Add custom connector*: the URL
+   is `https://rules.example.com/mcp` exactly; authentication *Sign in
+   now*; OAuth client *Register automatically* (Claude's published
+   identity, a Client ID Metadata Document, is not supported yet). Leave
+   the client ID and secret empty.
+3. *Connect* opens the server's sign-in page. It names the app ("Claude")
+   and where it goes back to (`claude.ai`). Enter the code and choose
+   *Connect*.
+4. The routine names the connector in its connections. The agent appears
+   in the app under the mailbox's agents with the name from step 1, and
+   *Revoke* there ends it at its next request.
+
+Claude Code should be able to sign in the same way (`claude mcp add
+--transport http openagc-scout https://rules.example.com/mcp`, then `/mcp`
+to authenticate; not yet tried by hand): it registers itself, returns to a
+loopback address on a port of its own, which the server matches without
+the port, and the page warns that it goes back to a program on this
+computer. A static agent token is simpler there.
+
+Limits: a connect code is ten characters from 31 without look-alikes (no
+0, 1, I, L or O; case, spaces and the dash do not matter), single use,
+10 minutes, kept as a hash; a mailbox may have 10 unused at once. A
+sign-in page closes after 5 wrong codes; an app (OAuth client) that sends
+5 wrong codes is locked out for an hour; the whole server checks at most
+30 codes a minute. Access tokens last an hour; refresh tokens 30 days and
+change at every refresh, and a refresh token or authorization code used
+twice revokes the agent (someone else has a copy). Clients that never
+connect an agent are forgotten after a week.
+
 ## The trust model
 
 - **The app is the only writer.** It registers each agent mailbox it
@@ -164,6 +219,16 @@ the mailbox from it.
   effect at the agent's next request. A leaked agent token reads that
   mailbox's published guide and shared facts until revoked; it cannot
   publish, read mail or send.
+- **OAuth agents** are made only with a connect code the app minted for
+  one mailbox, so a connector reaches only that mailbox, with the same
+  reach as an agent token, and is listed and revoked with the tokens. Its
+  access tokens are bound to this server's `/mcp` (they work nowhere else,
+  not even on the REST `GET`s). The sign-in page shows the app's name as
+  the app gave it, which anyone registering can choose, and the host it
+  returns to, which the server checks exactly against what the app
+  registered; it cannot be framed, runs no script and sets one cookie, for
+  its CSRF check. A stolen connect code is worth one agent until revoked,
+  and only within its 10 minutes.
 - **The operator** (you, or the project for a hosted server) can read what
   was published, now from the file and, once encryption at rest comes,
   still during requests. Only what the publish sheet lists leaves the Mac.
@@ -172,8 +237,9 @@ the mailbox from it.
 
 All bodies are JSON. Errors are `{"error": "<code>", "message": "…"}`; a
 401 carries `WWW-Authenticate: Bearer realm="openagc-rules"` (with
-`error="invalid_token"` for a token that is unknown or revoked), a 429
-carries `Retry-After`. Times are RFC 3339 in UTC.
+`error="invalid_token"` for a token that is unknown or revoked, and at
+`/mcp` with OAuth on `resource_metadata="<public URL>/.well-known/oauth-protected-resource", scope="rules"`),
+a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 
 ### For the app (publisher token)
 
@@ -183,8 +249,9 @@ carries `Retry-After`. Times are RFC 3339 in UTC.
 | `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
 | `GET /v1/mailboxes/{address}/snapshot/version` | | The same, `version` null before the first push |
 | `POST /v1/mailboxes/{address}/agent-tokens` | `{"name"}` | 201 `{"id", "name", "created_at", "revoked_at", "token"}`; the token is shown only here |
-| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "created_at", "revoked_at"}]}` |
-| `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204 |
+| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at"}]}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`) |
+| `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204; revokes a token or a grant (and its OAuth tokens) |
+| `POST /v1/mailboxes/{address}/connect-codes` | `{"name"}` | 201 `{"id", "name", "code", "expires_at"}`; the code is shown only here. 409 `oauth_off` without a public URL, 429 `too_many_codes` with 10 unused |
 | `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots and its tokens are gone |
 
 Publishing: the first push sends no `If-Match` (or `If-Match: 0`); every
@@ -217,3 +284,18 @@ with the app closed nothing changes, and the guide is "as of" that time.
 Before anything is published both answer `not_published`.
 
 `GET /healthz` answers `ok` when the database answers.
+
+### OAuth (with `OPENAGC_RULES_PUBLIC_URL`)
+
+The MCP authorization spec's shape (2025-06-18 and 2025-11-25): the
+server is the resource server for `<public URL>/mcp` and its own
+authorization server, issuer `<public URL>`.
+
+| Call | |
+|---|---|
+| `GET /.well-known/oauth-protected-resource` (also `…/mcp`) | RFC 9728: `resource`, `authorization_servers`, `scopes_supported: ["rules"]` |
+| `GET /.well-known/oauth-authorization-server` | RFC 8414: the endpoints below, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `grant_types_supported: ["authorization_code", "refresh_token"]` |
+| `POST /oauth/register` | RFC 7591, JSON: `redirect_uris` (1 to 10; `https://`, or `http://` to a loopback address), `client_name`. Every client is public (`token_endpoint_auth_method` `none`). 201 with `client_id`; 400 `invalid_redirect_uri` or `invalid_client_metadata`; 30 a minute across the server |
+| `GET /oauth/authorize` | `response_type=code`, `client_id`, `redirect_uri` (exactly as registered; a loopback one with any port), `code_challenge` with `code_challenge_method=S256` (required), `state`, `resource` (this server's `/mcp`, if given). An unknown client or return address is shown on the page, never redirected to; other errors go back with `error` and `state`. Otherwise the sign-in page |
+| `POST /oauth/authorize` | The sign-in page's form (its CSRF cookie, its Origin). 303 to the return address with `code`, `state` and `iss`, or `error=access_denied` |
+| `POST /oauth/token` | Form-encoded. `grant_type=authorization_code` with `code`, `redirect_uri`, `client_id`, `code_verifier` (and `resource`); `grant_type=refresh_token` with `refresh_token`, `client_id`. 200 `{"access_token", "token_type": "Bearer", "expires_in": 3600, "refresh_token", "scope": "rules"}`; errors are RFC 6749's (`invalid_grant`, `invalid_client`, `invalid_request`, `unsupported_grant_type`, `invalid_target`) |

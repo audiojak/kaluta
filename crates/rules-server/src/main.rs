@@ -1,7 +1,7 @@
 //! `openagc-rules`: the rules server for cloud agents (spec §10.6).
 //!
 //! ```text
-//! openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>]
+//! openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>]
 //! openagc-rules forget-mailbox <address> [--data-dir <dir>]
 //! openagc-rules backup <file> [--data-dir <dir>]
 //! openagc-rules healthcheck [--listen <addr>]
@@ -10,7 +10,9 @@
 //! Each flag has an environment variable, which the flag overrides:
 //! `OPENAGC_RULES_LISTEN` (default `127.0.0.1:8787`), `OPENAGC_RULES_DATA_DIR`
 //! (default `./data`), `OPENAGC_RULES_LOG` (default `info`),
-//! `OPENAGC_RULES_RATE_LIMIT` (requests per minute per token, default 120).
+//! `OPENAGC_RULES_RATE_LIMIT` (requests per minute per token, default 120),
+//! `OPENAGC_RULES_PUBLIC_URL` (the server's https:// origin as agents reach
+//! it; turns on OAuth sign-in with connect codes).
 //! `OPENAGC_RULES_REGISTRATION_TOKEN`, only from the environment, makes
 //! registering a mailbox need that bearer token.
 //!
@@ -25,7 +27,7 @@ use std::time::Duration;
 use rules_server::{Config, Db, db};
 
 const USAGE: &str =
-    "usage: openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>]
+    "usage: openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>]
        openagc-rules forget-mailbox <address> [--data-dir <dir>]
        openagc-rules backup <file> [--data-dir <dir>]
        openagc-rules healthcheck [--listen <addr>]";
@@ -45,6 +47,7 @@ struct Args {
     data_dir: PathBuf,
     log: String,
     rate_limit: u32,
+    public_url: Option<String>,
 }
 
 fn env(name: &str) -> Option<String> {
@@ -58,6 +61,7 @@ fn parse_args() -> Result<Args, String> {
         data_dir: env("OPENAGC_RULES_DATA_DIR").map_or_else(|| PathBuf::from("data"), PathBuf::from),
         log: env("OPENAGC_RULES_LOG").unwrap_or_else(|| "info".into()),
         rate_limit: 120,
+        public_url: env("OPENAGC_RULES_PUBLIC_URL"),
     };
     if let Some(v) = env("OPENAGC_RULES_RATE_LIMIT") {
         args.rate_limit = v.parse().map_err(|_| format!("OPENAGC_RULES_RATE_LIMIT {v:?} is not a number"))?;
@@ -87,6 +91,7 @@ fn parse_args() -> Result<Args, String> {
             "--listen" => args.listen = value()?,
             "--data-dir" => args.data_dir = PathBuf::from(value()?),
             "--log" => args.log = value()?,
+            "--public-url" => args.public_url = Some(value()?),
             "--rate-limit" => {
                 let v = value()?;
                 args.rate_limit = v.parse().map_err(|_| format!("--rate-limit {v:?} is not a number"))?;
@@ -139,6 +144,7 @@ fn serve(args: &Args) -> ExitCode {
         data_dir: args.data_dir.clone(),
         rate_limit_per_minute: args.rate_limit,
         registration_token: env("OPENAGC_RULES_REGISTRATION_TOKEN"),
+        public_url: args.public_url.clone(),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(r) => r,
@@ -151,7 +157,7 @@ fn serve(args: &Args) -> ExitCode {
         let app = match rules_server::app(&config) {
             Ok(a) => a,
             Err(e) => {
-                tracing::error!(error = %e, "cannot open the database");
+                tracing::error!(error = %e, "cannot start");
                 return ExitCode::FAILURE;
             }
         };
@@ -167,6 +173,7 @@ fn serve(args: &Args) -> ExitCode {
             data_dir = %config.data_dir.display(),
             rate_limit = config.rate_limit_per_minute,
             registration_open = config.registration_token.is_none(),
+            oauth = config.public_url.as_deref().unwrap_or("off"),
             "openagc-rules {} serving",
             env!("CARGO_PKG_VERSION")
         );

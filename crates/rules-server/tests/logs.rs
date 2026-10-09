@@ -44,8 +44,13 @@ async fn logs_name_token_ids_and_nothing_secret() {
     let client = s.mcp(&agent).await.unwrap();
     call(&client, "guide_rules", json!({ "to": ["ann@acme.com"] })).await;
     let _ = s.get(Some("oagc_agt_0123456789abcdef_guess"), "/v1/m/x@y.z/facts").await;
+    let oauth_secrets = oauth_flow(&s, &publisher).await;
 
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
+    assert!(log.contains("route=\"/oauth/token\"") && log.contains("agent connected with a connect code"), "{log}");
+    for secret in &oauth_secrets {
+        assert!(!log.contains(secret.as_str()), "an OAuth secret was logged: {log}");
+    }
     assert!(log.contains(&format!("token=\"agent:{id}\"")), "{log}");
     assert!(log.contains("route=\"/v1/m/{address}/guide\"") && log.contains("route=\"/mcp\""), "{log}");
     assert!(log.contains(&format!("tool call token={id} tool=\"guide_rules\"")), "{log}");
@@ -56,4 +61,95 @@ async fn logs_name_token_ids_and_nothing_secret() {
     for content in ["bea@globex.com", "ann@acme.com", "circle back", "cal.com/scout", "Scout", MAILBOX] {
         assert!(!log.contains(content), "{content:?} was logged: {log}");
     }
+}
+
+/// A connector's whole flow, with one wrong code: every secret it saw
+/// (connect codes, the state, the PKCE verifier and challenge, the
+/// authorization code, the tokens, the CSRF cookie).
+async fn oauth_flow(s: &common::Server, publisher: &str) -> Vec<String> {
+    use base64::Engine;
+    use sha2::Digest;
+    let web = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build().unwrap();
+    let form = |pairs: &[(&str, &str)]| {
+        let mut f = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in pairs {
+            f.append_pair(k, v);
+        }
+        f.finish()
+    };
+    let r = s
+        .http
+        .post(s.url(&format!("/v1/mailboxes/{MAILBOX}/connect-codes")))
+        .bearer_auth(publisher)
+        .json(&json!({ "name": "Routine" }))
+        .send()
+        .await
+        .unwrap();
+    let code = r.json::<serde_json::Value>().await.unwrap()["code"].as_str().unwrap().to_owned();
+    let redirect = "https://claude.ai/api/mcp/auth_callback";
+    let r = web.post(s.url("/oauth/register")).json(&json!({ "redirect_uris": [redirect] })).send().await.unwrap();
+    let client = r.json::<serde_json::Value>().await.unwrap()["client_id"].as_str().unwrap().to_owned();
+    let verifier = format!("{}{}", rules_server::tokens::secret(), rules_server::tokens::secret());
+    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&verifier));
+    let state = "state-SECRET-4711";
+    let query = form(&[
+        ("response_type", "code"),
+        ("client_id", &client),
+        ("redirect_uri", redirect),
+        ("code_challenge", &challenge),
+        ("code_challenge_method", "S256"),
+        ("state", state),
+    ]);
+    let r = web.get(format!("{}?{query}", s.url("/oauth/authorize"))).send().await.unwrap();
+    let cookie = r.headers()["set-cookie"].to_str().unwrap().split(';').next().unwrap().to_owned();
+    let html = r.text().await.unwrap();
+    let marker = "name=\"request\" value=\"";
+    let at = html.find(marker).unwrap() + marker.len();
+    let request = html[at..].split('"').next().unwrap().to_owned();
+    let mut auth_code = String::new();
+    for typed in ["ZZZZZ-ZZZZZ", code.as_str()] {
+        let r = web
+            .post(s.url("/oauth/authorize"))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Cookie", &cookie)
+            .body(form(&[("request", &request), ("connect_code", typed), ("action", "allow")]))
+            .send()
+            .await
+            .unwrap();
+        if let Some(location) = r.headers().get("location") {
+            let url = url::Url::parse(location.to_str().unwrap()).unwrap();
+            auth_code = url.query_pairs().find(|(k, _)| k == "code").unwrap().1.into_owned();
+        }
+    }
+    let r = web
+        .post(s.url("/oauth/token"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form(&[
+            ("grant_type", "authorization_code"),
+            ("code", &auth_code),
+            ("redirect_uri", redirect),
+            ("client_id", &client),
+            ("code_verifier", &verifier),
+        ]))
+        .send()
+        .await
+        .unwrap();
+    let tokens: serde_json::Value = r.json().await.unwrap();
+    let access = tokens["access_token"].as_str().unwrap().to_owned();
+    let refresh = tokens["refresh_token"].as_str().unwrap().to_owned();
+    let mcp = s.mcp(&access).await.unwrap();
+    call(&mcp, "facts_lookup", json!({})).await;
+    vec![
+        code.clone(),
+        code.replace('-', ""),
+        "ZZZZZ".into(),
+        state.into(),
+        verifier,
+        challenge,
+        auth_code,
+        access,
+        refresh,
+        cookie.split('=').nth(1).unwrap().to_owned(),
+        request,
+    ]
 }

@@ -32,15 +32,21 @@ impl Drop for Server {
 }
 
 pub async fn start(rate_limit_per_minute: u32, registration_token: Option<&str>) -> Server {
+    start_with(rate_limit_per_minute, registration_token, true).await
+}
+
+/// With `oauth`, the server's public URL is its loopback address.
+pub async fn start_with(rate_limit_per_minute: u32, registration_token: Option<&str>, oauth: bool) -> Server {
     let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let base = format!("http://{}", listener.local_addr().unwrap());
     let config = Config {
         data_dir: dir.clone(),
         rate_limit_per_minute,
         registration_token: registration_token.map(str::to_owned),
+        public_url: oauth.then(|| base.clone()),
     };
     let app = rules_server::app(&config).expect("app");
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
-    let base = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move { axum::serve(listener, app).await });
     Server { base, dir, http: reqwest::Client::new() }
 }

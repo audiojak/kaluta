@@ -116,7 +116,15 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     assert!(s.mcp(&agent).await.is_err(), "and cannot connect again");
     let r = s.http.post(s.url("/mcp")).json(&json!({})).send().await.unwrap();
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(r.headers()["www-authenticate"], "Bearer realm=\"openagc-rules\"");
+    assert_eq!(
+        r.headers()["www-authenticate"],
+        format!(
+            "Bearer realm=\"openagc-rules\", resource_metadata=\"{}/.well-known/oauth-protected-resource\", \
+             scope=\"rules\"",
+            s.base
+        ),
+        "with OAuth on, a 401 at /mcp says where to sign in"
+    );
 
     let r = s
         .http

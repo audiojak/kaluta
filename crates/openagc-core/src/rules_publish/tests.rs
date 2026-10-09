@@ -366,13 +366,22 @@ struct RulesServer {
 
 impl RulesServer {
     fn start(name: &str) -> Self {
+        Self::start_with(name, true)
+    }
+
+    /// With `oauth`, its public URL is its loopback address.
+    fn start_with(name: &str, oauth: bool) -> Self {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let dir = scratch(&format!("server-{name}"));
-        let config =
-            rules_server::Config { data_dir: dir.0.clone(), rate_limit_per_minute: 0, registration_token: None };
-        let app = rules_server::app(&config).unwrap();
         let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
+        let config = rules_server::Config {
+            data_dir: dir.0.clone(),
+            rate_limit_per_minute: 0,
+            registration_token: None,
+            public_url: oauth.then(|| url.clone()),
+        };
+        let app = rules_server::app(&config).unwrap();
         rt.spawn(async move { axum::serve(listener, app).await });
         Self { rt, url, dir }
     }
@@ -667,4 +676,82 @@ fn removing_the_mailbox_removes_it_from_the_server_and_forgets_the_token() {
     block_on(core.remove_account(id.clone())).unwrap();
     assert!(server.stored(&address).is_none(), "the server forgot it");
     assert!(!secrets.0.lock().unwrap().contains_key(&server.key(&id)));
+}
+
+#[test]
+fn the_app_mints_connect_codes_and_tokens_lists_agents_and_revokes_them() {
+    let server = RulesServer::start("agents");
+    let (_t, core, secrets, id) = setup("agents");
+    let address = core.agent_meta(&id).unwrap().address;
+    let refused = block_on(core.rules_connect_code_mint(id.clone(), "Routine".into())).unwrap_err();
+    assert_eq!(refused.kind(), ErrorKind::InvalidInput, "not published yet");
+    block_on(core.clone().rules_publish_start(id.clone(), server.url.clone(), None)).unwrap();
+
+    let before = mail_sync::now_millis();
+    let code = block_on(core.rules_connect_code_mint(id.clone(), "  Weekly   outreach ".into())).unwrap();
+    assert_eq!(code.name, "Weekly outreach");
+    assert!(rules_server::tokens::normalize_connect_code(&code.code).is_some(), "{}", code.code);
+    let ten = rules_server::oauth::CONNECT_CODE_TTL_MS;
+    assert!((before + ten - 2_000..=before + ten + 2_000).contains(&code.expires_at));
+    let token = block_on(core.rules_agent_token_mint(id.clone(), "A script".into())).unwrap();
+    assert!(token.token.starts_with("oagc_agt_"));
+    assert!(block_on(core.rules_agent_token_mint(id.clone(), " ".into())).is_err(), "a name is needed");
+
+    // A connector signs in with the code (as the server's consent page
+    // would record it): an OAuth grant beside the token.
+    let db = rules_server::Db::open(&server.dir.0).unwrap();
+    db.run_now(|c| {
+        let m = rules_server::db::mailbox_by_address(c, &address)?.unwrap();
+        rules_server::db::insert_client(
+            c,
+            &rules_server::db::ClientRow {
+                id: "oagc_cli_test".into(),
+                name: "Claude".into(),
+                redirect_uris: vec!["https://claude.ai/api/mcp/auth_callback".into()],
+                created_at: 1,
+            },
+        )?;
+        rules_server::db::insert_agent_token(
+            c,
+            &rules_server::db::AgentTokenRow {
+                id: "00000000000000aa".into(),
+                mailbox_id: m.id,
+                name: "Weekly outreach".into(),
+                token_hash: String::new(),
+                created_at: mail_sync::now_millis() + 1_000,
+                revoked_at: None,
+                kind: rules_server::db::KIND_OAUTH.into(),
+                client_id: Some("oagc_cli_test".into()),
+            },
+        )
+    })
+    .unwrap();
+    let agents = block_on(core.rules_agents(id.clone())).unwrap();
+    assert_eq!(agents.len(), 2, "{agents:?}");
+    assert_eq!((agents[0].name.as_str(), agents[0].kind), ("A script", RulesAgentKind::Token));
+    assert_eq!(agents[0].id, token.id);
+    assert_eq!(agents[1].kind, RulesAgentKind::Connector);
+    assert_eq!(agents[1].client_name.as_deref(), Some("Claude"));
+    assert!(agents.iter().all(|a| a.revoked_at.is_none() && a.created_at > 0));
+
+    block_on(core.rules_agent_revoke(id.clone(), agents[1].id.clone())).unwrap();
+    block_on(core.rules_agent_revoke(id.clone(), agents[1].id.clone())).unwrap();
+    let agents = block_on(core.rules_agents(id.clone())).unwrap();
+    assert!(agents[1].revoked_at.is_some() && agents[0].revoked_at.is_none());
+    let missing = block_on(core.rules_agent_revoke(id.clone(), "00000000000000ff".into())).unwrap_err();
+    assert_eq!(missing.kind(), ErrorKind::NotFound);
+    assert!(block_on(core.rules_agent_revoke(id.clone(), "../x".into())).is_err());
+
+    // Nothing minted is kept on this Mac.
+    let kept: Vec<String> = secrets.0.lock().unwrap().values().cloned().collect();
+    assert!(!kept.iter().any(|v| v == &token.token || v.contains(&code.code)));
+    let record = std::fs::read_to_string(record_path(&core.data_path(), &id)).unwrap();
+    assert!(!record.contains(&token.token) && !record.contains(&code.code));
+
+    // A server without OAuth says so, in words.
+    let plain = RulesServer::start_with("agents-plain", false);
+    block_on(core.rules_publish_stop(id.clone(), true)).unwrap();
+    block_on(core.clone().rules_publish_start(id.clone(), plain.url.clone(), None)).unwrap();
+    let off = block_on(core.rules_connect_code_mint(id.clone(), "Routine".into())).unwrap_err();
+    assert!(off.to_string().contains("OPENAGC_RULES_PUBLIC_URL"), "{off}");
 }

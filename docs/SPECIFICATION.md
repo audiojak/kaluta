@@ -2012,8 +2012,9 @@ guide `docs/rules-server.md`. *(Implemented 2026-10-09, oagc-gmn7.2: the
 server with bearer tokens, the publish API, versioned snapshots and
 `guide_rules` and `facts_lookup` over MCP and REST. Implemented 2026-10-09,
 oagc-gmn7.3: the app's publishing (*Publish to a Rules Server…*, below).
-Not yet: OAuth, `check_draft`, `report_send`, reports and encryption at
-rest.)*
+Implemented 2026-10-09, oagc-gmn7.4: OAuth with one-time connect codes
+(*OAuth*, below). Not yet: *Connect a Cloud Agent…* in the app,
+`check_draft`, `report_send`, reports and encryption at rest.)*
 
 Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
 machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
@@ -2097,7 +2098,52 @@ also how a lost publisher token is recovered.
   *Request headers* beta is offered (checked 2026-10-08), so OAuth comes
   before *Connect a Cloud Agent…* in the build.
 - A secret URL (`/m/<token>/mcp`) is the fallback for connectors with no
-  sign-in; URLs end up in logs, and the sheet says so.
+  sign-in; URLs end up in logs, and the sheet says so. *(Not built: OAuth
+  covers claude.ai connectors.)*
+
+**OAuth** *(implemented 2026-10-09, oagc-gmn7.4)*. On when the operator
+sets the server's public URL (`OPENAGC_RULES_PUBLIC_URL`, an `https://`
+origin): the issuer is that URL and the one resource is its `/mcp`,
+following the MCP authorization spec (RFC 9728 protected resource
+metadata, also at the path-inserted address; RFC 8414 server metadata;
+RFC 7591 registration; OAuth 2.1 authorization code with PKCE S256 only;
+RFC 8707 `resource`, which must name this server's `/mcp`). A 401 at
+`/mcp` names the metadata (`resource_metadata`, `scope="rules"`).
+- *Clients* register themselves and are all public (`none`); redirect
+  URIs are `https://`, or `http://` to a loopback address, matched exactly
+  except a loopback one's port (RFC 8252; Claude Code). claude.ai returns
+  to `https://claude.ai/api/mcp/auth_callback`. An unknown client or
+  return address is shown on the page, never redirected to. Clients that
+  connect no agent are dropped after a week.
+- *Connect codes* are minted by the publisher (`POST
+  /v1/mailboxes/{address}/connect-codes {name}`): ten characters from 31
+  without look-alikes, shown `ABCDE-FGHJK`, single use, 10 minutes, kept
+  as a hash, at most 10 unused per mailbox.
+- *The consent page* names the client as it registered and the host it
+  returns to (with a warning for a loopback one) and asks for the code;
+  there are no accounts or passwords. It runs no script, cannot be framed
+  (`frame-ancestors 'none'`), escapes everything, and sets one cookie, a
+  CSRF token bound to that page (`HttpOnly`, `SameSite=Lax`, `Secure` on
+  https), and refuses a form from another Origin. It closes after 5 wrong
+  codes; a client with 5 wrong codes is locked out for an hour; the server
+  checks at most 30 codes a minute in all.
+- *A grant*: the right code makes an agent beside the static tokens
+  (same table, `kind` `oauth`), named as the code was, scoped to its
+  mailbox, listed (with the client's name) and revoked through the same
+  `…/agent-tokens` calls. "Agent" means either.
+- *Tokens*: authorization codes last two minutes and work once; access
+  tokens an hour, bound to `/mcp` (refused on the REST `GET`s); refresh
+  tokens 30 days, rotated at each use. A code or refresh token used twice
+  revokes its grant. All are random, kept as SHA-256 and compared in
+  constant time; none is logged.
+- *The app* (`rules_publish.rs`): `rules_connect_code_mint`,
+  `rules_agent_token_mint`, `rules_agents` and `rules_agent_revoke`, with
+  the publisher token; the sheet comes with *Connect a Cloud Agent…*
+  (oagc-gmn7.5).
+- Not supported: Client ID Metadata Documents (claude.ai's recommended
+  *Use Claude's published identity*; it falls back to registration when
+  the server does not advertise them), token revocation and introspection
+  endpoints, and a server under a path prefix.
 
 **Snapshot and versions.** The app pushes a full snapshot on change,
 debounced, with a version that only goes up and `If-Match` on the
@@ -2560,7 +2606,10 @@ publishing stops with the mailbox removed from the server or moves to
 another server) and, with encryption at rest (not built),
 `rules.snapshot_key.<account>`. Agent tokens for
 the rules server are shown once and never stored by the app, which keeps
-only their ids and names.
+only their ids and names. *(Implemented 2026-10-09, oagc-gmn7.4:)* the
+same holds for connect codes, which are shown once and kept nowhere on
+the Mac; the app reads the list of agents (tokens and OAuth grants) from
+the server with the publisher token rather than keeping one.
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens
@@ -3945,6 +3994,7 @@ them.)
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
 | The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
 | Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)*. Revoking takes effect at the next request; each token is rate limited; logs name the token's id, never the token *(implemented 2026-10-09, oagc-gmn7.2)* |
+| Rules server OAuth: phishing, code theft, replay *(amendment 2026-10-09, oagc-gmn7.4)* | No accounts or passwords: a grant needs a one-time connect code from the app (10 minutes, single use, hashed, attempts limited per page, client and server); PKCE S256 required; exact redirect URI match (loopback port aside), errors before that never redirect; `state` passed through and `iss` returned; the consent page shows the client's self-chosen name and the real return host, cannot be framed and checks a CSRF cookie and Origin; tokens bound to `/mcp`; refresh tokens rotate and a reused one, or a reused authorization code, revokes the grant; grants are revoked in the app like tokens |
 | Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses and the people entries are for as salted hashes, plain ones refused; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)* |
 
 ### 15.4 What the MVP does *not* protect against

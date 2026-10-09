@@ -1,7 +1,7 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); steps 1 to 4 done, the server built and
-the app publishing to it (2026-10-09). The maintainer took every
+Status: decided (2026-10-08); steps 1 to 5 done, the server built, the
+app publishing to it and OAuth with connect codes (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -294,7 +294,13 @@ the headers beta use them.
    and sheet; spec §10.6 and §12 say what was built.)*
 5. OAuth with connect codes: the server as its own minimal authorization
    server, consent by a one-time code from the app. Moved up from 7:
-   claude.ai connectors carry a header only in a limited beta.
+   claude.ai connectors carry a header only in a limited beta. *(Done
+   2026-10-09, oagc-gmn7.4: discovery, registration, the consent page,
+   tokens with rotation, grants beside agent tokens, the core's
+   `rules_connect_code_mint`, `rules_agents` and `rules_agent_revoke`;
+   spec §10.6 *OAuth*. Not yet tried against claude.ai itself. Client ID
+   Metadata Documents, claude.ai's recommended client identity, are not
+   supported; claude.ai falls back to registration.)*
 6. App: *Connect a Cloud Agent…*: name, mint, show once, revoke; a
    connect code for claude.ai connectors and routines, a token for the
    rest; the `claude mcp add --transport http …` line and routine

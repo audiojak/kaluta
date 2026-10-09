@@ -1,7 +1,8 @@
 //! MCP over Streamable HTTP at `/mcp` (spec §10.6). Stateless: every
-//! request carries `Authorization: Bearer <agent token>`, checked before
-//! rmcp sees it, and the token alone says which mailbox is served, so a
-//! revoked token stops working at its next request.
+//! request carries `Authorization: Bearer <agent token>` or an OAuth access
+//! token, checked before rmcp sees it, and the token alone says which
+//! mailbox is served, so a revoked agent stops working at its next request.
+//! A 401 names the protected resource metadata when OAuth is on.
 //!
 //! The tools are mailbox mode's `guide_rules` and `facts_lookup` (§10.1):
 //! the same names, arguments and answers, plus the snapshot's `version`
@@ -172,12 +173,18 @@ impl ServerHandler for RulesMcp {
 /// Every `/mcp` request needs a live agent token.
 async fn require_agent_token(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let slot = req.extensions().get::<TokenSlot>().cloned();
-    match agent_auth(&state, req.headers(), slot.as_ref()).await {
+    match agent_auth(&state, req.headers(), slot.as_ref(), true).await {
         Ok(auth) => {
             req.extensions_mut().insert(auth);
             next.run(req).await
         }
-        Err(e) => e.into_response(),
+        Err(mut e) => {
+            // With OAuth on, a 401 says where to sign in (RFC 9728 §5.1).
+            if let Some(o) = &state.oauth {
+                e.resource_metadata = Some(o.resource_metadata_url());
+            }
+            e.into_response()
+        }
     }
 }
 

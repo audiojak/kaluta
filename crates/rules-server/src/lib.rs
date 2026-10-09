@@ -8,6 +8,11 @@
 //!   in mailbox mode (§10.1), plus the snapshot's version and time.
 //! - **REST** for the app's publishing (publisher token) and read-only
 //!   `GET`s for scripts (agent token).
+//! - **OAuth 2.1** for clients that take only a URL (a claude.ai custom
+//!   connector, which a cloud routine uses): the server is its own minimal
+//!   authorization server, and its consent page asks for a one-time connect
+//!   code the app minted, never a password ([`oauth`]). On only with a
+//!   public URL set.
 //!
 //! The app is the source of truth and the only writer: it registers a
 //! mailbox, pushes full snapshots whose version only goes up, and mints
@@ -22,6 +27,7 @@ pub mod answers;
 pub mod db;
 pub mod limit;
 mod mcp;
+pub mod oauth;
 mod rest;
 pub mod tokens;
 
@@ -56,12 +62,26 @@ pub struct Config {
     /// When set, registering a mailbox needs `Authorization: Bearer` with
     /// it: a server reachable by strangers stays closed to their mailboxes.
     pub registration_token: Option<String>,
+    /// The address agents reach the server at, as `https://rules.example.com`
+    /// (an origin, no path): the OAuth issuer, and the base of the `/mcp`
+    /// resource tokens are bound to. Unset, OAuth is off.
+    pub public_url: Option<String>,
+}
+
+/// Why the server cannot start with these settings.
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    #[error(transparent)]
+    Db(#[from] DbError),
+    #[error("public URL: {0}")]
+    PublicUrl(String),
 }
 
 pub(crate) struct Inner {
     pub db: Db,
     pub limiter: RateLimiter,
     pub registration_token_hash: Option<String>,
+    pub oauth: Option<oauth::OAuth>,
 }
 
 /// What every handler shares.
@@ -77,14 +97,20 @@ impl std::ops::Deref for AppState {
 
 /// The router for these settings, with its database opened (created and
 /// migrated if need be).
-pub fn app(config: &Config) -> Result<Router, DbError> {
+pub fn app(config: &Config) -> Result<Router, StartError> {
+    let oauth = match config.public_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(url) => Some(oauth::OAuth::new(&oauth::public_base(url).map_err(StartError::PublicUrl)?)),
+        None => None,
+    };
     let db = Db::open(&config.data_dir)?;
     let state = AppState(Arc::new(Inner {
         db,
         limiter: RateLimiter::new(config.rate_limit_per_minute),
         registration_token_hash: config.registration_token.as_deref().map(tokens::hash),
+        oauth,
     }));
     Ok(rest::router(state.clone())
+        .merge(oauth::router(state.clone()))
         .merge(mcp::router(state))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(log_requests)))
@@ -131,11 +157,14 @@ pub(crate) struct ApiError {
     pub message: String,
     pub extra: Option<Value>,
     pub retry_after: Option<u64>,
+    /// For a 401 at `/mcp` with OAuth on: where the protected resource
+    /// metadata is (RFC 9728 §5.1), so a client can sign in.
+    pub resource_metadata: Option<String>,
 }
 
 impl ApiError {
     pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
-        Self { status, code, message: message.into(), extra: None, retry_after: None }
+        Self { status, code, message: message.into(), extra: None, retry_after: None, resource_metadata: None }
     }
 
     pub fn with(mut self, extra: Value) -> Self {
@@ -180,11 +209,13 @@ impl IntoResponse for ApiError {
         let mut response = (self.status, axum::Json(body)).into_response();
         let headers = response.headers_mut();
         if self.status == StatusCode::UNAUTHORIZED {
-            let value = if self.code == "invalid_token" {
-                format!("Bearer realm=\"{REALM}\", error=\"invalid_token\"")
-            } else {
-                format!("Bearer realm=\"{REALM}\"")
-            };
+            let mut value = format!("Bearer realm=\"{REALM}\"");
+            if let Some(url) = &self.resource_metadata {
+                value.push_str(&format!(", resource_metadata=\"{url}\", scope=\"{}\"", oauth::SCOPE));
+            }
+            if self.code == "invalid_token" {
+                value.push_str(", error=\"invalid_token\"");
+            }
             if let Ok(v) = HeaderValue::from_str(&value) {
                 headers.insert(header::WWW_AUTHENTICATE, v);
             }
@@ -196,7 +227,8 @@ impl IntoResponse for ApiError {
     }
 }
 
-/// An agent token that was accepted: which token, and its mailbox.
+/// An agent that was let in, by a static token or an OAuth access token:
+/// its id (the token's, or the grant's), and its mailbox.
 #[derive(Debug, Clone)]
 pub(crate) struct AgentAuth {
     pub token_id: String,
@@ -204,28 +236,57 @@ pub(crate) struct AgentAuth {
     pub address: String,
 }
 
-/// Check an agent token and take one request from its bucket.
+/// Check an agent's token and take one request from its bucket. OAuth
+/// access tokens are bound to the `/mcp` resource: they are taken only
+/// where `oauth_ok` (at `/mcp`), and only for this server's resource.
 pub(crate) async fn agent_auth(
     state: &AppState,
     headers: &http::HeaderMap,
     slot: Option<&TokenSlot>,
+    oauth_ok: bool,
 ) -> Result<AgentAuth, ApiError> {
     let token = tokens::bearer(headers).ok_or_else(|| ApiError::unauthorized(false))?;
-    let id = tokens::agent_token_id(token).ok_or_else(|| ApiError::unauthorized(true))?.to_owned();
     let presented = tokens::hash(token);
-    let found = state.db.run({
-        let id = id.clone();
-        move |c| db::agent_token(c, &id)
-    });
-    let (row, address) = found.await?.ok_or_else(|| ApiError::unauthorized(true))?;
-    if row.revoked_at.is_some() || !tokens::same(&presented, &row.token_hash) {
-        return Err(ApiError::unauthorized(true));
-    }
+    let (id, mailbox_id, address) = if token.starts_with(tokens::ACCESS_PREFIX) {
+        let resource = match &state.oauth {
+            Some(o) if oauth_ok => o.resource.clone(),
+            _ => return Err(ApiError::unauthorized(true)),
+        };
+        let now = db::now_ms();
+        let found = state
+            .db
+            .run(move |c| {
+                let Some(t) = db::oauth_token(c, &presented)? else { return Ok(None) };
+                Ok(db::agent_token(c, &t.grant_id)?.map(|g| (t, g)))
+            })
+            .await?;
+        let Some((t, (grant, address))) = found else { return Err(ApiError::unauthorized(true)) };
+        let live = t.kind == db::TOKEN_ACCESS
+            && t.expires_at > now
+            && grant.kind == db::KIND_OAUTH
+            && grant.revoked_at.is_none()
+            && tokens::same(&t.resource, &resource);
+        if !live {
+            return Err(ApiError::unauthorized(true));
+        }
+        (grant.id, grant.mailbox_id, address)
+    } else {
+        let id = tokens::agent_token_id(token).ok_or_else(|| ApiError::unauthorized(true))?.to_owned();
+        let found = state.db.run({
+            let id = id.clone();
+            move |c| db::agent_token(c, &id)
+        });
+        let (row, address) = found.await?.ok_or_else(|| ApiError::unauthorized(true))?;
+        if row.kind != db::KIND_TOKEN || row.revoked_at.is_some() || !tokens::same(&presented, &row.token_hash) {
+            return Err(ApiError::unauthorized(true));
+        }
+        (id, row.mailbox_id, address)
+    };
     if let Some(slot) = slot {
         slot.set(format!("agent:{id}"));
     }
     state.limiter.take(&format!("agent:{id}")).map_err(ApiError::too_many)?;
-    Ok(AgentAuth { token_id: id, mailbox_id: row.mailbox_id, address })
+    Ok(AgentAuth { token_id: id, mailbox_id, address })
 }
 
 /// A mailbox address as stored: trimmed and lower-cased, and shaped like
