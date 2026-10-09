@@ -32,9 +32,26 @@ pub struct ShimClient {
 
 impl ShimClient {
     pub async fn connect(socket: &Path, session: &str) -> Result<Self, ClientError> {
+        let hello = Hello { protocol: PROTOCOL_VERSION, session: session.to_owned(), mailbox: None, client: None };
+        Self::open(socket, hello).await
+    }
+
+    /// Mailbox mode: an outside agent's session on the agent mailbox at
+    /// `mailbox` (spec §10.1). Calls name mailbox tools.
+    pub async fn connect_mailbox(socket: &Path, mailbox: &str, client: &str) -> Result<Self, ClientError> {
+        let hello = Hello {
+            protocol: PROTOCOL_VERSION,
+            session: String::new(),
+            mailbox: Some(mailbox.to_owned()),
+            client: Some(client.to_owned()),
+        };
+        Self::open(socket, hello).await
+    }
+
+    async fn open(socket: &Path, hello: Hello) -> Result<Self, ClientError> {
         let stream = UnixStream::connect(socket).await.map_err(WireError::from)?;
         let (mut reader, mut writer) = stream.into_split();
-        write_frame(&mut writer, &Hello { protocol: PROTOCOL_VERSION, session: session.to_owned() }).await?;
+        write_frame(&mut writer, &hello).await?;
         let reply: HelloReply = read_frame(&mut reader)
             .await?
             .ok_or_else(|| ClientError::Refused("the app closed the connection".into()))?;
@@ -56,6 +73,11 @@ impl ShimClient {
             routes.lock().unwrap_or_else(|e| e.into_inner()).take();
         });
         Ok(Self { writer: Mutex::new(writer), pending, next_id: AtomicU64::new(1) })
+    }
+
+    /// Whether the app has gone away (later calls answer `app_unavailable`).
+    pub fn is_closed(&self) -> bool {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).is_none()
     }
 
     pub async fn call(&self, tool: &str, arguments: serde_json::Value) -> Outcome {

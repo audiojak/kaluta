@@ -1,7 +1,9 @@
 //! The shim ↔ core socket protocol: length-prefixed JSON frames.
 //!
 //! 1. Shim sends [`Hello`]; the core answers [`HelloReply`] (the session
-//!    must exist and the peer must be the same user).
+//!    must exist and the peer must be the same user). In mailbox mode the
+//!    hello names an agent mailbox instead, and the core opens an outside
+//!    agent's session on it (spec §10.1).
 //! 2. Shim sends [`CallRequest`]s; the core answers each with a
 //!    [`CallReply`] carrying the same id. Calls may overlap (an approval can
 //!    hold one open for minutes), so replies can arrive out of order.
@@ -18,7 +20,15 @@ pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub protocol: u32,
+    /// An app-started session; empty in mailbox mode.
     pub session: String,
+    /// Mailbox mode: the agent mailbox's address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mailbox: Option<String>,
+    /// Mailbox mode: the agent client's name (`claude-code`), for the
+    /// activity log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

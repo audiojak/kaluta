@@ -81,6 +81,10 @@ pub(crate) async fn call(core: &Arc<Core>, session: &str, tool: Tool, arguments:
                     if matches!(tool, Tool::Send | Tool::Forward) && core.agent_sends_freely() {
                         return send_freely(core, session, tool, arguments).await;
                     }
+                    // The headless MCP has no one to ask (spec §10.1).
+                    if core.is_headless() {
+                        return Outcome::error("needs_openagc", crate::outside::ASK_WHILE_CLOSED);
+                    }
                     return approve_then_run(core, session, tool, arguments).await;
                 }
             }

@@ -33,6 +33,26 @@ pub(crate) fn get_redacted(store: &dyn SecretStore, key: &str) -> Result<Option<
     Ok(store.get(key.to_owned())?.map(Redacted::new))
 }
 
+/// The headless MCP's store (spec §12): it holds no secrets and never
+/// reaches the Keychain, which only the app's Swift side can read.
+pub(crate) struct NoSecrets;
+
+impl SecretStore for NoSecrets {
+    fn get(&self, _key: String) -> Result<Option<String>, CoreError> {
+        Err(no_secrets())
+    }
+    fn set(&self, _key: String, _value: String) -> Result<(), CoreError> {
+        Err(no_secrets())
+    }
+    fn delete(&self, _key: String) -> Result<(), CoreError> {
+        Err(no_secrets())
+    }
+}
+
+fn no_secrets() -> CoreError {
+    CoreError::new(crate::ErrorKind::Auth, "openagc-mcp holds no secrets; OpenAGC reads the Keychain when it opens")
+}
+
 /// In-memory store for tests.
 #[cfg(test)]
 #[derive(Default)]

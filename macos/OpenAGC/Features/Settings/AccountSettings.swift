@@ -218,6 +218,7 @@ struct AccountRow: View {
     @State private var nameError: String?
     @FocusState private var nameFocused: Bool
     @State private var sendMode: AgentSendMode?
+    @State private var connecting = false
 
     /// Above this many messages, suggest IMAP to accounts without it.
     static let suggestIMAPAbove: UInt64 = 20_000
@@ -335,6 +336,11 @@ struct AccountRow: View {
                 }
                 .hoverHelp("Whether agents working in this mailbox send without asking you first. Deleting mail always asks")
                 .disabled(sendMode == nil)
+                LabeledContent("Outside agents") {
+                    Button("Connect an Agent…") { connecting = true }
+                        .hoverHelp("Let Claude Code or Codex on this Mac use this mailbox, even when OpenAGC is closed")
+                }
+                .sheet(isPresented: $connecting) { ConnectAgentSheet(accountID: account.id, address: account.email) }
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(

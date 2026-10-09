@@ -1594,6 +1594,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "uniffi",
@@ -1606,6 +1607,9 @@ version = "0.1.0"
 dependencies = [
  "agent-mcp",
  "async-trait",
+ "futures",
+ "mail-store",
+ "openagc-core",
  "permissions",
  "rmcp",
  "serde_json",

@@ -115,6 +115,10 @@ struct AgentActivityView: View {
                 .width(min: 90, ideal: 110)
                 TableColumn("Action") { a in Text(AgentStore.toolTitle(a.tool)) }
                     .width(min: 110, ideal: 140)
+                TableColumn("Agent") { a in
+                    Text(AgentStore.outsideAgentName(a.sessionId) ?? "In OpenAGC").foregroundStyle(.secondary)
+                }
+                .width(min: 90, ideal: 150)
                 TableColumn("Decision") { a in Text(Self.stateText(a.state)).foregroundStyle(Self.stateColor(a.state)) }
                     .width(min: 80, ideal: 90)
                 TableColumn("Details") { a in

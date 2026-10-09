@@ -37,30 +37,52 @@ pub fn render() -> String {
             spec.description,
             risk(spec.tool.risk())
         ));
-        let props = spec.input_schema["properties"].as_object().cloned().unwrap_or_default();
-        if props.is_empty() {
-            out.push_str("\nNo arguments.\n");
-            continue;
-        }
-        let required: Vec<&str> =
-            spec.input_schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-        out.push_str("\n| Argument | Type | Required | Notes |\n|---|---|---|---|\n");
-        let mut names: Vec<&String> = props.keys().collect();
-        names.sort_by_key(|n| (!required.contains(&n.as_str()), (*n).clone()));
-        for name in names {
-            let p = &props[name];
-            let mut notes = p["description"].as_str().unwrap_or_default().replace('|', "\\|");
-            if let Some(max) = p["maxItems"].as_u64() {
-                notes = format!("{notes} At most {max}.").trim().to_owned();
-            }
-            if let Some(max) = p["maximum"].as_u64() {
-                notes = format!("{notes} At most {max}.").trim().to_owned();
-            }
-            let req = if required.contains(&name.as_str()) { "yes" } else { "" };
-            out.push_str(&format!("| `{name}` | {} | {req} | {notes} |\n", type_of(p)));
-        }
+        arguments(&mut out, &spec.input_schema);
+    }
+    out.push_str(
+        "\n# Mailbox mode: agents outside OpenAGC\n\n\
+         `openagc-mcp --mailbox <address>` serves one agent mailbox to an agent that runs outside the app \
+         (Claude Code, Codex, a script), whether or not OpenAGC is open (spec §10.1). *Connect an Agent…* in \
+         the mailbox's settings adds it to Claude Code or Codex. Only agent mailboxes are served, never the \
+         user's own accounts. With OpenAGC open every call goes through it, as the app's own agents' do: the \
+         same permission engine, activity log and approvals. With OpenAGC closed, reads open the mailbox's \
+         store read-only, and a send is checked and recorded the same way, then queued: it goes out when \
+         OpenAGC next opens. A mailbox set to ask before each send cannot send while OpenAGC is closed.\n",
+    );
+    for spec in agent_mcp::mailbox_catalog() {
+        let risk = if spec.tool.read_only() {
+            "Read-only — always allowed"
+        } else {
+            "External — sent freely or after your approval, as the mailbox's *When Agents Send* says"
+        };
+        out.push_str(&format!("\n## `{}` (mailbox mode)\n\n{}\n\n**Risk:** {risk}\n", spec.name(), spec.description));
+        arguments(&mut out, &spec.input_schema);
     }
     out
+}
+
+fn arguments(out: &mut String, schema: &Value) {
+    let props = schema["properties"].as_object().cloned().unwrap_or_default();
+    if props.is_empty() {
+        out.push_str("\nNo arguments.\n");
+        return;
+    }
+    let required: Vec<&str> = schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    out.push_str("\n| Argument | Type | Required | Notes |\n|---|---|---|---|\n");
+    let mut names: Vec<&String> = props.keys().collect();
+    names.sort_by_key(|n| (!required.contains(&n.as_str()), (*n).clone()));
+    for name in names {
+        let p = &props[name];
+        let mut notes = p["description"].as_str().unwrap_or_default().replace('|', "\\|");
+        if let Some(max) = p["maxItems"].as_u64() {
+            notes = format!("{notes} At most {max}.").trim().to_owned();
+        }
+        if let Some(max) = p["maximum"].as_u64() {
+            notes = format!("{notes} At most {max}.").trim().to_owned();
+        }
+        let req = if required.contains(&name.as_str()) { "yes" } else { "" };
+        out.push_str(&format!("| `{name}` | {} | {req} | {notes} |\n", type_of(p)));
+    }
 }
 
 pub fn run(root: &Path, check: bool) -> Result<()> {

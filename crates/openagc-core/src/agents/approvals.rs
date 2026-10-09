@@ -113,15 +113,27 @@ pub(crate) fn outcome_summary(outcome: &Outcome) -> String {
 impl Core {
     /// Add a tool call to the audit log.
     pub(crate) async fn record_action(&self, session: &str, tool: Tool, args: &Value, state: &str) -> Option<i64> {
+        self.record_named_action(session, tool.name(), risk_name(tool), args, state).await
+    }
+
+    /// [`Core::record_action`] for a call that is not one of the in-app
+    /// tools (mailbox mode's `guide_rules`). The headless MCP keeps the
+    /// store read-only for reads: only calls that change something are
+    /// recorded there (spec §10.1).
+    pub(crate) async fn record_named_action(
+        &self,
+        session: &str,
+        name: &str,
+        risk: &'static str,
+        args: &Value,
+        state: &str,
+    ) -> Option<i64> {
+        if self.headless && risk == "read_only" {
+            return None;
+        }
         let db = self.db().ok()?;
-        let (uuid, name, json, risk, state, now) = (
-            session.to_owned(),
-            tool.name().to_owned(),
-            args.to_string(),
-            risk_name(tool),
-            state.to_owned(),
-            mail_sync::now_millis(),
-        );
+        let (uuid, name, json, state, now) =
+            (session.to_owned(), name.to_owned(), args.to_string(), state.to_owned(), mail_sync::now_millis());
         db.write(move |tx| mail_store::agents::record_action(tx, &uuid, &name, &json, risk, &state, now))
             .await
             .ok()
@@ -146,6 +158,22 @@ impl Core {
     ) -> Result<(), Outcome> {
         let Some(action_id) = action_id else {
             return Err(Outcome::error("failed", "could not record the proposal"));
+        };
+        // An outside agent's proposal says who asks, and from which mailbox,
+        // wherever the app shows it; the window may show another account,
+        // so its message is in the card rather than behind Review….
+        let summary = match self.outside_label(session) {
+            Some(who) => {
+                let text = match draft_id {
+                    Some(id) => self.get_draft(id).await.ok().flatten().map(|d| {
+                        let text = mail_mime::html_to_text(&d.body_html);
+                        format!("\n\n{}", mail_mime::truncate_chars(text.trim(), 600).0)
+                    }),
+                    None => None,
+                };
+                format!("{who}: {summary}{}", text.unwrap_or_default())
+            }
+            None => summary,
         };
         let (tx, rx) = oneshot::channel();
         // The card is answered by ticket; the row id stays for the record.

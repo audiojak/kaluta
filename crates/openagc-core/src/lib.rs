@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 uniffi::setup_scaffolding!();
 
 mod account;
+mod agent_connect;
 mod agent_mailbox;
 mod agents;
 mod analysis_compare;
@@ -35,6 +36,7 @@ mod guide_run;
 mod logging;
 mod mail;
 mod mutations;
+mod outside;
 mod registry;
 mod routines;
 mod runtime;
@@ -44,6 +46,7 @@ mod tasks;
 mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
+pub use agent_connect::{AgentClient, AgentConnection};
 pub use agent_mailbox::{
     AgentAdded, AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentSendRule,
     AgentService, AgentVerification, ServiceAccountSummary,
@@ -63,7 +66,11 @@ pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
 pub use error::{CoreError, ErrorKind};
 pub use events::{ChangeHint, CoreEvent, EventBus, EventListener, LogLevel, NewMailInfo, SyncState};
+pub use guide::{
+    GuideCheck, GuideCheckKind, GuideEdit, GuideEntryFields, GuideKind, GuideScope, GuideSource, GuideStatus,
+};
 pub use mutations::OutboxStatus;
+pub use outside::{OUTSIDE_SOCKET_FILE, QUEUED_MESSAGE, outside_socket};
 pub use registry::{AccountKind, AccountSummary, OrphanedStore};
 pub use routines::{RoutineInfo, RoutinePreviewRow, RoutineRunInfo};
 pub use secrets::SecretStore;
@@ -103,6 +110,10 @@ pub struct Core {
     /// How long a send waits in the outbox so it can be undone (spec
     /// §14.6a); set from Settings, 0 = off.
     send_delay_ms: std::sync::atomic::AtomicU64,
+    /// The headless MCP's core (`openagc-mcp --mailbox` with the app
+    /// closed, spec §10.1): stores open without migrating, read-only until
+    /// a send writes; no secrets, no sync; sends are queued for the app.
+    headless: bool,
 }
 
 #[uniffi::export]
@@ -113,28 +124,7 @@ impl Core {
         secrets: Arc<dyn SecretStore>,
         listener: Arc<dyn EventListener>,
     ) -> Result<Arc<Self>, CoreError> {
-        if config.data_dir.is_empty() {
-            return Err(CoreError::new(ErrorKind::InvalidInput, "data_dir must not be empty"));
-        }
-        let events = EventBus::start(listener, runtime::runtime().handle());
-        logging::init(config.log_dir.as_deref().map(std::path::Path::new), events.clone());
-        tracing::info!(version = env!("CARGO_PKG_VERSION"), "core started");
-        Ok(Arc::new(Self {
-            config,
-            events,
-            secrets,
-            open_accounts: RwLock::new(registry::OpenAccounts::default()),
-            index_lock: tokio::sync::Mutex::new(()),
-            store_open_lock: tokio::sync::Mutex::new(()),
-            global_facts: std::sync::OnceLock::new(),
-            global_facts_lock: std::sync::Mutex::new(()),
-            store_opens: Default::default(),
-            imports: Default::default(),
-            accounts: Default::default(),
-            agent_mail: Default::default(),
-            agents: Default::default(),
-            send_delay_ms: Default::default(),
-        }))
+        Self::build(config, secrets, listener, false)
     }
 
     /// Round-trip check used by the app at launch and by tests.
@@ -171,6 +161,58 @@ impl Core {
                 hint: ChangeHint { inserted: vec![id], ..ChangeHint::default() },
             });
         }
+    }
+}
+
+impl Core {
+    fn build(
+        config: CoreConfig,
+        secrets: Arc<dyn SecretStore>,
+        listener: Arc<dyn EventListener>,
+        headless: bool,
+    ) -> Result<Arc<Self>, CoreError> {
+        if config.data_dir.is_empty() {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "data_dir must not be empty"));
+        }
+        let events = EventBus::start(listener, runtime::runtime().handle());
+        logging::init(config.log_dir.as_deref().map(std::path::Path::new), events.clone());
+        tracing::info!(version = env!("CARGO_PKG_VERSION"), headless, "core started");
+        Ok(Arc::new(Self {
+            config,
+            events,
+            secrets,
+            open_accounts: RwLock::new(registry::OpenAccounts::default()),
+            index_lock: tokio::sync::Mutex::new(()),
+            store_open_lock: tokio::sync::Mutex::new(()),
+            global_facts: std::sync::OnceLock::new(),
+            global_facts_lock: std::sync::Mutex::new(()),
+            store_opens: Default::default(),
+            imports: Default::default(),
+            accounts: Default::default(),
+            agent_mail: Default::default(),
+            agents: Default::default(),
+            send_delay_ms: Default::default(),
+            headless,
+        }))
+    }
+
+    /// The core of `openagc-mcp --mailbox` while the app is closed (spec
+    /// §10.1): the app's data directory, no secrets (the Keychain is the
+    /// app's; spec §12), no events, no log file, no sync. Stores open
+    /// without migrating and stay read-only until a send writes; a send is
+    /// queued in the outbox for the app to send when it next opens.
+    pub fn headless(data_dir: &str) -> Result<Arc<Self>, CoreError> {
+        struct Silent;
+        impl EventListener for Silent {
+            fn on_event(&self, _account: Option<String>, _event: CoreEvent) {}
+        }
+        let config = CoreConfig { data_dir: data_dir.to_owned(), log_dir: None };
+        Self::build(config, Arc::new(secrets::NoSecrets), Arc::new(Silent), true)
+    }
+
+    /// Whether this is the headless MCP's core.
+    pub fn is_headless(&self) -> bool {
+        self.headless
     }
 }
 

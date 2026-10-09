@@ -22,6 +22,20 @@ pub trait ToolHandler: Send + Sync + 'static {
     fn has_session(&self, session: &str) -> bool;
     /// Run one call. May take minutes (a pending approval).
     async fn call(&self, session: &str, tool: permissions::Tool, arguments: serde_json::Value) -> Outcome;
+
+    /// Mailbox mode (spec §10.1): open an outside agent's session on the
+    /// agent mailbox at `mailbox`; the session id, or why not.
+    async fn open_outside(&self, _mailbox: &str, _client: &str) -> Result<String, String> {
+        Err("this app does not serve outside agents".to_owned())
+    }
+
+    /// Run one mailbox-mode call in an outside agent's session.
+    async fn call_outside(&self, _session: &str, tool: catalog::MailboxTool, _arguments: serde_json::Value) -> Outcome {
+        Outcome::error("unknown_tool", format!("there is no tool named {}", tool.name()))
+    }
+
+    /// The outside agent disconnected.
+    async fn close_outside(&self, _session: &str) {}
 }
 
 /// The listening socket; removed when dropped.
@@ -119,15 +133,27 @@ async fn connection(stream: UnixStream, handler: Arc<dyn ToolHandler>) {
         Ok(Some(h)) => h,
         _ => return,
     };
-    let refusal = if hello.protocol != PROTOCOL_VERSION {
-        Some(format!("protocol {} is not {PROTOCOL_VERSION}; the shim and app must match", hello.protocol))
+    let outside = hello.mailbox.is_some();
+    let (session, refusal) = if hello.protocol != PROTOCOL_VERSION {
+        (
+            hello.session,
+            Some(format!("protocol {} is not {PROTOCOL_VERSION}; the shim and app must match", hello.protocol)),
+        )
+    } else if let Some(mailbox) = &hello.mailbox {
+        match handler.open_outside(mailbox, hello.client.as_deref().unwrap_or("outside")).await {
+            Ok(session) => (session, None),
+            Err(why) => (String::new(), Some(why)),
+        }
     } else if !handler.has_session(&hello.session) {
-        Some("unknown agent session".to_owned())
+        (hello.session, Some("unknown agent session".to_owned()))
     } else {
-        None
+        (hello.session, None)
     };
     let ok = refusal.is_none();
     if write_frame(&mut writer, &HelloReply { ok, error: refusal }).await.is_err() || !ok {
+        if ok && outside {
+            handler.close_outside(&session).await;
+        }
         return;
     }
 
@@ -142,15 +168,23 @@ async fn connection(stream: UnixStream, handler: Arc<dyn ToolHandler>) {
     // Calls in flight; dropped (aborted) when the shim disconnects, which
     // cancels any that are waiting on the user.
     let mut calls = JoinSet::new();
-    let session: Arc<str> = hello.session.into();
+    let session: Arc<str> = session.into();
     while let Ok(Some(req)) = read_frame::<_, CallRequest>(&mut reader).await {
         let handler = handler.clone();
         let replies = replies.clone();
         let session = session.clone();
         calls.spawn(async move {
-            let outcome = match catalog::tool(&req.tool) {
-                Some(tool) => handler.call(&session, tool, req.arguments).await,
-                None => Outcome::error("unknown_tool", format!("there is no tool named {}", req.tool)),
+            let unknown = || Outcome::error("unknown_tool", format!("there is no tool named {}", req.tool));
+            let outcome = if outside {
+                match catalog::MailboxTool::from_name(&req.tool) {
+                    Some(tool) => handler.call_outside(&session, tool, req.arguments).await,
+                    None => unknown(),
+                }
+            } else {
+                match catalog::tool(&req.tool) {
+                    Some(tool) => handler.call(&session, tool, req.arguments).await,
+                    None => unknown(),
+                }
             };
             let _ = replies.send(CallReply { id: req.id, outcome });
         });
@@ -160,6 +194,9 @@ async fn connection(stream: UnixStream, handler: Arc<dyn ToolHandler>) {
     calls.abort_all();
     drop(replies);
     let _ = write_task.await;
+    if outside {
+        handler.close_outside(&session).await;
+    }
 }
 
 #[cfg(test)]

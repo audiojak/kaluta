@@ -266,6 +266,40 @@ final class AgentStore {
         await ingest(events)
     }
 
+    /// An agent outside OpenAGC working in an agent mailbox (spec §10.1):
+    /// its session ids start with `outside-`.
+    static func isOutside(_ sessionID: String) -> Bool { sessionID.hasPrefix("outside-") }
+
+    /// "Claude Code (outside OpenAGC)" for the activity log; nil for the app's own sessions.
+    static func outsideAgentName(_ sessionID: String) -> String? {
+        guard isOutside(sessionID) else { return nil }
+        let rest = sessionID.dropFirst("outside-".count)
+        let label = rest.split(separator: "-").dropLast().joined(separator: "-")
+        let name = switch label {
+        case "claude-code", "claude": "Claude Code"
+        case let l where l.hasPrefix("codex"): "Codex"
+        case "": "An agent"
+        default: label
+        }
+        return "\(name) (outside OpenAGC)"
+    }
+
+    /// Only an outside agent's proposals reach the panel: the approval is
+    /// the user's whichever panel shows it. The core's summary says who
+    /// asks, from which mailbox, and what the message says; its draft is
+    /// in the agent mailbox's store, which this window may not show, so
+    /// the card offers no Review… and does not follow an Undo Send hold.
+    func applyOutside(_ events: [AgentEventInfo]) async {
+        for event in events {
+            switch event {
+            case let .actionProposed(actionID, tool, summary, _):
+                await ingest([.actionProposed(actionId: actionID, tool: tool, summary: summary, draftId: nil)])
+            case .actionResolved: await ingest([event])
+            default: break
+            }
+        }
+    }
+
     private func ingest(_ events: [AgentEventInfo]) async {
         for event in events {
             switch event {
@@ -368,6 +402,7 @@ final class AgentStore {
         case "mail_add_label": "Added a label"
         case "mail_remove_label": "Removed a label"
         case "mail_create_label": "Created a label"
+        case "guide_rules": "Read the writing guide"
         case "mail_send": "Asked to send"
         case "mail_forward": "Asked to forward"
         case "mail_delete": "Asked to delete"

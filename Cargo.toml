@@ -61,6 +61,8 @@ zip = { version = "8", default-features = false, features = ["deflate"] }
 insta = "1"
 rrule = "0.14"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Connect an Agent… edits Codex's config.toml (spec §10.1).
+toml = "1"
 rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }
 
 [workspace.lints.rust]

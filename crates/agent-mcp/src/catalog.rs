@@ -205,6 +205,141 @@ fn spec(tool: Tool) -> ToolSpec {
     ToolSpec { tool, description, input_schema }
 }
 
+/// The tools of mailbox mode (`openagc-mcp --mailbox <address>`, spec
+/// §10.1): what an agent outside OpenAGC gets for one agent mailbox. Reads
+/// are the in-app tools of the same name; sending is one call that writes
+/// and sends, so an outside agent needs no draft ids.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MailboxTool {
+    GuideRules,
+    FactsLookup,
+    Search,
+    GetThread,
+    Send,
+    Reply,
+}
+
+impl MailboxTool {
+    pub const ALL: [MailboxTool; 6] = [
+        MailboxTool::GuideRules,
+        MailboxTool::FactsLookup,
+        MailboxTool::Search,
+        MailboxTool::GetThread,
+        MailboxTool::Send,
+        MailboxTool::Reply,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            MailboxTool::GuideRules => "guide_rules",
+            MailboxTool::FactsLookup => Tool::FactsLookup.name(),
+            MailboxTool::Search => Tool::Search.name(),
+            MailboxTool::GetThread => Tool::GetThread.name(),
+            MailboxTool::Send => "mail_send",
+            MailboxTool::Reply => "mail_reply",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<MailboxTool> {
+        MailboxTool::ALL.into_iter().find(|t| t.name() == name)
+    }
+
+    /// Reads change nothing; sends reach other people.
+    pub fn read_only(self) -> bool {
+        !matches!(self, MailboxTool::Send | MailboxTool::Reply)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MailboxToolSpec {
+    pub tool: MailboxTool,
+    pub description: &'static str,
+    pub input_schema: Value,
+}
+
+impl MailboxToolSpec {
+    pub fn name(&self) -> &'static str {
+        self.tool.name()
+    }
+}
+
+pub fn mailbox_catalog() -> Vec<MailboxToolSpec> {
+    MailboxTool::ALL.into_iter().map(mailbox_spec).collect()
+}
+
+/// What both send tools say about their result.
+macro_rules! send_note {
+    () => {
+        " It is checked against the mailbox's writing guide first, and what it breaks comes back as \
+         guide_check. The mailbox's setting decides the rest: it is sent at once, or the user approves it first \
+         (rejected_by_user if not). When OpenAGC is closed the message is queued and goes out when OpenAGC next \
+         opens."
+    };
+}
+
+fn mailbox_spec(tool: MailboxTool) -> MailboxToolSpec {
+    let from_app = |t: Tool| spec(t);
+    let (description, input_schema) = match tool {
+        MailboxTool::GuideRules => (
+            "The mailbox's writing guide: how mail from it is written (tone, length, phrases to use and avoid) and \
+             the facts drafts may use, for the given recipients and message type. Read it before writing. Also \
+             says whose mailbox this is, the name mail goes out as, and the service's sending limits.",
+            object(
+                json!({
+                    "to": { "type": "array", "items": { "type": "string" },
+                            "description": "Recipients, for rules about particular people." },
+                    "message_type": { "type": "string", "enum": ["new", "reply", "forward"] },
+                }),
+                &[],
+            ),
+        ),
+        MailboxTool::FactsLookup => {
+            let s = from_app(Tool::FactsLookup);
+            (s.description, s.input_schema)
+        }
+        MailboxTool::Search => {
+            let s = from_app(Tool::Search);
+            (s.description, s.input_schema)
+        }
+        MailboxTool::GetThread => {
+            let s = from_app(Tool::GetThread);
+            (s.description, s.input_schema)
+        }
+        MailboxTool::Send => (
+            concat!(
+                "Write and send a new message from this mailbox. The body is Markdown. Primitive mailboxes take \
+                 one recipient per message.",
+                send_note!()
+            ),
+            object(
+                json!({
+                    "to": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+                    "cc": { "type": "array", "items": { "type": "string" } },
+                    "subject": { "type": "string" },
+                    "body_markdown": { "type": "string" },
+                }),
+                &["to", "subject", "body_markdown"],
+            ),
+        ),
+        MailboxTool::Reply => (
+            concat!(
+                "Reply to a message in this mailbox (give its message_id from mail_get_thread). The body is \
+                 Markdown; the original is quoted below it.",
+                send_note!()
+            ),
+            object(
+                json!({
+                    "message_id": { "type": "string" },
+                    "body_markdown": { "type": "string" },
+                    "reply_all": { "type": "boolean", "default": false },
+                }),
+                &["message_id", "body_markdown"],
+            ),
+        ),
+    };
+    MailboxToolSpec { tool, description, input_schema }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +358,20 @@ mod tests {
             assert!(spec.name().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "{}", spec.name());
         }
         assert!(catalog().iter().filter(|s| s.read_only()).count() == 7);
+    }
+
+    #[test]
+    fn mailbox_mode_has_six_tools_and_reuses_the_read_tools() {
+        let all = mailbox_catalog();
+        let names: Vec<&str> = all.iter().map(|s| s.name()).collect();
+        assert_eq!(names, ["guide_rules", "facts_lookup", "mail_search", "mail_get_thread", "mail_send", "mail_reply"]);
+        assert_eq!(all[2].input_schema, spec(Tool::Search).input_schema);
+        assert_eq!(all.iter().filter(|s| s.tool.read_only()).count(), 4);
+        for spec in &all {
+            assert_eq!(MailboxTool::from_name(spec.name()), Some(spec.tool));
+            for required in spec.input_schema["required"].as_array().unwrap() {
+                assert!(spec.input_schema["properties"].get(required.as_str().unwrap()).is_some());
+            }
+        }
     }
 }

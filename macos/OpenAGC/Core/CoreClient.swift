@@ -36,6 +36,13 @@ final class CoreClient: Sendable {
         core.configureAgents(
             shimPath: bundle.bundleURL.appending(path: "Contents/MacOS/openagc-mcp").path,
             systemPromptPath: bundle.url(forResource: "agent-system-prompt", withExtension: "md")?.path ?? "")
+        // Agents outside the app reach agent mailboxes through it while it
+        // runs (spec §10.1, openagc-mcp --mailbox); tests never serve them.
+        if !Self.isRunningTests {
+            do { try core.serveOutsideAgents() } catch {
+                Logger(subsystem: "ai.actual.openagc", category: "agent").warning("outside agents: \(String(describing: error), privacy: .public)")
+            }
+        }
         // Tests never run the user's real agent CLIs (which would use their
         // account); neither do UI runs that ask for fakes.
         if UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents") || Self.isRunningTests {
@@ -281,6 +288,17 @@ final class CoreClient: Sendable {
 
     func setAgentSendMode(_ accountID: String, _ mode: AgentSendMode) throws(CoreClientError) {
         try callSync { try core.setAgentSendMode(accountId: accountID, mode: mode) }
+    }
+
+    /// What Connect an Agent… would write for this mailbox, and where
+    /// (spec §10.1). Writes nothing.
+    func agentConnection(_ accountID: String, client: AgentClient) throws(CoreClientError) -> AgentConnection {
+        try callSync { try core.agentConnection(accountId: accountID, client: client) }
+    }
+
+    /// Write it, backing the file up first; the backup's path, if there was a file.
+    func connectAgent(_ accountID: String, client: AgentClient) throws(CoreClientError) -> String? {
+        try callSync { try core.connectAgent(accountId: accountID, client: client) }
     }
 
     // MARK: Service accounts (spec §7.9, ADR 0015)
@@ -1481,6 +1499,8 @@ typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService
 typealias AgentSendMode = OpenAGCCore.AgentSendMode
+typealias AgentClient = OpenAGCCore.AgentClient
+typealias AgentConnection = OpenAGCCore.AgentConnection
 typealias AgentDomain = OpenAGCCore.AgentDomain
 typealias AgentSendRule = OpenAGCCore.AgentSendRule
 typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
