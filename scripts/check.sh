@@ -19,6 +19,7 @@ if ! out=$(TMPDIR="$SCRATCH/" cargo test --workspace --locked 2>&1); then
 fi
 echo "$out" | awk '/^test result/ { passed += $4 } END { print passed " tests passed" }'
 step check-deps; cargo xtask check-deps
+step check-brand; cargo xtask check-brand
 step mcp-docs; cargo xtask mcp-docs --check
 step deny;       cargo deny check --hide-inclusion-graph 2>&1 | tail -1
 echo "all checks passed"

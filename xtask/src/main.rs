@@ -6,6 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+mod brand;
 mod mcp_docs;
 mod perf;
 
@@ -19,12 +20,13 @@ fn main() -> Result<()> {
         .unwrap_or(perf::DEFAULT_MESSAGES);
     match cmd.as_str() {
         "check-deps" => check_deps(),
+        "check-brand" => brand::run(&root),
         "fixture" => perf::fixture(&root, messages, std::env::args().any(|a| a == "--force")).map(|_| ()),
         "perf" => perf::perf(&root, messages),
         "mcp-docs" => mcp_docs::run(&root, std::env::args().any(|a| a == "--check")),
         _ => {
             eprintln!(
-                "usage: cargo xtask <command>\n\ncommands:\n  check-deps              enforce the crate dependency direction (spec §3)\n  fixture [--messages N]  build the synthetic performance mailbox (default 100k)\n  perf [--messages N]     measure store operations against §1.3 budgets\n  mcp-docs [--check]      render the agent tool catalog to docs/mcp.md"
+                "usage: cargo xtask <command>\n\ncommands:\n  check-deps              enforce the crate dependency direction (spec §3)\n  check-brand             the old name only where it reads what it wrote (ADR 0017)\n  fixture [--messages N]  build the synthetic performance mailbox (default 100k)\n  perf [--messages N]     measure store operations against §1.3 budgets\n  mcp-docs [--check]      render the agent tool catalog to docs/mcp.md"
             );
             std::process::exit(2);
         }
