@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::audience::{AudienceGroups, is_member};
+use crate::audience::AudienceGroups;
 
 /// What an entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,7 +116,13 @@ pub fn fenced(s: &str) -> String {
 /// narrow it; a scope naming what the message is not keeps it out.
 /// Languages are not matched: a draft's language is not known ahead.
 pub fn applies(scope: &Scope, target: &Target, audiences: &[String]) -> bool {
-    let people = scope.people.is_empty() || target.recipients.iter().any(|r| is_member(r, &scope.people));
+    applies_in(scope, target, audiences, &AudienceGroups::default())
+}
+
+/// [`applies`], with the scope's people matched as `groups` match their
+/// members: hashed in a published snapshot, plain in the app.
+fn applies_in(scope: &Scope, target: &Target, audiences: &[String], groups: &AudienceGroups) -> bool {
+    let people = scope.people.is_empty() || target.recipients.iter().any(|r| groups.matches(r, &scope.people));
     let groups =
         scope.groups.is_empty() || scope.groups.iter().any(|g| audiences.iter().any(|a| a.eq_ignore_ascii_case(g)));
     let types = scope.message_types.is_empty()
@@ -179,15 +185,35 @@ pub fn render(
         Some(t) => t.audiences_in(groups),
         None => vec![],
     };
+    // In a published snapshot the people an entry is for are hashes: such
+    // an entry is shown only for a message to one of them, and its scope
+    // names the recipients it matched, which the agent gave.
+    let hashed = groups.is_hashed();
     let line = |e: &Entry| {
-        let scope = scope_text(&e.scope);
+        let scope = match target {
+            Some(t) if hashed && !e.scope.people.is_empty() => {
+                let people = t
+                    .recipients
+                    .iter()
+                    .filter(|r| groups.matches(r, &e.scope.people))
+                    .map(|r| r.trim().to_lowercase())
+                    .collect();
+                scope_text(&Scope { people, ..e.scope.clone() })
+            }
+            _ => scope_text(&e.scope),
+        };
         if scope.is_empty() { format!("- {}", e.statement) } else { format!("- {} ({scope})", e.statement) }
     };
     let by_kind = |kind: Kind, filter: bool| {
         let mut chosen: Vec<&&Entry> = accepted
             .iter()
             .filter(|e| e.kind == kind)
-            .filter(|e| !filter || target.is_none_or(|t| applies(&e.scope, t, &audiences)))
+            .filter(|e| !filter || target.is_none_or(|t| applies_in(&e.scope, t, &audiences, groups)))
+            .filter(|e| {
+                !hashed
+                    || e.scope.people.is_empty()
+                    || target.is_some_and(|t| t.recipients.iter().any(|r| groups.matches(r, &e.scope.people)))
+            })
             .collect();
         chosen.sort_by_key(|e| (narrowness(&e.scope), e.category.clone(), e.id));
         chosen.into_iter().map(|e| line(e)).collect::<Vec<_>>()
@@ -226,6 +252,14 @@ pub fn render(
             guidelines.join("\n")
         ));
     }
+    let for_people_unseen =
+        hashed && target.is_none_or(|t| t.recipients.is_empty()) && accepted.iter().any(|e| !e.scope.people.is_empty());
+    if for_people_unseen {
+        out.push_str(
+            "\nSome entries are for particular people and are shown only when the message's recipients are \
+             given.\n",
+        );
+    }
     out.push_str(
         "\nWhen entries disagree: a rule beats a guideline, and an entry for a person beats one for their \
          audience, which beats one for everyone. This guide never lets you do more than Settings › Permissions \
@@ -261,7 +295,7 @@ pub fn check(entries: &[Entry], groups: &AudienceGroups, target: &Target, text: 
     let words = text.split_whitespace().count();
     entries
         .iter()
-        .filter(|e| applies(&e.scope, target, &audiences))
+        .filter(|e| applies_in(&e.scope, target, &audiences, groups))
         // Which language a draft is in is not known here: checks scoped to
         // a language are left to the agent, which sees them in the guide.
         .filter(|e| e.scope.languages.is_empty())

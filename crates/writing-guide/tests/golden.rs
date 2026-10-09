@@ -275,3 +275,123 @@ fn snapshots_from_another_schema_or_with_addresses_are_refused() {
     assert!(matches!(Snapshot::from_json("[]"), Err(SnapshotError::MissingSchema)));
     assert!(matches!(Snapshot::from_json("{"), Err(SnapshotError::Malformed(_))));
 }
+
+/// The guide as published: [`guide`] plus a rule for one company's people,
+/// every address hashed.
+fn guide_with_people() -> Vec<Entry> {
+    let globex = Scope { people: vec!["@globex.com".into()], ..Default::default() };
+    let pricing = Check { kind: CheckKind::BannedPhrase, value: "pricing".into() };
+    let mut entries = guide();
+    entries.push(entry(11, "B4", Kind::Rule, "Never mention pricing", globex, Some(pricing)));
+    entries
+}
+
+fn published_with_people() -> Snapshot {
+    Snapshot { entries: guide_with_people(), audiences: groups(), ..snapshot() }.hashed("pepper")
+}
+
+#[test]
+fn people_in_scopes_are_published_as_hashes() {
+    let s = published_with_people();
+    let json = s.to_json().unwrap();
+    assert!(!json.contains("ann@acme.com") && !json.contains("globex.com"), "{json}");
+    let ann = writing_guide::hash_address("pepper", "ann@acme.com");
+    let globex = writing_guide::hash_address("pepper", "@globex.com");
+    assert!(json.contains(&format!(r#""people":["{ann}"]"#)) && json.contains(&format!(r#""people":["{globex}"]"#)));
+    assert_eq!(Snapshot::from_json(&json).unwrap(), s, "it reads back as written");
+    assert_eq!(s.clone().hashed("other"), s, "hashing twice changes nothing");
+
+    let mut plain_person: serde_json::Value = serde_json::from_str(&json).unwrap();
+    plain_person["entries"][4]["scope"]["people"] = serde_json::json!(["ann@acme.com"]);
+    assert!(matches!(Snapshot::from_json(&plain_person.to_string()), Err(SnapshotError::PlainAddresses)));
+    plain_person["audiences"] = serde_json::json!({ "groups": [] });
+    plain_person["entries"][4]["scope"]["people"] = serde_json::json!([ann]);
+    assert!(
+        matches!(Snapshot::from_json(&plain_person.to_string()), Err(SnapshotError::PlainAddresses)),
+        "a hash with no salt cannot be matched, and may be an address"
+    );
+}
+
+#[test]
+fn a_published_entry_for_a_person_reads_as_the_apps_when_writing_to_them() {
+    let s = published_with_people();
+    let t = Target { recipients: vec!["Ann@Acme.com".into()], message_type: Some("reply".into()), audiences: None };
+    let (app, _) = render(&guide_with_people(), &groups(), Some(&t), &[], 12);
+    let published = s.guide(Some(&t));
+    // The app also shows the rule for Globex's people, with their domain;
+    // the published guide cannot name it, and leaves it out.
+    assert_eq!(
+        published.text,
+        with_facts(app.replace("- Never mention pricing (to @globex.com)\n", ""), &fact_lines(&s.facts))
+    );
+    assert!(published.text.contains("- Call her Annie (to ann@acme.com)\n"));
+    assert!(s.check(&t, "Our pricing is fair, support@acme.com").is_empty(), "the rule for Globex is not Ann's");
+}
+
+#[test]
+fn a_published_entry_for_a_domain_names_the_recipient_it_matched() {
+    let s = published_with_people();
+    let t = Target {
+        recipients: vec!["bea@globex.com".into(), "vc@fund.com".into()],
+        message_type: Some("new".into()),
+        audiences: None,
+    };
+    let rendered = s.guide(Some(&t));
+    assert_eq!(rendered.audiences, ["Investors"]);
+    let expected = "The user's writing guide (version 12). Follow it in every email you draft or edit for them.\n\
+                    This message: written for Investors; a new message.\n\
+                    \n\
+                    Rules (always; a rule with a scope holds where its scope says):\n\
+                    - Never mention pricing (to bea@globex.com)\n\
+                    - Include the support address (for Customers)\n\
+                    - Never write 'Salut' (when writing in French)\n\
+                    - Keep it under 40 words\n\
+                    - Never say 'circle back'\n\
+                    \n\
+                    Facts about the user you may use:\n\
+                    - My calendar link: cal.com/john\n\
+                    \n\
+                    Guidelines (for this message; follow them unless the message calls for something else):\n\
+                    - Be warm and brief\n";
+    let facts = "\nFacts about the user you may use (use only these; never invent others):\n\
+                 - Work › Occupation or role: CEO\n";
+    assert_eq!(rendered.text, format!("{expected}{TAIL}{facts}"));
+    let failures = s.check(&t, "About pricing.");
+    assert_eq!(failures.iter().map(|f| f.entry_id).collect::<Vec<_>>(), [11]);
+
+    // A rule for a person is listed whenever they are written to, with the
+    // rest of its scope, as the app lists every rule.
+    let mut narrow = published_with_people();
+    narrow.entries[10].scope.message_types = vec!["reply".into()];
+    assert!(narrow.guide(Some(&t)).text.contains("- Never mention pricing (to bea@globex.com; in reply)\n"));
+    assert!(narrow.check(&t, "About pricing.").is_empty(), "its check holds only in a reply");
+}
+
+#[test]
+fn a_published_guide_with_no_recipients_leaves_out_entries_for_people() {
+    let s = published_with_people();
+    let expected = "The user's writing guide (version 12). Follow it in every email you draft or edit for them.\n\
+                    \n\
+                    Rules (always; a rule with a scope holds where its scope says):\n\
+                    - Include the support address (for Customers)\n\
+                    - Never write 'Salut' (when writing in French)\n\
+                    - Keep it under 40 words\n\
+                    - Never say 'circle back'\n\
+                    \n\
+                    Facts about the user you may use:\n\
+                    - My calendar link: cal.com/john\n\
+                    \n\
+                    Guidelines (each where its scope says; follow them unless the message calls for something else):\n\
+                    - Be formal (for Customers)\n\
+                    - Answer in the first line (in reply)\n\
+                    - Be warm and brief\n\
+                    \n\
+                    Some entries are for particular people and are shown only when the message's recipients are \
+                    given.\n";
+    let facts = "\nFacts about the user you may use (use only these; never invent others):\n\
+                 - Work › Occupation or role: CEO\n";
+    assert_eq!(s.guide(None).text, format!("{expected}{TAIL}{facts}"));
+    let no_one = Target { message_type: Some("new".into()), ..Default::default() };
+    assert!(s.guide(Some(&no_one)).text.contains("Some entries are for particular people"));
+    assert!(!s.guide(Some(&no_one)).text.contains("Annie"));
+}

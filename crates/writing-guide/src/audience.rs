@@ -37,6 +37,11 @@ pub fn is_member(address: &str, members: &[String]) -> bool {
     })
 }
 
+/// Whether `s` has the shape of a [`hash_address`]: 64 hex digits.
+pub fn is_hash(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// An address or `@domain` as published (decision 5 of the rules-server
 /// plan): lower-case hex of SHA-256 over the salt, a zero byte, and the
 /// trimmed, lower-cased address.
@@ -71,17 +76,29 @@ impl AudienceGroups {
         Self { salt: Some(salt.to_owned()), groups }
     }
 
+    /// Whether the addresses are salted hashes (a published snapshot).
+    pub fn is_hashed(&self) -> bool {
+        self.salt.is_some()
+    }
+
     /// Whether `address` belongs to `group`.
     pub fn contains(&self, group: &AudienceGroup, address: &str) -> bool {
+        self.matches(address, &group.members)
+    }
+
+    /// Whether `address` is one of `members` (addresses or `@domain`s),
+    /// hashed with this set's salt when it has one. Audience members and the
+    /// people an entry is scoped to are matched alike.
+    pub fn matches(&self, address: &str, members: &[String]) -> bool {
         match &self.salt {
-            None => is_member(address, &group.members),
+            None => is_member(address, members),
             Some(salt) => {
                 let a = address.trim().to_lowercase();
                 let mut keys = vec![hash_address(salt, &a)];
                 if let Some((_, domain)) = a.rsplit_once('@') {
                     keys.push(hash_address(salt, &format!("@{domain}")));
                 }
-                group.members.iter().any(|m| keys.iter().any(|k| m.eq_ignore_ascii_case(k)))
+                members.iter().any(|m| keys.iter().any(|k| m.eq_ignore_ascii_case(k)))
             }
         }
     }

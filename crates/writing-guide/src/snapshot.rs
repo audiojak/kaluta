@@ -1,7 +1,8 @@
 //! What an agent mailbox publishes to a rules server (spec §10.6): its
 //! accepted guide entries with their scope and checks, its confirmed
-//! audience groups with every member hashed, and the facts shared with
-//! cloud agents. Never evidence, examples or mail.
+//! audience groups with every member hashed, the people entries are
+//! scoped to hashed alike, and the facts shared with cloud agents. Never
+//! evidence, examples, mail or a plain address of anyone written to.
 //!
 //! The JSON is the publish format. `schema_version` names its shape: a
 //! change that an older reader would misread raises it, and a reader
@@ -9,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::audience::AudienceGroups;
+use crate::audience::{AudienceGroups, hash_address, is_hash};
 use crate::facts::{Fact, fact_lines, facts_lookup, with_facts};
 use crate::guide::{CheckFailure, Entry, Rendered, Target, check, render};
 
@@ -61,13 +62,13 @@ pub enum SnapshotError {
     UnsupportedSchema(u64),
     #[error("snapshot has no schema_version")]
     MissingSchema,
-    #[error("audience groups list addresses: members must be published as salted hashes")]
+    #[error("the snapshot lists addresses: audience members and people must be published as salted hashes")]
     PlainAddresses,
 }
 
 impl Snapshot {
-    /// Read a published snapshot, refusing an unknown schema and audience
-    /// members that are not hashed.
+    /// Read a published snapshot, refusing an unknown schema, and audience
+    /// members or scoped people that are not salted hashes.
     pub fn from_json(json: &str) -> Result<Self, SnapshotError> {
         let value: serde_json::Value = serde_json::from_str(json)?;
         match value.get("schema_version").map(serde_json::Value::as_u64) {
@@ -77,10 +78,31 @@ impl Snapshot {
             Some(None) => return Err(SnapshotError::MissingSchema),
         }
         let snapshot: Self = serde_json::from_value(value)?;
-        if snapshot.audiences.salt.is_none() && snapshot.audiences.groups.iter().any(|g| !g.members.is_empty()) {
+        let mut addresses = snapshot
+            .audiences
+            .groups
+            .iter()
+            .flat_map(|g| &g.members)
+            .chain(snapshot.entries.iter().flat_map(|e| &e.scope.people));
+        let hashed = snapshot.audiences.is_hashed();
+        if addresses.any(|a| !hashed || !is_hash(a)) {
             return Err(SnapshotError::PlainAddresses);
         }
         Ok(snapshot)
+    }
+
+    /// The same snapshot with every address it names (audience members, and
+    /// the people entries are scoped to) hashed with `salt`, for
+    /// publishing. A snapshot already hashed is returned as it is.
+    pub fn hashed(mut self, salt: &str) -> Self {
+        if self.audiences.is_hashed() {
+            return self;
+        }
+        self.audiences = self.audiences.hashed(salt);
+        for e in &mut self.entries {
+            e.scope.people = e.scope.people.iter().map(|p| hash_address(salt, p)).collect();
+        }
+        self
     }
 
     /// The publish format.

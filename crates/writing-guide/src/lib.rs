@@ -18,7 +18,7 @@ mod facts;
 mod guide;
 mod snapshot;
 
-pub use audience::{AudienceGroup, AudienceGroups, hash_address, is_member};
+pub use audience::{AudienceGroup, AudienceGroups, hash_address, is_hash, is_member};
 pub use facts::{Fact, fact_line, fact_lines, facts_lookup, with_facts};
 pub use guide::{
     Check, CheckFailure, CheckKind, Entry, Kind, Rendered, Scope, Target, applies, check, contains_phrase, fenced,
