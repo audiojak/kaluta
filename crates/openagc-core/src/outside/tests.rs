@@ -16,7 +16,7 @@ use crate::guide::{
 use crate::{AgentEventInfo, CoreConfig, CoreEvent, EventListener};
 
 #[derive(Default)]
-struct Events(Mutex<Vec<(String, AgentEventInfo)>>);
+pub(crate) struct Events(Mutex<Vec<(String, AgentEventInfo)>>);
 
 impl EventListener for Events {
     fn on_event(&self, _account: Option<String>, event: CoreEvent) {
@@ -28,7 +28,7 @@ impl EventListener for Events {
 }
 
 impl Events {
-    fn proposals(&self) -> Vec<(String, i64, String)> {
+    pub(crate) fn proposals(&self) -> Vec<(String, i64, String)> {
         self.0
             .lock()
             .unwrap()
@@ -50,7 +50,7 @@ impl Drop for Temp {
     }
 }
 
-fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
+pub(crate) fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
     for _ in 0..400 {
         if condition() {
             return;
@@ -63,16 +63,16 @@ fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
 /// The app's core on a scratch data directory, with an agent mailbox that
 /// has one received thread, a guide rule banning "circle back", and a
 /// finished learning run (so AI compositions are recorded, ADR 0013).
-struct App {
+pub(crate) struct App {
     _dir: Temp,
-    data_dir: String,
-    core: Arc<Core>,
-    events: Arc<Events>,
-    account: String,
-    address: String,
+    pub(crate) data_dir: String,
+    pub(crate) core: Arc<Core>,
+    pub(crate) events: Arc<Events>,
+    pub(crate) account: String,
+    pub(crate) address: String,
 }
 
-fn app(name: &str) -> App {
+pub(crate) fn app(name: &str) -> App {
     // Short: the socket path must fit macOS's limit without the fallback.
     let dir = std::env::temp_dir().join(format!("oagc-out-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -132,30 +132,30 @@ fn app(name: &str) -> App {
     App { _dir: Temp(dir), data_dir, core, events, account: agent.account_id, address: agent.address }
 }
 
-fn call(core: &Arc<Core>, session: &str, tool: MailboxTool, args: Value) -> Outcome {
+pub(crate) fn call(core: &Arc<Core>, session: &str, tool: MailboxTool, args: Value) -> Outcome {
     crate::runtime::runtime().block_on(core.call_outside(session, tool, args))
 }
 
-fn ok(outcome: Outcome) -> Value {
+pub(crate) fn ok(outcome: Outcome) -> Value {
     match outcome {
         Outcome::Ok { structured: Some(v), .. } => v,
         other => panic!("{other:?}"),
     }
 }
 
-fn error_code(outcome: Outcome) -> String {
+pub(crate) fn error_code(outcome: Outcome) -> String {
     match outcome {
         Outcome::Error { code, .. } => code,
         other => panic!("expected an error, got {other:?}"),
     }
 }
 
-fn outbox_sends(app: &App) -> i64 {
+pub(crate) fn outbox_sends(app: &App) -> i64 {
     let db = block_on(app.core.store_for(&app.account)).unwrap();
     db.read_blocking(|c| Ok(c.query_row("SELECT COUNT(*) FROM outbox WHERE kind = 'send'", [], |r| r.get(0))?)).unwrap()
 }
 
-fn drafts(app: &App) -> usize {
+pub(crate) fn drafts(app: &App) -> usize {
     let db = block_on(app.core.store_for(&app.account)).unwrap();
     db.read_blocking(mail_store::drafts::list).unwrap().len()
 }

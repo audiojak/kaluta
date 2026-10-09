@@ -356,4 +356,4 @@ pub fn outside_socket(data_dir: &std::path::Path) -> Option<std::path::PathBuf> 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

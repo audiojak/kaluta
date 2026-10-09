@@ -3634,11 +3634,6 @@ the other tips, until put away or until Clean Up is opened.)*
   `List-Id`'s or the sender's. Otherwise the list's mailto is offered, or,
   without one, the group counts as having no link Clean Up can use. A
   link the user would open in the browser is not offered.
-- *Only a 2xx is done.* A redirect is not followed and not recorded: the
-  line says "the list wants you to open a page at *host* to finish".
-- *Archive Them Too* archives only the groups whose one-click succeeded or
-  whose message opened in the composer; the sheet says so ("Archives only
-  the lists that take you off, and those whose message opens for you to
 - *Never to the local network* *(amendment 2026-10-08, oagc-cp3.1)*.
   `List-Id` and `From` are the sender's to write, so the one-click
   address must also be https on port 443 at a host name (not an IP
@@ -3652,6 +3647,11 @@ the other tips, until put away or until Clean Up is opened.)*
   rebind between the check and the connection. Unit tests' local
   servers are allowed by port through a `cfg(test)`-only list that the
   app does not compile.
+- *Only a 2xx is done.* A redirect is not followed and not recorded: the
+  line says "the list wants you to open a page at *host* to finish".
+- *Archive Them Too* archives only the groups whose one-click succeeded or
+  whose message opened in the composer; the sheet says so ("Archives only
+  the lists that take you off, and those whose message opens for you to
   send"). Groups that failed or had no link stay, still ticked.
 - *Spam leaves the user's own sent mail alone* (`SENT`): it is not spam,
   and whether Gmail accepts `SPAM` on a sent message is a hand-check (a
@@ -3710,11 +3710,12 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 | HTML/JS exploitation | Rust sanitization + JS-off WKWebView + CSP + no navigation (§14.4) |
 | Tracking pixels | Remote images blocked by default |
 | Phishing links | Host mismatch confirmation; links open in system browser only |
-| Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web) |
+| Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web). Exception: an agent mailbox set to *Send freely* (§7.9) sends without asking, by the user's choice |
 | Prompt injection → destructive bulk actions | `delete` gated; bulk caps; reversible ops are actually reversible (archive not delete; trash not purge) |
 | Prompt injection → credential theft | Tokens never reach the agent process; Keychain only touched from Swift; MCP tools cannot read settings |
 | Agent escapes tool boundary | Claude: `--tools ""` + `dontAsk` + `--strict-mcp-config`; Codex: shell/exec/web tools disabled, read-only sandbox, `--ignore-user-config`; both are belt-and-braces — the real boundary is that OpenAGC only ever *offers* mail tools |
-| Rogue MCP client on the socket | Per-launch random socket path, 0600, peer UID check, per-session token in the shim args |
+| Rogue MCP client on the socket | Per-launch random socket path, 0600, peer UID check, per-session token in the shim args. Mailbox mode (§10.1) has no per-session token: any same-user process can open a session on any agent mailbox (accepted, §15.4) |
+| Rogue socket for the shim | In mailbox mode the shim connects only to a socket owned by the user, in a folder only the user can write (sticky parent allowed), served by a same-user peer *(amendment 2026-10-08, oagc-cp3.4)* |
 | Attachments | Never auto-opened; saved with quarantine xattr (`com.apple.quarantine`) so Gatekeeper applies; agent gets extracted text only |
 | Log leakage | `Redacted` newtypes; email bodies never logged above `trace`, which is compiled out in release |
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
@@ -3723,6 +3724,18 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 
 Malware running as the user; a compromised agent CLI binary; the user
 approving a bad send. These are documented in `docs/security.md`.
+
+*(Amendment 2026-10-08, oagc-cp3.6.)* Mailbox mode trusts the user's own
+processes: `openagc-mcp --mailbox` carries no per-session token, so any
+process running as the user can drive any agent mailbox (read its mail,
+guide and the user's facts; send from it). Under *Ask before each send*
+every send still waits for the user in the app (and is refused with the
+app closed); under *Send freely* it goes. This is accepted, like the
+user's other CLI tools: the boundary is the user account, a token readable
+by the same user would not stop such a process, and the shim holds no
+secrets. Own accounts are never served, only the six mailbox tools exist,
+and every call is logged under the outside agent's name. The injection
+suite covers the six tools.
 
 ---
 
