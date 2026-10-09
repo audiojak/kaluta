@@ -16,11 +16,16 @@
 //!   `DELETE …/agent-tokens/{id}` revokes either.
 //! - `POST /v1/mailboxes/{address}/connect-codes` `{"name"}`: a one-time
 //!   connect code for the OAuth consent page, answered once (OAuth on only).
+//! - `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>`: the
+//!   reports agents filed, oldest first; `POST …/reports/ack`
+//!   `{"up_to_id"}` deletes those the app has recorded.
 //!
 //! Agents and scripts, `Authorization: Bearer <agent token>`:
 //! - `GET /v1/m/{address}/guide?to=&to=&message_type=` and
 //!   `GET /v1/m/{address}/facts?category=&query=`: `guide_rules` and
 //!   `facts_lookup`, answered as over MCP.
+//! - `POST /v1/m/{address}/check` and `POST /v1/m/{address}/reports`, with
+//!   the tools' arguments as JSON: `check_draft` and `report_send`.
 
 use axum::extract::{Extension, Path, RawQuery, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
@@ -31,9 +36,10 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use writing_guide::Snapshot;
 
-use crate::answers::{self, FactsArgs, GuideArgs};
+use crate::answers::{self, CheckArgs, FactsArgs, GuideArgs};
 use crate::db::{self, AgentTokenRow, ConnectCodeRow, SnapshotRow};
-use crate::{ApiError, AppState, TokenSlot, agent_auth, normalize_address, tokens};
+use crate::reports::ReportArgs;
+use crate::{AgentAuth, ApiError, AppState, TokenSlot, agent_auth, normalize_address, tokens};
 
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
@@ -45,8 +51,12 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/v1/mailboxes/{address}/agent-tokens", post(mint).get(list_tokens))
         .route("/v1/mailboxes/{address}/agent-tokens/{id}", delete(revoke))
         .route("/v1/mailboxes/{address}/connect-codes", post(connect_code))
+        .route("/v1/mailboxes/{address}/reports", get(list_reports))
+        .route("/v1/mailboxes/{address}/reports/ack", post(ack_reports))
         .route("/v1/m/{address}/guide", get(guide))
         .route("/v1/m/{address}/facts", get(facts))
+        .route("/v1/m/{address}/check", post(check))
+        .route("/v1/m/{address}/reports", post(report))
         .with_state(state)
 }
 
@@ -412,6 +422,50 @@ async fn connect_code(
     Ok((StatusCode::CREATED, Json(answer)).into_response())
 }
 
+/// `?after=<id>&limit=<n>`: reports after a cursor (0 for all), at most
+/// `limit` (100 by default, 500 at most).
+async fn list_reports(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    RawQuery(query): RawQuery,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let m = publisher(&state, &headers, &address, &slot).await?;
+    let (mut after, mut limit) = (0_i64, 100_i64);
+    let number = |k: &str, v: &str| {
+        v.parse::<i64>().ok().filter(|n| *n >= 0).ok_or_else(|| {
+            ApiError::new(StatusCode::BAD_REQUEST, "invalid_arguments", format!("{k} must be a whole number"))
+        })
+    };
+    for (k, v) in query_pairs(query.as_deref()) {
+        match k.as_str() {
+            "after" => after = number(&k, &v)?,
+            "limit" => limit = number(&k, &v)?,
+            other => return Err(unknown_parameter(other)),
+        }
+    }
+    Ok(Json(crate::reports::list(&state, m.id, after, limit).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AckBody {
+    up_to_id: i64,
+}
+
+async fn ack_reports(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Json<Value>, ApiError> {
+    let m = publisher(&state, &headers, &address, &slot).await?;
+    let b: AckBody = parse_json(&body)?;
+    Ok(Json(crate::reports::ack(&state, m.id, b.up_to_id).await?))
+}
+
 /// The agent token's mailbox, which must be the one in the path.
 async fn agent_mailbox(
     state: &AppState,
@@ -419,11 +473,47 @@ async fn agent_mailbox(
     address: &str,
     slot: &TokenSlot,
 ) -> Result<i64, ApiError> {
+    Ok(agent_in_path(state, headers, address, slot).await?.mailbox_id)
+}
+
+/// The agent let in, whose mailbox must be the one in the path.
+async fn agent_in_path(
+    state: &AppState,
+    headers: &HeaderMap,
+    address: &str,
+    slot: &TokenSlot,
+) -> Result<AgentAuth, ApiError> {
     let auth = agent_auth(state, headers, Some(slot), false).await?;
     if normalize_address(address).as_deref() != Some(auth.address.as_str()) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "this token is for another mailbox"));
     }
-    Ok(auth.mailbox_id)
+    Ok(auth)
+}
+
+async fn check(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Json<Value>, ApiError> {
+    let mailbox = agent_mailbox(&state, &headers, &address, &slot).await?;
+    let args: CheckArgs = parse_json(&body)?;
+    answers::check_draft_args(&args).map_err(crate::reports::invalid)?;
+    Ok(Json(answers::check_draft(&published(&state, mailbox).await?, &args)))
+}
+
+async fn report(
+    State(state): State<AppState>,
+    Extension(slot): Extension<TokenSlot>,
+    Path(address): Path<String>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<Response, ApiError> {
+    let auth = agent_in_path(&state, &headers, &address, &slot).await?;
+    let args: ReportArgs = parse_json(&body)?;
+    let answer = crate::reports::file(&state, &auth, args).await?;
+    Ok((StatusCode::ACCEPTED, Json(answer)).into_response())
 }
 
 /// The newest snapshot, or why there is none to read.

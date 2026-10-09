@@ -18,6 +18,7 @@ base64.workspace = true
 chrono.workspace = true
 getrandom.workspace = true
 http.workspace = true
+pulldown-cmark.workspace = true
 rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
 rusqlite.workspace = true
 serde.workspace = true
@@ -31,6 +32,7 @@ url.workspace = true
 
 [dev-dependencies]
 agent-mcp.workspace = true
+mail-mime.workspace = true
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 rmcp = { workspace = true, features = ["client", "transport-streamable-http-client-reqwest"] }
 

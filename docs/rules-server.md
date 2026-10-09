@@ -3,17 +3,18 @@
 Cloud agents (a Claude cloud routine, an agent on another machine, a
 script) cannot reach OpenAGC on your Mac. `openagc-rules` gives them an
 agent mailbox's writing guide and the facts you chose to share, published
-from the app. It is one binary and one SQLite file; you run it yourself,
+from the app, check their drafts against the guide, and take their
+reports of what they sent, for the app to record. It is one binary and one SQLite file; you run it yourself,
 behind your own TLS proxy. Spec §10.6, ADR 0016, plan
 `docs/plans/rules-server.md`.
 
-*Status:* the server is built (bearer tokens; `guide_rules` and
-`facts_lookup`; OAuth sign-in with one-time connect codes for claude.ai
-connectors and cloud routines), the app publishes to it (an agent
-mailbox's Settings, *Rules server* › *Publish to a Rules Server…*) and
-connects agents to it (*Cloud agents* › *Connect a Cloud Agent…*).
-`check_draft` and `report_send` (oagc-gmn7.6) and encryption at rest come
-next.
+*Status:* the server is built (bearer tokens; `guide_rules`,
+`facts_lookup`, `check_draft` and `report_send`; OAuth sign-in with
+one-time connect codes for claude.ai connectors and cloud routines), the
+app publishes to it (an agent mailbox's Settings, *Rules server* ›
+*Publish to a Rules Server…*), connects agents to it (*Cloud agents* ›
+*Connect a Cloud Agent…*) and pulls their reports at each sync. Encryption
+at rest comes next.
 
 ## What it holds, and what it never holds
 
@@ -33,7 +34,14 @@ It holds, per registered agent mailbox:
   their return addresses), each **agent grant** a connect code made (beside
   the agent tokens, with the same id, name and times), and the hashes of
   connect codes, authorization codes and access and refresh tokens until
-  they expire.
+  they expire;
+- the **reports** agents filed with `report_send` and the app has not
+  pulled yet: what the agent says it sent (the Message-ID, recipients,
+  subject, time and body, in its own words), which agent, the version it
+  checked against and what the server's check found. Each is deleted once
+  the app has pulled it, and after 30 days regardless (an hourly sweep); a
+  mailbox keeps at most 10,000, dropping the oldest (counted, and the app
+  logs it).
 
 Every address a snapshot names (audience-group members, and the people a
 rule or guideline is for) is a **salted hash**: lower-case hex SHA-256 of
@@ -44,8 +52,9 @@ for them; an entry for particular people is shown only for a message to
 one of them, naming the recipient it matched. The server refuses a
 snapshot with a plain address in it.
 
-It never holds mail, a mail service's key, an OAuth token or a token in
-the clear. It cannot read or send mail as anyone. It never logs a token,
+It never holds mail (only what agents say they sent, in their reports, until
+the app pulls them), a mail service's key, an OAuth token or a token in the
+clear. It cannot read or send mail as anyone. It never logs a token,
 an address it was asked about or what a snapshot says: each request is
 logged as its method, route pattern (`/v1/m/{address}/guide`), status,
 time and the token's id (`agent:3f9c…`, `publisher:1`).
@@ -187,10 +196,30 @@ token.
    is gone.
 4. Add the connector to the routine's connections and paste the
    instructions from step 1 into its prompt (call `guide_rules` before
-   writing, `facts_lookup` for facts). The agent is listed under *Cloud
+   writing, `facts_lookup` for facts, `check_draft` on each draft before
+   sending and `report_send` after). The agent is listed under *Cloud
    agents* with the name from step 1, as *Connector · Claude*, with when
    it was last used; *Revoke…* there ends its sessions at its next
    request.
+
+### Reports in the app
+
+At each sync of a publishing agent mailbox (at most once a minute) and on
+*Publish Now*, OpenAGC pulls the reports, keeps each in the mailbox's
+store, records it as an AI composition written by `cloud:<agent name>`
+(once the mailbox has finished a learning run, as for every AI
+composition, ADR 0013), and only then acknowledges them, which deletes
+them on the server; pulled twice, a report is recorded once. Each is
+matched to the mailbox's sent mail by the Message-ID it names (brackets
+and spaces ignored), else to a message to one of its recipients with its
+subject sent within 10 minutes of the time it gives; one whose mail has
+not synced yet is matched when it does, and after a day says "Reported,
+not seen in the mailbox". The daily review pairs a matched report with
+its sent copy as it pairs a draft with its own. *Cloud agents* counts the
+week's reports ("12 reports this week") and *Show Reports…* lists them.
+A report's text is the agent's own: shown as text, never followed, and
+fenced like every AI text when the review shows it to an agent. A send
+with no report is reviewed as any other.
 
 ### Connect Claude Code, the Agent SDK or a script
 
@@ -206,8 +235,8 @@ curl -H "Authorization: Bearer oagc_agt_…" \
 ```
 
 and the same instructions for the agent's prompt. Whoever holds the token
-can read this mailbox's published guide and shared facts and nothing else,
-until *Revoke…*. Tokens work on a server without a public URL; the URL is
+can read this mailbox's published guide and shared facts, check drafts and
+file reports, and nothing else, until *Revoke…*. Tokens work on a server without a public URL; the URL is
 then the address OpenAGC publishes to.
 
 Claude Code should also be able to sign in with a connect code
@@ -244,8 +273,10 @@ connect an agent are forgotten after a week.
 - **Agent tokens** are minted by the app through the publisher's API,
   named, scoped to one mailbox, shown once and revocable; revoking takes
   effect at the agent's next request. A leaked agent token reads that
-  mailbox's published guide and shared facts until revoked; it cannot
-  publish, read mail or send.
+  mailbox's published guide and shared facts, and can check drafts and
+  file reports (which the app shows as that agent's, matched against the
+  mailbox's real sent mail), until revoked; it cannot publish, read
+  reports, read mail or send.
 - **OAuth agents** are made only with a connect code the app minted for
   one mailbox, so a connector reaches only that mailbox, with the same
   reach as an agent token, and is listed and revoked with the tokens. Its
@@ -279,7 +310,9 @@ a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 | `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at", "last_used_at"}]}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`); `last_used_at` is when it was last let in, to the minute, or null |
 | `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204; revokes a token or a grant (and its OAuth tokens) |
 | `POST /v1/mailboxes/{address}/connect-codes` | `{"name"}` | 201 `{"id", "name", "code", "expires_at"}`; the code is shown only here. 409 `oauth_off` without a public URL, 429 `too_many_codes` with 10 unused |
-| `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots and its tokens are gone |
+| `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>` | | `{"reports": [{"id", "agent_id", "agent_name", "agent_kind", "received_at", "message_id", "to", "subject", "sent_at", "body_markdown", "checked_version", "check": {"version", "guide_check"}}], "pending", "dropped", "more"}`, oldest first, after the cursor (0 for all), at most `limit` (100 by default, 500 at most) |
+| `POST /v1/mailboxes/{address}/reports/ack` | `{"up_to_id"}` | `{"deleted"}`; the reports up to that id are gone |
+| `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots, its tokens and its reports are gone |
 
 Publishing: the first push sends no `If-Match` (or `If-Match: 0`); every
 later one sends `If-Match` with the current version (`5` or `"5"`) and a
@@ -295,20 +328,31 @@ plain address, not JSON) or `mailbox_mismatch` (the snapshot's
   `claude mcp add --transport http openagc-scout-rules https://rules.example.com/mcp --header "Authorization: Bearer oagc_agt_…"`.
 - **REST**, for scripts:
   `GET /v1/m/{address}/guide?to=ann@acme.com&to=…&message_type=reply`
-  (`to` may repeat or be comma-separated) and
-  `GET /v1/m/{address}/facts?category=Work&query=calendar`.
+  (`to` may repeat or be comma-separated),
+  `GET /v1/m/{address}/facts?category=Work&query=calendar`, and
+  `POST /v1/m/{address}/check` and `POST /v1/m/{address}/reports` with
+  the tools' arguments as JSON (200 and 202; 422 `invalid_arguments`, 413
+  `too_large`).
 
 | Tool | Input | Answer |
 |---|---|---|
 | `guide_rules` | `to` (array of addresses), `message_type` (`new`, `reply`, `forward`) | `{"mailbox", "sends_as", "about", "writing_guide", "guide_version", "version", "published_at"}` |
 | `facts_lookup` | `category`, `query` | `{"facts": [{"category", "label", "value", "ask_before_using"}], "version", "published_at"}` |
+| `check_draft` | `to`, `message_type` (read from a `Re:` or `Fwd:` subject when left out), `subject`, `body_markdown` (required, at most 256 KB) | `{"guide_check": ["Uses “circle back”, which your rules ban"], "guide_version", "version", "published_at"}`: what the draft breaks, empty when nothing |
+| `report_send` | `message_id` (as the service answered it), `to`, `subject`, `body_markdown` (required, at most 256 KB), `sent_at` (RFC 3339), `checked_version` | `{"queued": true, "report_id", "guide_check", "version", "message"}`; the server checks the body again and keeps the report for the app |
 
 The names, arguments and answers are mailbox mode's (`docs/mcp.md`), so an
 agent's instructions work with either; there is no `send_mode`, since a
 cloud agent sends through the mailbox's service. `version` and
 `published_at` say which snapshot answered and when the app published it:
 with the app closed nothing changes, and the guide is "as of" that time.
-Before anything is published both answer `not_published`.
+`check_draft` is mailbox mode's guide check, word for word: the body's
+text (Markdown read as mailbox mode renders it) against the banned and
+required phrases and length limits of the entries that apply to those
+recipients and that type; no model is asked. Before anything is published
+the reading tools and `check_draft` answer `not_published`; `report_send`
+still queues (with an empty check). Every call takes one request from the
+agent's rate limit.
 
 `GET /healthz` answers `ok` when the database answers.
 

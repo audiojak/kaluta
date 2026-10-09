@@ -5,7 +5,9 @@
 //!
 //! - **MCP over Streamable HTTP** at `/mcp` for agents, with an agent
 //!   token: `guide_rules` and `facts_lookup`, named, shaped and answered as
-//!   in mailbox mode (§10.1), plus the snapshot's version and time.
+//!   in mailbox mode (§10.1), plus the snapshot's version and time;
+//!   `check_draft`, the guide's deterministic check; and `report_send`,
+//!   which queues what the agent sent for the app ([`reports`]).
 //! - **REST** for the app's publishing (publisher token) and read-only
 //!   `GET`s for scripts (agent token).
 //! - **OAuth 2.1** for clients that take only a URL (a claude.ai custom
@@ -28,6 +30,7 @@ pub mod db;
 pub mod limit;
 mod mcp;
 pub mod oauth;
+pub mod reports;
 mod rest;
 pub mod tokens;
 
@@ -103,6 +106,7 @@ pub fn app(config: &Config) -> Result<Router, StartError> {
         None => None,
     };
     let db = Db::open(&config.data_dir)?;
+    sweep_reports_hourly(&db);
     let state = AppState(Arc::new(Inner {
         db,
         limiter: RateLimiter::new(config.rate_limit_per_minute),
@@ -114,6 +118,27 @@ pub fn app(config: &Config) -> Result<Router, StartError> {
         .merge(mcp::router(state))
         .layer(axum::extract::DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(axum::middleware::from_fn(log_requests)))
+}
+
+/// How often reports the app never pulled are swept once 30 days old.
+pub const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Delete reports past their 30 days (decision 10) now and every
+/// [`SWEEP_EVERY`], on the runtime the router is made on, if there is one.
+fn sweep_reports_hourly(db: &Db) {
+    let Ok(handle) = tokio::runtime::Handle::try_current() else { return };
+    let db = db.clone();
+    handle.spawn(async move {
+        let mut tick = tokio::time::interval(SWEEP_EVERY);
+        loop {
+            tick.tick().await;
+            match db.run(|c| db::sweep_reports(c, db::now_ms())).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(deleted = n, "reports past 30 days swept"),
+                Err(e) => tracing::warn!(error = %e, "reports not swept"),
+            }
+        }
+    });
 }
 
 /// Which token a request was made with, for its log line: filled in by

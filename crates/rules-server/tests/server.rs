@@ -80,8 +80,9 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     let tools = client.list_all_tools().await.unwrap();
     let catalog = agent_mcp::mailbox_catalog();
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
-    assert_eq!(names, ["guide_rules", "facts_lookup"]);
-    for t in &tools {
+    assert_eq!(names, ["guide_rules", "facts_lookup", "check_draft", "report_send"]);
+    // Mailbox mode's two reading tools take the same arguments here.
+    for t in tools.iter().take(2) {
         let spec = catalog.iter().find(|c| c.name() == t.name).unwrap();
         assert_eq!(Value::Object(t.input_schema.as_ref().clone()), spec.input_schema, "{}", t.name);
     }

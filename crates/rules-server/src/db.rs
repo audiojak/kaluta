@@ -89,6 +89,28 @@ const MIGRATIONS: &[&str] = &[
     "
     ALTER TABLE agent_tokens ADD COLUMN last_used_at INTEGER;
 ",
+    // Reports of what agents sent (`report_send`), waiting for the app to
+    // pull them. AUTOINCREMENT: an id is never used twice, so the app's
+    // `after` cursor and `ack` never skip or repeat one.
+    "
+    CREATE TABLE reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        message_id TEXT,
+        recipients TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        sent_at INTEGER,
+        body_markdown TEXT NOT NULL,
+        checked_version INTEGER,
+        check_version INTEGER,
+        guide_check TEXT NOT NULL
+    );
+    CREATE INDEX reports_by_mailbox ON reports(mailbox_id, id);
+    CREATE INDEX reports_by_time ON reports(received_at);
+    ALTER TABLE mailboxes ADD COLUMN reports_dropped INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -556,6 +578,129 @@ pub fn use_oauth_token(c: &Connection, token_hash: &str, now: i64) -> rusqlite::
     Ok(())
 }
 
+/// Reports kept per mailbox until the app pulls them; past this the oldest
+/// are dropped, and counted.
+pub const MAX_PENDING_REPORTS: i64 = 10_000;
+/// Reports the app has not pulled are deleted this long after they came
+/// (decision 10).
+pub const REPORT_RETENTION_MS: i64 = 30 * 24 * 3_600_000;
+
+/// A report an agent filed with `report_send`: what it says it sent, and
+/// what the guide's check made of it then.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReportRow {
+    pub id: i64,
+    pub mailbox_id: i64,
+    pub agent_id: String,
+    pub received_at: i64,
+    pub message_id: Option<String>,
+    pub recipients: Vec<String>,
+    pub subject: String,
+    pub sent_at: Option<i64>,
+    pub body_markdown: String,
+    /// The snapshot version the agent says it checked the draft against.
+    pub checked_version: Option<i64>,
+    /// The snapshot version the server checked it against when it came.
+    pub check_version: Option<i64>,
+    /// What that check found (`guide_check`'s messages).
+    pub guide_check: Vec<String>,
+}
+
+/// Store a report, dropping the mailbox's oldest beyond `max_pending`
+/// ([`MAX_PENDING_REPORTS`]; counted in `reports_dropped`). Its id.
+pub fn insert_report(c: &Connection, r: &ReportRow, max_pending: i64) -> rusqlite::Result<i64> {
+    c.execute(
+        "INSERT INTO reports (mailbox_id, agent_id, received_at, message_id, recipients, subject, sent_at, \
+         body_markdown, checked_version, check_version, guide_check) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            r.mailbox_id,
+            r.agent_id,
+            r.received_at,
+            r.message_id,
+            serde_json::to_string(&r.recipients).unwrap_or_else(|_| "[]".into()),
+            r.subject,
+            r.sent_at,
+            r.body_markdown,
+            r.checked_version,
+            r.check_version,
+            serde_json::to_string(&r.guide_check).unwrap_or_else(|_| "[]".into()),
+        ],
+    )?;
+    let id = c.last_insert_rowid();
+    let dropped = c.execute(
+        "DELETE FROM reports WHERE mailbox_id = ?1 AND id <= \
+         (SELECT id FROM reports WHERE mailbox_id = ?1 ORDER BY id DESC LIMIT 1 OFFSET ?2)",
+        params![r.mailbox_id, max_pending],
+    )?;
+    if dropped > 0 {
+        c.execute(
+            "UPDATE mailboxes SET reports_dropped = reports_dropped + ?2 WHERE id = ?1",
+            params![r.mailbox_id, i64::try_from(dropped).unwrap_or(i64::MAX)],
+        )?;
+    }
+    Ok(id)
+}
+
+/// A report as listed, with its agent's name and kind.
+pub type ListedReport = (ReportRow, String, String);
+
+/// A mailbox's reports after `after`, oldest first, at most `limit`.
+pub fn reports(c: &Connection, mailbox_id: i64, after: i64, limit: i64) -> rusqlite::Result<Vec<ListedReport>> {
+    let mut stmt = c.prepare(
+        "SELECT r.id, r.mailbox_id, r.agent_id, r.received_at, r.message_id, r.recipients, r.subject, r.sent_at, \
+         r.body_markdown, r.checked_version, r.check_version, r.guide_check, \
+         COALESCE(t.name, ''), COALESCE(t.kind, 'token') \
+         FROM reports r LEFT JOIN agent_tokens t ON t.id = r.agent_id \
+         WHERE r.mailbox_id = ?1 AND r.id > ?2 ORDER BY r.id LIMIT ?3",
+    )?;
+    stmt.query_map(params![mailbox_id, after, limit], |r| {
+        let recipients: String = r.get(5)?;
+        let check: String = r.get(11)?;
+        Ok((
+            ReportRow {
+                id: r.get(0)?,
+                mailbox_id: r.get(1)?,
+                agent_id: r.get(2)?,
+                received_at: r.get(3)?,
+                message_id: r.get(4)?,
+                recipients: serde_json::from_str(&recipients).unwrap_or_default(),
+                subject: r.get(6)?,
+                sent_at: r.get(7)?,
+                body_markdown: r.get(8)?,
+                checked_version: r.get(9)?,
+                check_version: r.get(10)?,
+                guide_check: serde_json::from_str(&check).unwrap_or_default(),
+            },
+            r.get(12)?,
+            r.get(13)?,
+        ))
+    })?
+    .collect()
+}
+
+/// How many reports wait for the app, and how many were dropped for room.
+pub fn report_counts(c: &Connection, mailbox_id: i64) -> rusqlite::Result<(i64, i64)> {
+    c.query_row(
+        "SELECT (SELECT COUNT(*) FROM reports WHERE mailbox_id = ?1), \
+         (SELECT reports_dropped FROM mailboxes WHERE id = ?1)",
+        [mailbox_id],
+        |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+    )
+}
+
+/// The app has the mailbox's reports up to `up_to_id`: delete them. How
+/// many went.
+pub fn ack_reports(c: &Connection, mailbox_id: i64, up_to_id: i64) -> rusqlite::Result<usize> {
+    c.execute("DELETE FROM reports WHERE mailbox_id = ?1 AND id <= ?2", params![mailbox_id, up_to_id])
+}
+
+/// Delete reports older than [`REPORT_RETENTION_MS`], pulled or not. How
+/// many went.
+pub fn sweep_reports(c: &Connection, now: i64) -> rusqlite::Result<usize> {
+    c.execute("DELETE FROM reports WHERE received_at < ?1", [now - REPORT_RETENTION_MS])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,7 +756,10 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         let (row, _) = db.run_now(|c| agent_token(c, "0123456789abcdef")).unwrap().unwrap();
         assert_eq!((row.kind.as_str(), row.client_id), (KIND_TOKEN, None));
-        assert_eq!(db.run_now(|c| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))).unwrap(), 3);
+        assert_eq!(
+            db.run_now(|c| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))).unwrap(),
+            u32::try_from(MIGRATIONS.len()).unwrap()
+        );
         let listed = db.run_now(|c| agent_tokens(c, 1)).unwrap();
         assert_eq!(listed[0].2, None, "never used, as far as the server knows");
         db.run_now(|c| touch_agent(c, "0123456789abcdef", 100_000)).unwrap();
@@ -651,6 +799,47 @@ mod tests {
             assert!(delete_mailbox(c, id)?);
             assert!(versions(c, id)?.is_empty());
             assert!(agent_token(c, &t.id)?.is_none());
+            Ok(())
+        })
+        .unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reports_are_kept_in_order_dropped_past_the_cap_acked_and_swept() {
+        let dir = scratch();
+        let db = Db::open(&dir).unwrap();
+        db.run_now(|c| {
+            let id = insert_mailbox(c, "a@x.com", "h", 1)?.unwrap();
+            let report = |at: i64| ReportRow {
+                id: 0,
+                mailbox_id: id,
+                agent_id: "0123456789abcdef".into(),
+                received_at: at,
+                message_id: Some("m@x".into()),
+                recipients: vec!["ann@acme.com".into()],
+                subject: "Hi".into(),
+                sent_at: None,
+                body_markdown: "Hello".into(),
+                checked_version: Some(3),
+                check_version: Some(3),
+                guide_check: vec!["Uses “circle back”, which your rules ban".into()],
+            };
+            let ids: Vec<i64> = (1..=5).map(|at| insert_report(c, &report(at), 3)).collect::<Result<_, _>>()?;
+            let listed = reports(c, id, 0, 100)?;
+            let kept: Vec<i64> = listed.iter().map(|(r, _, _)| r.id).collect();
+            assert_eq!(kept, ids[2..], "the oldest went for room");
+            assert_eq!(report_counts(c, id)?, (3, 2));
+            assert_eq!(listed[0].0.guide_check.len(), 1);
+            assert_eq!(listed[0].1, "", "an agent the server no longer has is named by its id alone");
+            assert_eq!(reports(c, id, ids[3], 100)?.len(), 1, "after a cursor");
+            assert_eq!(ack_reports(c, id, ids[3])?, 2);
+            assert_eq!(report_counts(c, id)?.0, 1);
+            assert_eq!(sweep_reports(c, 5 + REPORT_RETENTION_MS)?, 0, "not yet 30 days");
+            assert_eq!(sweep_reports(c, 6 + REPORT_RETENTION_MS)?, 1);
+            insert_report(c, &report(9), 3)?;
+            assert!(delete_mailbox(c, id)?);
+            assert_eq!(c.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get::<_, i64>(0))?, 0);
             Ok(())
         })
         .unwrap();

@@ -6,7 +6,9 @@
 //!
 //! The tools are mailbox mode's `guide_rules` and `facts_lookup` (§10.1):
 //! the same names, arguments and answers, plus the snapshot's `version`
-//! and `published_at`. `check_draft` and `report_send` come later.
+//! and `published_at`; `check_draft`, the guide's deterministic check on a
+//! draft (answered as mailbox mode's draft tools answer `guide_check`); and
+//! `report_send`, which queues what the agent sent for the app.
 
 use std::sync::Arc;
 
@@ -24,27 +26,36 @@ use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{Value, json};
 
-use crate::answers::{self, FactsArgs, GuideArgs};
+use crate::answers::{self, CheckArgs, FactsArgs, GuideArgs};
+use crate::reports::ReportArgs;
 use crate::{AgentAuth, AppState, TokenSlot, agent_auth};
 
 const INSTRUCTIONS: &str = "The writing guide and shared facts of one agent mailbox, published from OpenAGC. Read \
-                            guide_rules before writing, and use only the facts facts_lookup gives. Answers are as of \
-                            the version and time they name. Mail is read and sent through the mailbox's service, \
-                            not here.";
+                            guide_rules before writing, and use only the facts facts_lookup gives. Check each draft \
+                            with check_draft and fix what it reports before sending; after sending, call \
+                            report_send. Answers are as of the version and time they name. Mail is read and sent \
+                            through the mailbox's service, not here.";
 
 pub const GUIDE_RULES: &str = "guide_rules";
 pub const FACTS_LOOKUP: &str = "facts_lookup";
+pub const CHECK_DRAFT: &str = "check_draft";
+pub const REPORT_SEND: &str = "report_send";
 
 fn object(properties: Value) -> serde_json::Map<String, Value> {
-    match json!({ "type": "object", "properties": properties, "required": [], "additionalProperties": false }) {
+    object_requiring(properties, &[])
+}
+
+fn object_requiring(properties: Value, required: &[&str]) -> serde_json::Map<String, Value> {
+    match json!({ "type": "object", "properties": properties, "required": required, "additionalProperties": false }) {
         Value::Object(map) => map,
         _ => serde_json::Map::new(),
     }
 }
 
-/// The two tools' input schemas: mailbox mode's (kept in step by a test
-/// against `agent-mcp`'s catalog).
-pub fn input_schemas() -> [(&'static str, serde_json::Map<String, Value>); 2] {
+/// The tools' input schemas: `guide_rules` and `facts_lookup` are mailbox
+/// mode's (kept in step by a test against `agent-mcp`'s catalog);
+/// `check_draft` takes a draft as `mail_send` does.
+pub fn input_schemas() -> [(&'static str, serde_json::Map<String, Value>); 4] {
     [
         (
             GUIDE_RULES,
@@ -61,6 +72,36 @@ pub fn input_schemas() -> [(&'static str, serde_json::Map<String, Value>); 2] {
                 "query": { "type": "string", "description": "Words to look for in labels and values." },
             })),
         ),
+        (
+            CHECK_DRAFT,
+            object_requiring(
+                json!({
+                    "to": { "type": "array", "items": { "type": "string" },
+                            "description": "Recipients, for rules about particular people." },
+                    "message_type": { "type": "string", "enum": answers::MESSAGE_TYPES,
+                                      "description": "Read from the subject (Re:, Fwd:) when left out." },
+                    "subject": { "type": "string" },
+                    "body_markdown": { "type": "string", "description": "The draft's body, in Markdown." },
+                }),
+                &["body_markdown"],
+            ),
+        ),
+        (
+            REPORT_SEND,
+            object_requiring(
+                json!({
+                    "message_id": { "type": "string",
+                                    "description": "The sent message's Message-ID, as the mail service answered it." },
+                    "to": { "type": "array", "items": { "type": "string" } },
+                    "subject": { "type": "string" },
+                    "sent_at": { "type": "string", "description": "When it was sent, RFC 3339." },
+                    "body_markdown": { "type": "string", "description": "The body as sent, in Markdown." },
+                    "checked_version": { "type": "integer",
+                                         "description": "check_draft's version, if the draft was checked." },
+                }),
+                &["to", "subject", "body_markdown"],
+            ),
+        ),
     ]
 }
 
@@ -68,7 +109,20 @@ fn tools() -> Vec<Tool> {
     input_schemas()
         .into_iter()
         .map(|(name, schema)| {
+            let annotations = ToolAnnotations::new().read_only(name != REPORT_SEND).destructive(false);
             let description = match name {
+                CHECK_DRAFT => {
+                    "Check a draft against the mailbox's writing guide before sending it: the guide's banned and \
+                     required phrases and length limits that apply to these recipients and this message type. \
+                     guide_check lists what the draft breaks (empty when nothing); fix those and check again. \
+                     Deterministic, from the published guide (version says which)."
+                }
+                REPORT_SEND => {
+                    "After sending a message through the mailbox's service, report it: the Message-ID the service \
+                     gave it, the recipients, subject, when it was sent and the body as sent. OpenAGC records it \
+                     as written by this agent and links it to the sent mail. guide_check says what the sent body \
+                     broke, if anything."
+                }
                 GUIDE_RULES => {
                     "The mailbox's writing guide: how mail from it is written (tone, length, phrases to use and \
                      avoid) and the facts drafts may use, for the given recipients and message type. Read it before \
@@ -81,8 +135,7 @@ fn tools() -> Vec<Tool> {
                      A fact marked ask_before_using needs the user's yes before it goes in a message."
                 }
             };
-            Tool::new(name, description, schema)
-                .with_annotations(ToolAnnotations::new().read_only(true).destructive(false))
+            Tool::new(name, description, schema).with_annotations(annotations)
         })
         .collect()
 }
@@ -104,15 +157,30 @@ impl RulesMcp {
         enum Call {
             Guide(GuideArgs),
             Facts(FactsArgs),
+            Check(CheckArgs),
+        }
+        // The tool's name and the token's id; never the arguments.
+        tracing::info!(token = %auth.token_id, tool = name, "tool call");
+        // A report is kept whether or not anything was published yet.
+        if name == REPORT_SEND {
+            let filed = match serde_json::from_value::<ReportArgs>(arguments) {
+                Ok(a) => crate::reports::file(&self.state, auth, a).await,
+                Err(e) => return tool_error("invalid_arguments", e),
+            };
+            return match filed {
+                Ok(answer) => CallToolResult::structured(answer),
+                Err(e) => tool_error(e.code, e.message),
+            };
         }
         let parsed = match name {
             GUIDE_RULES => serde_json::from_value::<GuideArgs>(arguments)
                 .map_err(|e| e.to_string())
                 .and_then(|a| answers::check_guide_args(&a).map(|()| Call::Guide(a))),
+            CHECK_DRAFT => serde_json::from_value::<CheckArgs>(arguments)
+                .map_err(|e| e.to_string())
+                .and_then(|a| answers::check_draft_args(&a).map(|()| Call::Check(a))),
             _ => serde_json::from_value::<FactsArgs>(arguments).map(Call::Facts).map_err(|e| e.to_string()),
         };
-        // The tool's name and the token's id; never the arguments.
-        tracing::info!(token = %auth.token_id, tool = name, "tool call");
         let call = match parsed {
             Ok(c) => c,
             Err(e) => return tool_error("invalid_arguments", e),
@@ -125,6 +193,7 @@ impl RulesMcp {
         let answer = match call {
             Call::Guide(a) => answers::guide_rules(&snapshot, &a),
             Call::Facts(a) => answers::facts_lookup(&snapshot, &a),
+            Call::Check(a) => answers::check_draft(&snapshot, &a),
         };
         CallToolResult::structured(answer)
     }
