@@ -75,6 +75,9 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         // Mailbox mode runs the core headless when the app is closed
         // (spec §10.1), reusing its tools rather than copying them.
         ("openagc-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "openagc-core"][..]),
+        // The rules server for cloud agents (spec §10.6): the guide's
+        // renderers and nothing of the app's (never the core or a store).
+        ("rules-server", &["writing-guide"][..]),
         ("uniffi-bindgen-swift", &[][..]),
         ("xtask", &["mail-domain", "mail-store", "agent-mcp", "agent-api", "permissions"][..]),
     ])

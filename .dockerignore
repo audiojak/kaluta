@@ -1,0 +1,7 @@
+# Only the Rust workspace goes into an image build (crates/rules-server/Dockerfile).
+*
+!Cargo.toml
+!Cargo.lock
+!crates
+!xtask
+**/target
