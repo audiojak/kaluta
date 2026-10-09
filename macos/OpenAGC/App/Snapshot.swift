@@ -63,6 +63,13 @@ import os
 ///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
+///   -OpenAGCSnapshotRulesServer sheet|status|error|facts
+///                                       a new agent mailbox (fake service) with
+///                                       a guide and facts: the Publish to a
+///                                       Rules Server sheet with its list, its
+///                                       Settings row publishing (sample status,
+///                                       no server contacted) or failing, or its
+///                                       Facts with the Share switch (spec §10.6)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -364,6 +371,41 @@ enum Snapshot {
                     window = sheet
                 }
             }
+            if let rules = defaults.string(forKey: "OpenAGCSnapshotRulesServer"), let model = delegate.model,
+               let core = model.core, CoreClient.usesFakeAgentMail,
+               let created = try? await model.createAgentMailbox(name: "Research Scout") {
+                let id = created.accountId
+                await model.switchAccount(to: id)
+                await Self.seedRules(core)
+                switch rules {
+                case "sheet":
+                    window = Self.rulesSheetWindow(model, accountID: id)
+                case "facts":
+                    model.openFacts()
+                    await model.facts.load()
+                    // The detail's scroll view does not self-snapshot in the
+                    // main window: the chosen fact's detail on its own.
+                    if let fact = model.facts.facts.first(where: { $0.label == "Calendar link" }) {
+                        let detail = FactDetail(fact: fact, store: model.facts, onEdit: { _ in })
+                            .background(Color(nsColor: .windowBackgroundColor))
+                            .environment(model)
+                        window = Self.hostingWindow(detail, width: 560, height: 360)
+                    }
+                default:
+                    let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
+                    try? core.debugSetRulesPublication(
+                        id, serverURL: "https://rules.example.com", version: 12, publishedAt: minutesAgo,
+                        error: rules == "error" ? "rules.example.com no longer accepts this Mac's publisher token for research-scout@demo.primitive.email. The server's operator can forget the mailbox (openagc-rules forget-mailbox); then publish again." : nil)
+                    await model.reloadAccounts()
+                    window = Self.rulesRowWindow(model, accountID: id)
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+                // The sheet's list loads after it opens: fit the window to it.
+                if rules == "sheet", let shown = window, let content = shown.contentView {
+                    shown.setContentSize(NSSize(width: shown.frame.width, height: content.fittingSize.height))
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
             if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID
@@ -446,6 +488,71 @@ enum Snapshot {
                               backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: form)
+        window.makeKeyAndOrderFront(nil)
+        return window
+    }
+
+    /// An agent mailbox's guide and facts, for the rules-server snapshots.
+    private static func seedRules(_ core: CoreClient) async {
+        func rule(_ statement: String, _ kind: GuideKind = .rule, scope: GuideScope = GuideScope(groups: [], people: [], messageTypes: [], languages: []),
+                  check: GuideCheck? = nil) -> GuideEdit {
+            .add(fields: GuideEntryFields(category: "B6", kind: kind, statement: statement, scope: scope, check: check),
+                 status: .accepted, source: .you, origin: nil)
+        }
+        _ = try? await core.applyGuideEdits([
+            rule("Never say “circle back”", check: GuideCheck(kind: .bannedPhrase, value: "circle back")),
+            rule("Sign off as Research Scout, never with the user's name"),
+            rule("Be formal and brief with customers", .guideline,
+                 scope: GuideScope(groups: ["Customers"], people: [], messageTypes: [], languages: [])),
+            rule("Call her Annie", .guideline,
+                 scope: GuideScope(groups: [], people: ["ann@acme.example"], messageTypes: [], languages: [])),
+        ], reason: "snapshot")
+        _ = try? await core.saveAudienceGroup(AudienceGroup(id: 0, name: "Customers", status: .confirmed, description: "",
+                                                             members: ["@acme.example", "bea@globex.example"]))
+        func fact(_ c: String, _ l: String, _ v: String, _ u: FactUse = .free) -> FactEdit {
+            .add(fields: FactFields(category: c, label: l, value: v, use: u, asOf: nil), status: .accepted, source: .you)
+        }
+        _ = try? await core.applyFactEdits([
+            fact("work", "Occupation or role", "Research assistant"),
+            fact("availability", "Calendar link", "https://cal.example.com/scout"),
+            fact("people", "Sam Rivera", "The user's assistant", .ask),
+            fact("contact", "Mailing address", "1 Main St", .never),
+        ], reason: "snapshot")
+    }
+
+    /// The publish sheet in a window of its own (the Settings scene, which
+    /// presents it, cannot be opened from here).
+    private static func rulesSheetWindow(_ model: AppModel, accountID: String) -> NSWindow {
+        let root = PublishRulesSheet(accountID: accountID, name: "Research Scout")
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(model)
+        return hostingWindow(root, width: PublishRulesSheet.width, height: nil)
+    }
+
+    /// The agent's Settings › Accounts row, with its Rules server line.
+    private static func rulesRowWindow(_ model: AppModel, accountID: String) -> NSWindow {
+        let form = Form {
+            Section {
+                if let account = model.accounts.first(where: { $0.id == accountID }) {
+                    AccountRow(account: account, onRemove: {})
+                }
+            } header: {
+                Text("Research Scout")
+            }
+        }
+        .formStyle(.grouped)
+        .environment(model)
+        return hostingWindow(form, width: 640, height: 420)
+    }
+
+    /// `root` in a window of its own; with no height, as tall as it needs.
+    private static func hostingWindow(_ root: some View, width: CGFloat, height: CGFloat?) -> NSWindow {
+        let hosting = NSHostingView(rootView: root.frame(width: width, height: height, alignment: .top))
+        let size = NSSize(width: width, height: height ?? hosting.fittingSize.height)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
         return window
     }

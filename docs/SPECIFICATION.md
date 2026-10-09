@@ -2010,8 +2010,9 @@ that process keeps the store read-only; its sends are, §10.1.)
 *(Decided 2026-10-08.)* Plan `docs/plans/rules-server.md`; operators'
 guide `docs/rules-server.md`. *(Implemented 2026-10-09, oagc-gmn7.2: the
 server with bearer tokens, the publish API, versioned snapshots and
-`guide_rules` and `facts_lookup` over MCP and REST. Not yet: the app's
-publishing, OAuth, `check_draft`, `report_send`, reports and encryption at
+`guide_rules` and `facts_lookup` over MCP and REST. Implemented 2026-10-09,
+oagc-gmn7.3: the app's publishing (*Publish to a Rules Server…*, below).
+Not yet: OAuth, `check_draft`, `report_send`, reports and encryption at
 rest.)*
 
 Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
@@ -2107,6 +2108,37 @@ its age; with the app closed nothing changes, and agents see the guide
 name the one it was checked against. Settings shows "Version 12,
 published 3 minutes ago".
 
+*(Implemented 2026-10-09, oagc-gmn7.3.)* An agent mailbox's row in
+Settings › Accounts has *Rules server*: *Publish to a Rules Server…* opens
+a sheet with the server's address (`https://`, added when left out; plain
+`http://` only to `localhost`, `127.0.0.1` or `[::1]`, for a server run on
+the Mac), an optional registration token (§10.6 *Registration*, used once
+and not kept), a link to the operators' guide and the list of what goes:
+each accepted rule and guideline with its scope in words, people counted
+rather than named; the shared facts by category and label; each confirmed
+audience group by name and member count, sent as hashes; then a line
+saying the mailbox's address, name and limits go too, never mail, quotes
+from it or keys, and how many facts stay on the Mac. *Publish* registers
+the address (`POST /v1/mailboxes`, the publisher token into the Keychain,
+§12) and pushes. The row then says "https://rules.example.com · Version
+12, published 3 minutes ago" (or why the last push failed, in
+`Tone.failure`), with *Publish Now* and *Stop Publishing…*, which asks
+whether to keep the last version on the server (agents go on reading it)
+or remove the mailbox there (its snapshots and agent tokens). The core
+(`rules_publish.rs`) keeps `rules-server.json` in the account directory:
+the server, whether it publishes, the salt (new at each registration),
+the last version, when, and the last error. The snapshot is built as
+mailbox mode builds the guide (accepted entries without F3 leftovers,
+confirmed groups, facts as drafting sees them), hashed with the salt. A
+change to the guide or facts pushes 5 s after the last change (at most
+30 s after the first), and not at all when what would go is unchanged;
+at launch the app pushes what changed while it was closed. Each push is
+one version above the last with `If-Match` on it; a 409, 412 or 428 takes
+`current_version` from the answer and pushes above it (up to four tries),
+a 404 (the operator forgot the mailbox) registers again with a new salt,
+and an unreachable, limiting or failing server is tried again a minute
+later. Redirects are not followed.
+
 **Reports and retention.** Reports carry what the agent wrote, never
 mail it read. The app pulls them at sync, matches them to sent mail by
 Message-ID and records them as AI compositions (§14.10, agent
@@ -2135,7 +2167,13 @@ cloud agents will use the same queue later.
 - Facts, by a *Share with cloud agents* switch on each fact (§14.11). On
   by default for the mailbox's own *Use freely* facts; off by default
   for *Ask before using* (an unattended agent cannot ask) and for global
-  facts (ADR 0012); never for *Never share*.
+  facts (ADR 0012); never for *Never share*. *(Implemented 2026-10-09,
+  oagc-gmn7.3: `facts.share_with_cloud`, migration 22, NULL for the
+  default, so a fact whose use changes follows the default for its new
+  use until the user sets the switch; shown in the fact's detail on an
+  agent mailbox's Facts, a global fact's switch counting for every agent
+  mailbox that publishes; an Ask before using fact switched on goes with
+  "ask the user before using this".)*
 - Never mail, keys or tokens of any service.
 The publish sheet lists exactly what goes before the first push.
 
@@ -2508,9 +2546,14 @@ Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
 shared by its agents, §7.9; for mailboxes created before 2026-10-08 the
 service account's id is the agent's account id, so the name is
 unchanged).
-*(Amended 2026-10-08, ADR 0016; not built.)* `rules.publish_token.<server>.<account>`
-(the publisher token for one agent mailbox on one rules server, §10.6) and,
-with encryption at rest, `rules.snapshot_key.<account>`. Agent tokens for
+*(Amended 2026-10-08, ADR 0016.)* `rules.publish_token.<server>.<account>`
+(the publisher token for one agent mailbox on one rules server, §10.6;
+`<server>` is the server's host, port and path, as `rules.example.com` or
+`127.0.0.1:8787`; *implemented 2026-10-09, oagc-gmn7.3*: written at
+registration, replaced when the mailbox registers again, deleted when
+publishing stops with the mailbox removed from the server or moves to
+another server) and, with encryption at rest (not built),
+`rules.snapshot_key.<account>`. Agent tokens for
 the rules server are shown once and never stored by the app, which keeps
 only their ids and names.
 Routines need no secret of their own: the CLI holds the claude.ai login.

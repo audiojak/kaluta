@@ -8,8 +8,9 @@ behind your own TLS proxy. Spec §10.6, ADR 0016, plan
 `docs/plans/rules-server.md`.
 
 *Status:* the server is built (bearer tokens; `guide_rules` and
-`facts_lookup`). The app's *Publish to a Rules Server…* (oagc-gmn7.3),
-OAuth for claude.ai connectors (oagc-gmn7.4), *Connect a Cloud Agent…*
+`facts_lookup`), and the app publishes to it (an agent mailbox's
+Settings, *Rules server* › *Publish to a Rules Server…*). OAuth for
+claude.ai connectors (oagc-gmn7.4), *Connect a Cloud Agent…*
 (oagc-gmn7.5), `check_draft` and `report_send` (oagc-gmn7.6) and encryption
 at rest come next.
 
@@ -126,6 +127,21 @@ A backup holds what the live file holds (above); keep it as private. To
 restore, stop the server and put the copy in place as `rules.sqlite3`. Losing
 the database loses nothing that matters: the app publishes again, though
 agents need new tokens.
+
+### Publish from the app
+
+In OpenAGC, Settings › Accounts, an agent mailbox's row has *Rules
+server*: *Publish to a Rules Server…* asks for the server's address
+(`https://rules.example.com`; plain `http://127.0.0.1:8787` works for a
+server on the same Mac) and, if you set one, the registration token. The
+sheet lists exactly what goes before anything does. Publishing registers
+the mailbox, keeps the publisher token in the Keychain and pushes; after
+that every change to the mailbox's writing guide or shared facts is
+pushed a few seconds later while OpenAGC is open, and the row says which
+version the server has and when it was published. Which facts go is each
+fact's *Share with cloud agents* switch, in the mailbox's Facts.
+*Stop Publishing…* either leaves the last version on the server or removes
+the mailbox from it.
 
 ## The trust model
 

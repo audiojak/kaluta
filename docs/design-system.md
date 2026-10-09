@@ -368,6 +368,29 @@ Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
   banner takes their first sentence for AgentMail (its plan has no hourly
   numbers) and the plan's numbers for Primitive; the composer of an agent
   mailbox shows them in full in an info `Banner`.
+- **Rules server** (spec §10.6; `Features/Settings/RulesServerSettings.swift`):
+  the last line of an agent's row, *Rules server*, with *Publish to a Rules
+  Server…* until it publishes, then *Publish Now* and *Stop Publishing…*
+  (a `confirmationDialog`: *Stop Publishing*, or *Stop and Remove from
+  Server* as the destructive choice). Under it the status line in caption,
+  secondary: the server, then "Version 12, published 3 minutes ago"
+  (`DateStyle.relative`, refreshed every 30 s), "· a change waits to go"
+  while a push is due; the last failure under that as a caption
+  `Tone.failure` line with `exclamationmark.triangle`. The sheet is a
+  `Dialog` 560 wide: the address and an optional registration token as
+  rounded fields, a caption with *How to run one* (the operators' guide);
+  then "These go to the server:" in `groupLabel` over a `.card(.neutral)`
+  list (scrolling past 300 points) of groups with a semibold `meta` count
+  ("4 rules and guidelines", "2 facts", "1 audience group"), each entry its
+  statement over a caption ("Guideline · to 1 person · checked"); under the
+  card one caption paragraph on what else goes, what never does and the
+  facts kept back. Work in progress is the dialog's spinner line
+  ("Publishing…"); a refusal is a `Tone.failure` line in the sheet.
+- **Share with cloud agents**: on an agent mailbox's Facts, a fact's
+  detail has the switch (a checkbox `Toggle`) under *Drafts*, with one
+  caption line on what it does (a global fact's says every publishing
+  agent mailbox sends it; an *Ask before using* one's why it is off by
+  default); disabled, with its own caption, for *Never share*.
 
 ### Rows with a due day
 
@@ -563,6 +586,10 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
 | ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
 | ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |
+| ![Publish to a Rules Server: what goes, light](design/rules-sheet-light.png) | ![Publish to a Rules Server: what goes, dark](design/rules-sheet-dark.png) |
+| ![An agent's row publishing to a rules server, light](design/rules-status-light.png) | ![An agent's row publishing to a rules server, dark](design/rules-status-dark.png) |
+| ![A push the rules server refused, light](design/rules-error-light.png) | ![A push the rules server refused, dark](design/rules-error-dark.png) |
+| ![A fact's Share with cloud agents switch, light](design/rules-fact-share-light.png) | ![A fact's Share with cloud agents switch, dark](design/rules-fact-share-dark.png) |
 | ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
 | ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |

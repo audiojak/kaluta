@@ -1,7 +1,7 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); steps 1 to 3 done, the server built
-(2026-10-09). The maintainer took every
+Status: decided (2026-10-08); steps 1 to 4 done, the server built and
+the app publishing to it (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -288,7 +288,10 @@ the headers beta use them.
    revokes agent tokens for the app's *Connect a Cloud Agent…*.)*
 4. App: *Publish to a Rules Server…* in an agent mailbox's settings: the
    URL, the list of what is shared, push on change, a status line
-   ("Version 12, published 3 minutes ago").
+   ("Version 12, published 3 minutes ago"). *(Done 2026-10-09,
+   oagc-gmn7.3: `openagc-core` `rules_publish.rs`, the per-fact switch
+   `facts.share_with_cloud` (migration 22), Settings' *Rules server* row
+   and sheet; spec §10.6 and §12 say what was built.)*
 5. OAuth with connect codes: the server as its own minimal authorization
    server, consent by a one-time code from the app. Moved up from 7:
    claude.ai connectors carry a header only in a limited beta.
