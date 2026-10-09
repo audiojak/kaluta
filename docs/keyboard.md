@@ -1,8 +1,8 @@
 # Keyboard shortcuts
 
-Every action in OpenAGC can be reached from the keyboard (spec §14.3). The app shows
+Every action in Kaluta can be reached from the keyboard (spec §14.3). The app shows
 this list under **Help › Keyboard Shortcuts** (⇧⌘/). It is generated from
-`macos/OpenAGC/App/KeyboardShortcuts.swift`.
+`macos/Kaluta/App/KeyboardShortcuts.swift`.
 
 ## Mail
 
@@ -26,7 +26,7 @@ this list under **Help › Keyboard Shortcuts** (⇧⌘/). It is generated from
 |---|---|
 | `⌘F` | Search mail |
 | `⌘1 – ⌘6` | Inbox, Starred, Sent, Drafts, Archive, Trash |
-| `⌃1 – ⌃9` | Switch to account 1–9 (OpenAGC › Accounts) |
+| `⌃1 – ⌃9` | Switch to account 1–9 (Kaluta › Accounts) |
 
 ## In the thread list
 

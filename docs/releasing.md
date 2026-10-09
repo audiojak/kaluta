@@ -1,4 +1,4 @@
-# Releasing OpenAGC
+# Releasing Kaluta
 
 Releases are signed with Developer ID, notarized and delivered as a DMG. The
 app then updates itself with [Sparkle 2](https://sparkle-project.org). See
@@ -33,7 +33,7 @@ maintainer. Nothing here runs in ordinary CI.
 
    ```bash
    DEVELOPER_ID_APPLICATION="Developer ID Application: Actual AI (TEAMID)" \
-   NOTARY_PROFILE=openagc \
+   NOTARY_PROFILE=kaluta \
    scripts/release.sh 0.2.0            # add --beta for a beta
    ```
 
@@ -50,17 +50,17 @@ maintainer. Nothing here runs in ordinary CI.
    the repository yet: pushing workflow files needs the `workflow` scope
    (`gh auth refresh -h github.com -s workflow`), then `git add -f` it.
 3. Optionally write release notes next to the DMG as
-   `OpenAGC-0.2.0.md`.
+   `Kaluta-0.2.0.md`.
 4. Add the release to the appcast:
 
    ```bash
-   scripts/make-appcast.sh build/release/OpenAGC-0.2.0.dmg 0.2.0          # stable
-   scripts/make-appcast.sh build/release/OpenAGC-0.3.0-beta1.dmg 0.3.0-beta1 --beta
+   scripts/make-appcast.sh build/release/Kaluta-0.2.0.dmg 0.2.0          # stable
+   scripts/make-appcast.sh build/release/Kaluta-0.3.0-beta1.dmg 0.3.0-beta1 --beta
    ```
 
 5. Create the GitHub release `v0.2.0` (mark betas as pre-releases), upload
    the DMG, and commit the updated `appcast.xml` to `main`. The app reads
-   it from `https://raw.githubusercontent.com/audiojak/openagc/main/appcast.xml`.
+   it from `https://raw.githubusercontent.com/audiojak/kaluta/main/appcast.xml`.
 
 Beta items carry the Sparkle `beta` channel. Only users who turn on
 **Settings › General › Include beta versions** see them.

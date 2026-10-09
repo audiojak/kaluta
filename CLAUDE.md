@@ -2,17 +2,18 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
-## OpenAGC project notes
+## Kaluta project notes
 
 - Spec: `docs/SPECIFICATION.md` is the source of truth; beads issue descriptions cite its sections (§N).
 - Toolchain PATH (not in the default shell snapshot): `export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"`.
-- The app's self-snapshot (`-OpenAGCSnapshot`) cannot capture some pure-SwiftUI surfaces on macOS 26 (Form/List content, the onboarding scroll view): they come out blank although the view tree (`-OpenAGCSnapshotDumpViews YES`) shows them. AppKit views and the agent column capture fine. Real window capture needs Screen Recording permission.
+- The app's self-snapshot (`-KalutaSnapshot`) cannot capture some pure-SwiftUI surfaces on macOS 26 (Form/List content, the onboarding scroll view): they come out blank although the view tree (`-KalutaSnapshotDumpViews YES`) shows them. AppKit views and the agent column capture fine. Real window capture needs Screen Recording permission.
 - Checks before closing any issue: `scripts/gate.sh` (wraps `scripts/check.sh` without hiding its exit status) (fmt, clippy -D warnings, tests, check-deps, deny; exits non-zero) and `scripts/test-macos.sh` for the app. Never pipe the gate into `grep`/`tail` before `&& git commit`: the pipe's status wins and a failed gate commits anyway. Use `if scripts/gate.sh >log 2>&1; then …; fi`.
-- Only `openagc-core` may depend on UniFFI; dependency direction is enforced by `cargo xtask check-deps`.
+- Only `kaluta-core` may depend on UniFFI; dependency direction is enforced by `cargo xtask check-deps`.
 - Never touch real Gmail, Google/Apple accounts, or create Claude cloud routines from automation; test against fakes.
-- Never launch the app against the real account or start sync outside the fakes: the dev-signed build can read the real Gmail token from the Keychain. Snapshots use the demo account and `-OpenAGCFakeAgents YES`. Never delete anything under `~/Library/Application Support/OpenAGC`.
+- Never launch the app against the real account or start sync outside the fakes: the dev-signed build can read the real Gmail token from the Keychain. Snapshots use the demo account and `-KalutaFakeAgents YES`. Never delete anything under `~/Library/Application Support/Kaluta` or `~/Library/Application Support/OpenAGC`.
+- The project was named OpenAGC until 2026-10-09 (ADR 0017). Old names survive only where they read what the old name wrote; `cargo xtask check-brand` lists those places and fails on any other. The first real launch migrates the OpenAGC folder, Keychain items and settings (`macos/Kaluta/App/Migration.swift`); never run it outside its tests.
 - Overnight work happens on an `overnight-*` branch (plan in `docs/plans/`); push after each closed issue; never push to `main` overnight.
-- Debug builds are signed with the maintainer's Apple Development identity (team Y5W2BTVS33) or the self-signed "OpenAGC Dev" one, via `macos/Local.xcconfig` from `scripts/dev-signing.sh` (gitignored); ad-hoc rebuilds lose Keychain access to the stored Gmail sign-in. Batch changes: each rebuild of a self-signed build re-prompts for the login keychain.
+- Debug builds are signed with the maintainer's Apple Development identity (team Y5W2BTVS33) or the self-signed "Kaluta Dev" one, via `macos/Local.xcconfig` from `scripts/dev-signing.sh` (gitignored); ad-hoc rebuilds lose Keychain access to the stored Gmail sign-in. Batch changes: each rebuild of a self-signed build re-prompts for the login keychain.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:1105d646 -->
 ## Beads Issue Tracker

@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Decisions that change OpenAGC's architecture, one per file, numbered in
+Decisions that change Kaluta's architecture, one per file, numbered in
 order (`NNNN-short-title.md`). Each says which entry of the register in
 [ADR 0001](0001-architecture-decision-register.md) it amends, and the spec
 is updated in the same change so the two agree. Smaller product decisions
@@ -24,3 +24,4 @@ stay in the spec's dated amendments and the nightly plans in `docs/plans/`.
 | [0014](0014-agent-mailboxes.md) | Agent mailboxes are accounts on an agent-mail service, created in the app | 2026-10-06 |
 | [0015](0015-service-accounts.md) | Agent mailboxes belong to service accounts | 2026-10-08 |
 | [0016](0016-rules-server.md) | A rules server serves agent mailboxes' guides and facts to cloud agents | 2026-10-08 |
+| [0017](0017-named-kaluta.md) | The project is named Kaluta | 2026-10-09 |

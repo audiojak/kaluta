@@ -1,11 +1,11 @@
-# OpenAGC design system
+# Kaluta design system
 
 A small design system for the macOS app. It exists so that the app looks
 like one piece, sits naturally next to Mail on macOS 26, and does not
 repeat mistakes such as the rule under the list header that ran into the
 floating sidebar (oagc-0cw).
 
-The code lives in `macos/OpenAGC/Design/`:
+The code lives in `macos/Kaluta/Design/`:
 
 | File | Holds |
 | --- | --- |
@@ -353,7 +353,7 @@ Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
   "AgentMail · you@example.com" (AgentMail by the user's email) or
   "Primitive · jade-emu.primitive.email" (Primitive by its subdomain).
   ⌃1–⌃9 count down the menu as shown. (An AppKit menu does not
-  self-snapshot; `-OpenAGCSnapshotAgentMailbox switcher` prints the
+  self-snapshot; `-KalutaSnapshotAgentMailbox switcher` prints the
   sections instead.)
 - **Settings › Accounts:** a section per service account under the same
   title, below the user's own accounts: first what its agents share
@@ -591,7 +591,7 @@ when Reduce Motion is on.
    radius or status colour outside `Design/`; the lint checks it.
 6. **Every state in light and dark.** A change to a surface comes with
    snapshots in both appearances (`scripts/snapshot.sh out.png
-   -OpenAGCSnapshotAppearance dark`).
+   -KalutaSnapshotAppearance dark`).
 
 ## Snapshots
 

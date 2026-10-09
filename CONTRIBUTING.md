@@ -1,4 +1,4 @@
-# Contributing to OpenAGC
+# Contributing to Kaluta
 
 Thanks for helping. This file covers how to build, test and land changes.
 The architecture and the reasoning behind it are in
@@ -29,7 +29,7 @@ If you connect a real Gmail account to a development build, also run
 once. It points Debug builds at a stable signing identity
 (`macos/Local.xcconfig`, gitignored): an *Apple Development* certificate if
 you have one (free with any Apple ID: Xcode › Settings › Accounts › Manage
-Certificates › + › Apple Development), otherwise a self-signed "OpenAGC Dev"
+Certificates › + › Apple Development), otherwise a self-signed "Kaluta Dev"
 identity it creates. Without either, every rebuild is a new ad-hoc identity
 and the Keychain stops handing the stored sign-in to the new binary. With
 the self-signed identity macOS still asks for your login password after each
@@ -48,7 +48,7 @@ Allow* lasts across rebuilds.
 
 Crates depend on each other in one direction only: `mail-domain ← store ←
 sync ← core`, and providers/agent adapters depend only on their `*-api`
-crate. `cargo xtask check-deps` enforces this, and only `openagc-core` may
+crate. `cargo xtask check-deps` enforces this, and only `kaluta-core` may
 depend on UniFFI.
 
 ## Checks
@@ -66,7 +66,7 @@ cargo deny check
 ## Security-sensitive code
 
 Changes under `crates/mail-mime/` (HTML sanitization), `crates/permissions/`,
-`crates/agent-mcp/` and `crates/openagc-core/src/agents/` must keep the
+`crates/agent-mcp/` and `crates/kaluta-core/src/agents/` must keep the
 golden-file and injection test suites passing, and should add a test for the
 case being changed. Email content is untrusted input everywhere, including in
 agent prompts and logs. [docs/security.md](docs/security.md) lists each
@@ -90,7 +90,7 @@ real agent CLI. Performance numbers come from the synthetic fixture
 
 `docs/mcp.md` is rendered from the tool catalog by `cargo xtask mcp-docs`
 (the gate checks it), `docs/keyboard.md` from
-`macos/OpenAGC/App/KeyboardShortcuts.swift`, and the prompt snapshots under
+`macos/Kaluta/App/KeyboardShortcuts.swift`, and the prompt snapshots under
 `crates/agent-api/src/routines/snapshots/` by insta (`INSTA_UPDATE=always
 cargo test -p agent-api` after reviewing the change).
 

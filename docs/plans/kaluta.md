@@ -4,6 +4,8 @@ The app, its binaries, crates, identifiers, docs and copy take the name
 **Kaluta** (domain kaluta.org). A kaluta is a small Australian marsupial;
 the logo is one, in black ink.
 
+**Done 2026-10-09** (commits on `kaluta`, issues oagc-apj2.1–.8).
+
 Branch `kaluta`, from `main` at 97821fe (PRs #14, #15 and #16 merged),
 run during the day rather than overnight (maintainer, 2026-10-09). A
 rename touches nearly every file, so nothing else should land on `main`
@@ -81,14 +83,15 @@ holds it:
    never sent twice.
 3. **Imports** accept `openagc-writing-guide` and `openagc_facts` files.
 4. **Outside-agent configs** (`~/.claude.json`, `~/.codex/config.toml`):
-   an `openagc-<agent>` entry, or one whose command is an `openagc-mcp`
-   path, is recognised as ours. Settings shows it as *Needs updating*,
-   and *Update* rewrites it as `kaluta-<agent>` through the existing
-   preview, approve and backup flow. Nothing is rewritten unasked.
+   *Connect an Agent…* finds the `openagc-<agent>` entry it wrote, says
+   it replaces it, and writes `kaluta-<agent>` in its place through the
+   existing preview, approve and backup flow. Nothing is rewritten
+   unasked. *(Built 2026-10-09: the sheet says so; there is no separate
+   Needs updating state in Settings.)*
 5. **Rules server env vars:** `OPENAGC_RULES_*` is read when the
    `KALUTA_RULES_*` variable is unset, with a warning in the log naming
    the new one.
-6. **Backups:** cleanup and listing find `.openagc-backup-` files too.
+6. ~~Backups~~: nothing lists or cleans up backups, so nothing to do.
 7. **Rules encryption labels are not renamed.** `rules-crypto`'s
    domain-separation labels (`openagc-rules/v1/<label>` and the HKDF
    salt `openagc-rules/v1/credential`) are protocol constants: changing
@@ -118,9 +121,8 @@ deleted.
    *Always Allow*. An item that cannot be read is left alone, and the
    account says it needs signing in again, in words.
 3. **Defaults.** Copy the `ai.actual.openagc` persistent domain into the
-   app's defaults, skipping window and split-view frames (they belong to
-   the old window sizes). Keys whose names contain the old name are
-   renamed.
+   app's defaults, skipping AppKit's window, split-view and panel state
+   (keys starting `NS` or `com_apple_`). No key names the old name.
 4. **Marker.** `Kaluta/migrated-from-openagc.json` records when, what was
    copied and what was skipped. Its presence means the migration never
    runs again.

@@ -1,14 +1,15 @@
-# OpenAGC
+# Kaluta
 
-**Open Agent Gmail Client** — an open-source, local-first, native macOS email
-client built for personal AI agents.
+**An open-source Mac mail client for your AI agents.** Local-first and
+native, built for the personal AI agents you already use.
+[kaluta.org](https://kaluta.org)
 
-OpenAGC is a Gmail client first: a fast SwiftUI/AppKit app over a Rust core
+Kaluta is a Gmail client first: a fast SwiftUI/AppKit app over a Rust core
 that keeps your mailbox in a local SQLite database. Its defining feature is
 that it lets the AI agents you already use — [Claude Code](https://claude.com/claude-code)
 and [Codex](https://openai.com/codex) — work on your mail through a small,
 explicit set of tools, with sending and deleting always gated on your
-approval. You bring your own AI subscription; OpenAGC never sees your AI
+approval. You bring your own AI subscription; Kaluta never sees your AI
 credentials and has no server of its own.
 
 > **Status: pre-alpha.** The mail client, the agent integration and routines
@@ -20,7 +21,7 @@ credentials and has no server of its own.
 ## How it works
 
 ```text
-Gmail ──HTTPS/OAuth──▶ OpenAGC.app on your Mac
+Gmail ──HTTPS/OAuth──▶ Kaluta.app on your Mac
                          ├── local mail database + search
                          ├── permission engine (the only enforcement point)
                          └── mail tools (MCP) ──▶ your claude / codex CLI
@@ -65,21 +66,25 @@ scripts/gate.sh                 # fmt, clippy, Rust tests, dependency rules, car
 scripts/test-macos.sh test      # builds the core and the app, runs the Swift tests
 ```
 
-The app is at `build/DerivedData/Build/Products/Debug/OpenAGC.app`. Launch it
-with `-OpenAGCDemo YES` to open the demo mailbox directly, or
-`-OpenAGCFakeAgents YES` to try the agent panel without a real CLI.
+The app is at `build/DerivedData/Build/Products/Debug/Kaluta.app`. Launch it
+with `-KalutaDemo YES` to open the demo mailbox directly, or
+`-KalutaFakeAgents YES` to try the agent panel without a real CLI.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the app build, tests and workflow.
 
 ## Who is behind this
 
-OpenAGC is an independent open-source project sponsored by
+Kaluta is an independent open-source project sponsored by
 [Actual AI](https://actual.ai). Actual AI is the developer named on the
 signed app and on Google's OAuth consent screen. Mail never passes through
 Actual AI's infrastructure.
 
-OpenAGC is **not related** to [github.com/OpenAGC](https://github.com/OpenAGC),
-an unrelated PlayStation 5 graphics project that shares the acronym.
+## The name
+
+A kaluta is a small Australian marsupial; the logo is one. The project was
+called OpenAGC (*Open Agent Gmail Client*) until October 2026. Kaluta's
+first launch takes over an OpenAGC install's mail, accounts and settings
+and leaves the original as it was ([ADR 0017](docs/adr/0017-named-kaluta.md)).
 
 ## License
 
