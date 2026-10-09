@@ -16,6 +16,7 @@ mod analysis_run;
 mod analysis_settings;
 mod archive;
 mod attachments;
+mod cleanup;
 mod cloud_routines;
 mod compose;
 mod compositions;
@@ -44,8 +45,8 @@ mod tasks_ai;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
 pub use agent_mailbox::{
-    AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentSendRule, AgentService,
-    AgentVerification,
+    AgentAdded, AgentDnsRecord, AgentDomain, AgentMailboxCreated, AgentMailboxPlan, AgentSendMode, AgentSendRule,
+    AgentService, AgentVerification, ServiceAccountSummary,
 };
 pub use agents::{
     AgentActionInfo, AgentEventInfo, AgentProviderInfo, AgentSessionInfo, AgentStatusInfo, AgentTranscriptItem,
@@ -53,6 +54,11 @@ pub use agents::{
 };
 pub use archive::{ImportStatus, MailboxScan};
 pub use attachments::AttachmentFileInfo;
+pub use cleanup::{
+    CleanupAction, CleanupDay, CleanupGroup, CleanupLoadEstimate, CleanupLoadStatus, CleanupMessage, CleanupProgress,
+    CleanupResult, CleanupScope, CleanupUnsubscribeMethod, CleanupUnsubscribeResult, CleanupUnsubscribeTarget,
+    CleanupView,
+};
 pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
 pub use error::{CoreError, ErrorKind};

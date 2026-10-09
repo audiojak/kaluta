@@ -7,7 +7,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mail_domain::{Body, EmailAddress, Label, LabelId, LabelKind, MessageId, Millis, ThreadId, system_labels};
+use mail_domain::{
+    Body, EmailAddress, Label, LabelId, LabelKind, ListHeaders, MessageId, Millis, ThreadId, system_labels,
+};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
 
@@ -47,6 +49,8 @@ pub struct IncomingMessage {
     pub body: Option<Body>,
     /// Replaced only when `body` is `Some` (a full fetch).
     pub attachments: Vec<IncomingAttachment>,
+    /// Mailing-list headers; a fetch without them keeps stored ones.
+    pub list: ListHeaders,
     pub headers_json: Option<String>,
 }
 
@@ -83,23 +87,36 @@ impl ThreadChanges {
     }
 }
 
+/// What a stored message's labels become when it is upserted again (spec
+/// §7.9).
+#[derive(Debug, Clone, Copy, Default)]
+pub enum StoredLabels {
+    /// The incoming labels replace them (the provider's are the truth).
+    #[default]
+    Replace,
+    /// They stay, with the flags they set (labels that live only on this Mac).
+    Keep,
+    /// `merge(stored, incoming)` (labels that sync both ways, some of them
+    /// only this Mac's).
+    Merge(fn(&[LabelId], &[LabelId]) -> Vec<LabelId>),
+}
+
 pub struct MailWriter<'t> {
     tx: &'t Transaction<'t>,
     /// Thread rowid → provider thread id, for everything touched.
     dirty: BTreeMap<i64, String>,
-    /// A stored message keeps its labels when upserted again (labels that
-    /// live only on this Mac, spec §7.9).
-    keep_labels: bool,
+    /// A stored message's labels when upserted again.
+    stored_labels: StoredLabels,
 }
 
 impl<'t> MailWriter<'t> {
     pub fn new(tx: &'t Transaction<'t>) -> Self {
-        Self { tx, dirty: BTreeMap::new(), keep_labels: false }
+        Self { tx, dirty: BTreeMap::new(), stored_labels: StoredLabels::Replace }
     }
 
-    /// Upserts keep a stored message's labels and flags.
-    pub fn keeping_labels(mut self, keep: bool) -> Self {
-        self.keep_labels = keep;
+    /// What upserts do with a stored message's labels and flags.
+    pub fn with_stored_labels(mut self, stored_labels: StoredLabels) -> Self {
+        self.stored_labels = stored_labels;
         self
     }
 
@@ -166,9 +183,13 @@ impl<'t> MailWriter<'t> {
             .prepare_cached("SELECT id, thread_id, body_state FROM messages WHERE gmail_id = ?1")?
             .query_row([m.id.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
             .optional()?;
-        let label_ids: Vec<LabelId> = match &existing {
-            Some((rowid, _, _)) if self.keep_labels => {
+        let label_ids: Vec<LabelId> = match (&existing, self.stored_labels) {
+            (Some((rowid, _, _)), StoredLabels::Keep) => {
                 self.message_label_ids(*rowid)?.into_iter().map(LabelId).collect()
+            }
+            (Some((rowid, _, _)), StoredLabels::Merge(merge)) => {
+                let stored: Vec<LabelId> = self.message_label_ids(*rowid)?.into_iter().map(LabelId).collect();
+                merge(&stored, &m.label_ids)
             }
             _ => m.label_ids.clone(),
         };
@@ -200,7 +221,10 @@ impl<'t> MailWriter<'t> {
                            date = ?10, internal_date = ?11, size_estimate = ?12, body_state = ?13,
                            is_read = ?14, is_starred = ?15, is_draft = ?16, is_sent_by_me = ?17,
                            has_attachments = CASE WHEN ?18 THEN ?19 ELSE has_attachments END,
-                           headers_json = COALESCE(?20, headers_json)
+                           headers_json = COALESCE(?20, headers_json),
+                           list_id = COALESCE(?21, list_id), list_name = COALESCE(?22, list_name),
+                           list_unsubscribe = COALESCE(?23, list_unsubscribe),
+                           list_unsubscribe_post = COALESCE(?24, list_unsubscribe_post)
                          WHERE id = ?1",
                     )?
                     .execute(params![
@@ -224,6 +248,10 @@ impl<'t> MailWriter<'t> {
                         m.body.is_some(),
                         has_attachments,
                         m.headers_json,
+                        m.list.id,
+                        m.list.name,
+                        m.list.unsubscribe,
+                        m.list.unsubscribe_post,
                     ])?;
                 rowid
             }
@@ -232,8 +260,10 @@ impl<'t> MailWriter<'t> {
                     .prepare_cached(
                         "INSERT INTO messages (thread_id, gmail_id, rfc822_message_id, in_reply_to, references_json,
                            from_name, from_email, subject, snippet, date, internal_date, size_estimate, body_state,
-                           is_read, is_starred, is_draft, is_sent_by_me, has_attachments, headers_json)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                           is_read, is_starred, is_draft, is_sent_by_me, has_attachments, headers_json,
+                           list_id, list_name, list_unsubscribe, list_unsubscribe_post)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+                           ?20, ?21, ?22, ?23)",
                     )?
                     .execute(params![
                         thread_rowid,
@@ -255,6 +285,10 @@ impl<'t> MailWriter<'t> {
                         is_sent_by_me,
                         has_attachments,
                         m.headers_json,
+                        m.list.id,
+                        m.list.name,
+                        m.list.unsubscribe,
+                        m.list.unsubscribe_post,
                     ])?;
                 let rowid = self.tx.last_insert_rowid();
                 self.record_contacts(m, is_sent_by_me)?;

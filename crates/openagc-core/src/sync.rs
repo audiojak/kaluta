@@ -73,6 +73,12 @@ impl SyncObserver for EventObserver {
             message: None,
         });
     }
+
+    /// Between the ops of a bulk change (Clean Up's batches), so a long
+    /// apply shows how much is still to reach the provider.
+    fn outbox_progress(&self, counts: mail_store::outbox::OutboxCounts) {
+        self.events.emit(CoreEvent::OutboxStatus { pending: counts.pending, failed: counts.failed });
+    }
 }
 
 /// Told about label changes made outside OpenAGC (spec §11.6).
@@ -90,6 +96,9 @@ pub(crate) struct SyncService {
     external: Option<ExternalChanges>,
     tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     settled: Arc<AtomicBool>,
+    /// The last day whose Inbox count this service recorded (Clean Up's
+    /// progress card), so a day is looked up once, not every poll.
+    inbox_day: std::sync::Mutex<String>,
 }
 
 impl SyncService {
@@ -112,6 +121,7 @@ impl SyncService {
             external,
             tasks: std::sync::Mutex::new(Vec::new()),
             settled,
+            inbox_day: std::sync::Mutex::new(String::new()),
         });
         let main = handle.spawn(service.clone().run());
         service.tasks.lock().unwrap_or_else(|e| e.into_inner()).push(main);
@@ -376,6 +386,7 @@ impl SyncService {
                         let messages = report.new_mail.into_iter().map(Into::into).collect();
                         self.events.emit(CoreEvent::NewMail { messages });
                     }
+                    self.record_inbox_day().await;
                 }
                 Err(SyncError::ResyncStarted) => self.backfill_wake.notify_one(),
                 Err(e) if Self::is_fatal(&e) => {
@@ -396,6 +407,37 @@ impl SyncService {
                 () = self.poll_now.notified() => {}
                 () = tokio::time::sleep(interval) => {}
             }
+        }
+    }
+
+    /// The first sync after local midnight records the Inbox's count at the
+    /// start of the day, for Clean Up's progress card (spec §14.12). Not
+    /// before the first listing is done, nor while the Inbox phases are
+    /// still being fetched (the listing marks the account bootstrapped
+    /// before the backfill stores them).
+    async fn record_inbox_day(&self) {
+        let now = mail_sync::now_millis();
+        let offset = crate::cleanup::utc_offset_now();
+        let day = mail_store::cleanup::day_key(now, offset);
+        if *self.inbox_day.lock().unwrap_or_else(|e| e.into_inner()) == day
+            || !matches!(self.engine.needs_bootstrap().await, Ok(false))
+        {
+            return;
+        }
+        // While the Inbox phases are still being fetched nothing is
+        // recorded and `inbox_day` stays unset, so a later poll tries again.
+        let recorded = self
+            .engine
+            .db()
+            .write(move |tx| {
+                mail_store::cleanup::record_today(tx, now, offset)?;
+                mail_store::cleanup::today_recorded(tx, now, offset)
+            })
+            .await;
+        match recorded {
+            Ok(true) => *self.inbox_day.lock().unwrap_or_else(|e| e.into_inner()) = day,
+            Ok(false) => tracing::debug!("the Inbox is still filling; today's count waits"),
+            Err(e) => tracing::warn!(error = %e, "the Inbox's count for today was not recorded"),
         }
     }
 

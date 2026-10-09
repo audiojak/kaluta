@@ -73,6 +73,12 @@ enum TypeRole {
     static let code = Font.body.monospaced()
     /// Code at caption size (paths, ids in tables).
     static let codeCaption = Font.caption.monospaced()
+    /// Numbers that change in place (Clean Up's progress card): `meta`
+    /// with digits of one width, so columns of figures line up and a
+    /// count does not jitter as it changes.
+    static let numeric = Font.callout.monospacedDigit()
+    /// A card's headline figure ("62%"): `title`, digits of one width.
+    static let figure = Font.title3.weight(.semibold).monospacedDigit()
     /// The smallest status text (the sidebar's sync detail).
     static let fine = Font.caption2
     /// A first-run screen's heading (onboarding).

@@ -23,7 +23,7 @@ struct AccountSettings: View {
                                : "Sign in with Google to add a Gmail account")
                     .disabled(!GoogleClientConfiguration.effective().isUsable)
                     Button("Agent Mailbox…") { model.beginAgentMailbox() }
-                        .hoverHelp("Give one of your agents an address of its own on Primitive")
+                        .hoverHelp("Give one of your agents an address of its own on Primitive or AgentMail")
                     Button("From an Archived Mailbox…") { Task { await model.beginImport() } }
                         .hoverHelp("Make a read-only account from an .mbox file, such as a Google Takeout export")
                         .disabled(model.runningImport != nil)
@@ -37,9 +37,14 @@ struct AccountSettings: View {
             Section("Accounts") {
                 switch model.accountState {
                 case .open(let id) where id == AppModel.demoAccountID:
-                    LabeledContent("Account") { Text("Demo mailbox (nothing leaves this Mac)") }
+                    LabeledContent("Account") {
+                        HStack(spacing: Space.m) {
+                            Text("Demo mailbox (nothing leaves this Mac)")
+                            CleanUpButton(accountID: id)
+                        }
+                    }
                 case .open:
-                    ForEach(model.accounts, id: \.id) { account in
+                    ForEach(listedHere, id: \.id) { account in
                         AccountRow(account: account, onRemove: { removing = account })
                     }
                     if model.accounts.isEmpty {
@@ -55,6 +60,20 @@ struct AccountSettings: View {
                     }
                 default:
                     Text("No account is connected.").foregroundStyle(.secondary)
+                }
+            }
+            // Agents under their service account, which holds what they
+            // share (spec §7.9, ADR 0015).
+            if case .open = model.accountState, !isDemo {
+                ForEach(model.serviceAccounts, id: \.id) { service in
+                    Section {
+                        ServiceAccountPane(service: service)
+                        ForEach(agents(of: service), id: \.id) { account in
+                            AccountRow(account: account, onRemove: { removing = account })
+                        }
+                    } header: {
+                        Text(AppModel.serviceAccountTitle(service))
+                    }
                 }
             }
             Section {
@@ -111,8 +130,8 @@ struct AccountSettings: View {
                 removing = nil
             }
         } message: {
-            if removing?.kind == .agent {
-                Text("OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at Primitive.")
+            if let removing, removing.kind == .agent {
+                Text(Self.removeAgentMessage(removing, service: model.serviceAccount(of: removing.id)))
             } else {
                 Text("OpenAGC forgets the sign-in and deletes the mail it downloaded for this account. Gmail itself is not changed.")
             }
@@ -121,6 +140,32 @@ struct AccountSettings: View {
 }
 
 extension AccountSettings {
+    /// The Accounts section's rows: the user's own accounts, and agents
+    /// whose service account is not listed yet.
+    var listedHere: [AccountSummary] {
+        let grouped = Set(model.serviceAccounts.flatMap(\.agentAccountIds))
+        return model.accounts.filter { $0.kind != .agent || !grouped.contains($0.id) }
+    }
+
+    func agents(of service: ServiceAccountSummary) -> [AccountSummary] {
+        service.agentAccountIds.compactMap { id in model.accounts.first { $0.id == id } }
+    }
+
+    /// What removing an agent does: its key goes only with the last agent
+    /// of its service account. On AgentMail that key is the organisation's,
+    /// and making the account again with the same email gives it a new one
+    /// (spec §7.9), so a key handed out stops working.
+    static func removeAgentMessage(_ agent: AccountSummary, service: ServiceAccountSummary?) -> String {
+        let kind = service?.service ?? agent.service ?? .primitive
+        let name = AppModel.serviceName(kind)
+        if let service, service.agentAccountIds.count > 1 {
+            return "OpenAGC deletes the mail it downloaded for this agent. The service account and its key stay for its other agents, and the mailbox itself stays at \(name)."
+        }
+        let message = "OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at \(name)."
+        guard kind == .agentMail else { return message }
+        return message + " Creating it again here with the same email gives it a new key, so a key shared with Copy API Key or used on another Mac stops working."
+    }
+
     /// The demo mailbox is open: Gmail replaces it rather than joining it.
     var isDemo: Bool {
         if case let .open(id) = model.accountState, id == AppModel.demoAccountID { return true }
@@ -142,6 +187,25 @@ extension AccountSettings {
 
 /// One account in Settings › Accounts (spec §7.7): who it is, whether it
 /// is syncing, how far back it downloads, and Remove….
+/// Settings › Accounts › Clean Up…: the Clean Up window on this account,
+/// which the mail window switches to first (Clean Up cleans the open
+/// account, spec §14.12).
+struct CleanUpButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+    let accountID: String
+
+    var body: some View {
+        Button("Clean Up…") {
+            Task {
+                if accountID != model.openAccountID { await model.switchAccount(to: accountID) }
+                openWindow(id: "cleanup")
+            }
+        }
+        .hoverHelp("Archive, move or trash this account's mail in bulk, grouped by sender, subject, time or size")
+    }
+}
+
 struct AccountRow: View {
     @Environment(AppModel.self) private var model
     let account: AccountSummary
@@ -153,16 +217,14 @@ struct AccountRow: View {
     @State private var name = ""
     @State private var nameError: String?
     @FocusState private var nameFocused: Bool
-    /// Copy API Key asks first: whoever holds the key can use the mailbox.
-    @State private var confirmingCopy = false
     @State private var sendMode: AgentSendMode?
-    @State private var sendRules: [AgentSendRule]?
 
     /// Above this many messages, suggest IMAP to accounts without it.
     static let suggestIMAPAbove: UInt64 = 20_000
 
     static let bodyWindowChoices: [(BodyWindow, String)] = [
-        (.month, "Last 30 days"), (.halfYear, "Last 6 months"), (.window, "Everything downloaded"),
+        (.month, "Last 30 days"), (.halfYear, "Last 6 months"), (.year, "Last year"),
+        (.window, "Everything downloaded"),
     ]
 
     /// Whether to suggest IMAP: a large mailbox still on the API.
@@ -180,38 +242,6 @@ struct AccountRow: View {
     /// The name as it can be changed: an archive's is its listed name.
     static func editableName(_ account: AccountSummary) -> String {
         account.kind == .archive ? account.email : account.displayName ?? ""
-    }
-
-    /// Where an agent mailbox may send, in a line (spec §7.9).
-    static func sendRulesText(_ rules: [AgentSendRule]?) -> String {
-        guard let rules else { return "Checking…" }
-        if rules.contains(where: { $0.kind == "any_recipient" }) { return "Anyone" }
-        var parts: [String] = []
-        let addresses = rules.filter { $0.kind == "address" }.count
-        if addresses > 0 { parts.append(addresses == 1 ? "1 address that wrote to it" : "\(addresses) addresses that wrote to it") }
-        let domains = rules.filter { $0.kind == "your_domain" }.compactMap(\.value)
-        if !domains.isEmpty { parts.append("anyone at " + domains.joined(separator: ", ")) }
-        if rules.contains(where: { $0.kind == "managed_zone" }) { parts.append("other Primitive mailboxes") }
-        return parts.isEmpty ? "Nobody yet" : parts.joined(separator: " · ")
-    }
-
-    /// How to sign in to the service's dashboard for this mailbox.
-    static func dashboardHelp(_ plan: AgentMailboxPlan?) -> String {
-        switch plan?.email {
-        case let .some(email): "Open Primitive's dashboard in your browser; sign in as \(email), the email this mailbox was verified with"
-        default: "Open Primitive's dashboard in your browser; verify the mailbox first, then sign in with that email"
-        }
-    }
-
-    /// An agent mailbox's plan in a line.
-    static func planText(_ plan: AgentMailboxPlan?) -> String {
-        guard let plan else { return "Primitive" }
-        if plan.verified {
-            // Primitive still limits whom it writes to (spec §7.9).
-            return "Primitive · verified" + (plan.email.map { " with \($0)" } ?? "")
-                + " · writes to you, people who wrote first and your own domains"
-        }
-        return "Primitive · not verified: replies only, \(plan.sendPerHour) an hour"
     }
 
     private func rename() async {
@@ -258,8 +288,11 @@ struct AccountRow: View {
                     }
                     .hoverHelp("Sign in to Google again for this account")
                 }
+                if account.kind != .archive {
+                    CleanUpButton(accountID: account.id)
+                }
                 Button("Remove…", role: .destructive, action: onRemove)
-                    .hoverHelp(account.kind == .agent ? "Remove this mailbox from OpenAGC; it stays at Primitive"
+                    .hoverHelp(account.kind == .agent ? "Remove this agent's mailbox from OpenAGC; it stays at the service"
                                : "Remove this account from OpenAGC; Gmail itself is not changed")
             }
             TextField("Name", text: $name,
@@ -278,14 +311,17 @@ struct AccountRow: View {
                 Text(nameError).font(TypeRole.caption).foregroundStyle(Tone.failure)
             }
             if account.kind == .agent {
-                LabeledContent("Service") {
-                    Text(Self.planText(model.agentPlans[account.id])).foregroundStyle(.secondary)
+                // What the agents of a service account share is in its pane
+                // above (spec §7.9); the agent keeps its address and send mode.
+                LabeledContent("Address") {
+                    HStack(spacing: Space.m) {
+                        Text(account.email).foregroundStyle(.secondary).textSelection(.enabled)
+                        if account.service == .primitive {
+                            Button("Use Your Own Domain…") { model.beginAgentDomain(account.id) }
+                                .hoverHelp("Give the agent an address on a domain you own, such as agents.example.com")
+                        }
+                    }
                 }
-                LabeledContent("Can write to") {
-                    Text(Self.sendRulesText(sendRules)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .hoverHelp("Whom Primitive lets this mailbox write to. Sending to anyone is something Primitive grants on request; ask them at support, naming the mailbox's address")
                 // Spec §7.9: agents may send from their own mailbox freely.
                 Picker("When agents send", selection: Binding(
                     get: { sendMode ?? .freely },
@@ -299,32 +335,6 @@ struct AccountRow: View {
                 }
                 .hoverHelp("Whether agents working in this mailbox send without asking you first. Deleting mail always asks")
                 .disabled(sendMode == nil)
-                HStack {
-                    if model.agentPlans[account.id]?.verified == false {
-                        Button("Verify…") { model.beginAgentVerification(account.id) }
-                            .hoverHelp("Verify the mailbox with your email to raise its limits and let it write to you")
-                    }
-                    if let dashboard = model.core?.agentServiceDashboardURL(.primitive) {
-                        Button("Open at primitive.dev…") { NSWorkspace.shared.open(dashboard) }
-                            .hoverHelp(Self.dashboardHelp(model.agentPlans[account.id]))
-                    }
-                    Button("Use Your Own Domain…") { model.beginAgentDomain(account.id) }
-                        .hoverHelp("Give the agent an address on a domain you own, such as agents.example.com")
-                    Button("Copy API Key…") { confirmingCopy = true }
-                        .hoverHelp("Copy the mailbox's Primitive key, for an agent that calls Primitive itself")
-                }
-                .confirmationDialog("Copy the mailbox's API key?", isPresented: $confirmingCopy) {
-                    Button("Copy API Key") { // no-help: confirmation dialog button
-                        if let key = try? model.core?.agentMailboxAPIKey(account.id) {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(key, forType: .string)
-                            // Clipboard managers leave concealed items out.
-                            NSPasteboard.general.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
-                        }
-                    }
-                } message: {
-                    Text("Whoever has this key can read the mailbox's mail and send as the agent. Give it only to an agent you run.")
-                }
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(
@@ -373,11 +383,7 @@ struct AccountRow: View {
             window = try? await model.core?.syncWindow(for: account.id)
             bodyWindow = account.kind == .gmail ? try? await model.core?.bodyWindow(for: account.id) : nil
             signedIn = account.kind == .archive ? nil : ((try? model.core?.accountHasCredentials(account.id)) ?? false)
-            if account.kind == .agent {
-                sendMode = model.core?.agentSendMode(account.id)
-                await model.refreshAgentPlan(account.id)
-                sendRules = (try? await model.core?.agentSendRules(account.id)) ?? []
-            }
+            if account.kind == .agent { sendMode = model.core?.agentSendMode(account.id) }
             backfill = await model.core?.backfillStatus(account.id)
         }
     }

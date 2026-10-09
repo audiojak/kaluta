@@ -222,3 +222,41 @@ fn decode_text_part_repairs_mislabelled_utf8() {
     assert_eq!(decode_text_part(b"in \x97 ok", "text/plain"), "in — ok");
     assert_eq!(decode_text_part(b"Gr\xfc\xdfe", "text/plain; charset=iso-8859-1"), "Grüße");
 }
+
+#[test]
+fn mailing_list_headers_are_kept() {
+    let raw = b"From: News <news@example.com>\r\n\
+List-Id: =?UTF-8?Q?Caf=C3=A9_News?= <Cafe-News.Lists.Example.com>\r\n\
+List-Unsubscribe: <mailto:unsub@example.com?subject=stop>,\r\n\x20\x20\
+<https://example.com/unsub?u=1>\r\n\
+List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n\
+Subject: Issue 12\r\n\
+\r\n\
+Hello\r\n";
+    let list = parse(raw).unwrap().headers.list;
+    assert_eq!(list.id.as_deref(), Some("cafe-news.lists.example.com"));
+    assert_eq!(list.name.as_deref(), Some("Café News"));
+    assert_eq!(
+        list.unsubscribe.as_deref(),
+        Some("<mailto:unsub@example.com?subject=stop>, <https://example.com/unsub?u=1>")
+    );
+    assert_eq!(list.unsubscribe_post.as_deref(), Some("List-Unsubscribe=One-Click"));
+
+    // Without brackets the whole value is the id; plain mail has none.
+    let h = parse_headers([("From", "a@example.com"), ("List-Id", "digest.example.org")]);
+    assert_eq!(h.list.id.as_deref(), Some("digest.example.org"));
+    assert_eq!(h.list.name, None);
+    assert!(fixture("01-plain-ascii.eml").headers.list.is_empty());
+}
+
+#[test]
+fn parse_headers_keeps_list_headers_from_a_provider_header_list() {
+    let h = parse_headers([
+        ("List-Id", "\"Weekly Digest\" <digest.example.org>"),
+        ("List-Unsubscribe", "<https://example.org/u/1>"),
+    ]);
+    assert_eq!(h.list.id.as_deref(), Some("digest.example.org"));
+    assert_eq!(h.list.name.as_deref(), Some("Weekly Digest"));
+    assert_eq!(h.list.unsubscribe.as_deref(), Some("<https://example.org/u/1>"));
+    assert_eq!(h.list.unsubscribe_post, None);
+}

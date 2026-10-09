@@ -125,6 +125,22 @@ pub fn clear_from_priority(tx: &Transaction<'_>, priority: u8) -> StoreResult<us
     Ok(tx.execute("DELETE FROM backfill_queue WHERE priority >= ?1", [priority])?)
 }
 
+/// Queue priorities below this are the Inbox phases (unread, then the
+/// rest of the Inbox; spec §7.4) and mail that just arrived.
+pub const INBOX_PRIORITIES: u8 = 2;
+
+/// Whether the Inbox is still filling: an id queued at an Inbox priority
+/// has no row yet, so counting the Inbox now would come out short.
+/// Header-only rows count as stored (their labels are known).
+pub fn inbox_filling(conn: &Connection) -> StoreResult<bool> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT EXISTS (SELECT 1 FROM backfill_queue q WHERE q.priority < ?1
+           AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.gmail_id = q.gmail_id))",
+        )?
+        .query_row([INBOX_PRIORITIES], |r| r.get(0))?)
+}
+
 pub fn len(conn: &Connection) -> StoreResult<u64> {
     Ok(conn.query_row("SELECT COUNT(*) FROM backfill_queue", [], |r| r.get::<_, i64>(0))?.max(0) as u64)
 }

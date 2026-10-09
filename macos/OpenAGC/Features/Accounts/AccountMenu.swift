@@ -53,7 +53,32 @@ struct AccountMenuItems: View {
     let openSettings: () -> Void
 
     var body: some View {
-        ForEach(Array(model.accounts.enumerated()), id: \.element.id) { index, account in
+        let groups = model.accountMenuGroups
+        // ⌃1–⌃9 count down the menu as shown, across its sections.
+        let positions = Dictionary(uniqueKeysWithValues: groups.flatMap(\.accounts).enumerated().map { ($1.id, $0) })
+        ForEach(groups) { group in
+            if let title = group.title {
+                Section(title) {
+                    items(group.accounts, positions: positions)
+                }
+            } else {
+                items(group.accounts, positions: positions)
+            }
+        }
+        if !model.accounts.isEmpty { Divider() } // menu
+        Button("Add Account…") { Task { await model.addAccount() } } // no-help: menu item
+            .disabled(!GoogleClientConfiguration.effective().isUsable)
+        // An imported mailbox is an account of its own (spec §7.8); no
+        // shortcut: ⌘⇧I is Load Remote Images.
+        Button("Create an Agent Mailbox…") { model.beginAgentMailbox() } // no-help: menu item
+        Button("Create an Account from an Archived Mailbox…") { Task { await model.beginImport() } } // no-help: menu item
+            .disabled(model.runningImport != nil)
+        Button("Accounts Settings…", action: openSettings) // no-help: menu item
+    }
+
+    private func items(_ accounts: [AccountSummary], positions: [String: Int]) -> some View {
+        ForEach(accounts, id: \.id) { account in
+            let index = positions[account.id] ?? 9
             Button { // no-help: menu item
                 Task { await model.switchAccount(to: account.id) }
             } label: {
@@ -66,15 +91,6 @@ struct AccountMenuItems: View {
             }
             .keyboardShortcut(index < 9 ? KeyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .control) : nil)
         }
-        if !model.accounts.isEmpty { Divider() } // menu
-        Button("Add Account…") { Task { await model.addAccount() } } // no-help: menu item
-            .disabled(!GoogleClientConfiguration.effective().isUsable)
-        // An imported mailbox is an account of its own (spec §7.8); no
-        // shortcut: ⌘⇧I is Load Remote Images.
-        Button("Create an Agent Mailbox…") { model.beginAgentMailbox() } // no-help: menu item
-        Button("Create an Account from an Archived Mailbox…") { Task { await model.beginImport() } } // no-help: menu item
-            .disabled(model.runningImport != nil)
-        Button("Accounts Settings…", action: openSettings) // no-help: menu item
     }
 
     /// "Work Me — work@example.com (12)".
@@ -109,5 +125,35 @@ extension AccountAvatar {
         let image = renderer.nsImage ?? NSImage()
         image.isTemplate = false
         return image
+    }
+}
+
+/// A section of the account switcher: the user's own accounts (no title),
+/// then each service account's agents under its name (spec §7.9).
+struct AccountMenuGroup: Identifiable, Equatable {
+    let id: String
+    let title: String?
+    let accounts: [AccountSummary]
+}
+
+extension AppModel {
+    /// The switcher's sections: the user's own accounts first, then agents
+    /// grouped under their service account ("AgentMail · you@example.com").
+    var accountMenuGroups: [AccountMenuGroup] {
+        var groups: [AccountMenuGroup] = []
+        let own = accounts.filter { $0.kind != .agent }
+        if !own.isEmpty { groups.append(AccountMenuGroup(id: "own", title: nil, accounts: own)) }
+        var placed = Set<String>()
+        for service in serviceAccounts {
+            let agents = service.agentAccountIds.compactMap { id in accounts.first { $0.id == id && $0.kind == .agent } }
+            guard !agents.isEmpty else { continue }
+            placed.formUnion(agents.map(\.id))
+            groups.append(AccountMenuGroup(id: "service-\(service.id)", title: Self.serviceAccountTitle(service),
+                                           accounts: agents))
+        }
+        // Agents whose service account is not listed yet.
+        let others = accounts.filter { $0.kind == .agent && !placed.contains($0.id) }
+        if !others.isEmpty { groups.append(AccountMenuGroup(id: "agents", title: "Agents", accounts: others)) }
+        return groups
     }
 }

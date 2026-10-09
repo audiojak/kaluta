@@ -8,11 +8,13 @@ struct UndoNoticeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appearsActive) private var appearsActive
     @FocusState private var focused: Bool
+    /// Which window this is: each shows the notices of its own actions.
+    var origin: UndoNotice.Origin = .mail
 
     var body: some View {
         let undo = model.undo
         ZStack(alignment: .bottom) {
-            if let notice = undo.notice, notice.accountID == model.openAccountID {
+            if let notice = undo.notice, notice.accountID == model.openAccountID, notice.origin == origin {
                 HStack(spacing: Space.m) {
                     Text(notice.text)
                         .lineLimit(1)

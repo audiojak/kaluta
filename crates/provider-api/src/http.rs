@@ -41,25 +41,57 @@ impl RetryPolicy {
     }
 }
 
+/// A service's own reading of an error response: `(status, body)` to an
+/// error, or `None` for the default reading (Google's body). Not asked for
+/// 429, which is always a rate limit.
+pub type ErrorHook = Arc<dyn Fn(u16, &str) -> Option<ProviderError> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct HttpClient {
     client: Client,
     tokens: Arc<dyn TokenSource>,
     limiter: Arc<RateLimiter>,
     retry: RetryPolicy,
+    error_hook: Option<ErrorHook>,
+}
+
+/// The default whole-request timeout.
+const TIMEOUT: Duration = Duration::from_secs(60);
+
+fn build_client(timeout: Duration) -> ProviderResult<Client> {
+    Client::builder()
+        .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(10).min(timeout))
+        .timeout(timeout)
+        .gzip(true)
+        .https_only(false) // tests talk to a local mock; providers pass https URLs
+        .build()
+        .map_err(|e| ProviderError::Network(e.to_string()))
 }
 
 impl HttpClient {
     pub fn new(tokens: Arc<dyn TokenSource>, limiter: Arc<RateLimiter>, retry: RetryPolicy) -> ProviderResult<Self> {
-        let client = Client::builder()
-            .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60))
-            .gzip(true)
-            .https_only(false) // tests talk to a local mock; providers pass https URLs
-            .build()
-            .map_err(|e| ProviderError::Network(e.to_string()))?;
-        Ok(Self { client, tokens, limiter, retry })
+        Ok(Self { client: build_client(TIMEOUT)?, tokens, limiter, retry, error_hook: None })
+    }
+
+    /// Read error bodies the service's way first (a provider's own error
+    /// format, spec §7.9).
+    pub fn with_error_hook(mut self, hook: ErrorHook) -> Self {
+        self.error_hook = Some(hook);
+        self
+    }
+
+    /// Give up on a request after `timeout` rather than a minute.
+    pub fn with_timeout(mut self, timeout: Duration) -> ProviderResult<Self> {
+        self.client = build_client(timeout)?;
+        Ok(self)
+    }
+
+    /// The same client with another retry policy (a send that must not be
+    /// repeated blindly, say).
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
     }
 
     pub fn limiter(&self) -> &RateLimiter {
@@ -127,7 +159,7 @@ impl HttpClient {
                     refreshed = true;
                     continue;
                 }
-                Ok(response) => classify(response).await,
+                Ok(response) => classify(response, self.error_hook.as_ref()).await,
             };
             if !error.is_transient() || attempt + 1 >= self.retry.max_attempts {
                 return Err(error);
@@ -148,7 +180,7 @@ impl HttpClient {
 
 /// Turn a non-success response into a classified error, reading Google's
 /// JSON error body when present.
-async fn classify(response: Response) -> ProviderError {
+async fn classify(response: Response, hook: Option<&ErrorHook>) -> ProviderError {
     let status = response.status();
     let retry_after = response
         .headers()
@@ -157,6 +189,11 @@ async fn classify(response: Response) -> ProviderError {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
     let body = response.text().await.unwrap_or_default();
+    if status.as_u16() != 429
+        && let Some(e) = hook.and_then(|h| h(status.as_u16(), &body))
+    {
+        return e;
+    }
     let (message, reasons) = google_error(&body);
     if status.as_u16() == 429 || (status.as_u16() == 403 && reasons.iter().any(|r| r.contains("ateLimit"))) {
         tracing::warn!(status = status.as_u16(), ?retry_after, ?reasons, %message, "rate limited by provider");
@@ -358,6 +395,28 @@ mod tests {
         assert_eq!(err, ProviderError::CursorExpired);
         let err = http.empty(1, Priority::Interactive, |c| c.get(format!("{}/gate", server.uri()))).await.unwrap_err();
         assert_eq!(err, ProviderError::Forbidden("Agent accounts can only reply".into()));
+    }
+
+    #[tokio::test]
+    async fn a_services_error_hook_reads_its_own_body_first() {
+        let server = MockServer::start().await;
+        Mock::given(path("/rejected"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({
+                "name": "MessageRejectedError", "code": "message_rejected", "message": "Forbidden"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(path("/other")).respond_with(ResponseTemplate::new(404)).mount(&server).await;
+        let hook: ErrorHook = Arc::new(|status, body: &str| {
+            (status == 403 && body.contains("message_rejected")).then(|| ProviderError::Forbidden("plain words".into()))
+        });
+        let http = client(Arc::new(StaticToken("t".into()))).with_error_hook(hook);
+        let err =
+            http.empty(1, Priority::Interactive, |c| c.get(format!("{}/rejected", server.uri()))).await.unwrap_err();
+        assert_eq!(err, ProviderError::Forbidden("plain words".into()));
+        // The hook passes: the default reading.
+        let err = http.empty(1, Priority::Interactive, |c| c.get(format!("{}/other", server.uri()))).await.unwrap_err();
+        assert!(matches!(err, ProviderError::NotFound(_)), "{err:?}");
     }
 
     #[test]

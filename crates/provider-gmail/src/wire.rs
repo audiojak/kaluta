@@ -235,6 +235,7 @@ pub fn to_fetched(m: Message) -> FetchedMessage {
         reply_to: headers.reply_to,
         subject: headers.subject,
         date: headers.date,
+        list: headers.list,
         body,
     }
 }

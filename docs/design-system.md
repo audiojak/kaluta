@@ -77,6 +77,8 @@ controls), `card` 8 (cards), `panel` 12 (floating panels). Capsules use
 | `body` | body | Settings rows, detail values |
 | `code` / `codeCaption` | body / caption, monospaced | ids, paths, logs |
 | `fine` | caption2 | the sidebar's sync detail |
+| `numeric` | callout, monospaced digits | figures that change in place: Clean Up's progress card |
+| `figure` | title3 semibold, monospaced digits | a card's headline figure ("62%") |
 | `welcome` | title semibold | onboarding's heading |
 | `display` | title semibold | the one thing a page is about: a decision's statement in Review mode, the count on its band |
 | `reading` | title3 | reading text beside `display`: quotes, explanations, scopes |
@@ -157,8 +159,9 @@ is only for "approved". Orange is text or a band's fill, never an error.
 - **`TipCard`**: introduces a feature, as Mail introduces Categories: an
   icon, a title, one sentence, the main action and a dismiss ("Turn Off",
   "Not Now"). An info card under the Inbox's header, one tip at a time
-  (`Tip`: Categories, Important Only, the agent); any button puts it away
-  for good.
+  (`Tip`: Clean Up when the Inbox holds more than 1,000 conversations,
+  Categories, Important Only, the agent); any button puts it away for
+  good, and opening Clean Up retires its tip.
 - **`CapsuleTabs`**: tabs at the top of a list column as pills (the
   Inbox's categories, Tasks' Open and Done): a symbol each, and the
   chosen one widens to show its name. With two tabs whose names fit,
@@ -168,6 +171,8 @@ is only for "approved". Orange is text or a band's fill, never an error.
   (the writing guide's questions): a number key (1 to 9), the answer, and
   a check on the answer given before. Choosing it answers and goes on, so
   such a question has no Save; *Back* returns to the question before.
+  `detail:` adds a secondary caption line under the answer, for choices
+  that need a sentence each (the agent-mail services).
 - **Review mode** (proposed rules, proposed facts; `ReviewModeView`):
   deciding takes the whole window, entered only from the page's
   `ReviewBand` (the count in `TypeRole.display`, one prominent *Review*
@@ -239,6 +244,130 @@ the message the consequence, the destructive button with
 `role: .destructive`). An `NSAlert` is only for a warning raised from
 AppKit (the mismatched-link warning); its safe choice is first and the
 default.
+
+### Clean Up
+
+A window of its own for clearing a mailbox in bulk (spec §14.12;
+`Features/CleanUp/`), opened from *Mailbox › Clean Up Mailbox…* and
+*Settings › Accounts › Clean Up…*. Use its pattern, ticks over long
+AppKit lists with the actions in the window toolbar, for any other work
+done over thousands of messages at once.
+
+- **Three columns** in a `NavigationSplitView`: the views as a source
+  list (`CleanUpViewKind.shown`: adding a view is one line), with a slot
+  at its foot (`CleanUpSidebarFooter`) for the progress card; the groups;
+  the messages of the ticked groups. The window cleans the main window's
+  open account and says which in its title ("Clean Up — you@example.com").
+- **Long lists are AppKit tables** (`CleanUpTables.swift`), in the thread
+  row's type and calm: a group is a checkbox, its title
+  (`rowSender`), a second line in `rowSecondary`, secondary ("address ·
+  aka other names" in Sender and People; the senders' names, "Status
+  Alerts, Billing and 2 more", under a domain in Social and Promotions;
+  the bucket's range, "1 KB to 10 KB", in Size), and its count right-aligned
+  in `rowCount`, secondary (every row has one, so not the accent). A
+  message is sender and date over the subject, with its size on the
+  subject line in the Size view. Hairlines inset to the text, as thread
+  rows.
+- **Ticks, not the highlight.** Rows highlight as in the mail lists
+  (click, arrows, ⇧ and ⌘, ⌘A); the checkbox or Space ticks, and only
+  ticked groups fill the messages column and are acted on. Ticks stay
+  while the filter changes (groups found by several filters can go
+  together); changing the view or acting clears them.
+- **Headers are column headers:** the filter field ("Type a sender…";
+  none in Time and Size) over the groups, and "**813 messages** in
+  **2 groups**" with *Untick All* over the messages.
+- **Actions in the window toolbar**, never in a strip over the list: the
+  *Inbox / All Mail* segmented control at the leading edge; then a
+  spinner with "Archiving 813 messages…" while an action runs, or
+  "Sending changes to Gmail… N left" while the outbox drains; then
+  *Archive*, *Trash* and *Spam* in one glass group and *Move* (the Inbox
+  and the labels) after a fixed spacer, then *Unsubscribe* (`bell.slash`)
+  after another. Disabled, not hidden, with nothing ticked; *Unsubscribe*
+  is enabled only in Mailing Lists, Sender and People, when a ticked
+  group's newest message carries `List-Unsubscribe`.
+- **Unsubscribe always asks** (`CleanUpUnsubscribeDialog`, a `Dialog`):
+  the title names the list ("Unsubscribe from Weekly Digest?") or counts
+  them; the message says what happens (one request to the host, or a
+  message opened for the user to send); with several lists, a
+  `.card(.neutral)` lists each by name with "one click at <host>" or "a
+  message to <address>" in caption, secondary; *Archive Them Too* is a
+  toggle, off. *Cancel* (Esc), *Unsubscribe* (Return). What happened is a
+  line over the groups (`CleanUpUnsubscribeNoteView`): "Unsubscribed from
+  Weekly Digest" in secondary with a check, a failure in `Tone.failure`
+  with the triangle, and *OK* to put it away. A group the user left
+  leads its second line with "Unsubscribed".
+- **Loading every header** (spec §14.12): an info band (`CleanUpLoadBand`,
+  `.bandBackground(.info)`) under the filter, over the groups, since the
+  groups fill as headers arrive: "Loading headers for all mail — 11,712
+  of 43,118" with a small linear bar (a known total), and under it, in
+  `TypeRole.caption`, secondary, that the account's sync window is now
+  Everything and where to change it. While Gmail is searched, a small
+  spinner and "Finding older mail in Gmail…"; when done, the note stays
+  with *OK* until put away. Without IMAP the window first asks with a
+  `Dialog` ("Load All Mail": the count and the time as its message, the
+  consequence as a caption, *Not Now* (Esc) and *Load All Mail* (Return)).
+  Not in the toolbar: the toolbar's status is for actions and the outbox.
+- **The progress card** (`CleanUpProgressCard`) sits at the views'
+  foot, a `.card(.neutral)` inset `Space.m`: "Inbox Zero" in
+  `groupLabel` with the percentage in `TypeRole.figure` on the right; a
+  small linear bar (a known total); a sparkline (Swift Charts `LineMark`,
+  monotone, 1.5 pt, the tint, no axes or labels, a dot on today's point);
+  then At Midnight, Received Today ("+12"), Removed Today ("−310", a real
+  minus) and Now, labels secondary and values right-aligned, all in
+  `TypeRole.numeric` (digits of one width, so the figures line up and do
+  not jitter as they change). It refreshes with the groups.
+- **Undo** is the app's: one entry per action on the account's stack
+  (⌘Z works from this window too), acknowledged by `UndoNoticeView(origin:
+  .cleanUp)` floating over the groups. A notice carries its window's
+  origin, so the mail window does not show Clean Up's and the other way
+  round.
+- **Empty states** are `ContentUnavailableView`: "No Groups Ticked" over
+  the messages, the view's own ("No Senders", "No One You've Written To")
+  over the groups, and the search one when the filter matches nothing.
+  Social and Promotions say whether the scope has none ("No promotions in
+  the Inbox.") or the mailbox has no such category at all (IMAP-only and
+  agent mailboxes have no Gmail categories).
+  Errors are a `Tone.failure` line under the filter.
+
+### Agent mailboxes and service accounts
+
+Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
+`Features/Settings/ServiceAccountSettings.swift`.
+
+- **Create an Agent Mailbox is a `Dialog` in steps** (`AgentMailboxFlow`):
+  the service first, as `AnswerButton`s with a `detail` line each (what
+  it is and its free tier; 1 and 2 pick); then, when a service account
+  for it exists, *Add to <service account>* (its agents and whether it is
+  verified as the detail) or *New Service Account…*; then the name. Every
+  step after the first has *Back* leading. Adding asks for the name only,
+  with the address it will have as a `LabeledContent` (and, on Primitive,
+  a *Domain* picker when the service account has verified own domains);
+  its button is *Add Agent*, with no terms. A new service account shows
+  the service, its terms as a link and *Agree and Create*; AgentMail's
+  also asks for *Your email* above the service, prefilled from the open
+  Gmail account (a menu beside the field picks another of the user's),
+  with one caption sentence on why. After AgentMail's sign-up the sheet
+  goes straight to the code (it was emailed at sign-up).
+- **The account switcher's sections:** the user's own accounts first,
+  untitled; then one menu `Section` per service account, titled
+  "AgentMail · you@example.com" (AgentMail by the user's email) or
+  "Primitive · jade-emu.primitive.email" (Primitive by its subdomain).
+  ⌃1–⌃9 count down the menu as shown. (An AppKit menu does not
+  self-snapshot; `-OpenAGCSnapshotAgentMailbox switcher` prints the
+  sections instead.)
+- **Settings › Accounts:** a section per service account under the same
+  title, below the user's own accounts: first what its agents share
+  (`ServiceAccountPane`: *Service* and plan, *Verified* with *Verify…*,
+  *Limits* as a caption paragraph under its label, on Primitive *Can
+  write to* and *Domains* with *Add Domain…*; then *Add Agent…*, *Copy
+  API Key…* and *Open <service>…*), then its agents' rows (name, address,
+  *When agents send*, *Remove…*). *Copy API Key…* asks first and says the
+  key reaches every agent named; on verified AgentMail it offers *Copy
+  Key for <agent> Only* first, as the safer choice.
+- **Limits** are the core's words (`serviceAccountLimits`): the unverified
+  banner takes their first sentence for AgentMail (its plan has no hourly
+  numbers) and the plan's numbers for Primitive; the composer of an agent
+  mailbox shows them in full in an info `Banner`.
 
 ### Rows with a due day
 
@@ -425,7 +554,21 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Facts, light](design/facts-light.png) | ![Facts, dark](design/facts-dark.png) |
 | ![Reviewing proposed facts, light](design/facts-proposed-light.png) | ![Reviewing proposed facts, dark](design/facts-proposed-dark.png) |
 | ![Task list, light](design/tasks-light.png) | ![Task list, dark](design/tasks-dark.png) |
-| ![Create an Agent Mailbox, light](design/agent-create-light.png) | ![Create an Agent Mailbox, dark](design/agent-create-dark.png) |
+| ![Create an Agent Mailbox: the service first, light](design/agent-create-light.png) | ![Create an Agent Mailbox: the service first, dark](design/agent-create-dark.png) |
+| ![A new AgentMail service account asks for your email, light](design/agent-agentmail-light.png) | ![A new AgentMail service account asks for your email, dark](design/agent-agentmail-dark.png) |
+| ![Add to the Primitive service account or make another, light](design/agent-path-light.png) | ![Add to the Primitive service account or make another, dark](design/agent-path-dark.png) |
+| ![Adding an agent: the name only, light](design/agent-add-light.png) | ![Adding an agent: the name only, dark](design/agent-add-dark.png) |
+| ![Settings › Accounts: service accounts and their agents, light](design/agent-service-account-light.png) | ![Settings › Accounts: service accounts and their agents, dark](design/agent-service-account-dark.png) |
+| ![An unverified AgentMail mailbox's banner, light](design/agent-agentmail-banner-light.png) | ![An unverified AgentMail mailbox's banner, dark](design/agent-agentmail-banner-dark.png) |
 | ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
 | ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
 | ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |
+| ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
+| ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
+| ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |
+| ![Clean Up loading every header, light](design/cleanup-load-light.png) | ![Clean Up loading every header, dark](design/cleanup-load-dark.png) |
+| ![Clean Up asking before loading all mail without IMAP, light](design/cleanup-ask-light.png) | ![Clean Up asking before loading all mail without IMAP, dark](design/cleanup-ask-dark.png) |
+| ![Clean Up's Inbox Zero card, light](design/cleanup-progress-light.png) | ![Clean Up's Inbox Zero card, dark](design/cleanup-progress-dark.png) |
+| ![Clean Up's Social view on All Mail, light](design/cleanup-social-light.png) | ![Clean Up's Social view on All Mail, dark](design/cleanup-social-dark.png) |
+| ![Clean Up's Mailing Lists, light](design/cleanup-lists-light.png) | ![Clean Up's Mailing Lists, dark](design/cleanup-lists-dark.png) |
+| ![Unsubscribing from three lists, light](design/cleanup-unsubscribe-light.png) | ![Unsubscribing from three lists, dark](design/cleanup-unsubscribe-dark.png) |

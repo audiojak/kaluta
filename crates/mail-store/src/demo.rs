@@ -2,7 +2,7 @@
 //! (spec §13 rule 10) and UI development. All content is invented: names
 //! are generic and every address is under `example.com`/`.org`/`.net`.
 
-use mail_domain::{Body, EmailAddress, Label, LabelColor, LabelId, LabelKind, MessageId, ThreadId};
+use mail_domain::{Body, EmailAddress, Label, LabelColor, LabelId, LabelKind, ListHeaders, MessageId, ThreadId};
 
 use crate::db::Db;
 use crate::error::StoreResult;
@@ -63,6 +63,22 @@ const SERVICES: &[(&str, &str)] = &[
     ("Weekly Digest", "digest@example.org"),
     ("Events", "events@example.org"),
     ("Careers", "careers@example.com"),
+];
+/// Services that send as mailing lists (Clean Up's Mailing Lists view):
+/// address, list id. Chosen by sender, so the generator's random choices
+/// stay the same.
+const LISTS: &[(&str, &str)] = &[
+    ("digest@example.org", "weekly-digest.example.org"),
+    ("events@example.org", "events.example.org"),
+    ("careers@example.com", "careers.example.com"),
+];
+/// Other names services sign with now and then, so Clean Up's Sender view
+/// has "aka" lines: address, names. Used on every fourth thread by its
+/// index, so the generator's random choices stay the same.
+const SERVICE_AKA: &[(&str, &[&str])] = &[
+    ("billing@example.net", &["Example Billing", "Billing Team"]),
+    ("digest@example.org", &["The Digest"]),
+    ("events@example.org", &["Events Team"]),
 ];
 const TOPICS: &[&str] = &[
     "Q3 planning",
@@ -163,6 +179,7 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
         let automated = rng.chance(35);
         let (sender, topic) = if automated {
             let (name, email) = *rng.pick(SERVICES);
+            let name = service_name(name, email, t);
             (EmailAddress::new(Some(name), email), (*rng.pick(TOPICS)).to_owned())
         } else {
             let first = *rng.pick(FIRST);
@@ -260,13 +277,14 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
                 internal_date: at,
                 snippet: text.chars().take(120).collect(),
                 label_ids: labels,
-                size_estimate: body_text.len() as u64,
+                size_estimate: demo_size(t, i, &sender.email, automated, body_text.len(), &attachments),
                 body: Some(Body {
                     text_plain: Some(body_text),
                     html_sanitized: Some(body_html),
                     has_remote_images: false,
                 }),
                 attachments,
+                list: list_headers(&sender, from_me),
                 ..Default::default()
             });
             stats.messages += 1;
@@ -278,6 +296,70 @@ pub fn generate(db: &Db, spec: &DemoSpec) -> StoreResult<DemoStats> {
     }
     flush(db, &mut pending)?;
     Ok(stats)
+}
+
+/// The name a service signs this thread with: now and then another of its
+/// names (`SERVICE_AKA`).
+fn service_name(name: &'static str, email: &str, t: u32) -> &'static str {
+    match SERVICE_AKA.iter().find(|(e, _)| *e == email) {
+        Some((_, others)) if t % 4 == 1 => others[(t / 4) as usize % others.len()],
+        _ => name,
+    }
+}
+
+/// A message's size as Gmail reports it, for Clean Up's Size view: the
+/// body and attachments plus what such mail usually carries (a
+/// newsletter's HTML and images, a person's photos or, rarely, a video).
+/// Varied by a hash of the thread and message, not `Rng`, so the
+/// generator's random choices stay the same.
+fn demo_size(t: u32, i: u32, sender: &str, automated: bool, text: usize, attachments: &[IncomingAttachment]) -> u64 {
+    // SplitMix64's finaliser.
+    let mut h = (u64::from(t) << 8 | u64::from(i)).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    h ^= h >> 31;
+    let pick = |lo: u64, hi: u64| lo + h % (hi - lo);
+    let extra = if automated {
+        match sender {
+            "digest@example.org" => pick(40_000, 180_000),
+            "events@example.org" => pick(20_000, 90_000),
+            "billing@example.net" => pick(8_000, 60_000),
+            "careers@example.com" => pick(15_000, 70_000),
+            _ => pick(2_000, 9_000),
+        }
+    } else {
+        match (h >> 40) % 100 {
+            0..=1 => pick(10_000_000, 24_000_000),
+            2..=5 => pick(1_000_000, 8_000_000),
+            6..=17 => pick(100_000, 900_000),
+            18..=49 => pick(10_000, 90_000),
+            50..=79 => pick(1_000, 9_000),
+            _ => 0,
+        }
+    };
+    text as u64 + attachments.iter().map(|a| a.size).sum::<u64>() + extra
+}
+
+/// A list's headers: one-click unsubscribe (RFC 8058) with a mailto
+/// besides, except Careers, which unsubscribes by email only, so Clean
+/// Up's Unsubscribe shows both ways. (Never acted on: the demo has no
+/// network, and its addresses are documentation domains.)
+fn list_headers(sender: &EmailAddress, from_me: bool) -> ListHeaders {
+    match LISTS.iter().find(|(email, _)| !from_me && sender.email == *email) {
+        Some((email, id)) if email.starts_with("careers@") => ListHeaders {
+            id: Some((*id).to_owned()),
+            name: sender.name.clone(),
+            unsubscribe: Some(format!("<mailto:unsubscribe@{id}?subject=Unsubscribe>")),
+            unsubscribe_post: None,
+        },
+        Some((_, id)) => ListHeaders {
+            id: Some((*id).to_owned()),
+            name: sender.name.clone(),
+            unsubscribe: Some(format!("<mailto:unsubscribe@{id}>, <https://{id}/unsubscribe>")),
+            unsubscribe_post: Some("List-Unsubscribe=One-Click".to_owned()),
+        },
+        None => ListHeaders::default(),
+    }
 }
 
 fn flush(db: &Db, pending: &mut Vec<IncomingMessage>) -> StoreResult<()> {
@@ -358,5 +440,22 @@ mod tests {
         generate(&db2, &DemoSpec { threads: 300, ..Default::default() }).unwrap();
         let inbox2 = db2.read_blocking(|c| read::list_threads(c, "INBOX", None, 500)).unwrap();
         assert_eq!(inbox, inbox2, "same seed, same mailbox");
+    }
+
+    #[test]
+    fn the_demo_has_bulk_mail_for_clean_up() {
+        use crate::cleanup::{Query, Scope, View, groups};
+        let dir = std::env::temp_dir().join(format!("openagc-demo-cleanup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = Db::open(&dir.join("mail.sqlite")).unwrap();
+        generate(&db, &DemoSpec { threads: 2_000, ..Default::default() }).unwrap();
+        let q = |view| Query { view, scope: Scope::Inbox, now: 1_790_000_000_000, utc_offset_secs: 0 };
+        let senders = db.read_blocking(move |c| groups(c, &q(View::Sender), "")).unwrap();
+        let bulk = senders.iter().filter(|g| g.count >= 24).count();
+        assert!(bulk >= 4, "several senders with dozens of Inbox messages: {senders:?}");
+        assert!(senders.iter().any(|g| !g.aka.is_empty()), "some with other names");
+        let sizes = db.read_blocking(move |c| groups(c, &q(View::Size), "")).unwrap();
+        assert!(sizes.len() >= 5, "sizes spread over the buckets: {sizes:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

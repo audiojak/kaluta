@@ -69,6 +69,13 @@ struct OpenAGCApp: App {
         }
         .defaultSize(width: 980, height: 720)
 
+        // Clean Up (spec §14.12): the open account's mail in bulk.
+        Window("Clean Up", id: "cleanup") {
+            CleanUpWindow()
+                .environment(model)
+        }
+        .defaultSize(width: 1180, height: 760)
+
         // Listed in the Window menu; kept for diagnosing sync (decision 4).
         Window("Sync Debugger", id: "sync-debugger") {
             SyncDebuggerView()
@@ -122,9 +129,13 @@ struct MailCommands: Commands {
     /// composer (⌘⌫ deletes to line start there) never acts on the
     /// selection behind it.
     @FocusedValue(\.isMailWindow) private var isMailWindow
+    /// Set while the Clean Up window is key: ⌘Z undoes its actions too.
+    @FocusedValue(\.isCleanUpWindow) private var isCleanUpWindow
     @Environment(\.openWindow) private var openWindow
 
     private var mailKey: Bool { isMailWindow == true && model.isMailOpen }
+    /// Edit › Undo acts on the open account's mail actions here.
+    private var undoKey: Bool { mailKey || (isCleanUpWindow == true && model.isMailOpen) }
     private var noTargets: Bool { !mailKey || model.actionTargets.isEmpty }
     private var noReplyTarget: Bool { !mailKey || model.replyTargetMessageID == nil }
 
@@ -138,12 +149,12 @@ struct MailCommands: Commands {
         // Mail actions undo per account; text being edited keeps its own
         // undo (spec §14.6a).
         CommandGroup(replacing: .undoRedo) {
-            Button(mailKey ? model.undo.undoTitle(in: model.openAccountID) : "Undo") {
-                model.undoCommand(mailWindowKey: mailKey)
+            Button(undoKey ? model.undo.undoTitle(in: model.openAccountID) : "Undo") {
+                model.undoCommand(mailWindowKey: undoKey)
             }
             .keyboardShortcut("z")
-            Button(mailKey ? model.undo.redoTitle(in: model.openAccountID) : "Redo") {
-                model.redoCommand(mailWindowKey: mailKey)
+            Button(undoKey ? model.undo.redoTitle(in: model.openAccountID) : "Redo") {
+                model.redoCommand(mailWindowKey: undoKey)
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
         }
@@ -181,6 +192,11 @@ struct MailCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(!mailKey)
             Divider() // menu
+        }
+        // As Mail's Mailbox menu; Clean Up has no shortcut (used rarely).
+        CommandMenu("Mailbox") {
+            Button("Clean Up Mailbox…") { openWindow(id: "cleanup") }
+                .disabled(!model.canCleanUp)
         }
         CommandMenu("Message") {
             Button("Reply") { model.reply(all: false) }

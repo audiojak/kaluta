@@ -65,6 +65,10 @@ struct ComposerView: View {
                 Banner("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
                        systemImage: "sparkles", intent: .info)
             }
+            // An agent mailbox: what its service lets it send (spec §7.9).
+            if let limits = model.agentLimits(store.accountID ?? model.openAccountID) {
+                Banner(limits, systemImage: "person.badge.shield.checkmark", intent: .info)
+            }
             header(store)
                 .background {
                     // ⌘Return sends too, as in Gmail (not while reviewing an

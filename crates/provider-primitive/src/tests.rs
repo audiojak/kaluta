@@ -57,7 +57,7 @@ async fn sign_up_accepts_the_terms_and_returns_the_key_address_and_plan() {
         .mount(&server)
         .await;
     let service = PrimitiveService::with_base(&server.uri()).unwrap();
-    let signed = service.sign_up("Scout", "k1").await.unwrap();
+    let signed = service.sign_up("Scout", "k1", Some("me@example.com")).await.unwrap();
     assert_eq!(signed.api_key.expose(), "prim_new");
     assert_eq!(signed.address, "scout@abc.primitive.email");
     assert_eq!(
@@ -523,4 +523,274 @@ async fn where_the_mailbox_may_send_is_read_broadest_first() {
             SendRule::Address("ada@example.com".into()),
         ]
     );
+}
+
+// Several agents on one Primitive account (ADR 0015): scout (the first) and
+// writer, which has moved to an own domain and keeps its managed address.
+
+const SCOUT: &str = "scout@abc.primitive.email";
+const WRITER: &str = "writer@agents.example.com";
+const WRITER_MANAGED: &str = "writer@abc.primitive.email";
+
+fn scout_routing() -> Routing {
+    Routing { own: vec![SCOUT.into()], others: vec![WRITER.into(), WRITER_MANAGED.into()], catch_all: true }
+}
+
+fn writer_routing() -> Routing {
+    Routing { own: vec![WRITER.into(), WRITER_MANAGED.into()], others: vec![SCOUT.into()], catch_all: false }
+}
+
+fn agent(server: &MockServer, address: &str, routing: RoutingSource, limiter: &Arc<RateLimiter>) -> PrimitiveProvider {
+    PrimitiveProvider::for_agent(
+        Arc::new(StaticToken("prim_test".into())),
+        address,
+        routing,
+        limiter.clone(),
+        fast(),
+        &server.uri(),
+    )
+    .unwrap()
+}
+
+fn fixed(routing: Routing) -> RoutingSource {
+    Arc::new(move || routing.clone())
+}
+
+/// A received message: its record (with `to_email` unless `None`) and raw form.
+async fn mount_inbound(server: &MockServer, id: &str, to_email: Option<&str>, raw_headers: &str) {
+    Mock::given(path(format!("/emails/{id}")))
+        .respond_with(ok(json!({
+            "id": id, "thread_id": null, "status": "completed", "received_at": "2026-10-08T10:00:00Z",
+            "to_email": to_email
+        })))
+        .mount(server)
+        .await;
+    let raw = format!("From: Ada <ada@example.com>\r\n{raw_headers}Subject: {id}\r\n\r\nHello\r\n");
+    Mock::given(path(format!("/emails/{id}/raw")))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(raw.into_bytes(), "message/rfc822"))
+        .mount(server)
+        .await;
+}
+
+async fn mount_sent(server: &MockServer, id: &str, from: &str) {
+    Mock::given(path(format!("/sent-emails/{id}")))
+        .respond_with(ok(json!({
+            "id": id, "thread_id": null, "status": "delivered", "created_at": "2026-10-08T11:00:00Z",
+            "from_header": from, "to_header": "ada@example.com", "subject": id, "body_size_bytes": 2,
+            "body_text": "Hi"
+        })))
+        .mount(server)
+        .await;
+}
+
+async fn ids_of(p: &PrimitiveProvider) -> Vec<MessageId> {
+    let mut ids = Vec::new();
+    let mut page = None;
+    loop {
+        let listed = p.list_message_ids(&ListFilter::default(), page).await.unwrap();
+        ids.extend(listed.ids.into_iter().map(|(id, _)| id));
+        match listed.next {
+            Some(next) => page = Some(next),
+            None => return ids,
+        }
+    }
+}
+
+async fn fetched(p: &PrimitiveProvider, ids: &[MessageId]) -> Vec<(MessageId, Vec<LabelId>)> {
+    let mut out: Vec<_> =
+        p.fetch_messages(ids, Priority::Background).await.unwrap().into_iter().map(|m| (m.id, m.label_ids)).collect();
+    out.sort();
+    out
+}
+
+fn inbox(marked: bool) -> Vec<LabelId> {
+    let mut labels = vec![LabelId::new("INBOX"), LabelId::new("UNREAD")];
+    if marked {
+        labels.push(LabelId::new(OTHER_ADDRESSES_LABEL));
+        labels.sort();
+    }
+    labels
+}
+
+#[tokio::test]
+async fn two_agents_on_one_account_each_keep_their_own_received_and_sent_mail() {
+    let server = MockServer::start().await;
+    // The listing carries recipients for some rows and not for others.
+    Mock::given(path("/emails"))
+        .respond_with(ok_page(
+            json!([
+                { "id": "i1", "thread_id": null, "to_email": "Scout@abc.primitive.email" },
+                { "id": "i2", "thread_id": null, "to_email": "writer+news@abc.primitive.email" },
+                { "id": "i3", "thread_id": null, "to_email": "sales@abc.primitive.email" },
+                { "id": "i4", "thread_id": null },
+                { "id": "i5", "thread_id": null },
+                { "id": "i6", "thread_id": null, "to_email": "writer@agents.example.com" }
+            ]),
+            None,
+            6,
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(path("/sent-emails"))
+        .respond_with(ok_page(
+            json!([
+                { "id": "o1", "thread_id": null, "from_header": "\"Scout\" <scout@abc.primitive.email>" },
+                { "id": "o2", "thread_id": null },
+                { "id": "o3", "thread_id": null }
+            ]),
+            None,
+            3,
+        ))
+        .mount(&server)
+        .await;
+    mount_inbound(&server, "i1", Some("Scout@abc.primitive.email"), "To: scout@abc.primitive.email\r\n").await;
+    mount_inbound(&server, "i2", Some("writer+news@abc.primitive.email"), "To: ada@example.com\r\n").await;
+    mount_inbound(&server, "i3", Some("sales@abc.primitive.email"), "To: sales@abc.primitive.email\r\n").await;
+    // No `to_email` on the record: the raw message says where it went.
+    mount_inbound(&server, "i4", None, "Delivered-To: writer@abc.primitive.email\r\nTo: list@example.org\r\n").await;
+    mount_inbound(&server, "i5", None, "To: Bob <bob@example.com>\r\nCc: scout+x@abc.primitive.email\r\n").await;
+    mount_inbound(&server, "i6", Some("writer@agents.example.com"), "To: writer@agents.example.com\r\n").await;
+    mount_sent(&server, "o1", "\"Scout\" <scout@abc.primitive.email>").await;
+    mount_sent(&server, "o2", "\"Writer\" <Writer@agents.example.com>").await;
+    mount_sent(&server, "o3", "someone@abc.primitive.email").await;
+
+    let limiter = rate_limiter();
+    let scout = agent(&server, SCOUT, fixed(scout_routing()), &limiter);
+    let writer = agent(&server, WRITER, fixed(writer_routing()), &limiter);
+
+    // Listing leaves out the rows that say they are another's.
+    let (in_, out) = (inbound_id, outbound_id);
+    let scout_ids = ids_of(&scout).await;
+    assert_eq!(scout_ids, vec![in_("i1"), in_("i3"), in_("i4"), in_("i5"), out("o1"), out("o2"), out("o3")]);
+    let writer_ids = ids_of(&writer).await;
+    assert_eq!(writer_ids, vec![in_("i2"), in_("i4"), in_("i5"), in_("i6"), out("o2"), out("o3")]);
+
+    // Fetching decides the rest: the record's recipient, else the raw one's.
+    assert_eq!(
+        fetched(&scout, &scout_ids).await,
+        vec![
+            (in_("i1"), inbox(false)),
+            (in_("i3"), inbox(true)),
+            (in_("i5"), inbox(false)),
+            (out("o1"), vec![LabelId::new("SENT")]),
+            (out("o3"), vec![LabelId::new(OTHER_ADDRESSES_LABEL), LabelId::new("SENT")]),
+        ],
+        "scout: its own, a +tag of its own, and what no agent has (marked)"
+    );
+    assert_eq!(
+        fetched(&writer, &writer_ids).await,
+        vec![
+            (in_("i2"), inbox(false)),
+            (in_("i4"), inbox(false)),
+            (in_("i6"), inbox(false)),
+            (out("o2"), vec![LabelId::new("SENT")])
+        ],
+        "writer: its managed address with a +tag, Delivered-To, its own domain, and what it sent"
+    );
+    // Even asked for another's message by id, an agent does not take it.
+    assert!(fetched(&writer, &[in_("i1"), in_("i3")]).await.is_empty());
+
+    // The marker label is listed where it is used.
+    let has_marker =
+        |labels: Vec<Label>| labels.iter().any(|l| l.id.as_str() == OTHER_ADDRESSES_LABEL && l.kind == LabelKind::User);
+    assert!(has_marker(scout.list_labels().await.unwrap()));
+    assert!(!has_marker(writer.list_labels().await.unwrap()));
+    // The raw form of another agent's mail with a recipient on its record
+    // is never asked for.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.iter().filter(|r| r.url.path() == "/emails/i1/raw").count(), 1, "scout's fetch only");
+}
+
+#[tokio::test]
+async fn two_agents_long_poll_one_feed_with_their_own_cursors() {
+    let server = MockServer::start().await;
+    Mock::given(path("/changes"))
+        .and(query_param("since", "start"))
+        .respond_with(ok(json!({ "changes": [], "next_cursor": "base", "has_more": false, "baseline": true })))
+        .mount(&server)
+        .await;
+    // Reading the feed does not consume it: the same cursor gives the same
+    // changes to whoever asks.
+    let arrival = ok(json!({
+        "changes": [
+            { "kind": "email.visible", "email_id": "i9", "sent_email_id": null, "thread_id": null,
+              "changed_at": "2026-10-08T12:00:00Z" },
+            { "kind": "sent_email.created", "email_id": null, "sent_email_id": "o9", "thread_id": null,
+              "changed_at": "2026-10-08T12:00:01Z" }
+        ],
+        "next_cursor": "next", "has_more": false, "baseline": false
+    }));
+    Mock::given(path("/changes"))
+        .and(query_param("since", "base"))
+        .respond_with(arrival.set_delay(Duration::from_millis(100)))
+        .mount(&server)
+        .await;
+    Mock::given(path("/emails")).respond_with(ok_page(json!([]), None, 0)).mount(&server).await;
+    Mock::given(path("/sent-emails")).respond_with(ok_page(json!([]), None, 0)).mount(&server).await;
+    mount_inbound(&server, "i9", Some("writer@abc.primitive.email"), "To: writer@abc.primitive.email\r\n").await;
+    mount_sent(&server, "o9", "scout@abc.primitive.email").await;
+
+    let limiter = rate_limiter();
+    let scout = Arc::new(agent(&server, SCOUT, fixed(scout_routing()), &limiter));
+    let writer = Arc::new(agent(&server, WRITER, fixed(writer_routing()), &limiter));
+    scout.profile().await.unwrap();
+    writer.profile().await.unwrap();
+    // Both wait at once; each wakes.
+    let (scout_push, writer_push) = (PrimitivePush(scout.clone()), PrimitivePush(writer.clone()));
+    let (a, b) = tokio::join!(scout_push.watch(Duration::from_secs(5)), writer_push.watch(Duration::from_secs(5)));
+    assert_eq!((a.unwrap(), b.unwrap()), (Some(true), Some(true)));
+    let polls = server.received_requests().await.unwrap();
+    let waits = polls.iter().filter(|r| r.url.query().is_some_and(|q| q.contains("since=base") && q.contains("wait=")));
+    assert_eq!(waits.count(), 2, "one long-poll each, from each one's cursor");
+
+    // Each syncs the same changes and keeps its own.
+    for (p, mine) in [(&scout, outbound_id("o9")), (&writer, inbound_id("i9"))] {
+        let set = p.changes_since(&SyncCursor("base".into())).await.unwrap();
+        assert_eq!(set.cursor, SyncCursor("next".into()));
+        let added: Vec<MessageId> = set
+            .changes
+            .iter()
+            .filter_map(|c| match c {
+                Change::MessageAdded { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
+        let kept: Vec<MessageId> = fetched(p, &added).await.into_iter().map(|(id, _)| id).collect();
+        assert_eq!(kept, vec![mine]);
+    }
+}
+
+#[tokio::test]
+async fn when_an_agent_is_removed_the_first_takes_its_mail_unmarked_once_alone() {
+    let server = MockServer::start().await;
+    mount_inbound(&server, "i1", Some("writer@abc.primitive.email"), "").await;
+    mount_inbound(&server, "i2", Some("sales@abc.primitive.email"), "").await;
+    let routing = Arc::new(Mutex::new(scout_routing()));
+    let source: RoutingSource = {
+        let routing = routing.clone();
+        Arc::new(move || routing.lock().unwrap().clone())
+    };
+    let scout = agent(&server, SCOUT, source, &rate_limiter());
+    let ids = [inbound_id("i1"), inbound_id("i2")];
+    assert_eq!(fetched(&scout, &ids).await, vec![(inbound_id("i2"), inbox(true))]);
+    // Writer is removed: its mail has no agent now, and scout is alone.
+    routing.lock().unwrap().others.clear();
+    assert_eq!(fetched(&scout, &ids).await, vec![(inbound_id("i1"), inbox(false)), (inbound_id("i2"), inbox(false))]);
+    assert!(scout.list_labels().await.unwrap().iter().all(|l| l.id.as_str() != OTHER_ADDRESSES_LABEL));
+}
+
+#[tokio::test]
+async fn a_second_agent_sends_from_its_own_address() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/send-mail"))
+        .and(body_partial_json(json!({ "from": "\"Writer\" <writer@agents.example.com>", "to": "ada@example.com" })))
+        .respond_with(ok(json!({ "id": "o5", "status": "queued", "accepted": ["ada@example.com"], "rejected": [] })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let writer = agent(&server, WRITER, fixed(writer_routing()), &rate_limiter());
+    // Whatever From the composer wrote, the agent's address goes.
+    let raw = "From: Writer <scout@abc.primitive.email>\r\nTo: ada@example.com\r\nSubject: Hi\r\nMessage-ID: <w1@x>\r\n\r\nHi\r\n";
+    assert_eq!(writer.send(raw.as_bytes(), None).await.unwrap(), outbound_id("o5"));
 }

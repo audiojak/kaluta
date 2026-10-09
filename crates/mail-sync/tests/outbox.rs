@@ -164,3 +164,30 @@ async fn local_only_changes_are_not_queued() {
     engine.apply_change(LocalChange::set_starred(vec![ThreadId::new("a")], true), false).await.unwrap();
     assert_eq!(engine.outbox_counts().await.unwrap().pending, 0);
 }
+
+#[tokio::test]
+async fn a_message_deleted_on_the_server_drops_only_itself_from_a_batch() {
+    let (fake, db, _recorder, engine) = setup("not-found").await;
+    // A Clean Up sized batch: 40 messages, one deleted on the server
+    // before the change reaches it.
+    let ids: Vec<MessageId> = (0..40).map(|i| MessageId::new(format!("c{i}"))).collect();
+    for id in &ids {
+        fake.seed(message(id.as_str(), &format!("t-{}", id.as_str()), &["INBOX"]));
+    }
+    fake.delete(&MessageId::new("c17"));
+    fake.reject_missing_ids(true);
+    let op =
+        outbox::OutboxOp::ModifyLabels { message_ids: ids.clone(), add: vec![], remove: vec![LabelId::new("INBOX")] };
+    db.write(move |tx| outbox::enqueue(tx, &op, 0).map(|_| ())).await.unwrap();
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!((report.sent, report.failed), (1, 0));
+    for id in ids.iter().filter(|id| id.as_str() != "c17") {
+        assert_eq!(labels(&fake, id.as_str()), Vec::<String>::new(), "{} archived on the server", id.as_str());
+    }
+    // Trash too: the per-message loop goes on past the missing one.
+    let op =
+        outbox::OutboxOp::Trash { message_ids: vec![MessageId::new("c17"), MessageId::new("c18")], previous: vec![] };
+    db.write(move |tx| outbox::enqueue(tx, &op, 0).map(|_| ())).await.unwrap();
+    engine.drain_outbox().await.unwrap();
+    assert_eq!(labels(&fake, "c18"), vec!["TRASH"]);
+}

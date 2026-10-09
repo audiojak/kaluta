@@ -347,6 +347,7 @@ impl From<mail_sync::SyncWindow> for SyncWindow {
 pub enum BodyWindow {
     Month,
     HalfYear,
+    Year,
     /// Everything in the sync window.
     Window,
 }
@@ -356,6 +357,7 @@ impl From<BodyWindow> for mail_sync::BodyWindow {
         match w {
             BodyWindow::Month => Self::Month,
             BodyWindow::HalfYear => Self::HalfYear,
+            BodyWindow::Year => Self::Year,
             BodyWindow::Window => Self::Window,
         }
     }
@@ -366,6 +368,7 @@ impl From<mail_sync::BodyWindow> for BodyWindow {
         match w {
             mail_sync::BodyWindow::Month => Self::Month,
             mail_sync::BodyWindow::HalfYear => Self::HalfYear,
+            mail_sync::BodyWindow::Year => Self::Year,
             mail_sync::BodyWindow::Window => Self::Window,
         }
     }
@@ -896,8 +899,13 @@ impl Core {
             None => {
                 let db = self.db()?;
                 runtime::run(async move {
-                    db.write(move |tx| mail_store::read::set_sync_state(tx, mail_sync::KEY_WINDOW, window.as_str()))
-                        .await?;
+                    // The user's window: its headers-only tier is not
+                    // Clean Up's (spec §14.12), as `set_window` does.
+                    db.write(move |tx| {
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_WINDOW, window.as_str())?;
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_CLEANUP_HEADERS, "no")
+                    })
+                    .await?;
                     Ok(())
                 })
                 .await
@@ -966,11 +974,7 @@ impl Core {
     /// Keychain that refuses to answer is an error, not "no credentials":
     /// the user must be told to sign in again rather than see nothing.
     pub fn account_has_credentials(&self, account_id: String) -> Result<bool, CoreError> {
-        let key = if self.is_agent(&account_id) {
-            keys::mailbox_api_key(&account_id)
-        } else {
-            keys::refresh_token(&account_id)
-        };
+        let key = self.agent_key_name(&account_id).unwrap_or_else(|| keys::refresh_token(&account_id));
         match self.secrets.get(key) {
             Ok(token) => Ok(token.is_some()),
             Err(e) => {

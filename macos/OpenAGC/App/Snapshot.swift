@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import os
 
 /// Headless UI verification without Screen Recording permission: launched
@@ -26,17 +27,42 @@ import os
 ///                                       a routine if there is none) and
 ///                                       capture it
 ///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -OpenAGCSnapshotCleanUp <view>      open Clean Up on a view (sender,
+///                                       people, subject, mailingList, time,
+///                                       social, promotions, size) with its
+///                                       largest group ticked, and capture it
+///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
+///   -OpenAGCSnapshotCleanUpProgress YES …with a month of sample history on
+///                                       the progress card
+///   -OpenAGCSnapshotCleanUpCard YES     …capturing the progress card alone (the
+///                                       sidebar's glass hides it)
+///   -OpenAGCSnapshotCleanUpUnsubscribe one|all  …and ask to unsubscribe from
+///                                       the largest group or every group (the
+///                                       confirmation; never confirmed)
+///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
+///                                       undo notice)
+///   -OpenAGCSnapshotCleanUpLoad loading|ask  …showing every header loading
+///                                       (the band) or the question asked
+///                                       without IMAP (the sheet), sample
+///                                       numbers: the demo has no sync window
 ///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
 ///                                       fake agent on the demo mailbox, accept
 ///                                       some proposals, and show the Writing
 ///                                       Guide (a category, or the decisions)
 ///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
-///   -OpenAGCSnapshotAgentMailbox create|verify|banner|domain|domain-ready
-///                                       the Create an Agent Mailbox sheet, or a
+///   -OpenAGCSnapshotAgentMailbox create|agentmail|path|add|switcher|pane|verify|banner|agentmail-banner|domain|domain-ready|two
+///                                       the Create an Agent Mailbox sheet (its
+///                                       service step; AgentMail's email step;
+///                                       with a service account: add or new, and
+///                                       the add step), the switcher's sections
+///                                       (printed to stderr) and the service-account
+///                                       settings (a window of their own), or a
 ///                                       new mailbox (fake service) with its
-///                                       verify sheet, its limits banner, or its
-///                                       own-domain sheet (spec §7.9)
+///                                       verify sheet, its limits banner (or an
+///                                       AgentMail one's), its
+///                                       own-domain sheet, or a second agent on
+///                                       the same service account (spec §7.9)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -132,6 +158,60 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
             }
+            if let view = defaults.string(forKey: "OpenAGCSnapshotCleanUp"), let model = delegate.model {
+                model.openCleanUp?()
+                try? await Task.sleep(for: .milliseconds(800))
+                let store = model.cleanUp
+                store.view = CleanUpViewKind(rawValue: view) ?? .sender
+                if defaults.string(forKey: "OpenAGCSnapshotCleanUpScope") == "all" { store.scope = .allMail }
+                await store.open(accountID: model.openAccountID)
+                if let largest = store.groups.first {
+                    store.setTicked(true, keys: [largest.key])
+                    await store.refreshMessages()
+                }
+                // A month of history for the progress card: the demo has
+                // none, so sample counts falling to today's Inbox.
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpProgress"), let core = model.core,
+                   let account = model.openAccountID, let now = store.progress?.now {
+                    let start = Double(now) * 2.6
+                    let counts = (0..<30).map { day -> UInt64 in
+                        let t = Double(day) / 29
+                        let wobble = Double((day * 37) % 11) - 5
+                        return UInt64(max(Double(now) + 37, start - (start - Double(now) - 37) * (1 - pow(1 - t, 2)) + wobble * 4))
+                    }
+                    try? await core.debugSeedInboxHistory(accountID: account, counts: counts, baseline: counts[0] + 140)
+                    await store.loadProgress()
+                }
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpArchive") {
+                    model.undo.runsClock = false
+                    await store.apply(.archive)
+                }
+                // The confirmation only: nothing is ever confirmed here (the
+                // demo's addresses are not to be contacted).
+                let unsubscribe = defaults.string(forKey: "OpenAGCSnapshotCleanUpUnsubscribe")
+                if let unsubscribe {
+                    if unsubscribe == "all" { store.setTicked(true, keys: store.groups.map(\.key)) }
+                    await store.refreshMessages()
+                    store.askUnsubscribe()
+                }
+                let load = defaults.string(forKey: "OpenAGCSnapshotCleanUpLoad")
+                if load == "loading" {
+                    store.headerLoad = CleanUpHeaderLoad(total: 43_118, remaining: 31_406, widened: true)
+                } else if load == "ask", let account = model.openAccountID {
+                    store.loadQuestion = CleanUpLoadQuestion(accountID: account, messages: 38_412, seconds: 9_219)
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+                window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("cleanup") ?? false) }
+                // The sidebar's glass hides the card from self-snapshots:
+                // the left column's foot in a window of its own.
+                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpCard") {
+                    window = cleanUpCardWindow(model)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+                if load == "ask" || unsubscribe != nil, let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                    window = sheet
+                }
+            }
             if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
                 await model.agent.loadProviders()
                 _ = try? await core.startGuideRun(GuideRunRequest(kind: .latest, count: 40,
@@ -208,6 +288,50 @@ enum Snapshot {
                let core = model.core {
                 if agent == "create" {
                     model.beginAgentMailbox()
+                } else if agent == "agentmail" {
+                    // A new AgentMail service account: the email is asked first.
+                    model.beginAgentMailbox()
+                    try? await Task.sleep(for: .milliseconds(300))
+                    model.agentMailboxFlow?.choose(.agentMail)
+                    model.agentMailboxFlow?.name = "Research Scout"
+                    if model.agentMailboxFlow?.humanEmail.isEmpty == true {
+                        model.agentMailboxFlow?.humanEmail = "you@example.com"
+                    }
+                } else if agent == "agentmail-banner", CoreClient.usesFakeAgentMail,
+                          let created = try? await model.createAgentMailbox(service: .agentMail, name: "Research Scout",
+                                                                           humanEmail: "you@example.com") {
+                    // AgentMail's banner: the core's words, not a plan's numbers.
+                    try? core.deliverToAgentMailbox(created.accountId, from: "Ada Lovelace <ada@example.com>",
+                                                    subject: "Your library card",
+                                                    body: "Welcome! Your card number is on the attached sheet.")
+                } else if ["path", "add", "switcher", "pane"].contains(agent), CoreClient.usesFakeAgentMail,
+                          let scout = try? await model.createAgentMailbox(name: "Research Scout") {
+                    // A service account to add to (ADR 0015).
+                    if agent == "switcher" || agent == "pane" {
+                        _ = try? await model.addAgent(to: scout.accountId, name: "Writer")
+                        _ = try? await model.createAgentMailbox(service: .agentMail, name: "Clerk",
+                                                                humanEmail: "you@example.com")
+                        await model.switchAccount(to: scout.accountId)
+                    }
+                    if agent == "path" || agent == "add" {
+                        model.beginAgentMailbox()
+                        try? await Task.sleep(for: .milliseconds(300))
+                        model.agentMailboxFlow?.choose(.primitive)
+                        if agent == "add", let flow = model.agentMailboxFlow, let target = flow.existing(.primitive).first {
+                            flow.add(to: target)
+                            flow.name = "Writer"
+                        }
+                    }
+                    if agent == "switcher" {
+                        // AppKit menus do not snapshot: the sections as text.
+                        for group in model.accountMenuGroups {
+                            let names = group.accounts.map { $0.displayName ?? $0.email }.joined(separator: ", ")
+                            FileHandle.standardError.write(Data("switcher section \(group.title ?? "(own)"): \(names)\n".utf8))
+                        }
+                    }
+                    if agent == "pane" {
+                        window = Self.serviceAccountWindow(model)
+                    }
                 } else if CoreClient.usesFakeAgentMail,
                           let created = try? await model.createAgentMailbox(name: "Research Scout") {
                     try? core.deliverToAgentMailbox(created.accountId, from: "Ada Lovelace <ada@example.com>",
@@ -217,6 +341,15 @@ enum Snapshot {
                                                     subject: "Confirm your sign-up",
                                                     body: "Click to confirm the account for research-scout.")
                     if agent == "verify" { model.beginAgentVerification(created.accountId) }
+                    // Two agents on one service account (ADR 0015): the first's
+                    // account id is the service account's.
+                    if agent == "two",
+                       let writer = try? await core.addAgent(toServiceAccount: created.accountId, name: "Writer") {
+                        try? core.deliverToAgentMailbox(writer.accountId, from: "Grace Hopper <grace@example.com>",
+                                                        subject: "Draft for review",
+                                                        body: "Could you tighten the second paragraph?")
+                        await model.reloadAccounts()
+                    }
                     if agent == "domain" || agent == "domain-ready" {
                         let added = try? await core.addAgentDomain(created.accountId, domain: "agents.example.com")
                         if agent == "domain-ready", let added {
@@ -226,7 +359,8 @@ enum Snapshot {
                     }
                 }
                 try? await Task.sleep(for: .milliseconds(1200))
-                if agent != "banner", let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
+                if !["banner", "agentmail-banner", "switcher", "pane"].contains(agent),
+                   let sheet = NSApp.windows.first(where: { $0.isSheet && $0.isVisible }) {
                     window = sheet
                 }
             }
@@ -282,10 +416,57 @@ enum Snapshot {
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
             delegate.model?.agentMailboxSheet = nil
+            delegate.model?.cleanUp.loadQuestion = nil
+            delegate.model?.cleanUp.unsubscribeQuestion = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }
             try? await Task.sleep(for: .milliseconds(200))
             NSApp.terminate(nil)
         }
+    }
+
+    /// Settings › Accounts' service-account sections, in a window of their own
+    /// (the Settings scene cannot be opened from here).
+    private static func serviceAccountWindow(_ model: AppModel) -> NSWindow {
+        let form = Form {
+            ForEach(model.serviceAccounts, id: \.id) { service in
+                Section {
+                    ServiceAccountPane(service: service)
+                    ForEach(service.agentAccountIds.compactMap { id in model.accounts.first { $0.id == id } }, id: \.id) {
+                        AccountRow(account: $0, onRemove: {})
+                    }
+                } header: {
+                    Text(AppModel.serviceAccountTitle(service))
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 640, height: 900)
+        .environment(model)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 900), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: form)
+        window.makeKeyAndOrderFront(nil)
+        return window
+    }
+
+    /// Clean Up's left column foot (the progress card) at the column's
+    /// width, in a window of its own.
+    private static func cleanUpCardWindow(_ model: AppModel) -> NSWindow {
+        let size = NSSize(width: 210, height: 300)
+        let root = VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            CleanUpSidebarFooter()
+        }
+        .frame(width: size.width, height: size.height)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(model)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = NSHostingView(rootView: root)
+        window.makeKeyAndOrderFront(nil)
+        return window
     }
 
     private static func isOpen(_ state: AppModel.AccountState?) -> Bool {

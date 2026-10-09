@@ -8,6 +8,8 @@
 - Builds on: ADR 0004 (one store per account), ADR 0005 (accounts without
   Gmail), ADR 0011 (writing guide), ADR 0013 (recording AI compositions)
 - Spec: §7.9; plan `docs/plans/agent-mailboxes.md`
+- Amended by: ADR 0015 (the key, plan, verification and domains belong to
+  a service account that several agent mailboxes share)
 
 ## Context
 

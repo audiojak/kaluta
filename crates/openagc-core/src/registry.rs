@@ -298,6 +298,36 @@ impl Core {
         .await
     }
 
+    /// [`Core::remove_account`]'s work, once the account is marked removed.
+    async fn remove_marked_account(&self, account_id: String) -> Result<(), CoreError> {
+        // An agent's service account, read before its directory goes.
+        let service_account = self.agent_meta(&account_id).map(|m| m.service_account);
+        self.stop_sync_for(&account_id);
+        self.cancel_import(account_id.clone());
+        self.forget_imap(&account_id);
+        self.close_store(&account_id);
+        self.secrets.delete(crate::secrets::keys::refresh_token(&account_id))?;
+        self.secrets.delete(crate::account::client_key(&account_id))?;
+        // An agent's key is its service account's: it goes with the last
+        // agent (ADR 0015).
+        self.release_service_account(service_account.as_deref().unwrap_or(&account_id), &account_id).await?;
+        let data_dir = self.data_path();
+        let _guard = self.index_lock.lock().await;
+        runtime::run(async move {
+            let dir = accounts_dir(&data_dir).join(&account_id);
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+            tokio::task::spawn_blocking(move || {
+                let mut entries = load_index(&data_dir);
+                entries.retain(|e| e.id != account_id);
+                save_index(&data_dir, &entries)
+            })
+            .await
+            .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?
+            .map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))
+        })
+        .await
+    }
+
     /// The store for an account, opening it if needed. Does not change the
     /// current account.
     pub(crate) async fn store_for(&self, account_id: &str) -> Result<Db, CoreError> {
@@ -491,30 +521,16 @@ impl Core {
             return Err(CoreError::new(ErrorKind::InvalidInput, "not a removable account"));
         }
         // Mark it first so nothing reopens it, then stop everything that
-        // uses it, and delete under the index lock.
+        // uses it, and delete under the index lock. A removal that fails
+        // part way unmarks it: it is still listed, and an agent still on
+        // disk must count when a sibling's removal asks whether the shared
+        // key may go.
         self.open_accounts.write().unwrap_or_else(|e| e.into_inner()).removed.insert(account_id.clone());
-        self.stop_sync_for(&account_id);
-        self.cancel_import(account_id.clone());
-        self.forget_imap(&account_id);
-        self.close_store(&account_id);
-        self.secrets.delete(crate::secrets::keys::refresh_token(&account_id))?;
-        self.secrets.delete(crate::account::client_key(&account_id))?;
-        self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id))?;
-        let data_dir = self.data_path();
-        let _guard = self.index_lock.lock().await;
-        runtime::run(async move {
-            let dir = accounts_dir(&data_dir).join(&account_id);
-            let _ = tokio::fs::remove_dir_all(&dir).await;
-            tokio::task::spawn_blocking(move || {
-                let mut entries = load_index(&data_dir);
-                entries.retain(|e| e.id != account_id);
-                save_index(&data_dir, &entries)
-            })
-            .await
-            .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?
-            .map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))
-        })
-        .await
+        let removed = self.remove_marked_account(account_id.clone()).await;
+        if removed.is_err() {
+            self.open_accounts.write().unwrap_or_else(|e| e.into_inner()).removed.remove(&account_id);
+        }
+        removed
     }
 
     /// Development and test hook: add a listed account holding a synthetic
@@ -596,10 +612,11 @@ impl Core {
         if !orphans.iter().any(|o| o.id == account_id) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "that store belongs to an account"));
         }
+        let service_account = self.agent_meta(&account_id).map(|m| m.service_account);
         self.close_store(&account_id);
         let _ = self.secrets.delete(crate::secrets::keys::refresh_token(&account_id));
         let _ = self.secrets.delete(crate::account::client_key(&account_id));
-        let _ = self.secrets.delete(crate::secrets::keys::mailbox_api_key(&account_id));
+        let _ = self.release_service_account(service_account.as_deref().unwrap_or(&account_id), &account_id).await;
         let dir = accounts_dir(&self.data_path()).join(&account_id);
         runtime::run(async move {
             tokio::fs::remove_dir_all(dir).await.map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))

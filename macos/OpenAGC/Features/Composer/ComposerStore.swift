@@ -8,6 +8,9 @@ import UniformTypeIdentifiers
 /// composer windows across launches.
 enum ComposeRequest: Codable, Hashable, Sendable {
     case new(to: String?)
+    /// A new message filled in from a `mailto:` address (Clean Up's
+    /// Unsubscribe): the user reads it and sends it, or not.
+    case prefilled(to: [String], cc: [String], subject: String, body: String)
     /// `task`: the task this answers (spec §14.8); sending completes it.
     case reply(messageID: String, all: Bool, task: Int64? = nil)
     case forward(messageID: String, task: Int64? = nil)
@@ -110,6 +113,8 @@ final class ComposerStore {
             let draft: DraftInfo? = switch request {
             case let .new(to):
                 to.map { DraftInfo.empty(to: [AddressInfo(name: nil, email: $0)]) } ?? .empty()
+            case let .prefilled(to, cc, subject, body):
+                DraftInfo.prefilled(to: to, cc: cc, subject: subject, body: body)
             case let .reply(messageID, all, _):
                 try await core.replyDraft(to: messageID, all: all)
             case let .forward(messageID, _):
@@ -264,6 +269,15 @@ final class ComposerStore {
 }
 
 extension DraftInfo {
+    /// A new draft with these recipients, subject and plain-text body.
+    static func prefilled(to: [String], cc: [String], subject: String, body: String) -> DraftInfo {
+        let html = body.isEmpty ? "" : "<p>" + ComposerHTML.escape(body).replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "<br>") + "</p>"
+        return DraftInfo(id: 0, threadId: nil, inReplyToMessageId: nil, to: to.map { AddressInfo(name: nil, email: $0) },
+                         cc: cc.map { AddressInfo(name: nil, email: $0) }, bcc: [], subject: subject, bodyHtml: html,
+                         quotedHtml: "", attachments: [], status: .editing, error: nil, updatedAt: 0)
+    }
+
     static func empty(to: [AddressInfo] = []) -> DraftInfo {
         DraftInfo(id: 0, threadId: nil, inReplyToMessageId: nil, to: to, cc: [], bcc: [], subject: "",
                   bodyHtml: "", quotedHtml: "", attachments: [], status: .editing, error: nil, updatedAt: 0)

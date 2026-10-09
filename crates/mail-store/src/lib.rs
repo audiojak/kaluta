@@ -5,6 +5,7 @@
 
 pub mod agents;
 pub mod analysis;
+pub mod cleanup;
 pub mod compositions;
 pub mod consistency;
 mod db;
@@ -26,7 +27,8 @@ pub use db::{Db, READER_COUNT, schema_version};
 pub use error::{StoreError, StoreResult};
 pub use read::ThreadPage;
 /// The writer's transaction, for callers that compose store functions in one.
-pub use rusqlite::Transaction;
+pub use rusqlite::{Connection, Transaction};
 pub use write::{
-    ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, ThreadChanges,
+    ARCHIVE_LABEL, IncomingAttachment, IncomingMessage, LOCAL_PREFIX, MailWriter, MailboxChange, StoredLabels,
+    ThreadChanges,
 };

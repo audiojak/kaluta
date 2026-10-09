@@ -6,9 +6,9 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mail_domain::{EmailAddress, LabelId, MessageId, Millis, ThreadId, system_labels};
-use mail_store::{Db, IncomingMessage, MailWriter, ThreadChanges, queue, read};
+use mail_store::{Db, IncomingMessage, MailWriter, StoredLabels, ThreadChanges, queue, read};
 use provider_api::{
-    BackfillSource, Change, ListFilter, MailProvider, PageToken, Priority, ProviderError, RestBackfill,
+    BackfillSource, Change, LabelSync, ListFilter, MailProvider, PageToken, Priority, ProviderError, RestBackfill,
 };
 
 use crate::convert::to_incoming;
@@ -52,17 +52,19 @@ pub enum BodyWindow {
     #[default]
     Month,
     HalfYear,
+    Year,
     /// Everything in the sync window.
     Window,
 }
 
 impl BodyWindow {
-    pub const ALL: [BodyWindow; 3] = [Self::Month, Self::HalfYear, Self::Window];
+    pub const ALL: [BodyWindow; 4] = [Self::Month, Self::HalfYear, Self::Year, Self::Window];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Month => "30d",
             Self::HalfYear => "6m",
+            Self::Year => "1y",
             Self::Window => "window",
         }
     }
@@ -76,7 +78,20 @@ impl BodyWindow {
         match self {
             Self::Month => Some(3),
             Self::HalfYear => Some(4),
+            Self::Year => Some(5),
             Self::Window => None,
+        }
+    }
+
+    /// The body window that keeps bodies where they are when the sync
+    /// window widens from `window`: "the whole window" becomes the span
+    /// `window` covered, so a wider window brings headers, not bodies.
+    pub fn kept_from(self, window: SyncWindow) -> Self {
+        match (self, window) {
+            (Self::Window, SyncWindow::Month) => Self::Month,
+            (Self::Window, SyncWindow::HalfYear) => Self::HalfYear,
+            (Self::Window, SyncWindow::Year) => Self::Year,
+            (body, _) => body,
         }
     }
 }
@@ -151,11 +166,109 @@ const KEY_EMAIL: &str = "account_email";
 pub const KEY_WINDOW: &str = "sync_window";
 pub const KEY_BODY_WINDOW: &str = "body_window";
 const KEY_TIERS: &str = "queue_tiers";
+/// Whether the headers-only tier is Clean Up's (spec §14.12): "ask" when
+/// Clean Up widened the window to *Everything* with cheap headers. If
+/// headers then stop being cheap (IMAP refused), that tier waits for IMAP
+/// or for the user's *Load All Mail* instead of becoming whole downloads
+/// over the API unasked. "no" (or absent) keeps §7.4's promotion: a window
+/// the user chose, or one from before Clean Up.
+pub const KEY_CLEANUP_HEADERS: &str = "cleanup_headers_only";
+const CLEANUP_ASK: &str = "ask";
+const CLEANUP_NO: &str = "no";
+
+/// Whether Clean Up's headers-only tier waits rather than being promoted.
+fn cleanup_tier_waits(conn: &mail_store::Connection) -> mail_store::StoreResult<bool> {
+    Ok(read::sync_state(conn, KEY_CLEANUP_HEADERS)?.as_deref() == Some(CLEANUP_ASK))
+}
+
+/// Whether Clean Up's headers-only tier is waiting for IMAP now: it is
+/// Clean Up's, headers are not cheap (`cheap_headers`, the source's
+/// answer) and some are queued. Clean Up then asks before downloading
+/// the rest whole ([`SyncEngine::load_waiting_headers`]).
+pub async fn cleanup_headers_paused(db: &Db, cheap_headers: bool) -> SyncResult<bool> {
+    if cheap_headers {
+        return Ok(false);
+    }
+    Ok(db.read(|c| Ok(cleanup_tier_waits(c)? && queue::counts(c)?.1 > 0)).await?)
+}
+
+/// *Load All Mail* for Clean Up's waiting tier on an account that is not
+/// syncing: the tier stops being Clean Up's and its ids become whole
+/// downloads. Returns how many.
+pub async fn load_waiting_headers_stored(db: &Db) -> SyncResult<usize> {
+    Ok(db
+        .write(|tx| {
+            read::set_sync_state(tx, KEY_CLEANUP_HEADERS, CLEANUP_NO)?;
+            queue::promote_headers_only(tx)
+        })
+        .await?)
+}
+
+/// What loading every header did (Clean Up, spec §14.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EveryHeader {
+    /// The window was *Everything* already: nothing changed.
+    Unchanged,
+    /// The window is *Everything* now. `body_window` is the body window
+    /// set to keep bodies where they were, when it changed (only with
+    /// cheap headers: over the API every message comes whole anyway).
+    Widened { body_window: Option<BodyWindow> },
+    /// The caller decided on cheap headers, but they are not cheap now
+    /// (IMAP refused in between): nothing changed, so the caller asks
+    /// before a whole download over the API.
+    NeedsAsk,
+}
+
+/// The stored writes of loading every header, in one transaction.
+fn widen_stored(
+    tx: &mail_store::Transaction<'_>,
+    cheap: bool,
+    expect_cheap: bool,
+) -> mail_store::StoreResult<EveryHeader> {
+    let window = read::sync_state(tx, KEY_WINDOW)?.as_deref().and_then(SyncWindow::parse).unwrap_or_default();
+    if window == SyncWindow::Everything {
+        return Ok(EveryHeader::Unchanged);
+    }
+    if expect_cheap && !cheap {
+        return Ok(EveryHeader::NeedsAsk);
+    }
+    let body = read::sync_state(tx, KEY_BODY_WINDOW)?.as_deref().and_then(BodyWindow::parse).unwrap_or_default();
+    // Without cheap headers the body window is moot (every message comes
+    // whole) and is left as the user set it.
+    let kept = if cheap { body.kept_from(window) } else { body };
+    if kept != body {
+        read::set_sync_state(tx, KEY_BODY_WINDOW, kept.as_str())?;
+    }
+    read::set_sync_state(tx, KEY_WINDOW, SyncWindow::Everything.as_str())?;
+    read::set_sync_state(tx, KEY_CLEANUP_HEADERS, if cheap { CLEANUP_ASK } else { CLEANUP_NO })?;
+    Ok(EveryHeader::Widened { body_window: (kept != body).then_some(kept) })
+}
+
+/// [`SyncEngine::load_every_header`] for an account that is not syncing:
+/// the window and body window are stored, and the queue's tiering is
+/// marked stale so the next start lists the wider window
+/// ([`SyncEngine::ensure_tiers`]). `cheap_headers`: the account will sync
+/// over IMAP, so the older mail is Clean Up's headers-only tier.
+/// `expect_cheap` as for [`SyncEngine::load_every_header`].
+pub async fn load_every_header_stored(db: &Db, cheap_headers: bool, expect_cheap: bool) -> SyncResult<EveryHeader> {
+    Ok(db
+        .write(move |tx| {
+            let outcome = widen_stored(tx, cheap_headers, expect_cheap)?;
+            if matches!(outcome, EveryHeader::Widened { .. }) {
+                read::set_sync_state(tx, KEY_TIERS, "stale")?;
+            }
+            Ok(outcome)
+        })
+        .await?)
+}
 
 /// Receives what sync changed; the core turns it into UI events.
 pub trait SyncObserver: Send + Sync {
     fn threads_changed(&self, changes: &ThreadChanges);
     fn progress(&self, _progress: SyncProgress) {}
+    /// An outbox op reached the provider and more are waiting (a bulk
+    /// change goes out as many ops, spec §14.12).
+    fn outbox_progress(&self, _counts: mail_store::outbox::OutboxCounts) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,7 +335,7 @@ pub struct SyncEngine {
     /// Where backfill gets bodies; REST unless a bulk source is set.
     backfill: std::sync::RwLock<Arc<dyn BackfillSource>>,
     db: Db,
-    observer: Arc<dyn SyncObserver>,
+    pub(crate) observer: Arc<dyn SyncObserver>,
     /// Serializes outbox drains so one op is never sent twice.
     pub(crate) drain_lock: tokio::sync::Mutex<()>,
     /// Label changes OpenAGC itself pushed recently, so history sync can
@@ -232,6 +345,9 @@ pub struct SyncEngine {
     /// All Mail since they were listed): left to the body backfill, which
     /// falls back to the API, and not asked for again.
     headers_missed: std::sync::Mutex<std::collections::HashSet<MessageId>>,
+    /// Clean Up's headers-only tier is waiting for IMAP, reported once so
+    /// the window can ask (spec §14.12).
+    headers_waiting: std::sync::atomic::AtomicBool,
     /// IMAP or the API per job, the breaker, and recent operations
     /// (docs/plans/imap-first-sync.md).
     pub(crate) transport: crate::transport::Transport,
@@ -269,6 +385,7 @@ impl SyncEngine {
             drain_lock: tokio::sync::Mutex::new(()),
             own_changes: std::sync::Mutex::new(Vec::new()),
             headers_missed: Default::default(),
+            headers_waiting: Default::default(),
             transport: Default::default(),
         }
     }
@@ -637,6 +754,12 @@ impl SyncEngine {
         self.set_backfill_source(Arc::new(RestBackfill(self.provider.clone())));
     }
 
+    /// Whether the backfill source fetches headers cheaply now (IMAP, not
+    /// refused): older mail can then come down as headers only.
+    pub fn cheap_headers(&self) -> bool {
+        self.backfill.read().unwrap_or_else(|e| e.into_inner()).cheap_headers()
+    }
+
     /// The backfill source's name, for diagnostics.
     pub fn backfill_source_name(&self) -> &'static str {
         self.backfill.read().unwrap_or_else(|e| e.into_inner()).name()
@@ -719,9 +842,37 @@ impl SyncEngine {
     /// dropped and the window's own phases re-listed, so widening
     /// downloads more and narrowing stops downloading older mail. Mail
     /// already stored is kept either way.
+    /// A window the user sets is theirs: its headers-only tier is not
+    /// Clean Up's ([`KEY_CLEANUP_HEADERS`]).
     pub async fn set_window(&self, window: SyncWindow) -> SyncResult<()> {
-        self.db.write(move |tx| read::set_sync_state(tx, KEY_WINDOW, window.as_str())).await?;
+        self.db
+            .write(move |tx| {
+                read::set_sync_state(tx, KEY_WINDOW, window.as_str())?;
+                read::set_sync_state(tx, KEY_CLEANUP_HEADERS, CLEANUP_NO)
+            })
+            .await?;
         self.relist_window().await
+    }
+
+    /// Download every header (Clean Up, spec §14.12): the window becomes
+    /// *Everything*. With cheap headers the body window keeps bodies where
+    /// they were ([`BodyWindow::kept_from`]), so the older mail is listed
+    /// for headers only, and that tier is Clean Up's
+    /// ([`KEY_CLEANUP_HEADERS`]): it waits rather than becoming whole
+    /// downloads if IMAP is refused. Without them every message comes
+    /// whole and the body window is left alone.
+    ///
+    /// `expect_cheap`: the caller decided not to ask because headers were
+    /// cheap when it looked. If they are not now, nothing changes and the
+    /// answer is [`EveryHeader::NeedsAsk`], so a whole download over the
+    /// API never starts unasked.
+    pub async fn load_every_header(&self, expect_cheap: bool) -> SyncResult<EveryHeader> {
+        let cheap = self.cheap_headers();
+        let outcome = self.db.write(move |tx| widen_stored(tx, cheap, expect_cheap)).await?;
+        if matches!(outcome, EveryHeader::Widened { .. }) {
+            self.relist_window().await?;
+        }
+        Ok(outcome)
     }
 
     /// Which part of the window gets full messages when headers are cheap.
@@ -740,10 +891,29 @@ impl SyncEngine {
 
     /// The first phase priority listed for headers only, or `None` when
     /// every phase gets bodies: the source cannot fetch headers cheaply
-    /// (REST), or the body window is the whole sync window.
+    /// (REST), or the body window is the whole sync window. Clean Up's
+    /// tier keeps its tiering without cheap headers: it waits for IMAP.
     async fn headers_from(&self) -> SyncResult<Option<u8>> {
         let cheap = self.backfill.read().unwrap_or_else(|e| e.into_inner()).cheap_headers();
-        Ok(if cheap { self.body_window().await?.headers_from() } else { None })
+        let tiered = cheap || self.db.read(cleanup_tier_waits).await?;
+        Ok(if tiered { self.body_window().await?.headers_from() } else { None })
+    }
+
+    /// Whether Clean Up's headers-only tier is waiting for IMAP now
+    /// ([`cleanup_headers_paused`]).
+    pub async fn headers_paused(&self) -> SyncResult<bool> {
+        cleanup_headers_paused(&self.db, self.cheap_headers()).await
+    }
+
+    /// *Load All Mail* (spec §14.12): Clean Up's waiting headers-only tier
+    /// becomes whole downloads over the API, as §7.4 does for any other
+    /// tier when IMAP is refused. Returns how many were queued.
+    pub async fn load_waiting_headers(&self) -> SyncResult<usize> {
+        let promoted = load_waiting_headers_stored(&self.db).await?;
+        self.headers_waiting.store(false, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!(promoted, "Clean Up's headers-only messages queued for whole downloads");
+        self.report(SyncPhase::Backfilling).await;
+        Ok(promoted)
     }
 
     /// Re-list the window's own phases if the queue was listed under
@@ -795,11 +965,11 @@ impl SyncEngine {
         tracing::debug!(count = fetched.len(), "backfill batch: storing");
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let processed = ids.len();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -849,6 +1019,15 @@ impl SyncEngine {
         let source = self.backfill.read().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(headers) = self.fetch_headers(&ids).await? else {
             if !source.cheap_headers() {
+                if self.db.read(cleanup_tier_waits).await? {
+                    // Clean Up's tier (spec §14.12): wait for IMAP or the
+                    // user's Load All Mail; say so once, so the window asks.
+                    if !self.headers_waiting.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                        tracing::info!("IMAP refused: Clean Up's headers-only tier waits for it");
+                        self.report(SyncPhase::Backfilling).await;
+                    }
+                    return Ok(0);
+                }
                 // Headers cost as much as bodies now (IMAP refused): fetch
                 // the headers-only tier in full rather than never.
                 let promoted = self.db.write(queue::promote_headers_only).await?;
@@ -858,15 +1037,16 @@ impl SyncEngine {
             }
             return Ok(0);
         };
+        self.headers_waiting.store(false, std::sync::atomic::Ordering::Relaxed);
         let incoming: Vec<_> = headers.into_iter().map(to_incoming).collect();
         let returned: std::collections::HashSet<MessageId> = incoming.iter().map(|m| m.id.clone()).collect();
         let stored = incoming.len();
         let requested = ids.clone();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let (changes, dropped) = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -923,11 +1103,11 @@ impl SyncEngine {
         let fetched = self.fetch_bodies(&missing, Priority::Interactive).await?;
         let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
         let count = incoming.len();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1006,11 +1186,11 @@ impl SyncEngine {
         let downloaded = fetched.len();
         let incoming: Vec<_> = fetched.into_iter().map(to_incoming).collect();
         let pairs: Vec<(String, String)> = listed.into_iter().map(|(d, m)| (d, m.0)).collect();
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1080,12 +1260,12 @@ impl SyncEngine {
         let new_cursor = set.cursor.0.clone();
         let changes_in = set.changes;
 
-        let keep_labels = self.provider.labels_are_local();
+        let stored_labels = self.stored_labels();
         let (changes, report) = self
             .db
             .write(move |tx| {
                 let mut report = IncrementalReport::default();
-                let mut w = MailWriter::new(tx).keeping_labels(keep_labels);
+                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
                 for m in &incoming {
                     let stored =
                         tx.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1")?.exists([m.id.as_str()])?;
@@ -1157,22 +1337,22 @@ impl SyncEngine {
         let now = crate::outbox::now_millis();
         let mut own = self.own_changes.lock().unwrap_or_else(|e| e.into_inner());
         own.retain(|c| now - c.at < OWN_CHANGE_WINDOW);
+        // Sets, not scans: a bulk change (Clean Up) comes back from history
+        // as tens of thousands of label changes.
+        let ours: std::collections::HashSet<(&MessageId, &LabelId, bool)> =
+            own.iter().map(|c| (&c.message, &c.label, c.added)).collect();
         let mut out: Vec<ExternalLabelChange> = Vec::new();
+        let mut index: std::collections::HashMap<MessageId, usize> = std::collections::HashMap::new();
         for (message, thread, labels, added) in labeled {
-            let theirs: Vec<LabelId> = labels
-                .into_iter()
-                .filter(|l| !own.iter().any(|c| c.message == message && c.label == *l && c.added == added))
-                .collect();
+            let theirs: Vec<LabelId> = labels.into_iter().filter(|l| !ours.contains(&(&message, l, added))).collect();
             if theirs.is_empty() {
                 continue;
             }
-            let entry = match out.iter_mut().position(|e| e.message == message) {
-                Some(i) => &mut out[i],
-                None => {
-                    out.push(ExternalLabelChange { message: message.clone(), thread, added: vec![], removed: vec![] });
-                    out.last_mut().expect("just pushed")
-                }
-            };
+            let i = *index.entry(message.clone()).or_insert_with(|| {
+                out.push(ExternalLabelChange { message, thread, added: vec![], removed: vec![] });
+                out.len() - 1
+            });
+            let entry = &mut out[i];
             if added { entry.added.extend(theirs) } else { entry.removed.extend(theirs) }
         }
         out
@@ -1189,12 +1369,29 @@ impl SyncEngine {
     }
 
     /// Label list changes are not in history; refresh them wholesale.
+    ///
+    /// When the provider's list does not hold every user label
+    /// ([`LabelSync::keeps_user_labels`]: labels live on this Mac, or the
+    /// provider has no label list), the user labels in the store are the
+    /// truth: the provider's list only adds labels that are missing, and
+    /// nothing the user made is dropped or renamed. Otherwise the
+    /// provider's list is the truth (Gmail).
     pub async fn refresh_labels(&self) -> SyncResult<()> {
-        let labels = self.provider.list_labels().await?;
-        let keep: Vec<LabelId> = labels.iter().map(|l| l.id.clone()).collect();
+        let local = self.provider.label_sync().keeps_user_labels();
+        let mut labels = self.provider.list_labels().await?;
+        let mut keep: Vec<LabelId> = labels.iter().map(|l| l.id.clone()).collect();
         let changes = self
             .db
             .write(move |tx| {
+                if local {
+                    let user: BTreeSet<LabelId> = read::list_labels(tx)?
+                        .into_iter()
+                        .filter(|l| l.kind == mail_domain::LabelKind::User)
+                        .map(|l| l.id)
+                        .collect();
+                    labels.retain(|l| !user.contains(&l.id));
+                    keep.extend(user);
+                }
                 let mut w = MailWriter::new(tx);
                 w.upsert_labels(&labels)?;
                 w.retain_labels(&keep)?;
@@ -1205,8 +1402,19 @@ impl SyncEngine {
         Ok(())
     }
 
+    /// What writing a fetched message does to a stored one's labels, by
+    /// whose labels they are ([`MailProvider::label_sync`]).
+    fn stored_labels(&self) -> StoredLabels {
+        match self.provider.label_sync() {
+            LabelSync::Provider => StoredLabels::Replace,
+            LabelSync::Local => StoredLabels::Keep,
+            LabelSync::Both(merge) => StoredLabels::Merge(merge),
+        }
+    }
+
     /// The history cursor expired: take a fresh cursor and re-list
-    /// everything. Stored messages are refetched so labels are current.
+    /// everything. Stored messages are refetched so labels are current
+    /// (as far as they are the provider's: [`Self::stored_labels`]).
     async fn start_resync(&self) -> SyncResult<()> {
         tracing::warn!("history cursor expired; starting full resync");
         let profile = self.provider.profile().await?;
@@ -1278,7 +1486,15 @@ impl SyncEngine {
 
     async fn report(&self, phase: SyncPhase) {
         let (queued, headers) = self.db.read(queue::counts).await.unwrap_or((0, 0));
-        let phase = if queued + headers == 0 && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
+        // Clean Up's headers waiting for IMAP (the user said Not Now, or
+        // has not answered) are not work under way: the account is idle,
+        // and the count still goes out for Clean Up's band.
+        let waiting = queued == 0
+            && headers > 0
+            && !self.cheap_headers()
+            && self.db.read(cleanup_tier_waits).await.unwrap_or(false);
+        let phase =
+            if (queued + headers == 0 || waiting) && phase == SyncPhase::Backfilling { SyncPhase::Idle } else { phase };
         self.observer.progress(SyncProgress { phase, queued, headers });
     }
 }

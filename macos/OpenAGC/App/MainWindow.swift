@@ -86,6 +86,7 @@ struct MainWindow: View {
             model.openThreadWindow = { openWindow(id: "thread", value: $0) }
             model.openRoutines = { openWindow(id: "routines") }
             model.openSyncDebugger = { openWindow(id: "sync-debugger") }
+            model.openCleanUp = { openWindow(id: "cleanup") }
             model.openAgentSettings = {
                 model.settingsTab = .agents
                 openSettings()
@@ -240,8 +241,8 @@ struct MainWindow: View {
                 if let failed = model.failedSends.first {
                     FailedSendBanner(draft: failed, more: model.failedSends.count - 1)
                 }
-                if let plan = model.unverifiedAgentPlan, !model.isGuide, !model.isFacts {
-                    AgentLimitsBanner(plan: plan)
+                if let limits = model.unverifiedAgentLimits, !model.isGuide, !model.isFacts {
+                    AgentLimitsBanner(text: limits)
                 }
                 if let error = model.threads.searchError {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")

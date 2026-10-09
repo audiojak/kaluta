@@ -1,0 +1,415 @@
+import SwiftUI
+
+/// The Clean Up window (spec §14.12): the open account's mail grouped by
+/// the view chosen on the left, the groups in the middle, and the
+/// messages of the ticked groups on the right. The toolbar's actions
+/// apply to every message in the ticked groups, one undo each.
+struct CleanUpWindow: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let store = model.cleanUp
+        NavigationSplitView {
+            CleanUpSidebar()
+                .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
+        } content: {
+            CleanUpGroupsColumn()
+                .navigationSplitViewColumnWidth(min: 300, ideal: 380, max: 520)
+        } detail: {
+            CleanUpMessagesColumn()
+        }
+        .navigationTitle(model.cleanUpTitle)
+        .navigationSubtitle(store.view.title)
+        .toolbar { CleanUpToolbar() }
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .focusedSceneValue(\.isCleanUpWindow, true)
+        .frame(minWidth: 900, minHeight: 520)
+        .task(id: model.openAccountID) { await store.open(accountID: model.openAccountID) }
+        .sheet(item: Binding(get: { store.loadQuestion }, set: { if $0 == nil { store.answerLoadQuestion(load: false) } })) {
+            CleanUpLoadDialog(question: $0)
+        }
+        .sheet(item: Binding(get: { store.unsubscribeQuestion }, set: { if $0 == nil { store.unsubscribeQuestion = nil } })) {
+            CleanUpUnsubscribeDialog(question: $0)
+        }
+        .onAppear {
+            store.isShown = true
+            model.cleanUpOpened()
+            ToolbarToolTips.install(model: model)
+        }
+        .onDisappear { store.isShown = false }
+    }
+}
+
+extension FocusedValues {
+    /// True in the Clean Up window's scene: ⌘Z undoes its actions.
+    @Entry var isCleanUpWindow: Bool?
+}
+
+/// The views, as a source list, with the progress card under them.
+private struct CleanUpSidebar: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var store = model.cleanUp
+        List(selection: Binding(get: { store.view }, set: { if let view = $0 { store.view = view } })) {
+            Section("Group By") {
+                ForEach(CleanUpViewKind.shown) { view in
+                    Label(view.title, systemImage: view.symbol)
+                        .tag(view)
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom, spacing: 0) { CleanUpSidebarFooter() }
+    }
+}
+
+/// The left column's foot: the Inbox Zero card (spec §14.12), once its
+/// numbers are in.
+struct CleanUpSidebarFooter: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let progress = model.cleanUp.progress {
+            CleanUpProgressCard(progress: progress)
+                .padding(.horizontal, Space.m)
+                .padding(.bottom, Space.m)
+        }
+    }
+}
+
+/// The filter field and the groups.
+private struct CleanUpGroupsColumn: View {
+    @Environment(AppModel.self) private var model
+    @State private var filter = ""
+
+    var body: some View {
+        let store = model.cleanUp
+        CleanUpGroupList()
+            .overlay { emptyState }
+            .overlay(alignment: .bottom) { UndoNoticeView(origin: .cleanUp) }
+            .columnHeader { header }
+            .onChange(of: store.view) { filter = store.filter }
+            // A short pause while typing: one query per word, not per key.
+            .task(id: filter) {
+                guard filter != store.filter else { return }
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                store.filter = filter
+            }
+    }
+
+    @ViewBuilder private var header: some View {
+        let store = model.cleanUp
+        VStack(alignment: .leading, spacing: 0) {
+            if let prompt = store.view.filterPrompt {
+                ListHeaderBar {
+                    TextField(prompt, text: $filter)
+                        .textFieldStyle(.roundedBorder)
+                        .hoverHelp("Show only the groups whose name, other names or address contain this")
+                }
+            }
+            if let load = store.headerLoad {
+                CleanUpLoadBand(load: load)
+            }
+            if let error = store.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(TypeRole.meta)
+                    .foregroundStyle(Tone.failure)
+                    .padding(.horizontal, Space.l)
+                    .padding(.vertical, Space.s)
+            }
+            if let note = store.unsubscribeNote {
+                CleanUpUnsubscribeNoteView(note: note)
+            }
+        }
+    }
+
+    @ViewBuilder private var emptyState: some View {
+        let store = model.cleanUp
+        if store.groupsLoaded, store.groups.isEmpty {
+            if !store.filter.isEmpty {
+                ContentUnavailableView.search(text: store.filter)
+            } else {
+                ContentUnavailableView(store.view.emptyTitle, systemImage: store.view.symbol,
+                                       description: Text(CleanUpGroupsColumnText.empty(
+                                           store.view, scope: store.scope, noCategoryMail: store.noCategoryMail)))
+            }
+        }
+    }
+}
+
+/// What the groups column says when it has no groups.
+enum CleanUpGroupsColumnText {
+    static func empty(_ view: CleanUpViewKind, scope: CleanupScope, noCategoryMail: Bool) -> String {
+        if view == .people { return "Senders you have written to are listed here." }
+        if view == .mailingList { return "Mailing lists show here as new mail from them arrives." }
+        if view.isCategory {
+            let category = view == .social ? "Social" : "Promotions"
+            if noCategoryMail {
+                return "This view groups the mail Gmail sorts into \(category), by the sender's domain. "
+                    + "This mailbox has none."
+            }
+            let what = view == .social ? "social mail" : "promotions"
+            return scope == .inbox ? "No \(what) in the Inbox." : "No \(what) outside Spam and Trash."
+        }
+        return scope == .inbox ? "The Inbox is empty." : "There is no mail outside Spam and Trash."
+    }
+}
+
+/// Every header loading (spec §14.12): how far it has got and, when Clean
+/// Up widened the sync window, that it did and where to change it. An info
+/// band over the groups, since the groups fill as the headers arrive.
+struct CleanUpLoadBand: View {
+    @Environment(AppModel.self) private var model
+    let load: CleanUpHeaderLoad
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Image(systemName: load.done ? "checkmark.circle" : "arrow.down.circle")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: Space.hair) {
+                Text(load.text)
+                if load.widened {
+                    Text(load.note)
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            Spacer(minLength: 0)
+            if load.listing {
+                ProgressView().controlSize(.small)
+            } else if !load.done {
+                ProgressView(value: load.fraction)
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .frame(width: 80)
+                    .accessibilityLabel("Headers loaded")
+            } else {
+                Button("OK") { model.cleanUp.dismissHeaderLoad() }
+                    .controlSize(.small)
+                    .hoverHelp("Hide this note")
+            }
+        }
+        .font(TypeRole.meta)
+        .bandBackground(.info)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Asked before loading all mail without IMAP (spec §14.12): how much
+/// there is and how long it takes over the Gmail API.
+struct CleanUpLoadDialog: View {
+    @Environment(AppModel.self) private var model
+    let question: CleanUpLoadQuestion
+
+    var body: some View {
+        Dialog(title: "Load All Mail", message: question.message) {
+            Text(question.detail)
+                .font(TypeRole.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } buttons: {
+            CancelButton(title: "Not Now", help: "Clean up the mail already on this Mac (Esc)") {
+                model.cleanUp.answerLoadQuestion(load: false)
+            }
+            Button("Load All Mail") { model.cleanUp.answerLoadQuestion(load: true) }
+                .keyboardShortcut(.defaultAction)
+                .hoverHelp("Download every message from Gmail; the groups fill as it arrives (Return)")
+        }
+    }
+}
+
+/// The confirmation before unsubscribing (spec §14.12): each list once,
+/// named with how it is left (the host a one-click unsubscribe goes to,
+/// or the address a message goes to), and *Archive Them Too*, off.
+struct CleanUpUnsubscribeDialog: View {
+    @Environment(AppModel.self) private var model
+    let question: CleanUpUnsubscribeQuestion
+    @State private var archiveToo = false
+
+    var body: some View {
+        Dialog(title: question.title, message: question.message) {
+            VStack(alignment: .leading, spacing: Space.m) {
+                if question.targets.count > 1 {
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        ForEach(Array(question.targets.enumerated()), id: \.offset) { _, target in
+                            VStack(alignment: .leading, spacing: Space.hair) {
+                                Text(target.name).lineLimit(1)
+                                Text(CleanUpUnsubscribeQuestion.how(target.method))
+                                    .font(TypeRole.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(.neutral, padding: Space.m)
+                }
+                Toggle("Archive Them Too", isOn: $archiveToo)
+                    .hoverHelp("Also archive the messages of the lists you leave; one Undo brings them back")
+                Text(CleanUpUnsubscribeQuestion.archiveNote)
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } buttons: {
+            CancelButton { model.cleanUp.unsubscribeQuestion = nil }
+            Button("Unsubscribe") {
+                let archive = archiveToo
+                Task { await model.cleanUp.confirmUnsubscribe(archiveToo: archive) }
+            }
+            .keyboardShortcut(.defaultAction)
+            .hoverHelp("Unsubscribe from \(question.targets.count == 1 ? "this list" : "these lists") (Return)")
+        }
+    }
+}
+
+/// What the last unsubscribe did, over the groups: done in the secondary
+/// style, a failure in the error style, a message waiting to be sent.
+struct CleanUpUnsubscribeNoteView: View {
+    @Environment(AppModel.self) private var model
+    let note: CleanUpUnsubscribeNote
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                ForEach(Array(note.lines.enumerated()), id: \.offset) { _, line in
+                    Label(line.text, systemImage: line.failed ? "exclamationmark.triangle" : "checkmark.circle")
+                        .foregroundStyle(line.failed ? AnyShapeStyle(Tone.failure) : AnyShapeStyle(.secondary))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            Button("OK") { model.cleanUp.dismissUnsubscribeNote() }
+                .controlSize(.small)
+                .hoverHelp("Hide this note")
+        }
+        .font(TypeRole.meta)
+        .padding(.horizontal, Space.l)
+        .padding(.vertical, Space.s)
+    }
+}
+
+/// "813 messages in 2 groups", then the messages.
+private struct CleanUpMessagesColumn: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let store = model.cleanUp
+        CleanUpMessageList()
+            .overlay {
+                if !store.hasTicks {
+                    ContentUnavailableView("No Groups Ticked", systemImage: "checklist",
+                                           description: Text("Tick groups to see their messages and act on them all at once."))
+                }
+            }
+            .columnHeader {
+                if let summary = store.summary {
+                    ListHeaderBar {
+                        Text("\(Text(summary.messages).fontWeight(.semibold)) in \(Text(summary.groups).fontWeight(.semibold))")
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        Button("Untick All") { store.clearTicks() }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                            .hoverHelp("Untick every group")
+                    }
+                }
+            }
+    }
+}
+
+/// Inbox or All Mail; the actions; progress while they run and while the
+/// changes go to the provider. Like Mail's: archive, trash and spam in one
+/// group, then Move.
+private struct CleanUpToolbar: ToolbarContent {
+    @Environment(AppModel.self) private var model
+
+    var body: some ToolbarContent {
+        let store = model.cleanUp
+        ToolbarItem(placement: .navigation) {
+            Picker("Scope", selection: Binding(get: { store.scope }, set: { store.scope = $0 })) {
+                Text("Inbox").tag(CleanupScope.inbox)
+                Text("All Mail").tag(CleanupScope.allMail)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help(ToolbarHelp.text(for: "Scope", model: model) ?? "") // toolbar
+        }
+        if let status = Self.status(store) {
+            ToolbarItem {
+                HStack(spacing: Space.s) {
+                    ProgressView().controlSize(.small)
+                    Text(status).font(TypeRole.meta).foregroundStyle(.secondary)
+                }
+                .fixedSize()
+            }
+            .sharedBackgroundVisibility(.hidden)
+        }
+        ToolbarSpacer(.flexible)
+        ToolbarItemGroup {
+            Button("Archive", systemImage: "archivebox") { act(.archive) }
+                .help(ToolbarHelp.text(for: "Archive", model: model) ?? "") // toolbar
+                .disabled(!store.canAct)
+            Button("Trash", systemImage: "trash") { act(.trash) }
+                .help(ToolbarHelp.text(for: "Trash", model: model) ?? "") // toolbar
+                .disabled(!store.canAct)
+            Button("Spam", systemImage: "xmark.bin") { act(.spam) }
+                .help(ToolbarHelp.text(for: "Spam", model: model) ?? "") // toolbar
+                .disabled(!store.canAct)
+        }
+        ToolbarSpacer(.fixed)
+        ToolbarItem {
+            CleanUpMoveMenu()
+                .disabled(!store.canAct)
+        }
+        ToolbarSpacer(.fixed)
+        ToolbarItem {
+            Button("Unsubscribe", systemImage: "bell.slash") { store.askUnsubscribe() }
+                .help(ToolbarHelp.text(for: "Unsubscribe", model: model) ?? "") // toolbar
+                .disabled(!store.canUnsubscribe)
+        }
+    }
+
+    private func act(_ action: CleanupAction) {
+        Task { await model.cleanUp.apply(action) }
+    }
+
+    /// What is under way: an action, or changes still going to the provider.
+    static func status(_ store: CleanUpStore) -> String? {
+        if let working = store.working { return working }
+        if store.pending > 0 { return "Sending changes to Gmail… \(store.pending.formatted()) left" }
+        return nil
+    }
+}
+
+/// Move…: the Inbox and the user's labels, as in mail's label menu.
+private struct CleanUpMoveMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Menu {
+            Button("Inbox") { move(to: "INBOX") }
+            let nodes = LabelTree.build(model.mailboxes.labels).flatMap(\.flattened).filter { !$0.isGroup }
+            if !nodes.isEmpty {
+                Divider() // menu
+            }
+            ForEach(nodes) { node in
+                if let labelID = node.mailbox?.labelId {
+                    Button(node.path) { move(to: labelID) }
+                }
+            }
+        } label: {
+            Label("Move", systemImage: "folder")
+        }
+        .menuIndicator(.visible)
+        .help(ToolbarHelp.text(for: "Move", model: model) ?? "") // toolbar
+    }
+
+    private func move(to labelID: String) {
+        Task { await model.cleanUp.apply(.move(labelId: labelID)) }
+    }
+}

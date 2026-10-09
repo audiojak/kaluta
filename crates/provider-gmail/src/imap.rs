@@ -766,6 +766,7 @@ fn to_fetched(
         reply_to: h.reply_to,
         subject: h.subject,
         date: h.date,
+        list: h.list,
         body: Some(FetchedBody {
             text: parsed.text,
             html: parsed.html,

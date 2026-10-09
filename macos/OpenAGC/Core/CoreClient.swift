@@ -205,9 +205,14 @@ final class CoreClient: Sendable {
     /// Create a mailbox for an agent. Accepts the service's terms: only
     /// from the user's Agree and Create.
     /// `requestID` is the sheet's own: a retry returns the same mailbox.
-    func createAgentMailbox(service: AgentService, name: String,
+    /// `humanEmail` is the user's email: AgentMail needs it, Primitive
+    /// ignores it.
+    func createAgentMailbox(service: AgentService, name: String, humanEmail: String? = nil,
                             requestID: String) async throws(CoreClientError) -> AgentMailboxCreated {
-        try await call { try await core.createAgentMailbox(service: service, name: name, requestId: requestID) }
+        try await call {
+            try await core.createAgentMailbox(service: service, name: name, humanEmail: humanEmail,
+                                              requestId: requestID)
+        }
     }
 
     func agentMailboxPlan(_ accountID: String) async throws(CoreClientError) -> AgentMailboxPlan {
@@ -276,6 +281,63 @@ final class CoreClient: Sendable {
 
     func setAgentSendMode(_ accountID: String, _ mode: AgentSendMode) throws(CoreClientError) {
         try callSync { try core.setAgentSendMode(accountId: accountID, mode: mode) }
+    }
+
+    // MARK: Service accounts (spec §7.9, ADR 0015)
+
+    /// The service accounts with their agents' account ids.
+    func listServiceAccounts() async throws(CoreClientError) -> [ServiceAccountSummary] {
+        try await call { try await core.listServiceAccounts() }
+    }
+
+    /// Add an agent to a service account: no sign-up, terms or code.
+    func addAgent(toServiceAccount serviceAccountID: String, name: String, domain: String? = nil,
+                  requestID: String = UUID().uuidString) async throws(CoreClientError) -> AgentAdded {
+        try await call {
+            try await core.addAgent(serviceAccountId: serviceAccountID, name: name, domain: domain,
+                                    requestId: requestID)
+        }
+    }
+
+    /// The service account an agent mailbox belongs to.
+    func agentServiceAccount(_ accountID: String) -> String? {
+        try? core.agentServiceAccount(accountId: accountID)
+    }
+
+    /// The service account's plan now, from the service.
+    func serviceAccountPlan(_ serviceAccountID: String) async throws(CoreClientError) -> AgentMailboxPlan {
+        try await call { try await core.serviceAccountPlan(serviceAccountId: serviceAccountID) }
+    }
+
+    /// What the service account's agents may do, in words (the agents'
+    /// prompts say the same).
+    func serviceAccountLimits(_ serviceAccountID: String) -> String? {
+        try? core.serviceAccountLimits(serviceAccountId: serviceAccountID)
+    }
+
+    /// The same words for a service account not made yet.
+    func agentServiceLimits(_ service: AgentService, verified: Bool, humanEmail: String?) -> String {
+        core.agentServiceLimits(service: service, verified: verified, humanEmail: humanEmail)
+    }
+
+    /// The service account's key: it reaches every agent in it.
+    func serviceAccountAPIKey(_ serviceAccountID: String) throws(CoreClientError) -> String {
+        try callSync { try core.serviceAccountApiKey(serviceAccountId: serviceAccountID) }
+    }
+
+    /// AgentMail, once verified: a new key for this agent's inbox only.
+    func agentInboxAPIKey(_ accountID: String) async throws(CoreClientError) -> String {
+        try await call { try await core.agentInboxApiKey(accountId: accountID) }
+    }
+
+    /// Where the service account's agents may send now.
+    func serviceAccountSendRules(_ serviceAccountID: String) async throws(CoreClientError) -> [AgentSendRule] {
+        try await call { try await core.serviceAccountSendRules(serviceAccountId: serviceAccountID) }
+    }
+
+    /// The user's own domains on the service account.
+    func serviceAccountDomains(_ serviceAccountID: String) async throws(CoreClientError) -> [AgentDomain] {
+        try await call { try await core.serviceAccountDomains(serviceAccountId: serviceAccountID) }
     }
 
     /// Tests: deliver a message into a fake agent mailbox.
@@ -1157,6 +1219,99 @@ final class CoreClient: Sendable {
         try await call { try await core.setSyncWindow(window: window) }
     }
 
+    // MARK: Clean Up (spec §14.12)
+
+    // Every call names its account: the window cleans one account,
+    // whatever the main window shows.
+
+    /// The groups of `view` in `scope`, filtered by `filter`, in the core's order.
+    func cleanupGroups(accountID: String, view: CleanupView, scope: CleanupScope,
+                       filter: String) async throws(CoreClientError) -> [CleanupGroup] {
+        try await call { try await core.cleanupGroups(accountId: accountID, view: view, scope: scope, filter: filter) }
+    }
+
+    /// A page of the messages in the groups named by `keys`, newest first.
+    func cleanupMessages(accountID: String, view: CleanupView, scope: CleanupScope, keys: [String],
+                         offset: UInt32, limit: UInt32) async throws(CoreClientError) -> [CleanupMessage] {
+        try await call {
+            try await core.cleanupMessages(accountId: accountID, view: view, scope: scope, keys: keys,
+                                           offset: offset, limit: limit)
+        }
+    }
+
+    /// How many messages the groups named by `keys` hold now.
+    func cleanupCount(accountID: String, view: CleanupView, scope: CleanupScope,
+                      keys: [String]) async throws(CoreClientError) -> UInt64 {
+        try await call { try await core.cleanupCount(accountId: accountID, view: view, scope: scope, keys: keys) }
+    }
+
+    /// Apply `action` to every message in the groups named by `keys`, as
+    /// they are now: one undoable action (undone with `undo(_:)`).
+    func cleanupApply(accountID: String, view: CleanupView, scope: CleanupScope, keys: [String],
+                      action: CleanupAction) async throws(CoreClientError) -> CleanupResult {
+        try await call {
+            try await core.cleanupApply(accountId: accountID, view: view, scope: scope, keys: keys, action: action)
+        }
+    }
+
+    /// What Unsubscribe would do for the ticked groups: one target per list.
+    func cleanupUnsubscribeTargets(accountID: String, view: CleanupView, scope: CleanupScope,
+                                   keys: [String]) async throws(CoreClientError) -> [CleanupUnsubscribeTarget] {
+        try await call {
+            try await core.cleanupUnsubscribeTargets(accountId: accountID, view: view, scope: scope, keys: keys)
+        }
+    }
+
+    /// The one-click unsubscribes (RFC 8058) of the targets the user
+    /// confirmed, as `cleanupUnsubscribeTargets` gave them: a list whose
+    /// newest message changed since is not posted to. Mailto targets are
+    /// the composer's.
+    func cleanupUnsubscribe(accountID: String, view: CleanupView, scope: CleanupScope,
+                            targets: [CleanupUnsubscribeTarget]) async throws(CoreClientError)
+        -> [CleanupUnsubscribeResult] {
+        try await call {
+            try await core.cleanupUnsubscribe(accountId: accountID, view: view, scope: scope, targets: targets)
+        }
+    }
+
+    /// The Inbox Zero card's numbers; also records today's count at
+    /// midnight and, the first time, the baseline (spec §14.12).
+    func cleanupProgress(accountID: String) async throws(CoreClientError) -> CleanupProgress {
+        try await call { try await core.cleanupProgress(accountId: accountID) }
+    }
+
+    /// Snapshots only: the Inbox's daily counts, today's last, and the baseline.
+    func debugSeedInboxHistory(accountID: String, counts: [UInt64], baseline: UInt64) async throws(CoreClientError) {
+        try await call { try await core.debugSeedInboxHistory(accountId: accountID, counts: counts, baseline: baseline) }
+    }
+
+    /// Where the account's download stands, for loading every header when
+    /// Clean Up opens (spec §14.12).
+    func cleanupLoadStatus(accountID: String) async throws(CoreClientError) -> CleanupLoadStatus {
+        try await call { try await core.cleanupLoadStatus(accountId: accountID) }
+    }
+
+    /// Set the account's sync window to Everything, keeping bodies where
+    /// they were. `expectCheap`: widening without asking because headers
+    /// were cheap; if they are not by now, nothing changes (`.needsAsk`).
+    func cleanupLoadEveryHeader(accountID: String, expectCheap: Bool) async throws(CoreClientError)
+        -> CleanupLoadOutcome {
+        try await call { try await core.cleanupLoadEveryHeader(accountId: accountID, expectCheap: expectCheap) }
+    }
+
+    /// Without IMAP: how many messages loading all mail would download, and
+    /// about how long it would take (while Clean Up's header load waits for
+    /// IMAP, the messages still waiting).
+    func cleanupLoadEstimate(accountID: String) async throws(CoreClientError) -> CleanupLoadEstimate {
+        try await call { try await core.cleanupLoadEstimate(accountId: accountID) }
+    }
+
+    /// Load All Mail while Clean Up's header load waits for IMAP: the rest
+    /// comes down whole over the API. Returns how many were queued.
+    func cleanupLoadWaitingHeaders(accountID: String) async throws(CoreClientError) -> UInt64 {
+        try await call { try await core.cleanupLoadWaitingHeaders(accountId: accountID) }
+    }
+
     /// Which part of the download range gets full messages over IMAP.
     func bodyWindow(for accountID: String) async throws(CoreClientError) -> BodyWindow {
         try await call { try await core.bodyWindowFor(accountId: accountID) }
@@ -1309,6 +1464,19 @@ typealias MailboxInfo = OpenAGCCore.MailboxInfo
 typealias SyncWindow = OpenAGCCore.SyncWindow
 typealias BodyWindow = OpenAGCCore.BodyWindow
 typealias UndoToken = OpenAGCCore.UndoToken
+typealias CleanupView = OpenAGCCore.CleanupView
+typealias CleanupScope = OpenAGCCore.CleanupScope
+typealias CleanupAction = OpenAGCCore.CleanupAction
+typealias CleanupGroup = OpenAGCCore.CleanupGroup
+typealias CleanupMessage = OpenAGCCore.CleanupMessage
+typealias CleanupResult = OpenAGCCore.CleanupResult
+typealias CleanupLoadStatus = OpenAGCCore.CleanupLoadStatus
+typealias CleanupLoadEstimate = OpenAGCCore.CleanupLoadEstimate
+typealias CleanupProgress = OpenAGCCore.CleanupProgress
+typealias CleanupDay = OpenAGCCore.CleanupDay
+typealias CleanupUnsubscribeTarget = OpenAGCCore.CleanupUnsubscribeTarget
+typealias CleanupUnsubscribeMethod = OpenAGCCore.CleanupUnsubscribeMethod
+typealias CleanupUnsubscribeResult = OpenAGCCore.CleanupUnsubscribeResult
 typealias AccountSummary = OpenAGCCore.AccountSummary
 typealias AccountKind = OpenAGCCore.AccountKind
 typealias AgentService = OpenAGCCore.AgentService
@@ -1319,6 +1487,8 @@ typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
 typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
 typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
 typealias AgentVerification = OpenAGCCore.AgentVerification
+typealias ServiceAccountSummary = OpenAGCCore.ServiceAccountSummary
+typealias AgentAdded = OpenAGCCore.AgentAdded
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus
 typealias OrphanedStore = OpenAGCCore.OrphanedStore

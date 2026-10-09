@@ -28,6 +28,18 @@ final class AppModel {
         return 1 - Double(pending + headers) / Double(syncTotal)
     }
 
+    /// The Clean Up window's title: "Clean Up — you@example.com".
+    var cleanUpTitle: String {
+        guard let id = openAccountID else { return "Clean Up" }
+        if id == Self.demoAccountID { return "Clean Up — Demo Mailbox" }
+        let account = accounts.first { $0.id == id }
+        return "Clean Up — " + (account?.email ?? accountEmail ?? "Mailbox")
+    }
+
+    /// Clean Up cleans the open account; not an imported mailbox, which
+    /// is read-only.
+    var canCleanUp: Bool { isMailOpen && !isArchive }
+
     /// The sidebar's heading for the open account's own mailboxes.
     var accountSectionTitle: String {
         if openAccountID == Self.demoAccountID { return "Demo Mailbox" }
@@ -135,7 +147,16 @@ final class AppModel {
             categoriesShown: showCategories,
             importantOnly: inboxImportantOnly,
             agentShown: agent.isPresented,
-            importantAvailable: !isAgentMailbox))
+            importantAvailable: !isAgentMailbox,
+            inboxCount: Int(mailboxes.mailboxes.first { $0.kind == .inbox }?.totalCount ?? 0),
+            cleanUpAvailable: !isArchive))
+    }
+
+    /// Clean Up opened: its Inbox tip has done its work and never shows.
+    func cleanUpOpened() {
+        guard !dismissedTips.contains(Tip.cleanUp.rawValue) else { return }
+        dismissedTips.insert(Tip.cleanUp.rawValue)
+        defaults.set(Array(dismissedTips).sorted(), forKey: Self.dismissedTipsKey)
     }
 
     /// Act on a tip (`accept`) or put it away; either way it is done.
@@ -146,6 +167,7 @@ final class AppModel {
         case (.agent, true):
             agent.isPresented = true
             focusAgentPrompt()
+        case (.cleanUp, true): openCleanUp?()
         default: break
         }
         dismissedTips.insert(tip.rawValue)
@@ -299,6 +321,8 @@ final class AppModel {
     /// Opens the Routines window; set by the main window.
     @ObservationIgnored var openRoutines: (() -> Void)?
     @ObservationIgnored var openSyncDebugger: (() -> Void)?
+    /// Opens the Clean Up window; set by the main window.
+    @ObservationIgnored var openCleanUp: (() -> Void)?
 
     let notifier: NewMailNotifier
     let mailboxes: MailboxStore
@@ -325,8 +349,18 @@ final class AppModel {
     /// How each decided item went, by tag; an item back in the stores
     /// (Undo) waits again whatever this says.
     var reviewOutcomes: [String: ReviewItem.Outcome] = [:]
-    /// Agent mailboxes' plans as the service last reported them.
-    var agentPlans: [String: AgentMailboxPlan] = [:]
+    /// Service accounts (spec §7.9, ADR 0015) with their agents, in the
+    /// accounts' order.
+    var serviceAccounts: [ServiceAccountSummary] = []
+    /// Service accounts' plans as the service last reported them, by
+    /// service account: its agents share one.
+    var servicePlans: [String: AgentMailboxPlan] = [:]
+    /// Service accounts whose plan was read (or is being read) this run.
+    @ObservationIgnored var fetchedServicePlans: Set<String> = []
+    /// The steps of Create an Agent Mailbox while its sheet is open.
+    var agentMailboxFlow: AgentMailboxFlow?
+    /// Tests: record what the create sheet asks of the core.
+    @ObservationIgnored var agentMailboxCallsOverride: (any AgentMailboxCalls)?
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
@@ -350,13 +384,14 @@ final class AppModel {
     let facts: FactsStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
+    /// The Clean Up window's state (spec §14.12).
+    let cleanUp: CleanUpStore
     let core: CoreClient?
 
     private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
-    private var eventTask: Task<Void, Never>?
+    /// The event loop, observers and network monitor, ended with the model.
+    @ObservationIgnored private let subscriptions = Subscriptions()
     private var signInSession: String?
-    private var lifecycleObservers: [NSObjectProtocol] = []
-    private let networkMonitor = NWPathMonitor()
 
     /// The app's preferences; tests pass a throwaway suite so they never
     /// touch the real app's (the test host *is* the app).
@@ -381,6 +416,8 @@ final class AppModel {
         analysis = AnalysisStore(core: core)
         facts = FactsStore(core: core)
         undo = MailUndo(core: core)
+        cleanUp = CleanUpStore(core: core, undo: undo)
+        cleanUp.openComposer = { [weak self] in self?.compose($0) }
         undo.onError = { [weak self] message in
             self?.logger.error("undo failed: \(message, privacy: .private)")
             Task { await self?.threads.refresh() }
@@ -813,6 +850,9 @@ final class AppModel {
     func reloadAccounts() async {
         guard let core else { return }
         if let fresh = try? await core.accounts(), fresh != accounts { accounts = fresh }
+        // Agents came or went: their service accounts too.
+        let agents = Set(accounts.filter { $0.kind == .agent }.map(\.id))
+        if agents != Set(serviceAccounts.flatMap(\.agentAccountIds)) { await reloadServiceAccounts() }
         updateBadge()
     }
 
@@ -940,10 +980,12 @@ final class AppModel {
         }
     }
 
-    /// Switch to the account at `position` in the list (⌃1–⌃9).
+    /// Switch to the account at `position` in the switcher, as its sections
+    /// show them (⌃1–⌃9).
     func switchAccount(position: Int) async {
-        guard accounts.indices.contains(position) else { return }
-        await switchAccount(to: accounts[position].id)
+        let shown = accountMenuGroups.flatMap(\.accounts)
+        guard shown.indices.contains(position) else { return }
+        await switchAccount(to: shown[position].id)
     }
 
     /// Show a thread from a notification: switch to its account if need
@@ -1344,20 +1386,25 @@ final class AppModel {
     /// Poll faster while active; sync at once on activation, wake from
     /// sleep, and when the network comes back (spec §7.4).
     private func observeLifecycle() {
-        guard lifecycleObservers.isEmpty, let core else { return }
+        guard subscriptions.observers.isEmpty, let core else { return }
         let center = NotificationCenter.default
-        lifecycleObservers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            core.setAppActive(true)
-        })
-        lifecycleObservers.append(center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            core.setAppActive(false)
-        })
-        lifecycleObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in core.syncNow() })
-        networkMonitor.pathUpdateHandler = { path in
-            if path.status == .satisfied { core.syncNow() }
+        let workspace = NSWorkspace.shared.notificationCenter
+        // Weakly: the notification centres and the monitor outlive the
+        // model, and must not keep its core (and stores) open after it.
+        subscriptions.observers.append((center, center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak core] _ in
+            core?.setAppActive(true)
+        }))
+        subscriptions.observers.append((center, center.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak core] _ in
+            core?.setAppActive(false)
+        }))
+        subscriptions.observers.append((workspace, workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core] _ in core?.syncNow() }))
+        subscriptions.network.pathUpdateHandler = { [weak core] path in
+            if path.status == .satisfied { core?.syncNow() }
         }
-        networkMonitor.start(queue: DispatchQueue(label: "ai.actual.openagc.network"))
+        subscriptions.network.start(queue: DispatchQueue(label: "ai.actual.openagc.network"))
     }
 
     /// Set the mailbox without loading it (a switch loads the new account's).
@@ -1394,9 +1441,13 @@ final class AppModel {
         Task { await threads.show(mailboxID: id) }
     }
 
+    /// The loop holds the stream, not the core: holding the core kept every
+    /// `CoreClient` (and its open stores) alive for good, since its stream
+    /// ends only when the core goes away (oagc-4rrl). It ends with the model.
     private func listenForEvents(from core: CoreClient) {
-        eventTask = Task { [weak self] in
-            for await tagged in core.events {
+        let events = core.events
+        subscriptions.events = Task { [weak self] in
+            for await tagged in events {
                 guard let self else { return }
                 await self.handle(tagged)
             }
@@ -1454,6 +1505,7 @@ final class AppModel {
         case let .threadsChanged(mailboxID, hint):
             await mailboxes.reload()
             updateBadge()
+            cleanUp.mailChanged()
             if mailboxID == "DRAFT" { await refreshFailedSends() }
             // A category tab may have gained its first thread or lost its
             // last: then the Inbox shows another narrowing.
@@ -1480,6 +1532,7 @@ final class AppModel {
             }
         case let .syncStatus(state, pending, headers, message):
             refreshTransport()
+            cleanUp.syncChanged(pending: pending, headers: headers, accountID: tagged.accountID)
             switch state {
             case .idle:
                 syncDisplay = .idle
@@ -1490,8 +1543,9 @@ final class AppModel {
             case .offline: syncDisplay = .offline(message: message)
             case .error: syncDisplay = .error(message: message)
             }
-        case let .outboxStatus(_, failed):
+        case let .outboxStatus(pending, failed):
             failedChanges = failed
+            cleanUp.outboxChanged(pending: pending, accountID: tagged.accountID)
             await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))
@@ -1559,5 +1613,22 @@ private func model_chipLabels(_ mailboxes: MailboxStore) -> [String: ThreadRowVi
     mailboxes.labels.reduce(into: [:]) { acc, m in
         guard let id = m.labelId else { return }
         acc[id] = ThreadRowView.Chip(path: m.name, color: mailboxes.labelColors[id])
+    }
+}
+
+/// What a model subscribed to: its event loop, notification observers and
+/// network monitor. A main-actor class's deinit cannot reach its own
+/// state, so this holder's does the unsubscribing when the model goes away
+/// (tests make hundreds of models; each kept its core's stores open before,
+/// oagc-4rrl).
+private final class Subscriptions {
+    var events: Task<Void, Never>?
+    var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    let network = NWPathMonitor()
+
+    deinit {
+        events?.cancel()
+        for (center, token) in observers { center.removeObserver(token) }
+        network.cancel()
     }
 }

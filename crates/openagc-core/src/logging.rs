@@ -35,15 +35,34 @@ static INSTALLED: OnceLock<()> = OnceLock::new();
 pub(crate) fn init(log_dir: Option<&Path>, bus: EventBus) {
     *LOG_SINK.lock().unwrap_or_else(|e| e.into_inner()) = Some(bus);
     INSTALLED.get_or_init(|| {
-        // html5ever warns once per message about an unimplemented (and
-        // harmless) parsing corner; that alone rotated the log every minute.
-        let filter = EnvFilter::try_from_env("OPENAGC_LOG").unwrap_or_else(|_| EnvFilter::new("info,html5ever=error"));
+        let filter = filter(std::env::var("OPENAGC_LOG").ok().as_deref());
         let file_layer = log_dir
             .and_then(|dir| RotatingFile::open(dir).ok())
             .map(|file| tracing_subscriber::fmt::layer().with_writer(file).with_ansi(false).with_target(true));
         let _ =
             tracing_subscriber::registry().with(filter).with(file_layer).with(ForwardLayer(Sink::Global)).try_init();
     });
+}
+
+/// Crates whose records may carry a secret whatever the level asked for:
+/// tungstenite traces the WebSocket handshake request, AgentMail's key
+/// (`?api_key=`, `Authorization`) included (spec §7.9). Off always,
+/// `OPENAGC_LOG` or not.
+const ALWAYS_OFF: [&str; 2] = ["tungstenite=off", "tokio_tungstenite=off"];
+
+/// The level filter: `OPENAGC_LOG` if set and valid, else info, with
+/// [`ALWAYS_OFF`] added in either case.
+fn filter(env: Option<&str>) -> EnvFilter {
+    // html5ever warns once per message about an unimplemented (and
+    // harmless) parsing corner; that alone rotated the log every minute.
+    let mut filter =
+        env.and_then(|e| EnvFilter::try_new(e).ok()).unwrap_or_else(|| EnvFilter::new("info,html5ever=error"));
+    for directive in ALWAYS_OFF {
+        if let Ok(directive) = directive.parse() {
+            filter = filter.add_directive(directive);
+        }
+    }
+    filter
 }
 
 /// Where forwarded records go: the latest core's bus, or a fixed bus (tests).
@@ -318,6 +337,32 @@ mod tests {
                 CoreEvent::Log { level: LogLevel::Error, target, message: "sync failed".into() },
             ]
         );
+    }
+
+    #[test]
+    fn the_websocket_handshake_is_never_logged_whatever_the_level() {
+        for env in [None, Some("trace"), Some("debug,tungstenite=trace"), Some("openagc=loud")] {
+            let filter = filter(env);
+            let text = filter.to_string();
+            for directive in ALWAYS_OFF {
+                assert!(text.contains(directive), "{env:?}: {text}");
+            }
+            let seen = std::sync::Arc::new(Mutex::new(Vec::<String>::new()));
+            let subscriber = tracing_subscriber::registry().with(filter).with(Recording(seen.clone()));
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::trace!(target: "tungstenite::handshake::client", "Request: GET /v0?api_key=am_secret");
+                tracing::debug!(target: "tokio_tungstenite::compat", "Authorization: Bearer am_secret");
+                tracing::warn!(target: "openagc_core::sync", "kept");
+            });
+            assert_eq!(*seen.lock().unwrap(), ["openagc_core::sync"], "{env:?}");
+        }
+    }
+
+    struct Recording(std::sync::Arc<Mutex<Vec<String>>>);
+    impl<S: Subscriber> Layer<S> for Recording {
+        fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+            self.0.lock().unwrap().push(event.metadata().target().to_owned());
+        }
     }
 
     #[test]

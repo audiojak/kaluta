@@ -19,6 +19,7 @@ mail-sync.workspace = true
 provider-api.workspace = true
 provider-gmail.workspace = true
 provider-primitive.workspace = true
+provider-agentmail.workspace = true
 agent-api.workspace = true
 agent-claude.workspace = true
 agent-codex.workspace = true
@@ -39,6 +40,7 @@ reqwest.workspace = true
 [dev-dependencies]
 wiremock.workspace = true
 provider-gmail = { workspace = true, features = ["fake-imap"] }
+provider-agentmail = { workspace = true, features = ["fake-ws"] }
 futures = "0.3"
 tokio = { workspace = true, features = ["test-util"] }
 

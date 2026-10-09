@@ -46,7 +46,10 @@ fn full_message() -> Value {
                 {"name": "Date", "value": "Tue, 15 Sep 2026 09:30:00 -0700"},
                 {"name": "Message-ID", "value": "<plan.1@example.com>"},
                 {"name": "In-Reply-To", "value": "<root@example.com>"},
-                {"name": "References", "value": "<root@example.com>"}
+                {"name": "References", "value": "<root@example.com>"},
+                {"name": "List-Id", "value": "Plans <plans.example.com>"},
+                {"name": "List-Unsubscribe", "value": "<https://example.com/u/1>"},
+                {"name": "List-Unsubscribe-Post", "value": "List-Unsubscribe=One-Click"}
             ],
             "body": {"size": 0},
             "parts": [
@@ -95,6 +98,10 @@ async fn fetch_walks_a_full_payload() {
     assert_eq!(m.subject, "Plan & deck");
     assert_eq!(m.message_id_header.as_deref(), Some("plan.1@example.com"));
     assert_eq!(m.in_reply_to.as_deref(), Some("root@example.com"));
+    assert_eq!(m.list.id.as_deref(), Some("plans.example.com"));
+    assert_eq!(m.list.name.as_deref(), Some("Plans"));
+    assert_eq!(m.list.unsubscribe.as_deref(), Some("<https://example.com/u/1>"));
+    assert_eq!(m.list.unsubscribe_post.as_deref(), Some("List-Unsubscribe=One-Click"));
 
     let body = m.body.as_ref().expect("full fetch has a body");
     assert_eq!(body.text.as_deref().map(str::trim), Some("Here's the plan."));

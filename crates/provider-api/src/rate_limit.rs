@@ -22,6 +22,10 @@ pub enum Priority {
     Background,
 }
 
+/// The Gmail API units per minute the limiter refills at: background
+/// work (backfill) runs at this rate once its first bucket is spent.
+pub const GMAIL_UNITS_PER_MINUTE: u32 = 5_000;
+
 pub struct RateLimiter {
     capacity: f64,
     nominal_refill_per_sec: f64,
@@ -68,10 +72,11 @@ impl RateLimiter {
         }
     }
 
-    /// Gmail defaults: 5,000 of the 6,000 units/minute (the adaptive rate
-    /// finds the real ceiling), 1,000 reserved for the user.
+    /// Gmail defaults: [`GMAIL_UNITS_PER_MINUTE`] of the 6,000
+    /// units/minute (the adaptive rate finds the real ceiling), 1,000
+    /// reserved for the user.
     pub fn gmail_default() -> Self {
-        Self::new(5_000, 1_000)
+        Self::new(GMAIL_UNITS_PER_MINUTE, 1_000)
     }
 
     /// The provider rejected a request as rate limited: drain, pause

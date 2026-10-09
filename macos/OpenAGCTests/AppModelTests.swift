@@ -56,3 +56,43 @@ struct AppModelTests {
 
     private struct WaitTimeout: Error {}
 }
+
+/// A model that goes away takes its core and the core's open stores with it
+/// (oagc-4rrl): the event loop held the core for good, so every test's
+/// stores stayed open until the test host ran out of file descriptors.
+@MainActor
+struct ModelReleaseTests {
+    /// The files this process has open under `directory`.
+    static func openFiles(under directory: URL) -> [String] {
+        let prefix = directory.resolvingSymlinksInPath().path
+        var found: [String] = []
+        var path = [CChar](repeating: 0, count: Int(MAXPATHLEN))
+        for fd in 0..<getdtablesize() where fcntl(fd, F_GETPATH, &path) != -1 {
+            let name = String(decoding: path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+            if name.hasPrefix(prefix) || name.hasPrefix("/private" + prefix) { found.append(name) }
+        }
+        return found
+    }
+
+    @Test func aModelThatGoesAwayClosesItsCoreAndStores() async throws {
+        let dir = CoreClient.testScratch()
+        weak var weakCore: CoreClient?
+        weak var weakModel: AppModel?
+        do {
+            let core = try CoreClient(dataDirectory: dir)
+            let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+            await model.start(openDemo: true)
+            #expect(!model.threads.rows.isEmpty)
+            #expect(!Self.openFiles(under: dir).isEmpty, "the demo's store is open")
+            weakCore = core
+            weakModel = model
+        }
+        // Work the model started (loads, the event loop) winds down.
+        for _ in 0..<250 where weakCore != nil || !Self.openFiles(under: dir).isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(weakModel == nil, "the model is gone")
+        #expect(weakCore == nil, "and its core")
+        #expect(Self.openFiles(under: dir).isEmpty, "and its stores are closed")
+    }
+}

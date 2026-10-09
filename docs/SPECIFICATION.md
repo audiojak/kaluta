@@ -34,10 +34,10 @@ The short version. Everything below elaborates on these.
 | MIME | `mail-parser` (read), `mail-builder` (write) |
 | HTML email | Sanitized in Rust with `ammonia` at sync time, cached; rendered in a locked-down `WKWebView` |
 | Gmail | Hand-written `reqwest` client over the REST API; `history.list` polling; no push |
-| Agent mailboxes | Accounts on an agent-mail service (Primitive first), created in the app through its sign-up API; REST provider (§7.9, ADR 0014) |
+| Agent mailboxes | Accounts on an agent-mail service (Primitive first, AgentMail second), created in the app through its sign-up API; several agents share one service account and its key; REST provider (§7.9, ADR 0014, ADR 0015) |
 | OAuth | Desktop-app flow with PKCE and loopback redirect; shipped client ID with bring-your-own override |
 | Scope | `gmail.modify` only (plus `userinfo.email`) |
-| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent mailboxes' API keys) through a foreign trait |
+| Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent-mail service accounts' API keys, one per service account) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
@@ -533,6 +533,22 @@ title, notes, category, due day as `YYYY-MM-DD` or none, action `reply`,
 `task_categories` (name, unique in any case, and position; seeded with the
 starting set) and `task_meta` (the id of the account's `Task` label).
 
+**Clean Up (Amendment 2026-10-08, migration `0018_cleanup`).** For the
+Clean Up window (§14.12): `messages` gains `list_id` (the id inside
+`List-Id`'s angle brackets, lower-cased, or the whole value without
+them), `list_name` (its phrase, decoded), `list_unsubscribe` and
+`list_unsubscribe_post` (as sent, unfolded), written by every fetch path
+that sees the headers (IMAP header blocks and whole messages, the REST
+API's `format=full`, mbox import) and kept when a later fetch lacks them.
+`headers_json` stays unused. Covering indexes serve the grouping:
+`(from_email COLLATE NOCASE, from_name, date)`, `(subject, date)`,
+`(date)`, `(size_estimate, date)` and `(list_id, list_name, date)` where
+`list_id` is set; Spam, Trash and drafts are left out through one small
+set of message ids rather than per-row lookups. `inbox_history` (day as
+`YYYY-MM-DD`, the Inbox's message count at its start) and `cleanup_meta`
+(key/value: the progress baseline and when it was taken) back the
+progress card.
+
 ### 6.3 Full-text search **(Verified)**
 
 Two FTS5 tables *(amended in M1)*:
@@ -690,6 +706,18 @@ background" with a progress figure from the queue depth.
   queues the extra mail; narrowing drops queued fetches beyond the window and
   keeps what is stored. Mail outside the window stays on the server and is
   not searchable locally (server-side search is a follow-up).
+  *(Amended 2026-10-08: opening Clean Up, §14.12, sets the window to
+  everything, headers only, and says so; without IMAP it asks first.
+  Implemented: `SyncEngine::load_every_header` stores *Everything* and a
+  body window that keeps bodies where they were (*the whole window*
+  becomes the old window's span; Settings gains *Full messages for: Last
+  year*), then re-lists the window's phases, so with IMAP the older mail
+  lands in the headers-only tier and the body backfill never fetches it.
+  An account not syncing stores both and marks its queue's tiering stale,
+  so the next start lists the wider window. Amended 2026-10-08: the body
+  window changes only when headers are cheap (over the API it is moot and
+  stays as the user set it), and a widening decided on cheap headers
+  changes nothing if IMAP was refused since, so the window asks first.)*
 - *Order.* The queue drains in listing order within a priority, i.e. newest
   first (`backfill_queue.seq`); it used to order by Gmail id, which is oldest
   first. Fetches triggered by history (mail the user touched elsewhere) go to
@@ -812,7 +840,14 @@ Details:
    window's phases are re-listed. If the source stops offering cheap
    headers mid-run (IMAP refused), the headers-only tier is promoted to
    body fetches rather than left unlisted. A header-only refresh keeps an
-   existing snippet.)*
+   existing snippet.)* *(Amended 2026-10-08, oagc-merk.8: except the tier
+   Clean Up created by widening the window with IMAP (§14.12; recorded in
+   `sync_state` as `cleanup_headers_only`): it waits for IMAP instead,
+   keeps its tiering across restarts, and resumes headers only when IMAP
+   comes back; the Clean Up window asks *Load All Mail* / *Not Now* first,
+   and only *Load All Mail* promotes it. A window the user sets in
+   Settings, or an *Everything* window from before Clean Up, is promoted
+   as above.)*
 2. `ensure_bodies(ids)`: fetch header-only messages now (IMAP when
    available, else REST) and store them; agent tools (`mail_get_thread`,
    `mail_get_message`, `mail_get_attachment_text`) and the reader call it.
@@ -1070,24 +1105,80 @@ provider (UIDVALIDITY/MODSEQ) fits later.
 ### 7.9 Agent mailboxes **(Amendment 2026-10-06)**
 
 An *agent mailbox* is an address that belongs to one of the user's agents,
-hosted by an agent-mail service (Primitive first; AgentMail later). Agents
+hosted by an agent-mail service (Primitive first; AgentMail second). Agents
 use it to sign up for services and to correspond on the user's behalf as
 themselves. It is an account in every sense of §7.7 (its own directory,
 store, writing guide, facts, routines, undo and entry behind the avatar
 button), shown with an agent marker. The user reads it and can send as the
-agent. ADR 0014; plan `docs/plans/agent-mailboxes.md`.
+agent. ADR 0014, ADR 0015; plans `docs/plans/agent-mailboxes.md`,
+`docs/plans/overnight-2026-10-08.md`.
+
+**Service accounts (Amendment 2026-10-08, ADR 0015).** Agent mailboxes
+belong to a *service account*: what the service calls an organisation
+(AgentMail) or an account (Primitive). One service account holds the API
+key, the human email it was verified with, the plan and its limits, and
+the user's own domains; it has one agent or several, each an account of
+its own. Neither service allows one account per mailbox: Primitive
+refuses to verify a second account with an email that verified one
+(`email_in_use`), and AgentMail keeps one organisation per human email
+and rotates its key when the sign-up is repeated.
 
 **Model.**
-- The index (§7.7) gains the kind `agent` with `service` (`primitive`).
-  `display_name` is the agent's name; it is the From display name.
-- The service's API key lives in the Keychain as `mailbox.api_key.<id>`
-  (§12); removing the account deletes it. Nothing else is stored about
-  the service account: its plan, limits and verification state are read
-  from the service (`GET /account`) when the account opens and after
-  verifying.
+- The index (§7.7) gains the kind `agent` with `service` (`primitive`,
+  later `agentmail`). `display_name` is the agent's name; it is the From
+  display name.
+- A service account is `services/<id>/service.json` in the data directory
+  (service, human email, verified, the plan as last read, the managed
+  domain agents take addresses on, own domains as last read). Its id is
+  the account id of the agent it was created with. The plan, limits and
+  verification state are read again from the service (`GET /account`)
+  when an agent opens and after verifying; the record keeps the last
+  answer.
+- An agent's `agent.json` names its `service_account` and, on AgentMail,
+  its `inbox_id`.
+- The service account's API key lives in the Keychain as
+  `mailbox.api_key.<service account id>` (§12). Removing an agent removes
+  its account on the Mac; removing the last agent of a service account
+  also deletes the record and the key.
+- Mailboxes created before 2026-10-08 have no `service_account`: each is
+  read as a service account of one agent whose id is the agent's account
+  id, so the Keychain item keeps its name and nothing is re-keyed.
 - The core holds a `MailboxService` per service (sign up, start and finish
-  verification, plan and limits) beside the account's `MailProvider`, and
-  chooses the provider by kind.
+  verification, plan and limits, add a mailbox) beside each agent's
+  `MailProvider`, and chooses the provider by kind.
+
+*(Implemented 2026-10-08, core: `agent_mailbox/service_account.rs`. The
+migration happens on read and writes nothing by itself: `agent.json`
+without `service_account` is read with the agent's own account id, and a
+missing `service.json` is read from that agent's `agent.json` (service,
+created, the managed domain from its address). The record is written the
+first time it changes (a plan read, a verification, a domain, an agent
+added, or the first agent removed while others remain), and `agent.json`
+gains the field when next written; reading again gives the same answer.
+FFI: `list_service_accounts` (id, service, human email, verified, the
+plan as last read, the managed domain, agents' account ids in the
+accounts' order), `agent_service_account`, `add_agent(service account,
+name, domain, request id)` (the request id becomes the account id, so a
+retry returns the same agent; `domain` is a verified own domain, else the
+managed one), and `service_account_plan`,
+`start_service_account_verification`, `verify_service_account`,
+`find_service_account_code`, `service_account_api_key`,
+`rotate_service_account_key`, `service_account_send_rules`,
+`service_account_domains`, `add_service_account_domain`,
+`check_service_account_domain`, `service_account_domain_zone_file`. The
+per-agent calls (`agent_mailbox_plan`, `verify_agent_mailbox`,
+`agent_domains`, …) remain as wrappers that resolve the agent's service
+account. `MailboxService` gains `add_mailbox` (AgentMail's inbox; the
+default says the service adds none) and `rotate_key` (default
+unavailable: no Primitive endpoint is wired, so *Rotate Key* works only
+where a service implements it). Removing an agent, or an orphaned store,
+deletes the key only when no other agent on disk names its service
+account; it waits for an agent being added, which checks the key is
+still there once it may proceed, and a removal that fails part way
+leaves its agent counted (amended 2026-10-08 after review, oagc-uys.23).
+A retry of `add_agent` whose agent is on disk finishes its store and
+index entry (oagc-uys.21). A new service account takes the id of its
+first agent, as a migrated one does.)*
 
 **Creating one.** *Accounts › Create an Agent Mailbox…*, also on the
 welcome screen and in Settings › Accounts. A sheet:
@@ -1104,9 +1195,180 @@ welcome screen and in Settings › Accounts. A sheet:
    later from a banner in the mailbox and from its settings.
 
 No agent is involved: setup is a fixed sequence of calls in the core.
+Signing up makes a new service account with its first agent.
 
-**Verification.** Until verified, a Primitive account is on its `agent`
-plan: it can only reply to addresses that have already sent it
+**Adding an agent to a service account.** When a service account for
+the chosen service exists, the sheet offers *Add to <service account>*:
+the agent's name only, with no terms, sign-up or code, since the service
+account already agreed and verified. A new service account stays
+possible (Primitive refuses to verify it with an email already used).
+- Primitive: no API call. The agent's address is its name as a local
+  part on the service account's managed subdomain
+  (`writer@jade-emu.primitive.email`), or on one of its verified own
+  domains; the subdomain receives at any local part, and the account
+  sends from any of its verified domains. An address another agent of the
+  service account has is refused.
+- AgentMail: a new inbox in the organisation (`POST /v0/inboxes`), whose
+  `inbox_id` the agent keeps.
+
+*(Implemented 2026-10-08, oagc-uys.14, app: `Features/Accounts/AgentMailbox.swift`
+(`AgentMailboxFlow`). The sheet's first step is the service (Primitive,
+AgentMail, a line each on what it is and its free tier); with a service
+account for it, *Add to <service account>* (one per service account) or
+*New Service Account…*; then the name. Adding shows the address it will
+have (`name@<managed subdomain>`, or on Primitive a picker of the service
+account's verified own domains; `name@agentmail.to`) and calls only
+`add_agent`. A new AgentMail account asks for *Your email* (prefilled from
+the open Gmail account, else the first; a menu picks another of the
+user's accounts) above *Agree and Create*, and after the sign-up the sheet
+is at the code step, since AgentMail emailed it: the core now notes the
+sign-up as the moment a code was asked for, so *Fill Code from <address>*
+finds it (from `agentmail.to`) as after *Send Code*. Settings' *Add
+Agent…* opens the sheet at the name on that service account.)*
+
+**AgentMail.** The second service (`https://api.agentmail.to`). Its
+sign-up takes the agent's name and the user's email together, so the
+sheet asks for the email before *Agree and Create* (prefilled from the
+open account): without it the inbox only receives, and a lost key cannot
+be recovered. The code is emailed at sign-up and *Fill Code from
+<address>* works as for Primitive. Signing up again with the same email
+would rotate the organisation's key, so the app never does it for a
+service account it has. Labels sync both ways (read state, archive and
+user labels, through the outbox); deleting stays local. Its sync, sending
+and limits are specified with its provider.
+
+*(Implemented 2026-10-08, oagc-uys.6: `crates/provider-agentmail`; core
+`agent_mailbox.rs`, `service_account.rs`.)*
+- **Sign-up.** `POST /v0/agent/sign-up {username, human_email, source}`:
+  the username is the agent's name as a local part; the answer's `inbox_id`
+  is the address (else `<username>@agentmail.to`) and is kept in
+  `agent.json`. `create_agent_mailbox(service, name, human_email,
+  request_id)` refuses AgentMail without an email, an email that already
+  has an AgentMail service account on this Mac, and a request id that
+  already holds a key without the sign-up's answer. The answer (address,
+  inbox, plan) is kept in `services/<id>/sign-up.json` before the key is
+  stored, so a retry after a failure part way finishes with that key, and
+  a retry of a creation that got as far as its agent finishes its store
+  and index entry (the file goes once registered; oagc-uys.21, .22). So
+  the core never signs up twice for one organisation.
+- **Verification.** The code is sent at sign-up. *Resend* is
+  `POST /v0/agent/human` with the same email only (another email would
+  replace the human, which AgentMail allows twice per organisation; the
+  core refuses it). `POST /v0/agent/verify {otp_code}`; codes last 24
+  hours. AgentMail's organisation (`GET /v0/organizations`) gives limits
+  but not whether it is verified: the plan's name comes from its inbox
+  limit (3 free, 10 developer, 150 startup) and the core keeps *verified*
+  once a verification succeeded. Its per-hour and per-day fields are 0:
+  AgentMail's limits are per month and per new recipient, worded by
+  `agent_service_limits` / `service_account_limits` (the agent's prompt
+  says the same). Until verified, the composer refuses recipients other
+  than the human email.
+- **Adding an agent** is `POST /v0/inboxes {username, display_name,
+  client_id}` with the sheet's request id as `client_id`, so a retry
+  returns the same inbox. A taken name and a full plan are said in words.
+- **Inbox keys.** `agent_inbox_api_key(account)` makes a key for that
+  agent's inbox only (`POST /v0/inboxes/{id}/api-keys`), once verified; a
+  new key each call, not stored here.
+- **Sync.** Message and thread ids are AgentMail's. Listing is per inbox,
+  paged (`limit`, `page_token`); the Inbox and Sent are kept client-side
+  by label, unread, starred and user labels go as `labels`, `newer_than`
+  as `after`, Trash lists nothing. A message is fetched as its record
+  (labels, time) and its raw MIME: `…/raw` answers with a signed
+  `download_url`, downloaded without the key and parsed by `mail-mime`;
+  without one, the record's own fields, attachments fetched on demand.
+- **Labels.** `unread` ↔ `UNREAD` (marking read adds AgentMail's
+  conventional `read`); `sent` ↔ `SENT`; a message without `sent` is
+  received and in `INBOX` unless it carries the app's `archived` label
+  (archive adds it, *Move to Inbox* removes it); `starred` ↔ `STARRED`;
+  `spam` → `SPAM`; any other label is a user label whose id is its name.
+  Changes go out through the outbox as `PATCH …/messages/{id}
+  {add_labels, remove_labels}`, or `…/messages/batch-update` for up to 50
+  messages. Trash, spam and delete stay on this Mac, including the Inbox
+  removal that goes with them (no `archived` label for mail moved to
+  Trash or Spam; amended 2026-10-08). Labels sync both ways
+  (`LabelSync::Both`, amended 2026-10-08 after review, oagc-uys.17): a
+  stored message fetched again (a resync, a refetch) takes AgentMail's
+  read state, Inbox, Sent, stars and user labels, so changes the event
+  list missed are repaired, and keeps what is only this Mac's: Trash and
+  Spam (mail in either stays out of the Inbox) and store labels AgentMail
+  cannot carry (`DRAFT`, `IMPORTANT`, categories). User labels survive the
+  label refresh (there is no label listing at AgentMail). Gmail's labels
+  stay the provider's (`LabelSync::Provider`) and Primitive's this Mac's
+  (`LabelSync::Local`).
+- **Changes.** The sync cursor holds the newest message time seen, the
+  messages seen within an hour of it, and the newest label event seen. A
+  poll (every 30 s while active, and at once on a push, below) lists
+  `messages?after=<newest − 1 h>` and reports what it had not seen, then
+  reads `…/events` newest first, page by page, down to the last event
+  seen, and applies `label.added`/`label.removed` oldest first; other
+  events in the list (`message.received`, …, without a top-level message
+  id or label) are read past. `spam` or `trash` added also takes the
+  message out of the Inbox, as the labels read when it is fetched; taken
+  off, the Inbox comes back if AgentMail has the message there (one read
+  of it, since archived or sent mail stays out). Not reaching the last
+  event seen within 20 pages is an expired cursor (a full resync), and so
+  is more than 20 pages of new mail since the last poll (the listing is
+  newest first: stopping there would lose the older ones; amended
+  2026-10-08 after review, oagc-uys.16, .18, .25).
+- **Push** *(implemented 2026-10-08, oagc-uys.15; docs.agentmail.to
+  websockets and its AsyncAPI, read that day)*. One WebSocket per
+  organisation, `wss://ws.agentmail.to/v0?api_key=<key>` (the key also as
+  `Authorization: Bearer`; AgentMail's AsyncAPI documents only the query,
+  re-read 2026-10-08, so it stays), never logged: errors are redacted and
+  `tungstenite`/`tokio_tungstenite` records are off in the log filter
+  whatever `OPENAGC_LOG` asks, since tungstenite traces the handshake
+  request (oagc-uys.20). It is shared by every agent of it
+  that syncs: it sends `{"type":"subscribe","inbox_ids":[…],
+  "event_types":["message.received","message.sent"]}` for every agent's
+  inbox, ten to a message, and one more for an agent that starts later;
+  the server answers `subscribed`. An `event` (`message`, `send`, … with
+  an `inbox_id`) only wakes that agent's sync, which polls as above: the
+  payload is not stored, and label changes still come from polling the
+  event list, which the socket does not carry. The socket is the agent's
+  push source (`AgentMailPush`, a `BackfillSource` whose `watch` waits
+  for its inbox, as Primitive's long-poll does); the 30 s / 5 min poll
+  runs alongside. On connecting or reconnecting every agent polls once
+  (mail may have arrived meanwhile). It pings every minute and
+  reconnects after 150 s without a frame; failures back off from 1 s to
+  a minute, and five in a row (a refused key, an `error` answer, no
+  network, or a connection dropped within 30 s of subscribing) rest it
+  for 15 minutes, during which `watch` fails and the agents poll only. A
+  connection dropped after that reconnects after the first backoff, not
+  at once (every reconnection wakes every agent; oagc-uys.19). Inboxes
+  added while it connects are subscribed: the queue of added inboxes is
+  emptied before the list is read (oagc-uys.24). TLS is `tokio-rustls` with the webpki roots, as for
+  IMAP (`tokio-tungstenite` without TLS features); plain `ws://` only to
+  the loopback address. Spam, blocked and unauthenticated mail events
+  need permissions a key may lack, which would fail the subscription, so
+  they are not asked for. Tests use a local fake (`ws_fake`); nothing
+  connects to AgentMail. Fake agent mailboxes, and tests with another
+  API base and no fake socket, poll only.
+- **Sending.** The composer's MIME becomes AgentMail's JSON (`to`, `cc`,
+  `bcc`, `reply_to`, `subject`, `text`, `html`, base64 `attachments`,
+  `headers`). A reply goes to `…/messages/<In-Reply-To>/reply` (explicit
+  recipients, `reply_all` false) so AgentMail threads it; if AgentMail
+  does not know that id, `…/messages/send` with `In-Reply-To` and
+  `References` headers. Over 6 MB is refused before sending.
+- **Never twice.** Each send carries `X-OpenAGC-Outbox-Id` (the
+  composer's Message-ID, the same on every retry of that outbox entry) and
+  an `Idempotency-Key` derived from it (AgentMail now offers one, kept 24
+  hours; the plan expected none). The client never repeats a send itself.
+  After an answer that leaves it unknown whether the mail went (a timeout,
+  a 5xx), or when the message was queued more than ten minutes ago (an
+  earlier run may have tried it), the next attempt first lists the
+  inbox's mail since it was queued, looks for that header (fetching the
+  messages with the same subject whose row lacks headers), and takes a
+  match as the send.
+- **Errors** are AgentMail's `{name, code, message, fix}`, read through
+  `HttpClient`'s error hook: `message_rejected` before verification is
+  said as "can write only to the email it was created with";
+  `missing_permission` asks to verify first; `resource_taken`,
+  `inbox_paused` and a full plan in words; `conflict` (a send with that
+  key still running) and 429 are retried later.
+
+**Verification.** Verification belongs to the service account: once
+verified, every agent in it is. Until verified, a Primitive account is on
+its `agent` plan: it can only reply to addresses that have already sent it
 authenticated mail, at most 10 sends an hour and 50 a day. Verifying moves
 it to the free `developer` plan, which still sends only to: people who
 wrote to it first, the email it was verified with, its own verified
@@ -1147,8 +1409,8 @@ the key as a Bearer token).
   ignored. A `410 cursor_expired` resyncs (changes are kept 7 days; an
   idle cursor stays valid). Mail already stored keeps its labels, read
   state and stars through a resync or a refetch: the provider says its
-  labels are local (`labels_are_local`), and its labels apply only to
-  mail new to the store.
+  labels are local (`label_sync` is `LabelSync::Local`), and its labels
+  apply only to mail new to the store.
 - A sent message takes the id `/send-mail` returned at once
   (`adopts_sent_copies`), since Primitive may give it a Message-ID of its
   own: the optimistic copy is never left beside the real one.
@@ -1159,6 +1421,36 @@ the key as a Bearer token).
   message, and the sidebar footer shows it after "Trying again shortly".
 - No drafts at the service: drafts stay on the Mac until sent. No server
   search: search is the local index (§8), which holds the whole mailbox.
+- **Several agents on one account** (ADR 0015). Primitive lists all of an
+  account's mail as one inbox, so each agent's provider keeps its share:
+  received mail whose recipient is one of the agent's addresses (its
+  address, and its managed one after *Use This Address*), sent mail whose
+  From is one of them. Addresses compare without case and without a
+  `+tag`. Mail to or from an address no agent has goes to the service
+  account's first agent (the oldest); while the account has several
+  agents it is labelled *To Other Addresses* (a local user label, listed
+  in that agent's sidebar), and the To line says which address. Each
+  agent long-polls the change feed with its own cursor.
+
+*(Implemented 2026-10-08, oagc-uys.13: `provider-primitive/src/routing.rs`;
+the core gives each provider a routing read from the agents on disk as it
+syncs (`primitive_routing`), so an agent added or removed is seen without
+restarting the others; when the first agent is removed, the next oldest
+takes unclaimed mail. The recipient is the record's `to_email` (taken as
+the envelope recipient), else the raw message's `Delivered-To`,
+`X-Original-To`, `To` and `Cc`; a message with neither is the first
+agent's. Listing rows that carry `to_email` or `from_header` are filtered
+before fetching; the rest are decided when fetched, and another agent's
+message comes back as not found, which the sync engine drops. With one
+agent nothing is marked. `GET /changes` takes the client's cursor
+(`since=`) and reading does not consume it, so the agents' long-polls do
+not take changes from each other; every agent wakes on every change and
+fetches the new records to decide (N agents read each new message's
+record N times: accepted for now). The agents of a service account share
+one rate limiter, as they share the key's request limit. Sends go from
+the agent's own address whatever the composer's From says. The agent's
+system prompt names the other agents whose sends count against the same
+limits.)*
 
 **Sending (Primitive).** `POST /v1/send-mail` with the From address, one
 recipient, subject, text and HTML bodies, `in_reply_to` and `references`
@@ -1192,16 +1484,48 @@ are unchanged. The setting lives in the mailbox's `agent.json`
 prompt whose mailbox it is, the name it sends as, and the service's
 limits (one recipient per message).
 
-**Account settings.** Service, address, plan and verification state with
-*Verify…*, *Can write to* (the service's send rules, `GET
+**Account settings.** *(Amended 2026-10-08, ADR 0015: what is shared moves
+to a service-account settings pane, reached from each agent's settings;
+an agent's own settings keep its name, address, *When Agents Send* and
+*Remove…*. The account switcher groups agents under their service
+account, "Primitive · you@example.com". On AgentMail, once verified,
+*Copy API Key* offers a key scoped to the agent's inbox and says the
+organisation's key reaches every agent in it. *Rotate Key* replaces the
+service account's key for all its agents at once.)*
+*(Implemented 2026-10-08, oagc-uys.14: the switcher's sections are the
+user's own accounts, then one per service account, titled "AgentMail ·
+<the user's email>" or "Primitive · <its subdomain>" (an unverified
+Primitive account has no email, and its subdomain names it); ⌃1–⌃9 follow
+the menu's order. The service-account pane is a section of Settings ›
+Accounts per service account, under the same title, holding what is
+shared (service and plan, verified email or *Verify…*, the limits in the
+core's words (`service_account_limits`), on Primitive *Can write to* and
+*Domains* with *Add Domain…*, *Add Agent…*, *Copy API Key…*, *Open
+<service>…*), followed by its agents' rows (name, address with *Use Your
+Own Domain…* on Primitive, *When Agents Send*, *Remove…*). *Copy API
+Key…* names the agents the key reaches; on verified AgentMail it offers
+*Copy Key for <agent> Only* (`agent_inbox_api_key`) first. *Rotate Key*
+is not shown: neither service implements it (Primitive has no endpoint
+wired; AgentMail rotates only on a repeated sign-up, which the core never
+makes), and it returns when one does. The app keeps plans by service
+account (`servicePlans`), read once per service account per run; the
+unverified banner reads its agent's service account's plan: Primitive's
+line is from the plan's hourly and daily numbers, AgentMail's is the
+first sentence of the core's limits (its plan reports 0 an hour and 0 a
+day), and the composer of an agent mailbox shows the limits in full.)* Service, address,
+plan and verification state with *Verify…*, *Can write to* (the service's send rules, `GET
 /send-permissions`: anyone, addresses that wrote first, the user's own
 domains, other Primitive mailboxes; sending to anyone is an entitlement
 Primitive grants on request), *Open at primitive.dev…* (the dashboard's
 sign-in; the help names the verified email to sign in as), *When Agents
 Send*, *Copy API Key* (a confirmation says that
 whoever holds the key can read and send the mailbox's mail), *Remove…*.
-Removing deletes the account and its key on the Mac; the service account
-stays (the sheet says so).
+Removing deletes the account on the Mac, and the key with the service
+account's last agent; the service account stays at the service (the
+sheet says so). For the last agent of an AgentMail service account the
+sheet also says that creating it again with the same email gives the
+organisation a new key, so a key shared with *Copy API Key* or used on
+another Mac stops working (amended 2026-10-08 after review, oagc-uys.26).
 
 **Own domains.** *Use Your Own Domain…* in the mailbox's settings puts
 the agent on a domain the user owns:
@@ -1221,9 +1545,10 @@ the agent on a domain the user owns:
   address) and *Use This Address*. The mailbox then sends and receives as
   that address (`agent.json` keeps the service's own address too, and the
   agent can go back to it); sync restarts with it.
-- A domain belongs to one agent mailbox: each mailbox is its own account
-  at Primitive, and Primitive lists everything sent to an account's
-  domains as one inbox.
+- A domain belongs to the service account *(amended 2026-10-08, ADR
+  0015)*: every agent in it may take an address on it, and Primitive
+  lists everything sent to an account's domains as one inbox, which each
+  agent's provider splits by recipient.
 
 **Testing.** Every test runs against a wiremock fake of the service's API.
 Nothing in automation calls a real service: each sign-up creates a real
@@ -1231,8 +1556,9 @@ account.
 
 **Not in scope.** Agents outside the app sending through a local MCP
 without the app open (`docs/plans/headless-mcp.md`), sending to several
-recipients by splitting a message, deleting mail at the service, and
-services other than Primitive until their own step.
+recipients by splitting a message, deleting mail at the service, a
+combined inbox of all agents, and services other than Primitive and
+AgentMail.
 
 ---
 
@@ -1885,7 +2211,10 @@ pub trait SecretStore: Send + Sync {
 
 Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
 `oauth.client_secret.custom` (BYO only), `anthropic.api_key` (optional),
-`mailbox.api_key.<account>` (an agent mailbox's service key, §7.9).
+`mailbox.api_key.<service account>` (an agent-mail service account's key,
+shared by its agents, §7.9; for mailboxes created before 2026-10-08 the
+service account's id is the agent's account id, so the name is
+unchanged).
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens
@@ -2899,6 +3228,305 @@ interview's fact questions and writing help's
 kept answers (each question carrying a category and label) write facts.
 Settings › Facts lists the global facts with the same editing; its
 changes go on the open account's undo stack.
+
+### 14.12 Clean Up **(Amendment 2026-10-08)**
+
+A window for clearing a mailbox in bulk, used once a quarter or a year
+rather than every day: the account's mail grouped by sender, subject,
+time, size and so on; tick groups and archive, move, trash or mark as
+spam thousands of messages at once, with one undo. Plan
+`docs/plans/overnight-2026-10-08.md`, feature 2.
+
+**Where.** Its own window (`Window("Clean Up", id: "cleanup")`, like
+Routines), opened from *Mailbox › Clean Up Mailbox…* and from *Settings ›
+Accounts › Clean Up…*. It cleans the open account. A one-time tip in the
+Inbox suggests it when the Inbox holds more than 1,000 messages. Nothing
+is added to the main sidebar.
+
+**Scope.** *Inbox* (messages carrying `INBOX`) by default; an *All Mail*
+toggle widens it to every message except Spam, Trash and drafts.
+
+**Views**, the window's left column. Each groups the messages in scope;
+a group shows a title, an "aka" line where the view has one, and its
+message count. Groups are ordered by count, largest first; Time and Size
+keep their own order.
+
+| View | Groups by | Title, aka |
+| --- | --- | --- |
+| Sender | `from_email`, ignoring case | the most used name (else the address); the other names as aka; the address below |
+| People I've Emailed | as Sender, for senders the user has written to (`contacts.sent_count > 0`) | as Sender |
+| Subject | identical subject, as stored (`Re:` kept) | the subject, or "(no subject)" |
+| Mailing Lists | `List-Id` | the list's most used name (else its id); other names as aka; the id below |
+| Time | Today, Yesterday, This Week, Last Week, then calendar months, newest first | "Today" … "September 2026" |
+| Social | sender domain, among messages with `CATEGORY_SOCIAL` | the domain; the senders' names below (not aka: many senders share a domain) |
+| Promotions | sender domain, among messages with `CATEGORY_PROMOTIONS` | as Social |
+| Size | Tiny < 1 KB, Small 1–10 KB, Medium 10–100 KB, Large 100 KB–1 MB, Extra Large 1–10 MB, Jumbo > 10 MB | the bucket, smallest first |
+
+Time uses the user's calendar: weeks start on Monday; a day belongs to
+the first bucket it fits (on a Monday, yesterday is Last Week's); months
+hold what is older than Last Week; mail dated in the future is Today's.
+Sizes are the provider's (Gmail's `sizeEstimate`, IMAP's `RFC822.SIZE`),
+in decimal units as macOS shows them. Social and Promotions use Gmail's
+own categories; there is no list of brands. A filter field above the
+groups ("Type a sender…") keeps groups whose title, aka, address or key
+contains what is typed.
+
+**Messages, not threads.** Groups count messages, and actions change
+those messages only: archiving the "Amazon" group leaves the replies of
+real people in a mixed thread where they are.
+
+**Actions.** The toolbar's *Archive*, *Move…* (a label), *Trash* and
+*Spam* apply to every message in the ticked groups. The set is resolved
+when the action runs, so a group that grew since it was shown is acted
+on as it is now. One action is one undo entry with per-message diffs
+(ADR 0006); the changes go to the provider through the outbox in chunks
+of 1,000 (`batchModify`'s limit), with progress shown in the toolbar.
+Optimistic local copies of sent mail are left out.
+
+**Loading every header.** Clean Up needs the whole mailbox, so opening it
+sets the account's sync window to *Everything* when it is narrower
+(headers only; the body window is unchanged, §7.4) and shows the header
+load's progress; the window says the setting changed, and Settings ›
+Accounts shows it. Without IMAP, where headers cost as much as whole
+messages, the window states the message count and how long the download
+will take, and asks before starting. *(Decided 2026-10-08: this is the
+one exception to changing the setting without asking; the user's *Not
+Now* holds until the app quits.)*
+
+**Mailing lists from new mail only.** `List-Id`, `List-Unsubscribe` and
+`List-Unsubscribe-Post` are stored from 2026-10-08 on (§6.2), on every
+fetch path; old mail is not fetched again for them. The Mailing Lists
+view fills as mail arrives and says so while it is empty.
+
+**Progress card.** Under the views: Inbox Zero as a percentage of the
+Inbox when Clean Up was first opened (the baseline), a sparkline of the
+Inbox's daily count, and four numbers: At Midnight, Received Today,
+Removed Today, Now. The daily count is recorded at the first sync after
+midnight and when Clean Up opens.
+
+**Not in scope** (2026-10-08): Block, Chill and Expire (standing local
+rules; perhaps built-in routines later) and Forward. *Unsubscribe* for
+groups whose messages carry `List-Unsubscribe` comes with the Mailing
+Lists view: the one-click POST (RFC 8058) after a confirmation naming the
+sender and the URL's host, or a `mailto:` opened in the composer for the
+user to send; never automatic, never an agent's.
+
+*(Implemented 2026-10-08, store: migration `0018_cleanup`, the list
+headers on the IMAP, REST and MIME paths, and `mail_store::cleanup`:
+groups, a group's messages (paged), their count and ids, the Inbox's
+daily counts and the baseline. Groups for a 131,826-message store answer
+in 1–45 ms per view in a release build (docs/performance.md).)*
+
+*(Implemented 2026-10-08, core: `cleanup_groups`, `cleanup_messages`,
+`cleanup_count` and `cleanup_apply` take the account's id, since the
+window cleans one account whatever the main window shows, and use the
+real clock and the Mac's offset from UTC for the Time view. All four are
+`async` (§4.2): the apply writes every message in one transaction, about
+0.6 s for 20,000 in a release build (docs/performance.md), which must
+not run on the main thread. Actions: Archive (out of the Inbox), Move
+(the label added and out of the Inbox, as the mail list's Move; only a
+user label or the Inbox), Trash, Spam (to Spam and out of the Inbox).
+The set is resolved inside the apply's transaction; messages already so
+are not counted and not recorded, and an apply that changes nothing
+returns no undo token. The result carries the count changed, the token
+(undone with `undo_action`/`redo_action` like any mail action), the
+notice ("Archived 813 messages from Amazon"; "from N groups" when
+several are ticked; "20 large messages" in Size, "with the subject …" in
+Subject) and Edit › Undo's name. Provider ops: the messages are grouped
+by their exact change and queued as `ModifyLabels` outbox rows of at
+most 1,000 ids, one `batchModify` each; a row could hold more (the Gmail
+provider chunks), but one row per call means a retry repeats one batch
+and a failure rolls back exactly its own messages. Trash and Spam go
+the same way, adding `TRASH` or `SPAM` as labels, rather than through
+`messages.trash`'s call per message; undo and redo of a Clean Up action
+are batched alike (its undo record's kind starts `cleanup_`), while
+conversation actions keep the trash endpoints (§14.6a). Progress: the
+outbox emits `OutboxStatus` after each batch while more are waiting, so
+the toolbar can show what is left to reach Gmail; the local write needs
+no progress of its own. `cleanup_progress` (the card's numbers) is left
+for the progress card's issue.)*
+
+*(Implemented 2026-10-08, window: `Features/CleanUp/`. Sender, People
+I've Emailed, Subject, Time and Size are listed; Mailing Lists, Social
+and Promotions join with their issues. Highlighting and ticking are
+separate: rows highlight as in the mail lists, the checkbox or Space
+ticks, and only ticks fill the messages column and are acted on; ticks
+stay while the filter changes and clear when the view changes or an
+action succeeds. Keys in the groups list: Space, `e`, `⌫` or `#`, `!`,
+`j`/`k`. The menu item has no shortcut. *Settings › Accounts › Clean
+Up…* switches the mail window to that account first, since the window
+cleans the open account; imported mailboxes, being read-only, have no
+Clean Up. The undo notice shows in the window that acted (a notice
+carries its origin) and ⌘Z there undoes from the account's stack. The
+messages column fetches pages of 200 as rows come into view. While the
+window is open, changes from sync or the mail window refresh it at most
+every 2 s.)*
+
+*(Implemented 2026-10-08, loading every header: `cleanup_load_status`,
+`cleanup_load_every_header` and `cleanup_load_estimate`. On opening, a
+Gmail account whose window is narrower than *Everything* and whose
+headers are cheap (IMAP granted and not refused just now) is widened at
+once; otherwise the window asks with the count (Gmail's
+`messagesTotal` less the messages stored) and the time at the rate the
+backfill runs over the API (5,000 units a minute, 20 per
+`messages.get`: 250 messages a minute), or "all older mail" when Gmail
+cannot be asked. Widening keeps bodies where they were: a body window of
+"the whole window" becomes the span the old window covered (a new *Last
+year* body window exists for that), so the older mail is queued for
+headers only and no body outside the body window is fetched (tested
+against the IMAP fake and `FakeProvider`). An info band over the groups
+shows "Loading headers for all mail — N of M" from `SyncStatus`'s
+headers count (over the API, "Loading all mail", counting whole
+messages) and says the sync window is now *Everything*; the groups fill
+as headers arrive. Imported mailboxes, agent mailboxes and the demo have
+no sync window and load nothing. If IMAP is refused part way, the engine
+promotes the headers-only tier to whole downloads as for any
+*Everything* account (§7.4).* *(Amended 2026-10-08, oagc-merk.8: not
+any more. A widening with cheap headers records that the headers-only
+tier is Clean Up's (`cleanup_headers_only = ask` in `sync_state`; set
+from the account's IMAP grant when widened while not syncing); if IMAP
+is then refused, that tier waits (no whole download unasked, also across
+a restart while refused), the engine reports progress once, and
+`CleanupLoadStatus.headers_paused` is set. The window, on opening or when
+the band's header count stops moving, asks the same *Load All Mail* /
+*Not Now* question with the count still waiting and its time over the
+API (`cleanup_load_estimate` answers with those while paused); the band
+reads "Waiting for IMAP — headers for N older messages are still to
+load". *Load All Mail* calls `cleanup_load_waiting_headers`, which
+promotes the tier to whole downloads and makes it no longer Clean
+Up's; *Not Now* holds for the session, and IMAP coming back (after the
+refusal's hour, or ⌘R) resumes headers only. Setting the sync window in
+Settings makes the tier the user's again (`no`), so §7.4's promotion
+applies, as for windows from before Clean Up. Tested against the IMAP
+fake (refused logins, then allowed) and `FakeProvider`.)*
+
+*Also 2026-10-08: Size groups show their range as the second line ("Less
+than 1 KB" … "More than 10 MB"), and optimistic local copies of sent
+mail are out of scope everywhere (groups, counts, messages, actions), so
+"N messages in M groups" counts exactly what an action may change; the
+result's count and notice still give only the messages that changed.)*
+
+*(Implemented 2026-10-08, progress card: `cleanup_progress(account)`
+returns the baseline, the percentage, At Midnight, Received Today,
+Removed Today, Now and the last 30 days' counts at midnight (today's
+last; the sparkline ends with Now). The day's count is recorded by the
+first incremental sync after local midnight once the first listing is
+done, and by `cleanup_progress` itself, which the window calls as it
+opens and after every change; the first record of a day stands. A count
+recorded after midnight is the Inbox then less what arrived since
+midnight and is still in it, so the day starts consistent (Removed Today
+0). Received Today is the mail that arrived today by `internal_date`
+(not the user's own, not drafts, not Spam) wherever it is now, not only
+what is still in the Inbox: otherwise archiving today's mail would not
+count as removed. Mail a Gmail filter keeps out of the Inbox therefore
+counts as received and removed; the percentage, which uses only the
+baseline and Now, is unaffected. The baseline is set the first time and
+rises when the Inbox outgrows it (older Inbox mail arriving as every
+header loads would otherwise pin Inbox Zero at 0 %); it never falls. An
+empty Inbox is 100 %. Migration `0019_cleanup_progress` indexes
+`internal_date`. The card is `CleanUpProgressCard` at the foot of the
+views and refreshes with the groups: after every action, undo and redo,
+and when mail changes.)*
+
+*(Implemented 2026-10-08, Social and Promotions: listed between Time and
+Size, filtered with "Type a domain…". A domain group's second line names
+its senders, most used first, three at most ("Status Alerts, Billing and
+2 more"), rather than calling them aka, since many senders share a
+domain; the filter still finds a domain by a sender's name. When the
+view is empty the window says whether the scope has none ("No promotions
+in the Inbox.") or the mailbox has no mail in that category at all, as
+IMAP-only, imported and agent mailboxes, which Gmail does not sort.)*
+
+*(Implemented 2026-10-08, Mailing Lists and Unsubscribe: Mailing Lists
+sits after Subject; its groups are titled by the list's most used name,
+else its id, with the id below (the spec's choice, kept over the domain
+alone: the id names the list and ends in its domain); while empty it
+says "Mailing lists show here as new mail from them arrives."
+*Unsubscribe* is in the toolbar of Mailing Lists, Sender and People (the
+other views name no list or sender) and is enabled when a ticked group's
+newest message in scope carries `List-Unsubscribe`; an older message's
+address may have expired, so it is not used. Each list is asked once
+(groups sharing a List-Id, or without one the same address, are one).
+`List-Unsubscribe-Post: List-Unsubscribe=One-Click` with an https URI
+means one POST from the core with RFC 8058's body, `application/x-www-
+form-urlencoded`, after the confirmation: no cookies, no credentials (an
+address with a user name is refused), no redirect followed, 5 s to
+connect and 10 s in all; a 2xx answer counts as done *(amended below: a
+3xx is not)*. The address is read from the store again when the user
+confirms, never passed in by the app *(amended below: from the very
+messages the confirmation showed)*. Otherwise a `mailto:` URI (RFC 6068: To, Cc, Subject and Body,
+`+` kept) opens the composer filled in for the user to send; a web page
+alone is not offered. The confirmation names each list and the host (or
+the address), says ticked groups without a link are left alone, and
+offers *Archive Them Too*, off, which archives the ticked groups as one
+undoable action afterwards *(amended below: only the lists left)*. What happened shows over the groups. A
+one-click success is remembered (`cleanup_meta`, `unsubscribed:list:<id>`
+and, from Sender or People, `unsubscribed:from:<address>`), and the
+group's second line then starts "Unsubscribed"; a mailto is not, since
+sending it is the user's. Not an agent tool, and never automatic. The
+Inbox tip suggesting Clean Up shows when the Inbox holds more than 1,000
+conversations (the sidebar's count; so more than 1,000 messages), before
+the other tips, until put away or until Clean Up is opened.)*
+
+*(Amended 2026-10-08, review fixes, oagc-merk.9–19.)*
+
+- *The day's count waits for the Inbox.* The first sync of a day, and
+  `cleanup_progress`, record the count at midnight (and set or raise the
+  baseline) only once the Inbox phases are fetched: while an id queued at
+  an Inbox priority (0 or 1, which new mail also uses) has no row yet,
+  nothing is recorded and the card works its numbers out live; a later
+  poll or opening records them. The listing marks an account bootstrapped
+  before the backfill stores what it listed, so a first sync could
+  otherwise record a partial Inbox that stood all day.
+- *Unsubscribe from what was shown.* Each target carries, per group, the
+  id of the newest message its address was read from.
+  `cleanup_unsubscribe` takes the confirmed targets, reads those groups'
+  newest messages again and posts only if they are still the same
+  messages and the address still leads to the host shown; otherwise
+  nothing is sent for that list and its line says "New mail arrived from
+  this list; review it again". A one-click address is offered only on the
+  list's own site: the URL's registrable domain (its last two labels, or
+  three under a country's own second level such as `co.uk`; a short list,
+  not the Public Suffix List, erring towards "foreign") must be the
+  `List-Id`'s or the sender's. Otherwise the list's mailto is offered, or,
+  without one, the group counts as having no link Clean Up can use. A
+  link the user would open in the browser is not offered.
+- *Only a 2xx is done.* A redirect is not followed and not recorded: the
+  line says "the list wants you to open a page at *host* to finish".
+- *Archive Them Too* archives only the groups whose one-click succeeded or
+  whose message opened in the composer; the sheet says so ("Archives only
+  the lists that take you off, and those whose message opens for you to
+  send"). Groups that failed or had no link stay, still ticked.
+- *Spam leaves the user's own sent mail alone* (`SENT`): it is not spam,
+  and whether Gmail accepts `SPAM` on a sent message is a hand-check (a
+  refusal would roll back a batch of 1,000). Trash still takes it.
+- *A message gone from the server costs only its own change.* A
+  `NotFound` for a label change on several messages is split in halves
+  and retried down to the missing ids, which are dropped (about 20 calls
+  for one missing id among 1,000); per-message trash calls go on past a
+  missing one. What `batchModify` answers when one id is gone is a
+  hand-check.
+- *Widening without asking re-checks.* `cleanup_load_every_header`
+  takes `expect_cheap`: the window widens unasked because
+  `cleanup_load_status` said headers are cheap; if IMAP was refused in
+  between, nothing changes and the answer is `NeedsAsk`, so the window
+  asks *Load All Mail* / *Not Now* as without IMAP. *Load All Mail*
+  passes false.
+- *The body window changes only with cheap headers.* Over the API every
+  message comes whole, so the body window is left as the user set it.
+  When Clean Up does pin it (`Widened { body_window }`), the band adds
+  one sentence: "Full messages still download for the last 6 months only
+  (Full messages for, in the same place)."
+- *Waiting is idle.* While Clean Up's headers-only tier waits for IMAP and
+  nothing else is queued, sync reports the account idle (the header count
+  still goes out for the band), so the main window does not show it
+  syncing for ever after *Not Now*.
+- *The window drops a view's groups when the view or scope changes,* and
+  ignores ticks until the new groups load, so a tick cannot name a key of
+  the view just left.
+- *AgentMail:* moving mail to Trash or Spam (Clean Up's actions, Mark as
+  Junk) leaves the Inbox on this Mac only; no `archived` label is added at
+  the service (§7.9, ADR 0014).
 
 ---
 
