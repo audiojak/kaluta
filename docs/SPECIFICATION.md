@@ -1533,7 +1533,10 @@ in its account settings, *When Agents Send*:
 - *Ask before each send*: the §10.4 approval flow, as on the user's own
   accounts.
 `mail.delete` stays approval-gated either way. The user's own accounts
-are unchanged. The setting lives in the mailbox's `agent.json`
+are unchanged. *(Amended 2026-10-08, oagc-uys.10:* a send from an agent
+mailbox always goes through its outbox, even when its sync is not running,
+so it reaches the service when sync next runs instead of being kept on
+this Mac only. Agents outside the app get the same setting, §10.1.) The setting lives in the mailbox's `agent.json`
 (`send_mode`). An agent working in the mailbox is told in its system
 prompt whose mailbox it is, the name it sends as, and the service's
 limits (one recipient per message).
@@ -1608,8 +1611,9 @@ the agent on a domain the user owns:
 Nothing in automation calls a real service: each sign-up creates a real
 account.
 
-**Not in scope.** Agents outside the app sending through a local MCP
-without the app open (`docs/plans/headless-mcp.md`), sending to several
+**Not in scope.** Agents outside the app sending at once while the app is
+closed (they queue until it opens, §10.1; the helper in
+`docs/plans/headless-mcp.md` would send), sending to several
 recipients by splitting a message, deleting mail at the service, a
 combined inbox of all agents, and services other than Primitive and
 AgentMail.
@@ -1834,6 +1838,74 @@ shim and app always ship together.
 `rmcp`'s `#[tool]` macros with `schemars` 1.0 generate the JSON schemas; the
 same definitions are rendered to `docs/mcp.md` by a `cargo xtask`.
 
+**Mailbox mode (Amendment 2026-10-08, oagc-uys.10; plan
+`docs/plans/headless-mcp.md`).** Agents outside the app (Claude Code,
+Codex, scripts) use one agent mailbox (§7.9) through
+`openagc-mcp --mailbox <address> [--data-dir <dir>]` (stdio; the data
+directory defaults to `~/Library/Application Support/OpenAGC`), whether or
+not the app is open.
+- **Agent mailboxes only.** The address is looked up in the agents'
+  `agent.json` files (address or managed address, any case) and must be
+  listed in `accounts/index.json`. The user's own accounts, imported
+  mailboxes and unknown addresses are refused before anything is served
+  (stderr, exit status 2), and again by the core.
+- **Tools** (`docs/mcp.md`, *Mailbox mode*): `guide_rules` (the writing
+  guide for the given recipients and type, whose mailbox it is, the name
+  it sends as, the service's limits and its send mode), `facts_lookup`,
+  `mail_search` and `mail_get_thread` (the in-app tools), and `mail_send`
+  / `mail_reply`, which write and send in one call: the core's
+  `mail_create_draft` then `mail_send`, so the permission engine, the
+  session's rate limit, the draft-ownership rule, the guide check
+  (`guide_check` in the answer, and `writing_guide_breaches` when sent
+  freely) and the ADR 0013 record (source agent, agent
+  `outside:<client>`) are the in-app ones. A send that is declined, times
+  out or fails leaves no draft behind.
+- **The app running.** At launch the app binds the agent socket
+  (`serve_outside_agents`) and writes its path to `<data dir>/run/mcp-socket`.
+  The shim connects with a hello that names the mailbox and its MCP
+  client's name (from `initialize`); the core opens an *outside session*,
+  `outside-<client>-<random>`, bound to the mailbox's account, and runs
+  each call through it. *When Agents Send* applies: sent freely, or the
+  §10.4 approval, shown in the open window's agent panel (whichever
+  account it shows) with who asks and from which mailbox ("Claude Code
+  outside OpenAGC, as scout@…: Send …"). The activity log (§10.5) records
+  every call under the outside session; its *Agent* column names it.
+- **The app closed.** The shim runs the core headless in its own process
+  (`Core::headless`): no secrets (its secret store refuses every read; the
+  Keychain is the app's, §12), no events, no log file, no sync and no
+  outbox drain. Stores are opened with `Db::open_existing`: never created
+  or migrated, refused in words unless their schema is exactly this
+  build's ("from an older OpenAGC … open OpenAGC once to update it", or a
+  newer one, "update OpenAGC"); reads use read-only connections and only
+  a send opens the writer. Reads are not written to the activity log (the
+  store stays read-only); sends are, under the outside session. A send is
+  checked and recorded as above, then queued in the outbox
+  (`mail_sync::send_draft`, one write transaction beside a running app,
+  §7.4 outbox claims; no Undo Send hold) and answered
+  `{"queued": true, "message": "Queued. It goes out when OpenAGC next
+  opens."}`. The app's sync sends it, once, when it next runs. *Ask before
+  each send* is refused (`needs_openagc`): approvals are parked in the
+  app's memory and cannot outlive or cross processes. The user's *Ask
+  Before* choices for reversible tools live in the app's preferences and
+  do not apply here; the defaults do (a draft is allowed).
+- **Switching.** Each call goes to the app when its socket answers, else
+  to the headless core: an app opened later is used from the next call.
+  If the app quits during a call, a read is answered headless; a send is
+  not tried again (it may have been queued) and answers `app_unavailable`.
+- **Connect an Agent…** in an agent's row of Settings › Accounts writes the
+  MCP entry for Claude Code (the user-scope entry `claude mcp add --scope
+  user` makes: `mcpServers.openagc-<local part>` in `~/.claude.json`,
+  `{"type": "stdio", "command": <app>/Contents/MacOS/openagc-mcp, "args":
+  ["--mailbox", <address>]}`) or Codex (`[mcp_servers.openagc-<local
+  part>]` in `~/.codex/config.toml`, or `$CODEX_HOME/config.toml`, with
+  `command`, `args` and `tool_timeout_sec = 900`). The sheet shows the
+  exact entry and file first; writing copies the file to
+  `<file>.openagc-backup-<time>`, replaces an entry of the same name
+  (never a second one), keeps the rest of the file and its permissions,
+  and refuses a file it cannot edit safely (not JSON, or TOML that would
+  not read back with the entry). The command to paste instead (`claude mcp
+  add …` / `codex mcp add …`) is always shown.
+
 ### 10.2 Tool set (MVP)
 
 *(Amended in M3: tool names use underscores, `mail_search` rather than
@@ -1916,7 +1988,9 @@ are configured to 15 minutes for the `openagc` server).
 Every tool call, its decision, and a one-line result summary is an
 `agent_actions` row. Settings › Agents › Activity lists them and can export
 JSONL. Read tools record which thread/message IDs were returned, so "what
-did the agent see?" is always answerable.
+did the agent see?" is always answerable. *(Amended 2026-10-08:* reads by
+an agent outside the app while the app is closed are not recorded, since
+that process keeps the store read-only; its sends are, §10.1.)
 
 ---
 
@@ -2276,6 +2350,16 @@ are wrapped in a `Redacted` newtype whose `Debug` prints `***`.
 
 The MCP shim and the agent subprocesses receive **no** secrets in their
 environment; the agent CLIs manage their own credentials.
+
+*(Amendment 2026-10-08, oagc-uys.10.)* In mailbox mode (§10.1) with the
+app closed, `openagc-mcp` runs the core headless with a secret store that
+refuses every read, write and delete: it holds no secrets and never
+reaches the Keychain, which only the app's Swift side can read. It
+therefore cannot send; it queues, and the app sends when it next opens.
+Sending from the shim with the app closed needs the service account's key:
+the plan is a helper embedded in the app bundle, signed with the app's
+team and Keychain access group, which will be the one exception to this
+rule (`docs/plans/headless-mcp.md`, oagc-uys.7).
 
 ---
 
