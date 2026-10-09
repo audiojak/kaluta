@@ -63,13 +63,17 @@ import os
 ///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
-///   -OpenAGCSnapshotRulesServer sheet|status|error|facts
+///   -OpenAGCSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents
 ///                                       a new agent mailbox (fake service) with
 ///                                       a guide and facts: the Publish to a
 ///                                       Rules Server sheet with its list, its
 ///                                       Settings row publishing (sample status,
 ///                                       no server contacted) or failing, or its
-///                                       Facts with the Share switch (spec §10.6)
+///                                       Facts with the Share switch; Connect a
+///                                       Cloud Agent with a sample connect code
+///                                       or token, or for a server without a
+///                                       public URL; or the row's cloud agents
+///                                       (sample answers, spec §10.6)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -380,6 +384,25 @@ enum Snapshot {
                 switch rules {
                 case "sheet":
                     window = Self.rulesSheetWindow(model, accountID: id)
+                case "connect-connector", "connect-token", "connect-nourl":
+                    let calls = SnapshotRulesAgentCalls(oauth: rules != "connect-nourl")
+                    let flow = CloudAgentFlow(accountID: id, address: created.address, calls: calls)
+                    await flow.load()
+                    flow.name = rules == "connect-token" ? "Nightly digest script" : "Weekly outreach routine"
+                    if rules != "connect-nourl" {
+                        flow.route = rules == "connect-token" ? .token : .connector
+                        await flow.mint()
+                    }
+                    let sheet = ConnectCloudAgentSheet(flow: flow)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                    window = Self.hostingWindow(sheet, width: ConnectCloudAgentSheet.width, height: nil)
+                case "agents":
+                    model.rulesAgentCallsOverride = SnapshotRulesAgentCalls(oauth: true)
+                    let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
+                    try? core.debugSetRulesPublication(id, serverURL: "https://rules.example.com", version: 12,
+                                                       publishedAt: minutesAgo, error: nil)
+                    await model.reloadAccounts()
+                    window = Self.rulesRowWindow(model, accountID: id, height: 430)
                 case "facts":
                     model.openFacts()
                     await model.facts.load()
@@ -401,7 +424,7 @@ enum Snapshot {
                 }
                 try? await Task.sleep(for: .milliseconds(1200))
                 // The sheet's list loads after it opens: fit the window to it.
-                if rules == "sheet", let shown = window, let content = shown.contentView {
+                if rules == "sheet" || rules.hasPrefix("connect-"), let shown = window, let content = shown.contentView {
                     shown.setContentSize(NSSize(width: shown.frame.width, height: content.fittingSize.height))
                     try? await Task.sleep(for: .milliseconds(300))
                 }
@@ -530,7 +553,7 @@ enum Snapshot {
     }
 
     /// The agent's Settings › Accounts row, with its Rules server line.
-    private static func rulesRowWindow(_ model: AppModel, accountID: String) -> NSWindow {
+    private static func rulesRowWindow(_ model: AppModel, accountID: String, height: CGFloat = 420) -> NSWindow {
         let form = Form {
             Section {
                 if let account = model.accounts.first(where: { $0.id == accountID }) {
@@ -542,7 +565,7 @@ enum Snapshot {
         }
         .formStyle(.grouped)
         .environment(model)
-        return hostingWindow(form, width: 640, height: 420)
+        return hostingWindow(form, width: 640, height: height)
     }
 
     /// `root` in a window of its own; with no height, as tall as it needs.
@@ -635,4 +658,40 @@ enum Snapshot {
             logger.error("snapshot failed: \(error.localizedDescription, privacy: .public)")
         }
     }
+}
+
+/// Sample answers for Connect a Cloud Agent… and the cloud agents' list in
+/// snapshots: no server is contacted, nothing is minted.
+final class SnapshotRulesAgentCalls: RulesAgentCalls, @unchecked Sendable {
+    let oauth: Bool
+
+    init(oauth: Bool) { self.oauth = oauth }
+
+    private static func millis(_ secondsFromNow: TimeInterval) -> Int64 {
+        Int64(Date().addingTimeInterval(secondsFromNow).timeIntervalSince1970 * 1000)
+    }
+
+    func rulesConnectInfo(_ accountID: String) async throws(CoreClientError) -> RulesConnectInfo {
+        RulesConnectInfo(baseUrl: "https://rules.example.com", mcpUrl: "https://rules.example.com/mcp", oauth: oauth)
+    }
+
+    func rulesConnectCodeMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesConnectCode {
+        RulesConnectCode(code: "K7QXA-MNPR8", name: name, expiresAt: Self.millis(9 * 60 + 42))
+    }
+
+    func rulesAgentTokenMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesAgentToken {
+        RulesAgentToken(id: "3f9c2a71d04be5c6", name: name,
+                        token: "oagc_agt_3f9c2a71d04be5c6_Xq8vT2mLr5NwKc4HbZ9pYdE1sGfJ7uAa")
+    }
+
+    func rulesAgents(_ accountID: String) async throws(CoreClientError) -> [RulesAgent] {
+        [
+            RulesAgent(id: "a1", name: "Weekly outreach routine", kind: .connector, clientName: "Claude",
+                       createdAt: Self.millis(-2 * 86_400), revokedAt: nil, lastUsedAt: Self.millis(-3_600)),
+            RulesAgent(id: "a2", name: "Nightly digest script", kind: .token, clientName: nil,
+                       createdAt: Self.millis(-5 * 86_400), revokedAt: nil, lastUsedAt: nil),
+        ]
+    }
+
+    func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {}
 }

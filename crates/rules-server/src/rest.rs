@@ -278,13 +278,14 @@ fn agent_name(b: &MintBody) -> Result<String, ApiError> {
 
 /// An agent as listed: a static token, or an OAuth grant with the name its
 /// client registered under.
-fn token_json(t: &AgentTokenRow, client_name: Option<&str>) -> Value {
+fn token_json(t: &AgentTokenRow, client_name: Option<&str>, last_used_at: Option<i64>) -> Value {
     let mut v = json!({
         "id": t.id,
         "name": t.name,
         "kind": t.kind,
         "created_at": answers::time(t.created_at),
         "revoked_at": t.revoked_at.map_or(Value::Null, answers::time),
+        "last_used_at": last_used_at.map_or(Value::Null, answers::time),
     });
     if t.kind == db::KIND_OAUTH {
         v["client_name"] = json!(client_name);
@@ -317,7 +318,7 @@ async fn mint(
     let stored = row.clone();
     state.db.run(move |c| db::insert_agent_token(c, &stored)).await?;
     tracing::info!(mailbox = m.id, token = %row.id, "agent token minted");
-    let mut answer = token_json(&row, None);
+    let mut answer = token_json(&row, None, None);
     answer["token"] = json!(token);
     Ok((StatusCode::CREATED, Json(answer)).into_response())
 }
@@ -330,7 +331,7 @@ async fn list_tokens(
 ) -> Result<Json<Value>, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
     let rows = state.db.run(move |c| db::agent_tokens(c, m.id)).await?;
-    let agents: Vec<Value> = rows.iter().map(|(t, client)| token_json(t, client.as_deref())).collect();
+    let agents: Vec<Value> = rows.iter().map(|(t, client, used)| token_json(t, client.as_deref(), *used)).collect();
     Ok(Json(json!({ "agent_tokens": agents })))
 }
 

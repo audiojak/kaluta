@@ -1,7 +1,8 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); steps 1 to 5 done, the server built, the
-app publishing to it and OAuth with connect codes (2026-10-09). The maintainer took every
+Status: decided (2026-10-08); steps 1 to 6 done, the server built, the
+app publishing to it, OAuth with connect codes and *Connect a Cloud
+Agent…* (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -304,7 +305,12 @@ the headers beta use them.
 6. App: *Connect a Cloud Agent…*: name, mint, show once, revoke; a
    connect code for claude.ai connectors and routines, a token for the
    rest; the `claude mcp add --transport http …` line and routine
-   instructions.
+   instructions. *(Done 2026-10-09, oagc-gmn7.5: Settings' *Cloud
+   agents* under the *Rules server* line, `CloudAgentSettings.swift`; the
+   core's `rules_connect_info` reads the server's protected resource
+   metadata to find its public `/mcp` and whether OAuth is on; the server
+   lists each agent's `last_used_at`, to the minute. The routine
+   instructions leave a hook for step 7's lines.)*
 7. `check_draft` and `report_send`; the app pulls reports at sync and
    records them (ADR 0013).
 8. Encryption at rest.

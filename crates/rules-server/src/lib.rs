@@ -286,6 +286,11 @@ pub(crate) async fn agent_auth(
         slot.set(format!("agent:{id}"));
     }
     state.limiter.take(&format!("agent:{id}")).map_err(ApiError::too_many)?;
+    // For the app's list ("last used"); a failure here refuses nobody.
+    let used = id.clone();
+    if let Err(e) = state.db.run(move |c| db::touch_agent(c, &used, db::now_ms())).await {
+        tracing::warn!(token = %id, "could not note the agent's use: {e}");
+    }
     Ok(AgentAuth { token_id: id, mailbox_id, address })
 }
 

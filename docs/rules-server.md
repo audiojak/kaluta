@@ -9,10 +9,11 @@ behind your own TLS proxy. Spec §10.6, ADR 0016, plan
 
 *Status:* the server is built (bearer tokens; `guide_rules` and
 `facts_lookup`; OAuth sign-in with one-time connect codes for claude.ai
-connectors and cloud routines), and the app publishes to it (an agent
-mailbox's Settings, *Rules server* › *Publish to a Rules Server…*).
-*Connect a Cloud Agent…* in the app (oagc-gmn7.5), `check_draft` and
-`report_send` (oagc-gmn7.6) and encryption at rest come next.
+connectors and cloud routines), the app publishes to it (an agent
+mailbox's Settings, *Rules server* › *Publish to a Rules Server…*) and
+connects agents to it (*Cloud agents* › *Connect a Cloud Agent…*).
+`check_draft` and `report_send` (oagc-gmn7.6) and encryption at rest come
+next.
 
 ## What it holds, and what it never holds
 
@@ -26,8 +27,8 @@ It holds, per registered agent mailbox:
   quotes, which come from sent mail); its audience groups; and the facts
   you shared with cloud agents;
 - the **SHA-256 hash** of the mailbox's publisher token, and of each agent
-  token, with the agent token's id, its name ("Weekly outreach routine")
-  and when it was made and revoked;
+  token, with the agent token's id, its name ("Weekly outreach routine"),
+  when it was made and revoked, and when it was last used (to the minute);
 - for OAuth: the **clients** that registered (an id, the name they gave,
   their return addresses), each **agent grant** a connect code made (beside
   the agent tokens, with the same id, name and times), and the hashes of
@@ -165,30 +166,56 @@ the account, and those sign in with OAuth (a fixed `Authorization` header
 is a beta few organisations have). The server is its own minimal
 authorization server: there are no accounts on it and no passwords; the
 sign-in page asks for a **connect code** from OpenAGC. The server needs
-`OPENAGC_RULES_PUBLIC_URL`.
+`OPENAGC_RULES_PUBLIC_URL`; without it the app says so and offers only a
+token.
 
-1. In OpenAGC, the agent mailbox's Settings › *Rules server* › *Connect a
-   Cloud Agent…* (oagc-gmn7.5): name the agent ("Weekly outreach
-   routine") and choose a connect code. The code, `ABCDE-FGHJK`, works
-   once, for 10 minutes.
+1. In OpenAGC, the agent mailbox's row in Settings › Accounts, *Cloud
+   agents* › *Connect a Cloud Agent…*: name the agent ("Weekly outreach
+   routine"), choose *A claude.ai connector or cloud routine
+   (recommended)* and *Make Code*. The sheet shows the server's MCP URL,
+   the code (`ABCDE-FGHJK`; it works once, for 10 minutes, counted down;
+   *New Code* makes another) and instructions for the routine.
 2. In claude.ai, *Customize › Connectors › Add custom connector*: the URL
-   is `https://rules.example.com/mcp` exactly; authentication *Sign in
-   now*; OAuth client *Register automatically* (Claude's published
-   identity, a Client ID Metadata Document, is not supported yet). Leave
-   the client ID and secret empty.
+   is the one the sheet shows (`https://rules.example.com/mcp`) exactly;
+   authentication *Sign in now*; OAuth client *Register automatically*
+   (Claude's published identity, a Client ID Metadata Document, is not
+   supported yet). Leave the client ID and secret empty.
 3. *Connect* opens the server's sign-in page. It names the app ("Claude")
    and where it goes back to (`claude.ai`). Enter the code and choose
-   *Connect*.
-4. The routine names the connector in its connections. The agent appears
-   in the app under the mailbox's agents with the name from step 1, and
-   *Revoke* there ends it at its next request.
+   *Connect*. Within a few seconds the sheet in OpenAGC says "Connected:
+   Weekly outreach routine, from Claude."; *Done* closes it, and the code
+   is gone.
+4. Add the connector to the routine's connections and paste the
+   instructions from step 1 into its prompt (call `guide_rules` before
+   writing, `facts_lookup` for facts). The agent is listed under *Cloud
+   agents* with the name from step 1, as *Connector · Claude*, with when
+   it was last used; *Revoke…* there ends its sessions at its next
+   request.
 
-Claude Code should be able to sign in the same way (`claude mcp add
---transport http openagc-scout https://rules.example.com/mcp`, then `/mcp`
-to authenticate; not yet tried by hand): it registers itself, returns to a
-loopback address on a port of its own, which the server matches without
-the port, and the page warns that it goes back to a program on this
-computer. A static agent token is simpler there.
+### Connect Claude Code, the Agent SDK or a script
+
+*Connect a Cloud Agent…* with *Claude Code, the Agent SDK or a script* and
+*Make Token* shows a token once (OpenAGC does not keep it: close the sheet
+and it is gone), with what to do with it:
+
+```sh
+claude mcp add --transport http openagc-scout-rules https://rules.example.com/mcp \
+  --header "Authorization: Bearer oagc_agt_…"
+curl -H "Authorization: Bearer oagc_agt_…" \
+  "https://rules.example.com/v1/m/scout@agents.example/guide?message_type=new"
+```
+
+and the same instructions for the agent's prompt. Whoever holds the token
+can read this mailbox's published guide and shared facts and nothing else,
+until *Revoke…*. Tokens work on a server without a public URL; the URL is
+then the address OpenAGC publishes to.
+
+Claude Code should also be able to sign in with a connect code
+(`claude mcp add --transport http openagc-scout-rules
+https://rules.example.com/mcp`, then `/mcp` to authenticate; not yet tried
+by hand): it registers itself, returns to a loopback address on a port of
+its own, which the server matches without the port, and the page warns
+that it goes back to a program on this computer. A token is simpler there.
 
 Limits: a connect code is ten characters from 31 without look-alikes (no
 0, 1, I, L or O; case, spaces and the dash do not matter), single use,
@@ -249,7 +276,7 @@ a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 | `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
 | `GET /v1/mailboxes/{address}/snapshot/version` | | The same, `version` null before the first push |
 | `POST /v1/mailboxes/{address}/agent-tokens` | `{"name"}` | 201 `{"id", "name", "created_at", "revoked_at", "token"}`; the token is shown only here |
-| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at"}]}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`) |
+| `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at", "last_used_at"}]}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`); `last_used_at` is when it was last let in, to the minute, or null |
 | `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204; revokes a token or a grant (and its OAuth tokens) |
 | `POST /v1/mailboxes/{address}/connect-codes` | `{"name"}` | 201 `{"id", "name", "code", "expires_at"}`; the code is shown only here. 409 `oauth_off` without a public URL, 429 `too_many_codes` with 10 unused |
 | `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots and its tokens are gone |
@@ -265,7 +292,7 @@ plain address, not JSON) or `mailbox_mismatch` (the snapshot's
 ### For agents (agent token)
 
 - **MCP** at `/mcp`, Streamable HTTP, stateless:
-  `claude mcp add --transport http openagc-scout https://rules.example.com/mcp --header "Authorization: Bearer oagc_agt_…"`.
+  `claude mcp add --transport http openagc-scout-rules https://rules.example.com/mcp --header "Authorization: Bearer oagc_agt_…"`.
 - **REST**, for scripts:
   `GET /v1/m/{address}/guide?to=ann@acme.com&to=…&message_type=reply`
   (`to` may repeat or be comma-separated) and

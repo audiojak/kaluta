@@ -2013,8 +2013,10 @@ server with bearer tokens, the publish API, versioned snapshots and
 `guide_rules` and `facts_lookup` over MCP and REST. Implemented 2026-10-09,
 oagc-gmn7.3: the app's publishing (*Publish to a Rules Server…*, below).
 Implemented 2026-10-09, oagc-gmn7.4: OAuth with one-time connect codes
-(*OAuth*, below). Not yet: *Connect a Cloud Agent…* in the app,
-`check_draft`, `report_send`, reports and encryption at rest.)*
+(*OAuth*, below). Implemented 2026-10-09, oagc-gmn7.5: *Connect a Cloud
+Agent…* and the list of cloud agents in the app (*Connect a Cloud Agent…*,
+below). Not yet: `check_draft`, `report_send`, reports and encryption at
+rest.)*
 
 Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
 machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
@@ -2061,7 +2063,8 @@ REST surface, `Authorization: Bearer` throughout:
   it is missing after the first push, 409 when the version does not go
   up, 422 for a snapshot `writing_guide::Snapshot::from_json` refuses or
   one for another mailbox); `GET …/snapshot/version`; `POST` and `GET
-  …/agent-tokens` (minted tokens are shown once) and `DELETE
+  …/agent-tokens` (minted tokens are shown once; the list gives each
+  agent's `last_used_at`, to the minute) and `DELETE
   …/agent-tokens/{id}`; `DELETE /v1/mailboxes/{address}`.
 - Agents and scripts: `GET /v1/m/{address}/guide?to=&message_type=` and
   `GET /v1/m/{address}/facts?category=&query=`, answered as over MCP.
@@ -2087,8 +2090,9 @@ also how a lost publisher token is recovered.
   snapshot or pull reports.
 - *Agent tokens:* minted in the app (*Connect a Cloud Agent…*), named by
   the user ("Weekly outreach routine"), scoped to one mailbox, shown
-  once, revocable. The server stores only a hash; the app keeps the id
-  and name. A report names its token, so the activity log says which
+  once, revocable. The server stores only a hash; the app reads ids and
+  names from the server and keeps none *(amendment 2026-10-09,
+  oagc-gmn7.4)*. A report names its token, so the activity log says which
   agent sent.
 - *OAuth* for clients that take only a URL: the server is its own
   minimal authorization server; its consent page asks for a one-time
@@ -2138,12 +2142,47 @@ RFC 8707 `resource`, which must name this server's `/mcp`). A 401 at
   constant time; none is logged.
 - *The app* (`rules_publish.rs`): `rules_connect_code_mint`,
   `rules_agent_token_mint`, `rules_agents` and `rules_agent_revoke`, with
-  the publisher token; the sheet comes with *Connect a Cloud Agent…*
-  (oagc-gmn7.5).
+  the publisher token; the sheet is *Connect a Cloud Agent…* (below).
 - Not supported: Client ID Metadata Documents (claude.ai's recommended
   *Use Claude's published identity*; it falls back to registration when
   the server does not advertise them), token revocation and introspection
   endpoints, and a server under a path prefix.
+
+**Connect a Cloud Agent…** *(implemented 2026-10-09, oagc-gmn7.5)*.
+While an agent mailbox publishes, its Settings row has *Cloud agents*
+under the *Rules server* line: *Connect a Cloud Agent…*, then each agent
+not revoked with its name, its kind (*Connector* with the app it signed
+in from, or *Token*), when it was made, when the server last let it in
+("last used 1 hour ago", or "not used yet"; the server notes it at most
+once a minute and lists it as `last_used_at`) and *Revoke…*, which asks
+first, naming the agent (revoking a connector ends its sessions). The
+sheet asks for the agent's name ("Weekly outreach routine") and how it
+connects:
+- *A claude.ai connector or cloud routine* (recommended): a connect code
+  (`rules_connect_code_mint`), shown large with *Copy*, its 10 minutes
+  counting down and *New Code*; above it the server's MCP URL (`<public
+  URL>/mcp`) to add as a custom connector with *Sign in now* and
+  *Register automatically*, and where the code goes (the server's page
+  after *Connect*). The sheet asks the server every 5 s and says when an
+  agent of that name has signed in. The core's `rules_connect_info` reads
+  the server's protected resource metadata (no token needed) for its
+  public `/mcp` and whether OAuth is on; a server without a public URL
+  has none, and the sheet says its operator sets
+  `OPENAGC_RULES_PUBLIC_URL` and offers only the token.
+- *Claude Code, the Agent SDK or a script*: a token
+  (`rules_agent_token_mint`), shown once with the warning that it is not
+  shown again and what a holder can do (read this mailbox's published
+  guide and shared facts, nothing else, until revoked), the
+  `claude mcp add --transport http openagc-<mailbox>-rules <url>/mcp --header
+  "Authorization: Bearer <token>"` line and a `curl` of the read-only
+  REST, each with *Copy* (concealed from clipboard managers).
+- Both end with instructions to paste into the routine's or agent's
+  prompt: call `guide_rules` with the recipients and message type before
+  writing, and `facts_lookup` for facts, leaving out any marked ask before
+  using. (`check_draft` and `report_send` lines come with them.)
+Codes and tokens live only in the open sheet: never in the Keychain, a
+file or a log, and gone when it closes. The app keeps no list of its own;
+it reads the server's (`rules_agents`).
 
 **Snapshot and versions.** The app pushes a full snapshot on change,
 debounced, with a version that only goes up and `If-Match` on the

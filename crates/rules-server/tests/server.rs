@@ -41,6 +41,15 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     assert_eq!((body["version"].clone(), body["published_at"].clone()), (json!(2), json!("2025-10-09T08:55:20Z")));
 
     let (id, agent) = s.mint(&publisher, "Weekly outreach routine").await;
+    let r = s
+        .http
+        .get(s.url(&format!("/v1/mailboxes/{MAILBOX}/agent-tokens")))
+        .bearer_auth(&publisher)
+        .send()
+        .await
+        .unwrap();
+    let listed: Value = r.json().await.unwrap();
+    assert!(listed["agent_tokens"][0]["last_used_at"].is_null(), "never used yet: {listed}");
 
     // REST: a customer's person-scoped guideline and audience, matched by hash.
     let r = s.get(Some(&agent), &format!("/v1/m/{MAILBOX}/guide?to=Ann@Acme.com&message_type=reply")).await;
@@ -137,6 +146,7 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     assert_eq!(listed["agent_tokens"][0]["name"], "Weekly outreach routine");
     assert!(listed["agent_tokens"][0]["revoked_at"].is_string());
     assert!(listed["agent_tokens"][0].get("token").is_none(), "a token is shown once");
+    assert!(listed["agent_tokens"][0]["last_used_at"].is_string(), "the app's list says when it was last used");
 }
 
 #[tokio::test(flavor = "multi_thread")]

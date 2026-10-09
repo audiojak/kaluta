@@ -726,8 +726,18 @@ fn the_app_mints_connect_codes_and_tokens_lists_agents_and_revokes_them() {
         )
     })
     .unwrap();
+    let info = block_on(core.rules_connect_info(id.clone())).unwrap();
+    assert_eq!(
+        info,
+        RulesConnectInfo { base_url: server.url.clone(), mcp_url: format!("{}/mcp", server.url), oauth: true }
+    );
     let agents = block_on(core.rules_agents(id.clone())).unwrap();
     assert_eq!(agents.len(), 2, "{agents:?}");
+    assert!(agents.iter().all(|a| a.last_used_at.is_none()), "never used yet");
+    let (status, _) = server.call(reqwest::Method::GET, &format!("/v1/m/{address}/facts"), &token.token, None, None);
+    assert_eq!(status, 200);
+    let used = block_on(core.rules_agents(id.clone())).unwrap();
+    assert!(used[0].last_used_at.is_some_and(|t| t >= before - 1_000), "to the second: {used:?}");
     assert_eq!((agents[0].name.as_str(), agents[0].kind), ("A script", RulesAgentKind::Token));
     assert_eq!(agents[0].id, token.id);
     assert_eq!(agents[1].kind, RulesAgentKind::Connector);
@@ -754,4 +764,9 @@ fn the_app_mints_connect_codes_and_tokens_lists_agents_and_revokes_them() {
     block_on(core.clone().rules_publish_start(id.clone(), plain.url.clone(), None)).unwrap();
     let off = block_on(core.rules_connect_code_mint(id.clone(), "Routine".into())).unwrap_err();
     assert!(off.to_string().contains("OPENAGC_RULES_PUBLIC_URL"), "{off}");
+    let info = block_on(core.rules_connect_info(id.clone())).unwrap();
+    assert_eq!(
+        info,
+        RulesConnectInfo { base_url: plain.url.clone(), mcp_url: format!("{}/mcp", plain.url), oauth: false }
+    );
 }

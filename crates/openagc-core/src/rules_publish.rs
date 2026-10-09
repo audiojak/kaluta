@@ -171,6 +171,24 @@ pub struct RulesAgent {
     /// Milliseconds since the Unix epoch.
     pub created_at: i64,
     pub revoked_at: Option<i64>,
+    /// When the server last let it in (to the minute), if it ever did and
+    /// says so.
+    pub last_used_at: Option<i64>,
+}
+
+/// How agents reach a mailbox's rules server, for *Connect a Cloud Agent…*
+/// (spec §10.6).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RulesConnectInfo {
+    /// The server as agents reach it: its public URL when its operator set
+    /// one, else the address this Mac publishes to.
+    pub base_url: String,
+    /// Its MCP endpoint, `<base_url>/mcp`: what a claude.ai connector or
+    /// `claude mcp add` is given.
+    pub mcp_url: String,
+    /// It signs agents in with OAuth and connect codes (its operator set
+    /// its public URL), which claude.ai connectors and cloud routines need.
+    pub oauth: bool,
 }
 
 /// `rules-server.json` in the account directory.
@@ -533,7 +551,16 @@ fn rules_agent(v: &Value) -> Option<RulesAgent> {
         client_name: v["client_name"].as_str().map(str::to_owned),
         created_at: millis(&v["created_at"])?,
         revoked_at: millis(&v["revoked_at"]),
+        last_used_at: millis(&v["last_used_at"]),
     })
+}
+
+/// The MCP resource a server's protected resource metadata names, if it is
+/// one an agent can be sent to: `https://…/mcp`, or `http://` to this Mac.
+fn mcp_resource(v: &Value) -> Option<String> {
+    let resource = v["resource"].as_str()?;
+    let server = parse_server(resource.strip_suffix("/mcp")?).ok()?;
+    (server.endpoint(&["mcp"]).as_str() == resource).then(|| resource.to_owned())
 }
 
 impl Core {
@@ -1093,6 +1120,35 @@ impl Core {
     /// last time) for every mailbox that publishes.
     pub fn resume_rules_publishing(&self) {
         self.rules_changed(None);
+    }
+
+    /// How agents reach `account_id`'s rules server, and whether it signs
+    /// claude.ai connectors in (OAuth with connect codes): from its
+    /// protected resource metadata, which needs no token. A server without
+    /// a public URL has none.
+    pub async fn rules_connect_info(&self, account_id: String) -> Result<RulesConnectInfo, CoreError> {
+        let record = self.rules_record(&account_id).filter(|r| !r.sample).ok_or_else(|| {
+            CoreError::new(ErrorKind::InvalidInput, "this mailbox does not publish to a rules server; publish it first")
+        })?;
+        let server = parse_server(&record.server_url)?;
+        let client = client(&self.rules).map_err(Failure::into_error)?;
+        let request = client.get(server.endpoint(&[".well-known", "oauth-protected-resource"]));
+        let host = server.host.clone();
+        let a = runtime::run(async move { send(request, &host).await.map_err(Failure::into_error) }).await?;
+        if let Some(f) = transient(&server.host, &a) {
+            return Err(f.into_error());
+        }
+        let resource = (a.status == 200).then(|| mcp_resource(&a.body)).flatten();
+        Ok(match resource {
+            Some(mcp_url) => {
+                RulesConnectInfo { base_url: mcp_url.trim_end_matches("/mcp").to_owned(), mcp_url, oauth: true }
+            }
+            None => RulesConnectInfo {
+                base_url: server.url.clone(),
+                mcp_url: server.endpoint(&["mcp"]).to_string(),
+                oauth: false,
+            },
+        })
     }
 
     /// A one-time connect code for an agent named `name` (spec §10.6): the

@@ -386,6 +386,34 @@ Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
   card one caption paragraph on what else goes, what never does and the
   facts kept back. Work in progress is the dialog's spinner line
   ("Publishing…"); a refusal is a `Tone.failure` line in the sheet.
+- **Cloud agents** (spec §10.6; `Features/Settings/CloudAgentSettings.swift`):
+  while the mailbox publishes, a *Cloud agents* line under the status line
+  with *Connect a Cloud Agent…*, then each agent not revoked, indented by
+  `Space.xl`: its name over a caption ("Connector · Claude · connected 2
+  days ago · last used 1 hour ago", "Token · made 5 days ago · not used
+  yet"; `DateStyle.relative`, refreshed every minute) and *Revoke…*, a
+  `confirmationDialog` titled "Revoke <name>?" with one destructive
+  *Revoke* and a message saying what stops. With none, one caption
+  sentence on what a connected agent can read. The sheet is a `Dialog`
+  600 wide: the name as a rounded field, "It connects as" in `groupLabel`
+  over a radio-group `Picker` (*A claude.ai connector or cloud routine
+  (recommended)*, *Claude Code, the Agent SDK or a script*) with a caption
+  under it; a server without a public URL disables the first and says so
+  in a caption `Tone.caution` line. *Make Code* or *Make Token* is the
+  default action. The code step is three numbered `meta` lines, each over
+  what it needs: the MCP URL, the code in `TypeRole.display` monospaced
+  with *Copy* and *New Code* and a caption countdown ("Works once, for
+  9:38 more.", every second), and the routine's instructions; then a
+  spinner line "Waiting for the agent to sign in…" (the sheet asks the
+  server every 5 s) that becomes an `approved` "Connected: …" label. The
+  token step opens with the shown-once warning in a `.card(.caution)`,
+  then the token, the `claude mcp add` line, a `curl` for the REST and the
+  instructions. Text to copy is a `CopyableText`: `codeCaption` (or
+  caption, for prose) in a `.quaternary` well (`Radius.control`) with
+  *Copy* beside it, which says "Copied" for two seconds; tokens and lines
+  holding one are copied concealed from clipboard managers. The only
+  button is *Done* (Esc); what was shown is forgotten when the sheet
+  closes.
 - **Share with cloud agents**: on an agent mailbox's Facts, a fact's
   detail has the switch (a checkbox `Toggle`) under *Drafts*, with one
   caption line on what it does (a global fact's says every publishing
@@ -590,6 +618,10 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![An agent's row publishing to a rules server, light](design/rules-status-light.png) | ![An agent's row publishing to a rules server, dark](design/rules-status-dark.png) |
 | ![A push the rules server refused, light](design/rules-error-light.png) | ![A push the rules server refused, dark](design/rules-error-dark.png) |
 | ![A fact's Share with cloud agents switch, light](design/rules-fact-share-light.png) | ![A fact's Share with cloud agents switch, dark](design/rules-fact-share-dark.png) |
+| ![Connect a Cloud Agent: a claude.ai connector's code, light](design/rules-connect-connector-light.png) | ![Connect a Cloud Agent: a claude.ai connector's code, dark](design/rules-connect-connector-dark.png) |
+| ![Connect a Cloud Agent: a token shown once, light](design/rules-connect-token-light.png) | ![Connect a Cloud Agent: a token shown once, dark](design/rules-connect-token-dark.png) |
+| ![Connect a Cloud Agent on a server without a public URL, light](design/rules-connect-nourl-light.png) | ![Connect a Cloud Agent on a server without a public URL, dark](design/rules-connect-nourl-dark.png) |
+| ![An agent mailbox's cloud agents, light](design/rules-agents-light.png) | ![An agent mailbox's cloud agents, dark](design/rules-agents-dark.png) |
 | ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
 | ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |

@@ -86,6 +86,9 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX oauth_tokens_by_grant ON oauth_tokens(grant_id);
 ",
+    "
+    ALTER TABLE agent_tokens ADD COLUMN last_used_at INTEGER;
+",
 ];
 
 #[derive(Debug, thiserror::Error)]
@@ -303,15 +306,30 @@ pub fn insert_agent_token(c: &Connection, row: &AgentTokenRow) -> rusqlite::Resu
     Ok(())
 }
 
-/// A mailbox's agents (tokens and grants), each with its OAuth client's
-/// name if it is a grant.
-pub fn agent_tokens(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<(AgentTokenRow, Option<String>)>> {
+/// A mailbox's agent as listed: the row, its OAuth client's name if it is
+/// a grant, and when it was last let in (to the minute).
+pub type ListedAgent = (AgentTokenRow, Option<String>, Option<i64>);
+
+/// A mailbox's agents (tokens and grants), oldest first.
+pub fn agent_tokens(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<ListedAgent>> {
     let mut stmt = c.prepare(
         "SELECT t.id, t.mailbox_id, t.name, t.token_hash, t.created_at, t.revoked_at, t.kind, t.client_id, \
-         c.name FROM agent_tokens t LEFT JOIN oauth_clients c ON c.id = t.client_id WHERE t.mailbox_id = ?1 \
-         ORDER BY t.created_at, t.id",
+         c.name, t.last_used_at FROM agent_tokens t LEFT JOIN oauth_clients c ON c.id = t.client_id \
+         WHERE t.mailbox_id = ?1 ORDER BY t.created_at, t.id",
     )?;
-    stmt.query_map([mailbox_id], |r| Ok((agent_token_row(r)?, r.get(8)?)))?.collect()
+    stmt.query_map([mailbox_id], |r| Ok((agent_token_row(r)?, r.get(8)?, r.get(9)?)))?.collect()
+}
+
+/// How stale `last_used_at` may get before a request writes it again.
+pub const LAST_USED_GRAIN_MS: i64 = 60_000;
+
+/// Note that an agent was let in at `now`, at most once a minute.
+pub fn touch_agent(c: &Connection, id: &str, now: i64) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE agent_tokens SET last_used_at = ?2 WHERE id = ?1 AND (last_used_at IS NULL OR last_used_at <= ?2 - ?3)",
+        params![id, now, LAST_USED_GRAIN_MS],
+    )?;
+    Ok(())
 }
 
 /// Revoke one of the mailbox's agent tokens; false if it has no such
@@ -593,7 +611,14 @@ mod tests {
         let db = Db::open(&dir).unwrap();
         let (row, _) = db.run_now(|c| agent_token(c, "0123456789abcdef")).unwrap().unwrap();
         assert_eq!((row.kind.as_str(), row.client_id), (KIND_TOKEN, None));
-        assert_eq!(db.run_now(|c| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))).unwrap(), 2);
+        assert_eq!(db.run_now(|c| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))).unwrap(), 3);
+        let listed = db.run_now(|c| agent_tokens(c, 1)).unwrap();
+        assert_eq!(listed[0].2, None, "never used, as far as the server knows");
+        db.run_now(|c| touch_agent(c, "0123456789abcdef", 100_000)).unwrap();
+        db.run_now(|c| touch_agent(c, "0123456789abcdef", 130_000)).unwrap();
+        assert_eq!(db.run_now(|c| agent_tokens(c, 1)).unwrap()[0].2, Some(100_000), "once a minute at most");
+        db.run_now(|c| touch_agent(c, "0123456789abcdef", 160_000)).unwrap();
+        assert_eq!(db.run_now(|c| agent_tokens(c, 1)).unwrap()[0].2, Some(160_000));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

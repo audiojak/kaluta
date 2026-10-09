@@ -361,6 +361,9 @@ final class AppModel {
     var agentMailboxFlow: AgentMailboxFlow?
     /// Tests: record what the create sheet asks of the core.
     @ObservationIgnored var agentMailboxCallsOverride: (any AgentMailboxCalls)?
+    /// Tests and snapshots: what Connect a Cloud Agent… asks of the core
+    /// (spec §10.6), recorded or answered with samples.
+    @ObservationIgnored var rulesAgentCallsOverride: (any RulesAgentCalls)?
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.

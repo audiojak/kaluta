@@ -334,6 +334,34 @@ final class CoreClient: Sendable {
         try await call { try await core.rulesPublishNow(accountId: accountID) }
     }
 
+    /// How agents reach the mailbox's rules server, and whether it signs
+    /// claude.ai connectors in (Connect a Cloud Agent…).
+    func rulesConnectInfo(_ accountID: String) async throws(CoreClientError) -> RulesConnectInfo {
+        try await call { try await core.rulesConnectInfo(accountId: accountID) }
+    }
+
+    /// A one-time connect code for a claude.ai connector or cloud routine;
+    /// shown once, never kept.
+    func rulesConnectCodeMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesConnectCode {
+        try await call { try await core.rulesConnectCodeMint(accountId: accountID, name: name) }
+    }
+
+    /// A static agent token for Claude Code, the Agent SDK or a script;
+    /// shown once, never kept.
+    func rulesAgentTokenMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesAgentToken {
+        try await call { try await core.rulesAgentTokenMint(accountId: accountID, name: name) }
+    }
+
+    /// The agents connected to the mailbox on its rules server, revoked ones included.
+    func rulesAgents(_ accountID: String) async throws(CoreClientError) -> [RulesAgent] {
+        try await call { try await core.rulesAgents(accountId: accountID) }
+    }
+
+    /// Revoke an agent; a connector's sessions end at its next request.
+    func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {
+        try await call { try await core.rulesAgentRevoke(accountId: accountID, agentId: agentID) }
+    }
+
     /// Snapshots: a publishing status as if pushed; no server is contacted.
     func debugSetRulesPublication(_ accountID: String, serverURL: String, version: Int64, publishedAt: Int64,
                                   error: String?) throws(CoreClientError) {
@@ -1555,6 +1583,11 @@ typealias RulesPreview = OpenAGCCore.RulesPreview
 typealias RulesPreviewEntry = OpenAGCCore.RulesPreviewEntry
 typealias RulesPreviewFact = OpenAGCCore.RulesPreviewFact
 typealias RulesPreviewAudience = OpenAGCCore.RulesPreviewAudience
+typealias RulesConnectInfo = OpenAGCCore.RulesConnectInfo
+typealias RulesConnectCode = OpenAGCCore.RulesConnectCode
+typealias RulesAgentToken = OpenAGCCore.RulesAgentToken
+typealias RulesAgent = OpenAGCCore.RulesAgent
+typealias RulesAgentKind = OpenAGCCore.RulesAgentKind
 typealias AgentAdded = OpenAGCCore.AgentAdded
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus

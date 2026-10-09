@@ -3,7 +3,7 @@ import SwiftUI
 /// An agent mailbox's *Rules server* row in Settings › Accounts (spec
 /// §10.6): *Publish to a Rules Server…*, then the status line ("Version 12,
 /// published 3 minutes ago", or why the last push failed), *Publish Now*
-/// and *Stop Publishing…*.
+/// and *Stop Publishing…*; while it publishes, its cloud agents.
 struct RulesServerRow: View {
     @Environment(AppModel.self) private var model
     let account: AccountSummary
@@ -41,6 +41,10 @@ struct RulesServerRow: View {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(TypeRole.caption).foregroundStyle(Tone.failure)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            // Agents reach what it publishes (spec §10.6).
+            if let status, status.enabled {
+                CloudAgentsSection(account: account)
             }
         }
         .task(id: "\(account.id) \(model.rulesRevision)") { status = model.core?.rulesPublishStatus(account.id) }
