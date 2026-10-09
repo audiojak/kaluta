@@ -111,6 +111,8 @@ struct KalutaApp: App {
                 return try CoreClient(dataDirectory: dir, logDirectory: dir.appending(path: "Logs"),
                                       secrets: CoreClient.defaultSecrets())
             }
+            // The first launch takes over what OpenAGC left (ADR 0017).
+            guard OpenAGCMigration.runAtLaunch() else { exit(0) }
             return try CoreClient(dataDirectory: CoreClient.defaultDataDirectory(),
                                   logDirectory: CoreClient.defaultLogDirectory())
         } catch {

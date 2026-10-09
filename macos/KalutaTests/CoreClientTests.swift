@@ -58,7 +58,8 @@ struct TestIsolationTests {
     @Test func testsUseTheirOwnKeychainServiceAndNeverTheRealDataDirectory() throws {
         #expect(CoreClient.isRunningTests)
         #expect(CoreClient.defaultSecrets().service == "org.kaluta.Kaluta.tests")
-        let real = try CoreClient.defaultDataDirectory().standardizedFileURL.path
+        // The URL alone: asking for the folder itself would create it.
+        let real = CoreClient.defaultDataDirectoryURL.standardizedFileURL.path
         let hostCore = (NSApp.delegate as? AppDelegate)?.model?.core
         if let dir = hostCore?.dataDirectory {
             #expect(!URL(filePath: dir).standardizedFileURL.path.hasPrefix(real), "the test host runs on a scratch directory")

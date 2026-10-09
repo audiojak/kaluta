@@ -80,6 +80,28 @@ final class KeychainSecretStore: @unchecked Sendable {
         }
     }
 
+    /// The names of every item under this service, in either keychain.
+    /// Reads no secret, so it never asks to unlock an item.
+    func keys() -> [String] {
+        var names = Set<String>()
+        for dataProtection in [true, false] {
+            var q: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecReturnAttributes as String: true,
+                kSecMatchLimit as String: kSecMatchLimitAll,
+            ]
+            if dataProtection { q[kSecUseDataProtectionKeychain as String] = true }
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess,
+                  let items = result as? [[String: Any]] else { continue }
+            for item in items {
+                if let name = item[kSecAttrAccount as String] as? String { names.insert(name) }
+            }
+        }
+        return names.sorted()
+    }
+
     /// Delete every item under this service (the test host's, between
     /// runs). Never used on the app's own service.
     func deleteAll() throws(KeychainError) {

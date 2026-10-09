@@ -1483,9 +1483,14 @@ final class CoreClient: Sendable {
         URL.libraryDirectory.appending(path: "Logs/Kaluta", directoryHint: .isDirectory)
     }
 
+    /// `~/Library/Application Support/Kaluta`, without creating it.
+    static var defaultDataDirectoryURL: URL {
+        URL.applicationSupportDirectory.appending(path: "Kaluta", directoryHint: .isDirectory)
+    }
+
     /// `~/Library/Application Support/Kaluta`, created if missing.
     static func defaultDataDirectory() throws -> URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "Kaluta", directoryHint: .isDirectory)
+        let dir = defaultDataDirectoryURL
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
