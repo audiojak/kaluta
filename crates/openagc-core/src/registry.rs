@@ -308,6 +308,8 @@ impl Core {
         self.close_store(&account_id);
         self.secrets.delete(crate::secrets::keys::refresh_token(&account_id))?;
         self.secrets.delete(crate::account::client_key(&account_id))?;
+        // A rules server it publishes to forgets it too, when it can.
+        self.rules_forget(&account_id).await;
         // An agent's key is its service account's: it goes with the last
         // agent (ADR 0015).
         self.release_service_account(service_account.as_deref().unwrap_or(&account_id), &account_id).await?;

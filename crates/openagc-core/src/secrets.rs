@@ -24,6 +24,23 @@ pub mod keys {
     pub fn mailbox_api_key(service_account_id: &str) -> String {
         format!("mailbox.api_key.{service_account_id}")
     }
+    /// The publisher token for one agent mailbox on one rules server (spec
+    /// §10.6, §12). `server` is the server's host, port and path
+    /// (`rules.example.com`, `127.0.0.1:8787`).
+    pub fn rules_publish_token(server: &str, account_id: &str) -> String {
+        format!("rules.publish_token.{server}.{account_id}")
+    }
+    /// The newest snapshot key an agent mailbox's rules server holds its
+    /// guide under, with its id, as JSON (spec §10.6 encryption at rest,
+    /// §12): kept to wrap it for agents that connect between pushes.
+    pub fn rules_snapshot_key(account_id: &str) -> String {
+        format!("rules.snapshot_key.{account_id}")
+    }
+    /// An agent mailbox's X25519 private key: agents' keys and their
+    /// reports are sealed to its public half (spec §10.6, §12).
+    pub fn rules_report_key(account_id: &str) -> String {
+        format!("rules.report_key.{account_id}")
+    }
     pub const CUSTOM_CLIENT_SECRET: &str = "oauth.client_secret.custom";
     pub const ANTHROPIC_API_KEY: &str = "anthropic.api_key";
 }

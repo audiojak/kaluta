@@ -277,26 +277,30 @@ pub(crate) type SyncSources = (Arc<dyn MailProvider>, Option<Arc<dyn BackfillSou
 /// prompt and the app (composer, settings): `verified` and `human_email`
 /// are its service account's.
 pub(crate) fn limits_text(service: AgentService, verified: bool, human_email: Option<&str>) -> String {
-    match service {
-        AgentService::Primitive => "Each message goes to exactly one recipient (no Cc or Bcc): to write to \
-             several people, write to each separately. Drafts stay on this Mac until sent."
-            .into(),
-        AgentService::AgentMail => {
-            let before = if verified {
-                String::new()
-            } else {
-                let human = human_email.map_or_else(|| "the email it was created with".to_owned(), str::to_owned);
-                format!(
-                    "Until its service account is verified, it can write only to {human}; AgentMail refuses \
-                     anyone else. "
-                )
-            };
+    let before = match service {
+        AgentService::AgentMail if !verified => {
+            let human = human_email.map_or_else(|| "the email it was created with".to_owned(), str::to_owned);
             format!(
-                "{before}A message may go to several people (To, Cc and Bcc). AgentMail's free plan sends 3,000 \
-                 messages a month across the service account, and a new inbox may write to at most 3 different \
-                 people in its first hour, 5 in its first day and 10 in its first week. A message with its \
-                 attachments may be up to 6 MB. Drafts stay on this Mac until sent."
+                "Until its service account is verified, it can write only to {human}; AgentMail refuses anyone else. "
             )
+        }
+        _ => String::new(),
+    };
+    format!("{before}{} Drafts stay on this Mac until sent.", service_limits(service))
+}
+
+/// The service's own sending limits, the same wherever the agent runs.
+pub(crate) fn service_limits(service: AgentService) -> &'static str {
+    match service {
+        AgentService::Primitive => {
+            "Each message goes to exactly one recipient (no Cc or Bcc): to write to several people, write to each \
+             separately."
+        }
+        AgentService::AgentMail => {
+            "A message may go to several people (To, Cc and Bcc). AgentMail's free plan sends 3,000 messages a \
+             month across the service account, and a new inbox may write to at most 3 different people in its \
+             first hour, 5 in its first day and 10 in its first week. A message with its attachments may be up \
+             to 6 MB."
         }
     }
 }

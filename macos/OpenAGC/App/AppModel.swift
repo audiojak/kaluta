@@ -361,6 +361,9 @@ final class AppModel {
     var agentMailboxFlow: AgentMailboxFlow?
     /// Tests: record what the create sheet asks of the core.
     @ObservationIgnored var agentMailboxCallsOverride: (any AgentMailboxCalls)?
+    /// Tests and snapshots: what Connect a Cloud Agent… asks of the core
+    /// (spec §10.6), recorded or answered with samples.
+    @ObservationIgnored var rulesAgentCallsOverride: (any RulesAgentCalls)?
     /// The task dialog, while open (spec §14.8).
     var taskDraft: TaskDraft?
     /// The bulk sheet (`⇧T`), while open.
@@ -682,6 +685,9 @@ final class AppModel {
     var analysisError: String?
     /// Bumped when facts change (spec §14.11); views showing them reload.
     private(set) var factsRevision = 0
+    /// Bumped when an agent mailbox's publishing to a rules server moved on
+    /// (spec §10.6); its status line reloads.
+    private(set) var rulesRevision = 0
     /// Whether the open account reviews daily (for the header's wording).
     var analysisDaily = true
     /// Accounts with Analysis proposals not seen yet: the account menu's dots.
@@ -1482,6 +1488,11 @@ final class AppModel {
             await store.apply(sessionID: sessionID, events: events)
             return
         }
+        // Any agent mailbox's: its Settings row shows the status.
+        if tagged.event == .rulesPublicationChanged {
+            rulesRevision += 1
+            return
+        }
         guard isForWindow(tagged) else {
             switch tagged.event {
             case let .newMail(mail):
@@ -1593,6 +1604,8 @@ final class AppModel {
             await facts.load()
             // Undoing a fact decision puts its proposal back in Facts.
             await analysisChanged()
+        case .rulesPublicationChanged:
+            break // above, for every account
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

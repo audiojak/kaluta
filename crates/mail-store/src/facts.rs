@@ -29,6 +29,10 @@ pub struct FactRow {
     pub status: String,
     pub created_at: Millis,
     pub updated_at: Millis,
+    /// Whether an agent mailbox publishing to a rules server shares it;
+    /// `None` follows the default for its use and store (spec §10.6).
+    #[serde(default)]
+    pub share_with_cloud: Option<bool>,
 }
 
 /// A custom category, or a built-in one's stored state (hidden, order).
@@ -70,7 +74,8 @@ pub struct Snapshot {
     pub proposals: Vec<crate::analysis::ProposalSnapshot>,
 }
 
-const FACT_COLUMNS: &str = "id, category, label, value, use, as_of, source, status, created_at, updated_at";
+const FACT_COLUMNS: &str =
+    "id, category, label, value, use, as_of, source, status, created_at, updated_at, share_with_cloud";
 
 fn fact(r: &Row<'_>) -> rusqlite::Result<FactRow> {
     Ok(FactRow {
@@ -84,6 +89,7 @@ fn fact(r: &Row<'_>) -> rusqlite::Result<FactRow> {
         status: r.get(7)?,
         created_at: r.get(8)?,
         updated_at: r.get(9)?,
+        share_with_cloud: r.get(10)?,
     })
 }
 
@@ -123,11 +129,34 @@ pub fn get(conn: &Connection, id: i64) -> StoreResult<Option<FactRow>> {
 pub fn insert(tx: &Transaction<'_>, f: &FactRow) -> StoreResult<i64> {
     let id = (f.id != 0).then_some(f.id);
     tx.prepare_cached(
-        "INSERT INTO facts (id, category, label, value, use, as_of, source, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO facts (id, category, label, value, use, as_of, source, status, created_at, updated_at,
+           share_with_cloud)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
     )?
     .execute(params![
         id,
+        f.category,
+        f.label,
+        f.value,
+        f.use_,
+        f.as_of,
+        f.source,
+        f.status,
+        f.created_at,
+        f.updated_at,
+        f.share_with_cloud
+    ])?;
+    Ok(tx.last_insert_rowid())
+}
+
+/// [`insert`] as the table was at [`MIGRATION_VERSION`], for moving the
+/// guide's facts in that migration: later columns are not there yet.
+fn insert_at_v17(tx: &Transaction<'_>, f: &FactRow) -> StoreResult<i64> {
+    tx.prepare_cached(
+        "INSERT INTO facts (category, label, value, use, as_of, source, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+    )?
+    .execute(params![
         f.category,
         f.label,
         f.value,
@@ -146,7 +175,7 @@ pub fn write(tx: &Transaction<'_>, f: &FactRow) -> StoreResult<bool> {
     Ok(tx
         .prepare_cached(
             "UPDATE facts SET category = ?2, label = ?3, value = ?4, use = ?5, as_of = ?6, source = ?7, status = ?8,
-               created_at = ?9, updated_at = ?10 WHERE id = ?1",
+               created_at = ?9, updated_at = ?10, share_with_cloud = ?11 WHERE id = ?1",
         )?
         .execute(params![
             f.id,
@@ -158,7 +187,8 @@ pub fn write(tx: &Transaction<'_>, f: &FactRow) -> StoreResult<bool> {
             f.source,
             f.status,
             f.created_at,
-            f.updated_at
+            f.updated_at,
+            f.share_with_cloud
         ])?
         > 0)
 }
@@ -380,8 +410,9 @@ pub fn move_guide_facts(tx: &Transaction<'_>) -> StoreResult<usize> {
             status: status.clone(),
             created_at: *created_at,
             updated_at: *updated_at,
+            share_with_cloud: None,
         };
-        let fact_id = insert(tx, &f)?;
+        let fact_id = insert_at_v17(tx, &f)?;
         let quotes: Vec<FactEvidence> = crate::guide::evidence(tx, *id)?
             .into_iter()
             .filter(|e| !e.contradicts)
@@ -521,6 +552,28 @@ mod tests {
         })
         .unwrap();
         assert_eq!(db.read_blocking(move |c| get(c, id)).unwrap().unwrap().value, "Mail", "redone with its own id");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_share_switch_is_kept_and_unset_by_default() {
+        let dir = std::env::temp_dir().join(format!("openagc-facts-share-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let db = crate::Db::open(&dir.join("mail.sqlite")).unwrap();
+        let row = FactRow {
+            category: "work".into(),
+            label: "Team".into(),
+            value: "Mail".into(),
+            use_: "free".into(),
+            source: "you".into(),
+            status: "accepted".into(),
+            ..Default::default()
+        };
+        let id = db.write_blocking(move |tx| insert(tx, &row)).unwrap();
+        let got = db.read_blocking(move |c| get(c, id)).unwrap().unwrap();
+        assert_eq!(got.share_with_cloud, None);
+        db.write_blocking(move |tx| write(tx, &FactRow { share_with_cloud: Some(false), ..got })).unwrap();
+        assert_eq!(db.read_blocking(move |c| get(c, id)).unwrap().unwrap().share_with_cloud, Some(false));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

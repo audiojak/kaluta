@@ -133,7 +133,10 @@ pub fn match_records(
         // A draft sent with a Message-ID waits for that exact copy; one still
         // open waits for its own send, for a day (it may go from Gmail).
         let open = record.draft_id.is_some() && now - record.created_at < OPEN_DRAFT_MS;
-        if record.rfc822_message_id.is_none() && !open {
+        // A cloud agent's report is linked to its send by the report's own
+        // matching (Message-ID, or recipient, subject and time), never
+        // guessed at here: its agent may send many alike.
+        if record.rfc822_message_id.is_none() && !open && !compositions::is_reported(record) {
             if matches!(record.kind, Kind::Reply | Kind::Forward)
                 && let Some(thread) = record.thread_id.as_deref()
                 && let Some(next) = sent.iter().filter(after).find(|s| s.thread_id == thread)
@@ -370,6 +373,23 @@ mod tests {
         assert_eq!(got[&2], Some(("m2", Method::ThreadNext)));
         assert_eq!(got[&3], Some(("m3", Method::RecipientNext)));
         assert_eq!(got[&4], Some(("m4", Method::RecipientNext)));
+    }
+
+    #[test]
+    fn a_cloud_agents_report_is_paired_by_message_id_only() {
+        let mut guessed = record(1, Kind::New, 100, None, &["ann@x.com"], AI);
+        guessed.source = Source::Agent;
+        guessed.agent = Some("cloud:Weekly outreach routine".into());
+        let mut exact = guessed.clone();
+        exact.id = 2;
+        exact.rfc822_message_id = Some("sent-2@agents.example".into());
+        let sent = [
+            sent("m1", "t1", 200, &["ann@x.com"], Some("other@agents.example")),
+            sent("m2", "t2", 300, &["ann@x.com"], Some("sent-2@agents.example")),
+        ];
+        let out = run(&[guessed, exact], &sent, &[("m1", AI), ("m2", AI)], 400);
+        let got: Vec<(i64, Option<(&str, Method)>)> = out.iter().map(|(id, o)| (*id, method(o))).collect();
+        assert_eq!(got, [(2, Some(("m2", Method::SentDraft)))], "the one without a Message-ID is not guessed at");
     }
 
     #[test]

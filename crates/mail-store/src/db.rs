@@ -38,6 +38,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0019_cleanup_progress.sql"),
     include_str!("../migrations/0020_inbox_category_stats.sql"),
     include_str!("../migrations/0021_outbox_claims.sql"),
+    include_str!("../migrations/0022_fact_share_with_cloud.sql"),
+    include_str!("../migrations/0023_cloud_reports.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -430,6 +432,8 @@ mod tests {
         c.execute_batch(
             "DROP TABLE inbox_category_stats;
              ALTER TABLE outbox DROP COLUMN claimed_by; ALTER TABLE outbox DROP COLUMN lease_until;
+             ALTER TABLE facts DROP COLUMN share_with_cloud;
+             DROP TABLE cloud_reports;
              PRAGMA user_version = 19",
         )
         .unwrap();

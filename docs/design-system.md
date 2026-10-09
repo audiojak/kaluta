@@ -368,6 +368,68 @@ Spec §7.9, ADR 0015; `Features/Accounts/AgentMailbox.swift`,
   banner takes their first sentence for AgentMail (its plan has no hourly
   numbers) and the plan's numbers for Primitive; the composer of an agent
   mailbox shows them in full in an info `Banner`.
+- **Rules server** (spec §10.6; `Features/Settings/RulesServerSettings.swift`):
+  the last line of an agent's row, *Rules server*, with *Publish to a Rules
+  Server…* until it publishes, then *Publish Now* and *Stop Publishing…*
+  (a `confirmationDialog`: *Stop Publishing*, or *Stop and Remove from
+  Server* as the destructive choice). Under it the status line in caption,
+  secondary: the server, then "Version 12, published 3 minutes ago"
+  (`DateStyle.relative`, refreshed every 30 s), "· a change waits to go"
+  while a push is due; the last failure under that as a caption
+  `Tone.failure` line with `exclamationmark.triangle`. The sheet is a
+  `Dialog` 560 wide: the address and an optional registration token as
+  rounded fields, a caption with *How to run one* (the operators' guide);
+  then "These go to the server:" in `groupLabel` over a `.card(.neutral)`
+  list (scrolling past 300 points) of groups with a semibold `meta` count
+  ("4 rules and guidelines", "2 facts", "1 audience group"), each entry its
+  statement over a caption ("Guideline · to 1 person · checked"); under the
+  card one caption paragraph on what else goes, what never does and the
+  facts kept back. Work in progress is the dialog's spinner line
+  ("Publishing…"); a refusal is a `Tone.failure` line in the sheet.
+- **Cloud agents** (spec §10.6; `Features/Settings/CloudAgentSettings.swift`):
+  while the mailbox publishes, a *Cloud agents* line under the status line
+  with *Connect a Cloud Agent…*, then each agent not revoked, indented by
+  `Space.xl`: its name over a caption ("Connector · Claude · connected 2
+  days ago · last used 1 hour ago", "Token · made 5 days ago · not used
+  yet"; `DateStyle.relative`, refreshed every minute) and *Revoke…*, a
+  `confirmationDialog` titled "Revoke <name>?" with one destructive
+  *Revoke* and a message saying what stops. With none, one caption
+  sentence on what a connected agent can read. The sheet is a `Dialog`
+  600 wide: the name as a rounded field, "It connects as" in `groupLabel`
+  over a radio-group `Picker` (*A claude.ai connector or cloud routine
+  (recommended)*, *Claude Code, the Agent SDK or a script*) with a caption
+  under it; a server without a public URL disables the first and says so
+  in a caption `Tone.caution` line. *Make Code* or *Make Token* is the
+  default action. The code step is three numbered `meta` lines, each over
+  what it needs: the MCP URL, the code in `TypeRole.display` monospaced
+  with *Copy* and *New Code* and a caption countdown ("Works once, for
+  9:38 more.", every second), and the routine's instructions; then a
+  spinner line "Waiting for the agent to sign in…" (the sheet asks the
+  server every 5 s) that becomes an `approved` "Connected: …" label. The
+  token step opens with the shown-once warning in a `.card(.caution)`,
+  then the token, the `claude mcp add` line, a `curl` for the REST and the
+  instructions. Text to copy is a `CopyableText`: `codeCaption` (or
+  caption, for prose) in a `.quaternary` well (`Radius.control`) with
+  *Copy* beside it, which says "Copied" for two seconds; tokens and lines
+  holding one are copied concealed from clipboard managers. The only
+  button is *Done* (Esc); what was shown is forgotten when the sheet
+  closes. Under the agents, a caption line counts the week's reports
+  ("12 reports this week", "No reports this week") with a small *Show
+  Reports…*, which opens *Cloud Agents' Reports*, a `Dialog` 560 wide: a
+  scrolling list (at most 360 high), each report its subject in `heading`
+  over a caption ("Weekly outreach routine · to ann@acme.com · sent 2
+  hours ago"), a caption label for how it matched the sent mail
+  (`checkmark.circle` matched, `clock` waiting, `questionmark.circle`
+  "Reported, not seen in the mailbox" in `Tone.caution`) and one
+  `Tone.caution` label per guide check it broke. A report's strings are
+  the agent's own: `Text(verbatim:)`, never Markdown. *Done* (Esc) only.
+  In Review mode a cloud agent's pair is titled "<agent> reported" over
+  "In the mailbox's sent mail" instead of "AI drafted" and "You sent".
+- **Share with cloud agents**: on an agent mailbox's Facts, a fact's
+  detail has the switch (a checkbox `Toggle`) under *Drafts*, with one
+  caption line on what it does (a global fact's says every publishing
+  agent mailbox sends it; an *Ask before using* one's why it is off by
+  default); disabled, with its own caption, for *Never share*.
 
 ### Rows with a due day
 
@@ -563,6 +625,15 @@ colour, not materials. Refresh them with `scripts/snapshot.sh`.
 | ![Verifying an agent mailbox, light](design/agent-verify-light.png) | ![Verifying an agent mailbox, dark](design/agent-verify-dark.png) |
 | ![An unverified agent mailbox's banner, light](design/agent-banner-light.png) | ![An unverified agent mailbox's banner, dark](design/agent-banner-dark.png) |
 | ![An agent mailbox's own domain: the records to add, light](design/agent-domain-light.png) | ![An agent mailbox's own domain: the records to add, dark](design/agent-domain-dark.png) |
+| ![Publish to a Rules Server: what goes, light](design/rules-sheet-light.png) | ![Publish to a Rules Server: what goes, dark](design/rules-sheet-dark.png) |
+| ![An agent's row publishing to a rules server, light](design/rules-status-light.png) | ![An agent's row publishing to a rules server, dark](design/rules-status-dark.png) |
+| ![A push the rules server refused, light](design/rules-error-light.png) | ![A push the rules server refused, dark](design/rules-error-dark.png) |
+| ![A fact's Share with cloud agents switch, light](design/rules-fact-share-light.png) | ![A fact's Share with cloud agents switch, dark](design/rules-fact-share-dark.png) |
+| ![Connect a Cloud Agent: a claude.ai connector's code, light](design/rules-connect-connector-light.png) | ![Connect a Cloud Agent: a claude.ai connector's code, dark](design/rules-connect-connector-dark.png) |
+| ![Connect a Cloud Agent: a token shown once, light](design/rules-connect-token-light.png) | ![Connect a Cloud Agent: a token shown once, dark](design/rules-connect-token-dark.png) |
+| ![Connect a Cloud Agent on a server without a public URL, light](design/rules-connect-nourl-light.png) | ![Connect a Cloud Agent on a server without a public URL, dark](design/rules-connect-nourl-dark.png) |
+| ![An agent mailbox's cloud agents, light](design/rules-agents-light.png) | ![An agent mailbox's cloud agents, dark](design/rules-agents-dark.png) |
+| ![Cloud agents' reports, light](design/rules-reports-light.png) | ![Cloud agents' reports, dark](design/rules-reports-dark.png) |
 | ![Clean Up with a sender ticked, light](design/cleanup-light.png) | ![Clean Up with a sender ticked, dark](design/cleanup-dark.png) |
 | ![Clean Up's Size view on All Mail, light](design/cleanup-size-light.png) | ![Clean Up's Size view on All Mail, dark](design/cleanup-size-dark.png) |
 | ![Clean Up's undo notice after archiving a sender, light](design/cleanup-undo-light.png) | |

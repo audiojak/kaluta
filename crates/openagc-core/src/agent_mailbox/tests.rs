@@ -784,12 +784,17 @@ fn two_primitive_agents_sync_only_their_own_mail_and_one_keeps_syncing_when_the_
             .and(query_param("since", "start"))
             .respond_with(ok(json!({ "changes": [], "next_cursor": "c0", "has_more": false, "baseline": true }))),
     );
-    // Nothing new until later; a long-poll answers after a moment.
+    // Nothing new until later. Primitive holds a long-poll until a change
+    // or its wait; this one holds a second, so the two agents' push loops
+    // spend about 2 of the account's 100 requests a minute each second
+    // rather than 40 (a 50 ms answer emptied the shared bucket in two
+    // seconds, and the new mail's fetches then queued behind long-polls:
+    // oagc-7ouz).
     mount(
         Mock::given(path("/changes"))
             .respond_with(
                 ok(json!({ "changes": [], "next_cursor": "c0", "has_more": false, "baseline": false }))
-                    .set_delay(Duration::from_millis(50)),
+                    .set_delay(Duration::from_secs(1)),
             )
             .with_priority(10),
     );
@@ -859,7 +864,10 @@ fn two_primitive_agents_sync_only_their_own_mail_and_one_keeps_syncing_when_the_
                     { "kind": "email.visible", "email_id": "i4", "thread_id": null },
                     { "kind": "email.visible", "email_id": "i5", "thread_id": null }
                 ],
-                "next_cursor": "c0", "has_more": false, "baseline": false
+                // The feed moves on past them, as Primitive's does: a
+                // cursor that stayed put would answer every long-poll at
+                // once, and the writer's would spin on the shared budget.
+                "next_cursor": "c1", "has_more": false, "baseline": false
             })))
             .with_priority(1),
     );

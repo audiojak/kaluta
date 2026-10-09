@@ -1,6 +1,8 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); nothing built. The maintainer took every
+Status: decided (2026-10-08); steps 1 to 8 done, the server built, the
+app publishing to it, OAuth with connect codes, *Connect a Cloud Agent…*,
+`check_draft`, `report_send` and the app recording reports (2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -274,21 +276,68 @@ the headers beta use them.
 
 1. ADR 0016 and the spec amendments above. No code. *(Done 2026-10-08.)*
 2. Extract the guide check and the guide and facts renderers into a pure
-   crate; the core uses it. No change in behaviour.
+   crate; the core uses it. No change in behaviour. *(Done 2026-10-08:
+   crate `writing-guide`, which also holds the snapshot's JSON format,
+   `schema_version` 1, and the audience-address hash.)*
 3. `rules-server`: SQLite, publish API with a publisher token, versioned
    snapshots, `guide_rules` and `facts_lookup` over MCP with bearer
-   tokens. Tests with an in-process client. Dockerfile.
+   tokens. Tests with an in-process client. Dockerfile. *(Done
+   2026-10-09, oagc-gmn7.2: `crates/rules-server`, operators' guide
+   `docs/rules-server.md`. The people entries are scoped to are now
+   hashed in the snapshot too. Registration: the first wins, an optional
+   registration token closes it; the publisher's API also mints, lists and
+   revokes agent tokens for the app's *Connect a Cloud Agent…*.)*
 4. App: *Publish to a Rules Server…* in an agent mailbox's settings: the
    URL, the list of what is shared, push on change, a status line
-   ("Version 12, published 3 minutes ago").
+   ("Version 12, published 3 minutes ago"). *(Done 2026-10-09,
+   oagc-gmn7.3: `openagc-core` `rules_publish.rs`, the per-fact switch
+   `facts.share_with_cloud` (migration 22), Settings' *Rules server* row
+   and sheet; spec §10.6 and §12 say what was built.)*
 5. OAuth with connect codes: the server as its own minimal authorization
    server, consent by a one-time code from the app. Moved up from 7:
-   claude.ai connectors carry a header only in a limited beta.
+   claude.ai connectors carry a header only in a limited beta. *(Done
+   2026-10-09, oagc-gmn7.4: discovery, registration, the consent page,
+   tokens with rotation, grants beside agent tokens, the core's
+   `rules_connect_code_mint`, `rules_agents` and `rules_agent_revoke`;
+   spec §10.6 *OAuth*. Not yet tried against claude.ai itself. Client ID
+   Metadata Documents, claude.ai's recommended client identity, are not
+   supported; claude.ai falls back to registration.)*
 6. App: *Connect a Cloud Agent…*: name, mint, show once, revoke; a
    connect code for claude.ai connectors and routines, a token for the
    rest; the `claude mcp add --transport http …` line and routine
-   instructions.
+   instructions. *(Done 2026-10-09, oagc-gmn7.5: Settings' *Cloud
+   agents* under the *Rules server* line, `CloudAgentSettings.swift`; the
+   core's `rules_connect_info` reads the server's protected resource
+   metadata to find its public `/mcp` and whether OAuth is on; the server
+   lists each agent's `last_used_at`, to the minute. The routine
+   instructions leave a hook for step 7's lines.)*
 7. `check_draft` and `report_send`; the app pulls reports at sync and
-   records them (ADR 0013).
-8. Encryption at rest.
+   records them (ADR 0013). *(Done 2026-10-09, oagc-gmn7.6: the server's
+   two tools and their REST, the `reports` table (migration 4) with a
+   10,000 cap per mailbox and an hourly 30-day sweep, `GET …/reports` and
+   `POST …/reports/ack` for the publisher; the core's
+   `rules_publish/reports.rs` pulls after each sync of a publishing agent
+   mailbox and on *Publish Now*, keeps reports in `cloud_reports`
+   (migration 23), records them as AI compositions (`cloud:<agent name>`)
+   once the mailbox records them, acknowledges after recording, and
+   matches them by Message-ID, else recipient, subject and ±10 minutes;
+   Settings shows "N reports this week" and *Show Reports…*, and the
+   routine instructions gained the check and report lines. Decided while
+   building: the spec's `DELETE` of reports is a `POST …/ack` with an id;
+   a report needs `to`, and `message_id` is optional; reports are kept on
+   this Mac before the first learning run but not recorded as
+   compositions then, as ADR 0013 says.)*
+8. Encryption at rest. *(Done 2026-10-09, oagc-gmn7.7: the `rules-crypto` crate;
+   each push sealed under a fresh key wrapped per agent key; agent keys made
+   by the server while it holds the credential, stored wrapped under
+   HKDF-SHA256 of it and sealed to the app's X25519 key; OAuth grants'
+   tokens carry the grant's secret; reports sealed to the app;
+   `OPENAGC_RULES_REQUIRE_ENCRYPTION`; on by default in the app, with
+   *Advanced* › *Encrypt on the server* when the server allows plaintext;
+   spec §10.6 *Encryption at rest*. Decided while building: no key is
+   wrapped under a connect code (about 49 bits, brute-forced from a leaked
+   database within its 10 minutes); a grant gets its key with its first
+   tokens instead, and the app wraps for it when it sees it in the list.
+   The per-push key is the rotation: a revoked agent opens nothing
+   published after its revocation.)*
 9. The project-hosted instance: operations notes, backups, the price.

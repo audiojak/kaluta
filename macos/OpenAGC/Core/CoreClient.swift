@@ -42,6 +42,9 @@ final class CoreClient: Sendable {
             do { try core.serveOutsideAgents() } catch {
                 Logger(subsystem: "ai.actual.openagc", category: "agent").warning("outside agents: \(String(describing: error), privacy: .public)")
             }
+            // Push what changed while closed to the rules servers agent
+            // mailboxes publish to (spec §10.6).
+            core.resumeRulesPublishing()
         }
         // Tests never run the user's real agent CLIs (which would use their
         // account); neither do UI runs that ask for fakes.
@@ -299,6 +302,89 @@ final class CoreClient: Sendable {
     /// Write it, backing the file up first; the backup's path, if there was a file.
     func connectAgent(_ accountID: String, client: AgentClient) throws(CoreClientError) -> String? {
         try callSync { try core.connectAgent(accountId: accountID, client: client) }
+    }
+
+    // MARK: Rules server (spec §10.6)
+
+    /// Exactly what publishing this agent mailbox sends now.
+    func rulesPreview(_ accountID: String) async throws(CoreClientError) -> RulesPreview {
+        try await call { try await core.rulesPreview(accountId: accountID) }
+    }
+
+    /// Register on the server (the first time) and publish now and on every change,
+    /// encrypted at rest unless `encrypt` is off (spec §10.6).
+    func rulesPublishStart(_ accountID: String, serverURL: String, registrationToken: String?,
+                           encrypt: Bool = true) async throws(CoreClientError) -> RulesPublication {
+        try await call {
+            try await core.rulesPublishStart(accountId: accountID, serverUrl: serverURL,
+                                             registrationToken: registrationToken, encrypt: encrypt)
+        }
+    }
+
+    /// Whether the server requires, offers or cannot do encryption at rest.
+    func rulesServerEncryption(_ serverURL: String) async throws(CoreClientError) -> RulesEncryption {
+        try await call { try await core.rulesServerEncryption(serverUrl: serverURL) }
+    }
+
+    /// Stop publishing; with `removeFromServer`, the server forgets the mailbox.
+    func rulesPublishStop(_ accountID: String, removeFromServer: Bool) async throws(CoreClientError) {
+        try await call { try await core.rulesPublishStop(accountId: accountID, removeFromServer: removeFromServer) }
+    }
+
+    func rulesPublishStatus(_ accountID: String) -> RulesPublication? {
+        core.rulesPublishStatus(accountId: accountID)
+    }
+
+    /// Push a new version now.
+    func rulesPublishNow(_ accountID: String) async throws(CoreClientError) -> RulesPublication {
+        try await call { try await core.rulesPublishNow(accountId: accountID) }
+    }
+
+    /// How agents reach the mailbox's rules server, and whether it signs
+    /// claude.ai connectors in (Connect a Cloud Agent…).
+    func rulesConnectInfo(_ accountID: String) async throws(CoreClientError) -> RulesConnectInfo {
+        try await call { try await core.rulesConnectInfo(accountId: accountID) }
+    }
+
+    /// A one-time connect code for a claude.ai connector or cloud routine;
+    /// shown once, never kept.
+    func rulesConnectCodeMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesConnectCode {
+        try await call { try await core.rulesConnectCodeMint(accountId: accountID, name: name) }
+    }
+
+    /// A static agent token for Claude Code, the Agent SDK or a script;
+    /// shown once, never kept.
+    func rulesAgentTokenMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesAgentToken {
+        try await call { try await core.rulesAgentTokenMint(accountId: accountID, name: name) }
+    }
+
+    /// The agents connected to the mailbox on its rules server, revoked ones included.
+    func rulesAgents(_ accountID: String) async throws(CoreClientError) -> [RulesAgent] {
+        try await call { try await core.rulesAgents(accountId: accountID) }
+    }
+
+    /// Revoke an agent; a connector's sessions end at its next request.
+    func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {
+        try await call { try await core.rulesAgentRevoke(accountId: accountID, agentId: agentID) }
+    }
+
+    /// The reports cloud agents filed about what they sent, newest first.
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo] {
+        try await call { try await core.rulesReports(accountId: accountID, limit: limit) }
+    }
+
+    /// How many reports came since `since` (milliseconds since 1970).
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.rulesReportCount(accountId: accountID, since: since) }
+    }
+
+    /// Snapshots: a publishing status as if pushed; no server is contacted.
+    func debugSetRulesPublication(_ accountID: String, serverURL: String, version: Int64, publishedAt: Int64,
+                                  error: String?) throws(CoreClientError) {
+        try callSync {
+            try core.debugSetRulesPublication(accountId: accountID, serverUrl: serverURL, version: version,
+                                              publishedAt: publishedAt, error: error)
+        }
     }
 
     // MARK: Service accounts (spec §7.9, ADR 0015)
@@ -1508,6 +1594,19 @@ typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
 typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
 typealias AgentVerification = OpenAGCCore.AgentVerification
 typealias ServiceAccountSummary = OpenAGCCore.ServiceAccountSummary
+typealias RulesPublication = OpenAGCCore.RulesPublication
+typealias RulesEncryption = OpenAGCCore.RulesEncryption
+typealias RulesPreview = OpenAGCCore.RulesPreview
+typealias RulesPreviewEntry = OpenAGCCore.RulesPreviewEntry
+typealias RulesPreviewFact = OpenAGCCore.RulesPreviewFact
+typealias RulesPreviewAudience = OpenAGCCore.RulesPreviewAudience
+typealias RulesConnectInfo = OpenAGCCore.RulesConnectInfo
+typealias RulesConnectCode = OpenAGCCore.RulesConnectCode
+typealias RulesAgentToken = OpenAGCCore.RulesAgentToken
+typealias RulesAgent = OpenAGCCore.RulesAgent
+typealias RulesAgentKind = OpenAGCCore.RulesAgentKind
+typealias CloudReportInfo = OpenAGCCore.CloudReportInfo
+typealias CloudReportMatch = OpenAGCCore.CloudReportMatch
 typealias AgentAdded = OpenAGCCore.AgentAdded
 typealias ImportStatus = OpenAGCCore.ImportStatus
 typealias BackfillStatus = OpenAGCCore.BackfillStatus
@@ -1619,6 +1718,8 @@ enum CoreClientEvent: Sendable, Equatable {
     case analysisProgress(AnalysisProgress)
     case analysisChanged
     case factsChanged
+    /// An agent mailbox's publishing to a rules server moved on (spec §10.6).
+    case rulesPublicationChanged
     case importProgress(ImportStatus)
     case error(CoreClientError)
 }
@@ -1710,6 +1811,8 @@ private extension CoreClientEvent {
             self = .analysisChanged
         case .factsChanged:
             self = .factsChanged
+        case .rulesPublicationChanged:
+            self = .rulesPublicationChanged
         case let .agentEvents(sessionId, events):
             self = .agent(sessionID: sessionId, events: events)
         case let .newMail(messages):

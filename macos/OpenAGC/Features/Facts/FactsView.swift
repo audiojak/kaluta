@@ -111,6 +111,9 @@ struct FactDetail: View {
                 .pickerStyle(.segmented)
                 .fixedSize()
                 .hoverHelp("Whether AI drafts may use it, ask you first, or never see it")
+                if model.isAgentMailbox, store.scope == .account {
+                    CloudShareToggle(fact: fact)
+                }
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text(fact.scope == .global ? "Every account · \(fact.source.title)" : "This account · \(fact.source.title)")
                     if let asOf = fact.asOf {
@@ -146,6 +149,38 @@ struct FactDetail: View {
     }
 
     private static let readingWidth: CGFloat = 720
+}
+
+/// A fact's *Share with Cloud Agents* switch, on an agent mailbox's Facts
+/// (spec §10.6): whether the rules server it publishes to gets the fact.
+/// *Never share* facts never go, whatever the switch.
+struct CloudShareToggle: View {
+    @Environment(AppModel.self) private var model
+    let fact: FactInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Toggle("Share with cloud agents", isOn: Binding(get: { fact.shareWithCloud }, set: { share in
+                Task {
+                    await model.applyFactEdits([.share(id: fact.id, share: share)], scope: fact.scope,
+                                               actionName: share ? "Share with Cloud Agents" : "Keep on This Mac",
+                                               notice: share ? "Cloud agents get “\(fact.label)”"
+                                                   : "“\(fact.label)” stays on this Mac")
+                }
+            }))
+            .disabled(fact.use == .never)
+            .hoverHelp("Whether the rules server this mailbox publishes to gets it, for agents that cannot reach this Mac")
+            Text(Self.caption(fact)).font(TypeRole.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    static func caption(_ fact: FactInfo) -> String {
+        if fact.use == .never { return "Never share facts never go to a rules server." }
+        let note = fact.scope == .global ? "A global fact: every agent mailbox that publishes sends it when on."
+            : "Sent with the writing guide when this mailbox publishes to a rules server."
+        return fact.use == .ask ? note + " Off by default: a cloud agent cannot ask you first." : note
+    }
 }
 
 /// Add or change a fact (spec §14.11). Saving is one undoable change.

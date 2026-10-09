@@ -341,6 +341,8 @@ struct AccountRow: View {
                         .hoverHelp("Let Claude Code or Codex on this Mac use this mailbox, even when OpenAGC is closed")
                 }
                 .sheet(isPresented: $connecting) { ConnectAgentSheet(accountID: account.id, address: account.email) }
+                // Cloud agents read the guide and shared facts there (spec §10.6).
+                RulesServerRow(account: account)
             }
             if account.kind == .gmail {
                 Picker("Download mail from", selection: Binding(

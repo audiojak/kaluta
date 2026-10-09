@@ -157,6 +157,9 @@ pub enum CoreEvent {
     },
     /// Facts or their categories changed (spec §14.11); re-read them.
     FactsChanged,
+    /// An agent mailbox's publishing to a rules server moved on: pushed,
+    /// failed, started or stopped (spec §10.6); re-read its status.
+    RulesPublicationChanged,
     /// Proposals in Analysis were added, decided or seen; re-read them.
     AnalysisChanged,
     /// The daily review moved on, paused or finished (spec §14.10).

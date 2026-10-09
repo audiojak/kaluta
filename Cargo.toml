@@ -26,6 +26,9 @@ agent-codex = { path = "crates/agent-codex" }
 agent-mcp = { path = "crates/agent-mcp" }
 permissions = { path = "crates/permissions" }
 openagc-core = { path = "crates/openagc-core" }
+writing-guide = { path = "crates/writing-guide" }
+rules-crypto = { path = "crates/rules-crypto" }
+rules-server = { path = "crates/rules-server" }
 
 # External crates.
 uniffi = "0.32"
@@ -66,6 +69,15 @@ toml = "1"
 # The shim's own uid, to check the app's socket (no `unsafe` getuid).
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
 rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }
+# The rules server's HTTP (spec §10.6): plain HTTP/1.1 behind the user's TLS proxy.
+# Rules server encryption at rest (spec §10.6, oagc-gmn7.7): XChaCha20-Poly1305,
+# HKDF-SHA256 and X25519 from RustCrypto and dalek, randomness from getrandom.
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hkdf = "0.12"
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
+zeroize = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "matched-path"] }
+http = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

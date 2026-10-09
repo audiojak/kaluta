@@ -39,6 +39,7 @@ mod mutations;
 mod outside;
 mod registry;
 mod routines;
+mod rules_publish;
 mod runtime;
 pub mod secrets;
 mod sync;
@@ -73,6 +74,10 @@ pub use mutations::OutboxStatus;
 pub use outside::{OUTSIDE_SOCKET_FILE, QUEUED_MESSAGE, outside_socket};
 pub use registry::{AccountKind, AccountSummary, OrphanedStore};
 pub use routines::{RoutineInfo, RoutinePreviewRow, RoutineRunInfo};
+pub use rules_publish::{
+    CloudReportInfo, CloudReportMatch, RulesPreview, RulesPreviewAudience, RulesPreviewEntry, RulesPreviewFact,
+    RulesPublication,
+};
 pub use secrets::SecretStore;
 
 /// Configuration the app passes when it creates the core.
@@ -114,6 +119,10 @@ pub struct Core {
     /// closed, spec §10.1): stores open without migrating, read-only until
     /// a send writes; no secrets, no sync; sends are queued for the app.
     headless: bool,
+    /// Publishing agent mailboxes to rules servers (spec §10.6).
+    rules: rules_publish::RulesState,
+    /// This core, for work it starts on its own (the rules publisher).
+    me: std::sync::Weak<Core>,
 }
 
 #[uniffi::export]
@@ -177,7 +186,7 @@ impl Core {
         let events = EventBus::start(listener, runtime::runtime().handle());
         logging::init(config.log_dir.as_deref().map(std::path::Path::new), events.clone());
         tracing::info!(version = env!("CARGO_PKG_VERSION"), headless, "core started");
-        Ok(Arc::new(Self {
+        Ok(Arc::new_cyclic(|me| Self {
             config,
             events,
             secrets,
@@ -193,6 +202,8 @@ impl Core {
             agents: Default::default(),
             send_delay_ms: Default::default(),
             headless,
+            rules: Default::default(),
+            me: me.clone(),
         }))
     }
 

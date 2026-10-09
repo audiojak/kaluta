@@ -121,6 +121,10 @@ pub struct FactInfo {
     pub overridden: bool,
     /// Its `as_of` is old enough that it may no longer be true.
     pub stale: bool,
+    /// An agent mailbox that publishes to a rules server shares it with
+    /// cloud agents (spec §10.6): the fact's own switch, or the default for
+    /// its use and store ([`shares_with_cloud`]). Never for *Never share*.
+    pub share_with_cloud: bool,
 }
 
 /// A fact dated longer ago than this is flagged for review.
@@ -139,10 +143,27 @@ pub struct FactFields {
 /// One change in a set applied (and undone) together.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum FactEdit {
-    Add { fields: FactFields, status: FactStatus, source: FactSource },
-    Update { id: i64, fields: FactFields },
-    Decide { id: i64, status: FactStatus },
-    Delete { id: i64 },
+    Add {
+        fields: FactFields,
+        status: FactStatus,
+        source: FactSource,
+    },
+    Update {
+        id: i64,
+        fields: FactFields,
+    },
+    Decide {
+        id: i64,
+        status: FactStatus,
+    },
+    Delete {
+        id: i64,
+    },
+    /// Its *Share with cloud agents* switch (spec §10.6).
+    Share {
+        id: i64,
+        share: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
@@ -355,22 +376,34 @@ pub(crate) fn similar(a: &str, b: &str) -> bool {
     a == b || (a.len().min(b.len()) >= 5 && (a.starts_with(&b) || b.starts_with(&a)))
 }
 
-pub(crate) fn info(f: FactRow, evidence: Vec<FactEvidence>) -> FactInfo {
+/// Whether a fact goes to cloud agents when its agent mailbox publishes
+/// to a rules server (spec §10.6, decision 4 of the rules-server plan): its
+/// own switch when the user set one, else on for an account's *Use freely*
+/// facts and off for *Ask before using* (an unattended agent cannot ask)
+/// and global ones (ADR 0012: they are the user's own). *Never share*
+/// facts never go.
+pub(crate) fn shares_with_cloud(use_: FactUse, scope: FactScope, choice: Option<bool>) -> bool {
+    use_ != FactUse::Never && choice.unwrap_or(use_ == FactUse::Free && scope == FactScope::Account)
+}
+
+pub(crate) fn info(f: FactRow, evidence: Vec<FactEvidence>, scope: FactScope) -> FactInfo {
+    let use_ = FactUse::parse(&f.use_);
     FactInfo {
         id: f.id,
         category: f.category,
         label: f.label,
         value: f.value,
-        use_: FactUse::parse(&f.use_),
+        use_,
         as_of: f.as_of,
         source: FactSource::parse(&f.source),
         status: FactStatus::parse(&f.status),
         evidence: evidence.into_iter().map(|e| FactQuote { message_id: e.message_id, quote: e.quote }).collect(),
         created_at: f.created_at,
         updated_at: f.updated_at,
-        scope: FactScope::Account,
+        scope,
         overridden: false,
         stale: f.as_of.is_some_and(|at| mail_sync::now_millis() - at > STALE_AFTER_MS),
+        share_with_cloud: shares_with_cloud(use_, scope, f.share_with_cloud),
     }
 }
 
@@ -406,17 +439,26 @@ pub(crate) fn categories_from(rows: &[CategoryRow]) -> Vec<FactCategoryInfo> {
 
 /// A fact as drafting reads it, or `None` for one never shared.
 pub(crate) fn prompt_line(f: &FactInfo, category: &str) -> Option<String> {
-    let fact = format!("{category} › {}: {}", f.label, f.value);
-    match f.use_ {
-        FactUse::Free => Some(format!("- {}", crate::guide_ai::fenced(&fact))),
-        FactUse::Ask => Some(format!("- {} (ask the user before using this)", crate::guide_ai::fenced(&fact))),
-        FactUse::Never => None,
-    }
+    shared(f, category).map(|f| writing_guide::fact_line(&f))
+}
+
+/// A fact as the guide's renderer takes it (`category`: its category's
+/// name), or `None` for one never shared.
+pub(crate) fn shared(f: &FactInfo, category: &str) -> Option<writing_guide::Fact> {
+    (f.use_ != FactUse::Never).then(|| writing_guide::Fact {
+        category_key: f.category.clone(),
+        category: category.to_owned(),
+        label: f.label.clone(),
+        value: f.value.clone(),
+        ask_before_using: f.use_ == FactUse::Ask,
+    })
 }
 
 impl Core {
     pub(crate) fn facts_changed(&self) {
         self.account_events().emit(CoreEvent::FactsChanged);
+        // A global fact is every account's: each publishing mailbox looks.
+        self.rules_changed(None);
     }
 
     /// The accepted facts drafting may see, each as a prompt line.
@@ -480,7 +522,7 @@ impl Core {
                     let mut out = Vec::new();
                     for f in store::list(c, &wanted)? {
                         let e = store::evidence(c, f.id)?;
-                        out.push(FactInfo { scope, ..info(f, e) });
+                        out.push(info(f, e, scope));
                     }
                     Ok(out)
                 })
@@ -581,9 +623,10 @@ impl Core {
                     let mut fact_ids: Vec<i64> = edits
                         .iter()
                         .filter_map(|e| match e {
-                            FactEdit::Update { id, .. } | FactEdit::Decide { id, .. } | FactEdit::Delete { id } => {
-                                Some(*id)
-                            }
+                            FactEdit::Update { id, .. }
+                            | FactEdit::Decide { id, .. }
+                            | FactEdit::Delete { id }
+                            | FactEdit::Share { id, .. } => Some(*id),
                             FactEdit::Add { .. } => None,
                         })
                         .collect();
@@ -735,6 +778,7 @@ impl Core {
                                         status: status.as_str().into(),
                                         created_at: now,
                                         updated_at: now,
+                                        share_with_cloud: None,
                                     },
                                 )?;
                                 fact_ids.push(id);
@@ -761,6 +805,11 @@ impl Core {
                                 store::write(tx, &FactRow { status: status.as_str().into(), updated_at: now, ..old })?;
                             }
                             FactEdit::Delete { id } => store::delete(tx, *id)?,
+                            FactEdit::Share { id, share } => {
+                                let old =
+                                    store::get(tx, *id)?.ok_or_else(|| invalid_store("that fact no longer exists"))?;
+                                store::write(tx, &FactRow { share_with_cloud: Some(*share), updated_at: now, ..old })?;
+                            }
                         }
                     }
                     // One fact per label in a category, for the facts this
@@ -780,7 +829,7 @@ impl Core {
                     let change_id = store::record_change(tx, &reason, &before, &after, now)?;
                     Ok(FactChange {
                         change_id,
-                        facts: after.facts.into_iter().map(|(f, e)| FactInfo { scope, ..info(f, e) }).collect(),
+                        facts: after.facts.into_iter().map(|(f, e)| info(f, e, scope)).collect(),
                         categories: keys,
                     })
                 })
@@ -941,7 +990,7 @@ impl Core {
         self.facts_changed();
         Ok(FactChange {
             change_id,
-            facts: vec![FactInfo { scope: to, ..info(moved.0, moved.1) }],
+            facts: vec![info(moved.0, moved.1, to)],
             categories: category.map(|c| vec![c.key]).unwrap_or_default(),
         })
     }
@@ -966,35 +1015,16 @@ pub(crate) fn lookup_json(
     category: Option<&str>,
     query: Option<&str>,
 ) -> serde_json::Value {
-    let want = category.map(str::to_lowercase);
-    let q = query.map(str::to_lowercase).filter(|q| !q.trim().is_empty());
-    let rows: Vec<serde_json::Value> = facts
+    let usable: Vec<writing_guide::Fact> = facts
         .iter()
-        .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never && !f.overridden)
+        .filter(|f| f.status == FactStatus::Accepted && !f.overridden)
         .filter(|f| !categories.iter().any(|c| c.key == f.category && c.hidden))
         .filter_map(|f| {
-            let c = categories.iter().find(|c| c.key == f.category);
-            let name = c.map_or("Other".to_owned(), |c| c.name.clone());
-            if let Some(w) = &want
-                && *w != f.category.to_lowercase()
-                && *w != name.to_lowercase()
-            {
-                return None;
-            }
-            if let Some(q) = &q
-                && !format!("{name} {} {}", f.label, f.value).to_lowercase().contains(q.as_str())
-            {
-                return None;
-            }
-            Some(serde_json::json!({
-                "category": name,
-                "label": f.label,
-                "value": f.value,
-                "ask_before_using": f.use_ == FactUse::Ask,
-            }))
+            let name = categories.iter().find(|c| c.key == f.category).map_or("Other".to_owned(), |c| c.name.clone());
+            shared(f, &name)
         })
         .collect();
-    serde_json::json!({ "facts": rows })
+    writing_guide::facts_lookup(&usable, category, query)
 }
 
 #[uniffi::export]

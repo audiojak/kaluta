@@ -79,6 +79,9 @@ pub struct PrimitiveProvider {
     routing: RoutingSource,
     /// The newest change cursor seen, for long-polling without consuming.
     last_cursor: Mutex<Option<String>>,
+    /// Woken when the first cursor is seen, so a long-poll that started
+    /// before it waits for it rather than sleeping its whole wait.
+    cursor_seen: tokio::sync::Notify,
 }
 
 impl PrimitiveProvider {
@@ -114,6 +117,7 @@ impl PrimitiveProvider {
             address: address.to_owned(),
             routing,
             last_cursor: Mutex::new(None),
+            cursor_seen: tokio::sync::Notify::new(),
         })
     }
 
@@ -127,6 +131,7 @@ impl PrimitiveProvider {
 
     fn remember_cursor(&self, cursor: &str) {
         *self.last_cursor.lock().unwrap_or_else(|e| e.into_inner()) = Some(cursor.to_owned());
+        self.cursor_seen.notify_waiters();
     }
 
     async fn get<T: serde::de::DeserializeOwned>(
@@ -222,10 +227,21 @@ impl PrimitiveProvider {
     /// change to another agent's mail wakes this one too (its sync then
     /// finds nothing of its own).
     pub async fn wait_for_change(&self, max: Duration) -> ProviderResult<bool> {
+        // Registered before the cursor is read, so a cursor remembered in
+        // between still wakes it.
+        let seen = self.cursor_seen.notified();
+        tokio::pin!(seen);
+        seen.as_mut().enable();
         let cursor = self.last_cursor.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let Some(cursor) = cursor else {
-            // Nothing synced yet: let the poll take the first cursor.
-            tokio::time::sleep(max.min(MAX_WAIT)).await;
+            // Nothing synced yet: the poll takes the first cursor. Wait for
+            // it (or the whole wait), then the caller long-polls from it:
+            // sleeping the whole wait would leave this agent deaf to new
+            // mail for up to MAX_WAIT after it starts (oagc-7ouz).
+            tokio::select! {
+                () = seen => {}
+                () = tokio::time::sleep(max.min(MAX_WAIT)) => {}
+            }
             return Ok(false);
         };
         let wait = max.min(MAX_WAIT).as_secs().max(1);

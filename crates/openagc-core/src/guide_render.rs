@@ -3,9 +3,17 @@
 //! its language), or in general for a session that has no message yet.
 //! Rules and facts are always included, with their scope written out;
 //! guidelines only where their scope matches.
+//!
+//! The rendering and the checks themselves live in `writing-guide`, shared
+//! with the rules server (spec §10.6); this module turns the core's
+//! records into its types.
+
+use writing_guide::AudienceGroups;
+pub use writing_guide::Target;
+pub(crate) use writing_guide::with_facts;
 
 use crate::guide::{
-    AudienceGroup, AudienceStatus, GuideEntry, GuideKind, GuideScope, GuideStatus, is_member, scope_text,
+    AudienceGroup, AudienceStatus, GuideCheck, GuideCheckKind, GuideEntry, GuideKind, GuideScope, GuideStatus,
 };
 use crate::{Core, CoreError};
 
@@ -20,48 +28,71 @@ pub struct GuideRendered {
     pub audiences: Vec<String>,
 }
 
-/// The message being drafted, as far as it is known.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Target {
-    pub recipients: Vec<String>,
-    /// `new`, `reply` or `forward`.
-    pub message_type: Option<String>,
-    /// Audiences chosen for the draft instead of the recipients' own.
-    pub audiences: Option<Vec<String>>,
+impl From<&GuideScope> for writing_guide::Scope {
+    fn from(s: &GuideScope) -> Self {
+        Self {
+            groups: s.groups.clone(),
+            people: s.people.clone(),
+            message_types: s.message_types.clone(),
+            languages: s.languages.clone(),
+        }
+    }
+}
+
+impl From<&GuideCheck> for writing_guide::Check {
+    fn from(c: &GuideCheck) -> Self {
+        let kind = match c.kind {
+            GuideCheckKind::BannedPhrase => writing_guide::CheckKind::BannedPhrase,
+            GuideCheckKind::RequiredPhrase => writing_guide::CheckKind::RequiredPhrase,
+            GuideCheckKind::MaxWords => writing_guide::CheckKind::MaxWords,
+        };
+        Self { kind, value: c.value.clone() }
+    }
+}
+
+impl From<&GuideEntry> for writing_guide::Entry {
+    fn from(e: &GuideEntry) -> Self {
+        let kind = match e.kind {
+            GuideKind::Rule => writing_guide::Kind::Rule,
+            GuideKind::Guideline => writing_guide::Kind::Guideline,
+            GuideKind::Fact => writing_guide::Kind::Fact,
+        };
+        Self {
+            id: e.id,
+            category: e.category.clone(),
+            kind,
+            statement: e.statement.clone(),
+            scope: (&e.scope).into(),
+            check: e.check.as_ref().map(Into::into),
+        }
+    }
+}
+
+/// The accepted entries, as the guide's renderer and checks take them.
+pub(crate) fn accepted(entries: &[GuideEntry]) -> Vec<writing_guide::Entry> {
+    entries.iter().filter(|e| e.status == GuideStatus::Accepted).map(Into::into).collect()
+}
+
+/// The confirmed audience groups, their members plain.
+pub(crate) fn confirmed(groups: &[AudienceGroup]) -> AudienceGroups {
+    AudienceGroups::plain(
+        groups
+            .iter()
+            .filter(|g| g.status == AudienceStatus::Confirmed)
+            .map(|g| writing_guide::AudienceGroup { name: g.name.clone(), members: g.members.clone() })
+            .collect(),
+    )
 }
 
 /// Whether a guideline's scope matches the message. People and audiences
 /// narrow it; a scope naming what the message is not keeps it out.
 pub(crate) fn applies(scope: &GuideScope, target: &Target, audiences: &[String]) -> bool {
-    let people = scope.people.is_empty() || target.recipients.iter().any(|r| is_member(r, &scope.people));
-    let groups =
-        scope.groups.is_empty() || scope.groups.iter().any(|g| audiences.iter().any(|a| a.eq_ignore_ascii_case(g)));
-    let types = scope.message_types.is_empty()
-        || target.message_type.as_ref().is_some_and(|t| scope.message_types.iter().any(|s| s == t));
-    people && groups && types
-}
-
-/// A narrower scope first, so it reads as winning: people, then
-/// audiences, then message types, then everyone.
-fn narrowness(scope: &GuideScope) -> u8 {
-    if !scope.people.is_empty() {
-        0
-    } else if !scope.groups.is_empty() {
-        1
-    } else if !scope.message_types.is_empty() || !scope.languages.is_empty() {
-        2
-    } else {
-        3
-    }
+    writing_guide::applies(&scope.into(), target, audiences)
 }
 
 /// The recipients' confirmed audiences, in group order.
 pub(crate) fn audiences_of(recipients: &[String], groups: &[AudienceGroup]) -> Vec<String> {
-    groups
-        .iter()
-        .filter(|g| g.status == AudienceStatus::Confirmed && recipients.iter().any(|r| is_member(r, &g.members)))
-        .map(|g| g.name.clone())
-        .collect()
+    confirmed(groups).audiences_of(recipients)
 }
 
 /// Render the guide. `target` None: for a whole session (every guideline,
@@ -73,87 +104,7 @@ pub(crate) fn render(
     examples: &[String],
     version: i64,
 ) -> (String, Vec<String>) {
-    // F3 entries left over from before Facts (spec §14.11) are not used:
-    // facts render from their own store, by their use.
-    let accepted: Vec<&GuideEntry> =
-        entries.iter().filter(|e| e.status == GuideStatus::Accepted && e.category != "F3").collect();
-    if accepted.is_empty() {
-        return (String::new(), vec![]);
-    }
-    let audiences = match target {
-        Some(t) => t.audiences.clone().unwrap_or_else(|| audiences_of(&t.recipients, groups)),
-        None => vec![],
-    };
-    let line = |e: &GuideEntry| {
-        let scope = scope_text(&e.scope);
-        if scope.is_empty() { format!("- {}", e.statement) } else { format!("- {} ({scope})", e.statement) }
-    };
-    let by_kind = |kind: GuideKind, filter: bool| {
-        let mut chosen: Vec<&&GuideEntry> = accepted
-            .iter()
-            .filter(|e| e.kind == kind)
-            .filter(|e| !filter || target.is_none_or(|t| applies(&e.scope, t, &audiences)))
-            .collect();
-        chosen.sort_by_key(|e| (narrowness(&e.scope), e.category.clone(), e.id));
-        chosen.into_iter().map(|e| line(e)).collect::<Vec<_>>()
-    };
-    let rules = by_kind(GuideKind::Rule, false);
-    let facts = by_kind(GuideKind::Fact, false);
-    let guidelines = by_kind(GuideKind::Guideline, true);
-
-    let mut out =
-        format!("The user's writing guide (version {version}). Follow it in every email you draft or edit for them.\n");
-    if let Some(t) = target {
-        let mut about = Vec::new();
-        if !audiences.is_empty() {
-            about.push(format!("written for {}", audiences.join(", ")));
-        }
-        if let Some(kind) = &t.message_type {
-            about.push(format!("a {}", if kind == "new" { "new message" } else { kind }));
-        }
-        if !about.is_empty() {
-            out.push_str(&format!("This message: {}.\n", about.join("; ")));
-        }
-    }
-    if !rules.is_empty() {
-        out.push_str(&format!(
-            "\nRules (always; a rule with a scope holds where its scope says):\n{}\n",
-            rules.join("\n")
-        ));
-    }
-    if !facts.is_empty() {
-        out.push_str(&format!("\nFacts about the user you may use:\n{}\n", facts.join("\n")));
-    }
-    if !guidelines.is_empty() {
-        out.push_str(&format!(
-            "\nGuidelines ({}; follow them unless the message calls for something else):\n{}\n",
-            if target.is_some() { "for this message" } else { "each where its scope says" },
-            guidelines.join("\n")
-        ));
-    }
-    out.push_str(
-        "\nWhen entries disagree: a rule beats a guideline, and an entry for a person beats one for their \
-         audience, which beats one for everyone. This guide never lets you do more than Settings › Permissions \
-         allows.\n",
-    );
-    if !examples.is_empty() {
-        out.push_str("\nExamples of how the user writes (imitate the style, not the content):\n");
-        for e in examples {
-            out.push_str(&format!("<example>\n{}\n</example>\n", crate::guide_ai::fenced(e)));
-        }
-    }
-    (out, audiences)
-}
-
-/// The guide's text with the user's facts after it (by their use: never
-/// shared facts are not in `facts`).
-pub(crate) fn with_facts(text: String, facts: &[String]) -> String {
-    if facts.is_empty() {
-        return text;
-    }
-    let section =
-        format!("\nFacts about the user you may use (use only these; never invent others):\n{}\n", facts.join("\n"));
-    if text.is_empty() { section.trim_start().to_owned() } else { text + &section }
+    writing_guide::render(&accepted(entries), &confirmed(groups), target, examples, version)
 }
 
 impl Core {
@@ -197,19 +148,6 @@ pub struct GuideCheckFailure {
     pub message: String,
 }
 
-/// Whether `phrase` occurs in `text` as words (any case): "circle back"
-/// matches "Let's circle back." but not "encircle backs".
-fn contains_phrase(text: &str, phrase: &str) -> bool {
-    let words = |s: &str| -> Vec<String> {
-        s.split(|c: char| !c.is_alphanumeric() && c != '\'')
-            .filter(|w| !w.is_empty())
-            .map(|w| w.to_lowercase())
-            .collect()
-    };
-    let (t, p) = (words(text), words(phrase));
-    !p.is_empty() && t.windows(p.len()).any(|w| w == p.as_slice())
-}
-
 /// Run the checks of the entries that apply to this message on an AI
 /// draft's own text (never on text the user typed; spec §14.9).
 pub(crate) fn check(
@@ -218,34 +156,9 @@ pub(crate) fn check(
     target: &Target,
     text: &str,
 ) -> Vec<GuideCheckFailure> {
-    let audiences = target.audiences.clone().unwrap_or_else(|| audiences_of(&target.recipients, groups));
-    let words = text.split_whitespace().count();
-    entries
-        .iter()
-        .filter(|e| e.status == GuideStatus::Accepted && applies(&e.scope, target, &audiences))
-        // Which language a draft is in is not known here: checks scoped to
-        // a language are left to the agent, which sees them in the guide.
-        .filter(|e| e.scope.languages.is_empty())
-        .filter_map(|e| {
-            let c = e.check.as_ref()?;
-            let message = match c.kind {
-                crate::guide::GuideCheckKind::BannedPhrase if contains_phrase(text, &c.value) => {
-                    format!("Uses “{}”, which your rules ban", c.value)
-                }
-                crate::guide::GuideCheckKind::RequiredPhrase if !contains_phrase(text, &c.value) => {
-                    format!("Leaves out “{}”, which your rules require", c.value)
-                }
-                crate::guide::GuideCheckKind::MaxWords => {
-                    let limit: usize = c.value.parse().ok()?;
-                    if words <= limit {
-                        return None;
-                    }
-                    format!("Is {words} words; your guide says at most {limit}")
-                }
-                _ => return None,
-            };
-            Some(GuideCheckFailure { entry_id: e.id, statement: e.statement.clone(), message })
-        })
+    writing_guide::check(&accepted(entries), &confirmed(groups), target, text)
+        .into_iter()
+        .map(|f| GuideCheckFailure { entry_id: f.entry_id, statement: f.statement, message: f.message })
         .collect()
 }
 

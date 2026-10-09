@@ -63,6 +63,17 @@ import os
 ///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
+///   -OpenAGCSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents|reports
+///                                       a new agent mailbox (fake service) with
+///                                       a guide and facts: the Publish to a
+///                                       Rules Server sheet with its list, its
+///                                       Settings row publishing (sample status,
+///                                       no server contacted) or failing, or its
+///                                       Facts with the Share switch; Connect a
+///                                       Cloud Agent with a sample connect code
+///                                       or token, or for a server without a
+///                                       public URL; or the row's cloud agents
+///                                       (sample answers, spec §10.6)
 ///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
 ///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
@@ -364,6 +375,65 @@ enum Snapshot {
                     window = sheet
                 }
             }
+            if let rules = defaults.string(forKey: "OpenAGCSnapshotRulesServer"), let model = delegate.model,
+               let core = model.core, CoreClient.usesFakeAgentMail,
+               let created = try? await model.createAgentMailbox(name: "Research Scout") {
+                let id = created.accountId
+                await model.switchAccount(to: id)
+                await Self.seedRules(core)
+                switch rules {
+                case "sheet":
+                    window = Self.rulesSheetWindow(model, accountID: id)
+                case "connect-connector", "connect-token", "connect-nourl":
+                    let calls = SnapshotRulesAgentCalls(oauth: rules != "connect-nourl")
+                    let flow = CloudAgentFlow(accountID: id, address: created.address, calls: calls)
+                    await flow.load()
+                    flow.name = rules == "connect-token" ? "Nightly digest script" : "Weekly outreach routine"
+                    if rules != "connect-nourl" {
+                        flow.route = rules == "connect-token" ? .token : .connector
+                        await flow.mint()
+                    }
+                    let sheet = ConnectCloudAgentSheet(flow: flow)
+                        .background(Color(nsColor: .windowBackgroundColor))
+                    window = Self.hostingWindow(sheet, width: ConnectCloudAgentSheet.width, height: nil)
+                case "reports":
+                    let list = CloudReportList(accountID: id, calls: SnapshotRulesAgentCalls(oauth: true))
+                    await list.load()
+                    let sheet = CloudReportsSheet(list: list).background(Color(nsColor: .windowBackgroundColor))
+                    window = Self.hostingWindow(sheet, width: CloudReportsSheet.width, height: nil)
+                case "agents":
+                    model.rulesAgentCallsOverride = SnapshotRulesAgentCalls(oauth: true)
+                    let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
+                    try? core.debugSetRulesPublication(id, serverURL: "https://rules.example.com", version: 12,
+                                                       publishedAt: minutesAgo, error: nil)
+                    await model.reloadAccounts()
+                    window = Self.rulesRowWindow(model, accountID: id, height: 430)
+                case "facts":
+                    model.openFacts()
+                    await model.facts.load()
+                    // The detail's scroll view does not self-snapshot in the
+                    // main window: the chosen fact's detail on its own.
+                    if let fact = model.facts.facts.first(where: { $0.label == "Calendar link" }) {
+                        let detail = FactDetail(fact: fact, store: model.facts, onEdit: { _ in })
+                            .background(Color(nsColor: .windowBackgroundColor))
+                            .environment(model)
+                        window = Self.hostingWindow(detail, width: 560, height: 360)
+                    }
+                default:
+                    let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
+                    try? core.debugSetRulesPublication(
+                        id, serverURL: "https://rules.example.com", version: 12, publishedAt: minutesAgo,
+                        error: rules == "error" ? "rules.example.com no longer accepts this Mac's publisher token for research-scout@demo.primitive.email. The server's operator can forget the mailbox (openagc-rules forget-mailbox); then publish again." : nil)
+                    await model.reloadAccounts()
+                    window = Self.rulesRowWindow(model, accountID: id)
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+                // The sheet's list loads after it opens: fit the window to it.
+                if rules == "sheet" || rules.hasPrefix("connect-"), let shown = window, let content = shown.contentView {
+                    shown.setContentSize(NSSize(width: shown.frame.width, height: content.fittingSize.height))
+                    try? await Task.sleep(for: .milliseconds(300))
+                }
+            }
             if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID
@@ -450,6 +520,71 @@ enum Snapshot {
         return window
     }
 
+    /// An agent mailbox's guide and facts, for the rules-server snapshots.
+    private static func seedRules(_ core: CoreClient) async {
+        func rule(_ statement: String, _ kind: GuideKind = .rule, scope: GuideScope = GuideScope(groups: [], people: [], messageTypes: [], languages: []),
+                  check: GuideCheck? = nil) -> GuideEdit {
+            .add(fields: GuideEntryFields(category: "B6", kind: kind, statement: statement, scope: scope, check: check),
+                 status: .accepted, source: .you, origin: nil)
+        }
+        _ = try? await core.applyGuideEdits([
+            rule("Never say “circle back”", check: GuideCheck(kind: .bannedPhrase, value: "circle back")),
+            rule("Sign off as Research Scout, never with the user's name"),
+            rule("Be formal and brief with customers", .guideline,
+                 scope: GuideScope(groups: ["Customers"], people: [], messageTypes: [], languages: [])),
+            rule("Call her Annie", .guideline,
+                 scope: GuideScope(groups: [], people: ["ann@acme.example"], messageTypes: [], languages: [])),
+        ], reason: "snapshot")
+        _ = try? await core.saveAudienceGroup(AudienceGroup(id: 0, name: "Customers", status: .confirmed, description: "",
+                                                             members: ["@acme.example", "bea@globex.example"]))
+        func fact(_ c: String, _ l: String, _ v: String, _ u: FactUse = .free) -> FactEdit {
+            .add(fields: FactFields(category: c, label: l, value: v, use: u, asOf: nil), status: .accepted, source: .you)
+        }
+        _ = try? await core.applyFactEdits([
+            fact("work", "Occupation or role", "Research assistant"),
+            fact("availability", "Calendar link", "https://cal.example.com/scout"),
+            fact("people", "Sam Rivera", "The user's assistant", .ask),
+            fact("contact", "Mailing address", "1 Main St", .never),
+        ], reason: "snapshot")
+    }
+
+    /// The publish sheet in a window of its own (the Settings scene, which
+    /// presents it, cannot be opened from here).
+    private static func rulesSheetWindow(_ model: AppModel, accountID: String) -> NSWindow {
+        let root = PublishRulesSheet(accountID: accountID, name: "Research Scout")
+            .background(Color(nsColor: .windowBackgroundColor))
+            .environment(model)
+        return hostingWindow(root, width: PublishRulesSheet.width, height: nil)
+    }
+
+    /// The agent's Settings › Accounts row, with its Rules server line.
+    private static func rulesRowWindow(_ model: AppModel, accountID: String, height: CGFloat = 420) -> NSWindow {
+        let form = Form {
+            Section {
+                if let account = model.accounts.first(where: { $0.id == accountID }) {
+                    AccountRow(account: account, onRemove: {})
+                }
+            } header: {
+                Text("Research Scout")
+            }
+        }
+        .formStyle(.grouped)
+        .environment(model)
+        return hostingWindow(form, width: 640, height: height)
+    }
+
+    /// `root` in a window of its own; with no height, as tall as it needs.
+    private static func hostingWindow(_ root: some View, width: CGFloat, height: CGFloat?) -> NSWindow {
+        let hosting = NSHostingView(rootView: root.frame(width: width, height: height, alignment: .top))
+        let size = NSSize(width: width, height: height ?? hosting.fittingSize.height)
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        return window
+    }
+
     /// Clean Up's left column foot (the progress card) at the column's
     /// width, in a window of its own.
     private static func cleanUpCardWindow(_ model: AppModel) -> NSWindow {
@@ -528,4 +663,57 @@ enum Snapshot {
             logger.error("snapshot failed: \(error.localizedDescription, privacy: .public)")
         }
     }
+}
+
+/// Sample answers for Connect a Cloud Agent… and the cloud agents' list in
+/// snapshots: no server is contacted, nothing is minted.
+final class SnapshotRulesAgentCalls: RulesAgentCalls, @unchecked Sendable {
+    let oauth: Bool
+
+    init(oauth: Bool) { self.oauth = oauth }
+
+    private static func millis(_ secondsFromNow: TimeInterval) -> Int64 {
+        Int64(Date().addingTimeInterval(secondsFromNow).timeIntervalSince1970 * 1000)
+    }
+
+    func rulesConnectInfo(_ accountID: String) async throws(CoreClientError) -> RulesConnectInfo {
+        RulesConnectInfo(baseUrl: "https://rules.example.com", mcpUrl: "https://rules.example.com/mcp", oauth: oauth)
+    }
+
+    func rulesConnectCodeMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesConnectCode {
+        RulesConnectCode(code: "K7QXA-MNPR8", name: name, expiresAt: Self.millis(9 * 60 + 42))
+    }
+
+    func rulesAgentTokenMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesAgentToken {
+        RulesAgentToken(id: "3f9c2a71d04be5c6", name: name,
+                        token: "oagc_agt_3f9c2a71d04be5c6_Xq8vT2mLr5NwKc4HbZ9pYdE1sGfJ7uAa")
+    }
+
+    func rulesAgents(_ accountID: String) async throws(CoreClientError) -> [RulesAgent] {
+        [
+            RulesAgent(id: "a1", name: "Weekly outreach routine", kind: .connector, clientName: "Claude",
+                       createdAt: Self.millis(-2 * 86_400), revokedAt: nil, lastUsedAt: Self.millis(-3_600)),
+            RulesAgent(id: "a2", name: "Nightly digest script", kind: .token, clientName: nil,
+                       createdAt: Self.millis(-5 * 86_400), revokedAt: nil, lastUsedAt: nil),
+        ]
+    }
+
+    func rulesAgentRevoke(_ accountID: String, agentID: String) async throws(CoreClientError) {}
+
+    func rulesReports(_ accountID: String, limit: UInt32) async throws(CoreClientError) -> [CloudReportInfo] {
+        [
+            CloudReportInfo(id: 3, agentName: "Weekly outreach routine", agentKind: .connector, to: ["ann@acme.com"],
+                            subject: "Following up on Thursday", sentAt: Self.millis(-2 * 3_600),
+                            guideCheck: ["Uses “circle back”, which your rules ban"], checkedVersion: 12,
+                            matched: .messageId, messageId: "out-3", recorded: true),
+            CloudReportInfo(id: 2, agentName: "Nightly digest script", agentKind: .token, to: ["team@acme.com"],
+                            subject: "Digest for Tuesday", sentAt: Self.millis(-20 * 3_600), guideCheck: [],
+                            checkedVersion: 12, matched: .recipientAndSubject, messageId: "out-2", recorded: true),
+            CloudReportInfo(id: 1, agentName: "Weekly outreach routine", agentKind: .connector,
+                            to: ["bea@globex.com"], subject: "A quick introduction", sentAt: Self.millis(-30 * 3_600),
+                            guideCheck: [], checkedVersion: 11, matched: .notSeen, messageId: nil, recorded: true),
+        ]
+    }
+
+    func rulesReportCount(_ accountID: String, since: Int64) async throws(CoreClientError) -> UInt32 { 3 }
 }

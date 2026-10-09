@@ -128,8 +128,8 @@ struct AnalysisPairCard: View {
             if let ai = pair.aiText, let sent = pair.sentText {
                 let marked = WordDiff.attributed(ai: ai, sent: sent)
                 HStack(alignment: .top, spacing: Space.l) {
-                    side("AI drafted", marked.ai)
-                    side("You sent", marked.sent)
+                    side(Self.aiTitle(pair.agent), marked.ai)
+                    side(Self.sentTitle(pair.agent), marked.sent)
                 }
             } else {
                 Text("The texts are no longer kept (Settings › Learning › Keep AI drafts for).")
@@ -151,9 +151,27 @@ struct AnalysisPairCard: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// A cloud agent's report (spec §10.6) is named by its agent:
+    /// "Weekly outreach routine reported".
+    static func aiTitle(_ agent: String?) -> String {
+        guard let name = cloudAgent(agent) else { return "AI drafted" }
+        return "\(name) reported"
+    }
+
+    static func sentTitle(_ agent: String?) -> String {
+        cloudAgent(agent) == nil ? "You sent" : "In the mailbox's sent mail"
+    }
+
+    /// The cloud agent's name in a record's `cloud:<name>`.
+    static func cloudAgent(_ agent: String?) -> String? {
+        guard let agent, agent.hasPrefix("cloud:") else { return nil }
+        let name = agent.dropFirst("cloud:".count)
+        return name.isEmpty ? "A cloud agent" : String(name)
+    }
+
     private func side(_ title: String, _ text: AttributedString) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            Text(title).font(TypeRole.caption).foregroundStyle(.secondary)
+            Text(verbatim: title).font(TypeRole.caption).foregroundStyle(.secondary)
             Text(text).font(TypeRole.meta).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

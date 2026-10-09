@@ -438,7 +438,22 @@ impl Core {
         });
         let account =
             self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
-        let service = SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), settled);
+        // An agent mailbox that publishes pulls its cloud agents' reports
+        // after each sync, so they meet the sent mail they describe.
+        let after_sync: Option<crate::sync::AfterSync> = self.is_agent(&account).then(|| {
+            let weak = Arc::downgrade(self);
+            let id = account.clone();
+            Arc::new(move || {
+                if let Some(core) = weak.upgrade() {
+                    let id = id.clone();
+                    runtime::runtime().spawn(crate::registry::scoped(Some(id.clone()), async move {
+                        core.rules_after_sync(&id).await;
+                    }));
+                }
+            }) as crate::sync::AfterSync
+        });
+        let service =
+            SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), after_sync, settled);
         let old = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).insert(account, service);
         if let Some(old) = old {
             old.stop();

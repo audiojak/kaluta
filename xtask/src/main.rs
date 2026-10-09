@@ -50,6 +50,12 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ("agent-claude", &["mail-domain", "agent-api"][..]),
         ("agent-codex", &["mail-domain", "agent-api"][..]),
         ("agent-mcp", &["mail-domain", "agent-api", "permissions"][..]),
+        // The guide's check and renderers, shared by the core and the rules
+        // server (spec §10.6): pure, no internal crates.
+        ("writing-guide", &[][..]),
+        // Encryption at rest on the rules server, shared by the core and the
+        // server (spec §10.6): pure, no internal crates.
+        ("rules-crypto", &[][..]),
         (
             "openagc-core",
             &[
@@ -66,11 +72,16 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
                 "agent-codex",
                 "agent-mcp",
                 "permissions",
+                "writing-guide",
+                "rules-crypto",
             ][..],
         ),
         // Mailbox mode runs the core headless when the app is closed
         // (spec §10.1), reusing its tools rather than copying them.
         ("openagc-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "openagc-core"][..]),
+        // The rules server for cloud agents (spec §10.6): the guide's
+        // renderers and nothing of the app's (never the core or a store).
+        ("rules-server", &["writing-guide", "rules-crypto"][..]),
         ("uniffi-bindgen-swift", &[][..]),
         ("xtask", &["mail-domain", "mail-store", "agent-mcp", "agent-api", "permissions"][..]),
     ])
@@ -79,6 +90,18 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
 /// Crates allowed to depend on UniFFI directly (spec §3: only the core
 /// knows about UniFFI; the bindgen binary is tooling).
 const UNIFFI_ALLOWED: &[&str] = &["openagc-core", "uniffi-bindgen-swift"];
+
+/// Crates held to a fixed list of external dependencies, so they stay pure:
+/// the writing guide's check and renderers run in the rules server, which
+/// has no store, runtime or UniFFI of the app's (spec §10.6).
+const EXTERNAL_ALLOWED: &[(&str, &[&str])] = &[
+    ("writing-guide", &["serde", "serde_json", "sha2", "thiserror"]),
+    // Computation and the OS's random numbers only.
+    (
+        "rules-crypto",
+        &["base64", "chacha20poly1305", "getrandom", "hkdf", "serde", "sha2", "thiserror", "x25519-dalek", "zeroize"],
+    ),
+];
 
 fn check_deps() -> Result<()> {
     let out = Command::new(env!("CARGO"))
@@ -107,6 +130,13 @@ fn check_deps() -> Result<()> {
             let is_dev = dep["kind"].as_str() == Some("dev");
             if members.contains(dep_name) && !is_dev && !permitted.contains(&dep_name) {
                 errors.push(format!("{name} must not depend on {dep_name}"));
+            }
+            if !members.contains(dep_name)
+                && !is_dev
+                && let Some((_, external)) = EXTERNAL_ALLOWED.iter().find(|(c, _)| *c == name)
+                && !external.contains(&dep_name)
+            {
+                errors.push(format!("{name} must stay pure: {dep_name} is not among its allowed dependencies"));
             }
             if dep_name == "uniffi" && !UNIFFI_ALLOWED.contains(&name) {
                 errors.push(format!("{name} must not depend on uniffi; only openagc-core exports to Swift"));
