@@ -48,7 +48,9 @@ preferences under the old names.
   (`openagc-rules/v1/…`). They are bound into every sealed snapshot,
   report and wrapped key; changing them would make all of them
   unreadable. A known-answer test pins them.
-- **Kept on purpose:** the beads prefix `oagc-`, accepted ADRs and the
+- **Kept on purpose:** the rules server's token prefixes (`oagc_pub_`,
+  `oagc_agt_`, `oagc_oat_`, `oagc_ort_`, `oagc_cli_`, `oagc_consent_`),
+  which tokens already issued carry; the beads prefix `oagc-`; accepted ADRs and the
   dated plans (they record what happened under the old name), and the
   original product spec at the repository root.
 - `cargo xtask check-brand` fails on the old name anywhere else.
