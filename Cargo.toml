@@ -26,6 +26,7 @@ agent-codex = { path = "crates/agent-codex" }
 agent-mcp = { path = "crates/agent-mcp" }
 permissions = { path = "crates/permissions" }
 openagc-core = { path = "crates/openagc-core" }
+writing-guide = { path = "crates/writing-guide" }
 
 # External crates.
 uniffi = "0.32"

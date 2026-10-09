@@ -50,6 +50,9 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ("agent-claude", &["mail-domain", "agent-api"][..]),
         ("agent-codex", &["mail-domain", "agent-api"][..]),
         ("agent-mcp", &["mail-domain", "agent-api", "permissions"][..]),
+        // The guide's check and renderers, shared by the core and the rules
+        // server (spec §10.6): pure, no internal crates.
+        ("writing-guide", &[][..]),
         (
             "openagc-core",
             &[
@@ -66,6 +69,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
                 "agent-codex",
                 "agent-mcp",
                 "permissions",
+                "writing-guide",
             ][..],
         ),
         // Mailbox mode runs the core headless when the app is closed
@@ -79,6 +83,11 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
 /// Crates allowed to depend on UniFFI directly (spec §3: only the core
 /// knows about UniFFI; the bindgen binary is tooling).
 const UNIFFI_ALLOWED: &[&str] = &["openagc-core", "uniffi-bindgen-swift"];
+
+/// Crates held to a fixed list of external dependencies, so they stay pure:
+/// the writing guide's check and renderers run in the rules server, which
+/// has no store, runtime or UniFFI of the app's (spec §10.6).
+const EXTERNAL_ALLOWED: &[(&str, &[&str])] = &[("writing-guide", &["serde", "serde_json", "sha2", "thiserror"])];
 
 fn check_deps() -> Result<()> {
     let out = Command::new(env!("CARGO"))
@@ -107,6 +116,13 @@ fn check_deps() -> Result<()> {
             let is_dev = dep["kind"].as_str() == Some("dev");
             if members.contains(dep_name) && !is_dev && !permitted.contains(&dep_name) {
                 errors.push(format!("{name} must not depend on {dep_name}"));
+            }
+            if !members.contains(dep_name)
+                && !is_dev
+                && let Some((_, external)) = EXTERNAL_ALLOWED.iter().find(|(c, _)| *c == name)
+                && !external.contains(&dep_name)
+            {
+                errors.push(format!("{name} must stay pure: {dep_name} is not among its allowed dependencies"));
             }
             if dep_name == "uniffi" && !UNIFFI_ALLOWED.contains(&name) {
                 errors.push(format!("{name} must not depend on uniffi; only openagc-core exports to Swift"));

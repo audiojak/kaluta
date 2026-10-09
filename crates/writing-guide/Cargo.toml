@@ -1,0 +1,17 @@
+[package]
+name = "writing-guide"
+description = "The writing guide's deterministic check, its guide and facts renderers, and the published snapshot format, shared by the core and the rules server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -49,9 +49,7 @@ pub struct Audience {
 }
 
 /// Every `<` in mail becomes `‹`, so no text closes or fakes a block.
-pub(crate) fn fenced(s: &str) -> String {
-    s.replace('<', "‹")
-}
+pub(crate) use writing_guide::fenced;
 
 /// Lower case, spaces collapsed: how quotes are compared with the mail.
 pub(crate) fn loose(s: &str) -> String {

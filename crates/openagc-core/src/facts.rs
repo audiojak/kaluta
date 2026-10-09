@@ -406,12 +406,19 @@ pub(crate) fn categories_from(rows: &[CategoryRow]) -> Vec<FactCategoryInfo> {
 
 /// A fact as drafting reads it, or `None` for one never shared.
 pub(crate) fn prompt_line(f: &FactInfo, category: &str) -> Option<String> {
-    let fact = format!("{category} › {}: {}", f.label, f.value);
-    match f.use_ {
-        FactUse::Free => Some(format!("- {}", crate::guide_ai::fenced(&fact))),
-        FactUse::Ask => Some(format!("- {} (ask the user before using this)", crate::guide_ai::fenced(&fact))),
-        FactUse::Never => None,
-    }
+    shared(f, category).map(|f| writing_guide::fact_line(&f))
+}
+
+/// A fact as the guide's renderer takes it (`category`: its category's
+/// name), or `None` for one never shared.
+pub(crate) fn shared(f: &FactInfo, category: &str) -> Option<writing_guide::Fact> {
+    (f.use_ != FactUse::Never).then(|| writing_guide::Fact {
+        category_key: f.category.clone(),
+        category: category.to_owned(),
+        label: f.label.clone(),
+        value: f.value.clone(),
+        ask_before_using: f.use_ == FactUse::Ask,
+    })
 }
 
 impl Core {
@@ -966,35 +973,16 @@ pub(crate) fn lookup_json(
     category: Option<&str>,
     query: Option<&str>,
 ) -> serde_json::Value {
-    let want = category.map(str::to_lowercase);
-    let q = query.map(str::to_lowercase).filter(|q| !q.trim().is_empty());
-    let rows: Vec<serde_json::Value> = facts
+    let usable: Vec<writing_guide::Fact> = facts
         .iter()
-        .filter(|f| f.status == FactStatus::Accepted && f.use_ != FactUse::Never && !f.overridden)
+        .filter(|f| f.status == FactStatus::Accepted && !f.overridden)
         .filter(|f| !categories.iter().any(|c| c.key == f.category && c.hidden))
         .filter_map(|f| {
-            let c = categories.iter().find(|c| c.key == f.category);
-            let name = c.map_or("Other".to_owned(), |c| c.name.clone());
-            if let Some(w) = &want
-                && *w != f.category.to_lowercase()
-                && *w != name.to_lowercase()
-            {
-                return None;
-            }
-            if let Some(q) = &q
-                && !format!("{name} {} {}", f.label, f.value).to_lowercase().contains(q.as_str())
-            {
-                return None;
-            }
-            Some(serde_json::json!({
-                "category": name,
-                "label": f.label,
-                "value": f.value,
-                "ask_before_using": f.use_ == FactUse::Ask,
-            }))
+            let name = categories.iter().find(|c| c.key == f.category).map_or("Other".to_owned(), |c| c.name.clone());
+            shared(f, &name)
         })
         .collect();
-    serde_json::json!({ "facts": rows })
+    writing_guide::facts_lookup(&usable, category, query)
 }
 
 #[uniffi::export]

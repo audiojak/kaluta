@@ -40,6 +40,7 @@ in [SPECIFICATION.md](SPECIFICATION.md); this page is the map.
 | `agent-codex` | Codex app-server adapter | domain, agent-api |
 | `permissions` | Risk classes, policy, `decide`, per-session hard limits | domain |
 | `agent-mcp` | Tool catalog, the shim ↔ core socket protocol and server | domain, agent-api, permissions |
+| `writing-guide` | The guide's deterministic check, the guide and facts renderers, the rules server's snapshot format and audience-address hash; pure, shared with the rules server (§10.6) | — (serde, serde_json, sha2, thiserror only) |
 | `openagc-mcp` | The stdio MCP shim binary agents spawn | agent-mcp |
 | `openagc-core` | The UniFFI surface; ties everything together | all of the above |
 

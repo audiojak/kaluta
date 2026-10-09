@@ -1600,6 +1600,7 @@ dependencies = [
  "tracing-subscriber",
  "uniffi",
  "wiremock",
+ "writing-guide",
 ]
 
 [[package]]
@@ -3448,6 +3449,16 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
+
+[[package]]
+name = "writing-guide"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "xtask"

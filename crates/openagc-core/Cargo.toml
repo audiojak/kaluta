@@ -25,6 +25,7 @@ agent-claude.workspace = true
 agent-codex.workspace = true
 agent-mcp.workspace = true
 permissions.workspace = true
+writing-guide.workspace = true
 uniffi.workspace = true
 tokio.workspace = true
 thiserror.workspace = true

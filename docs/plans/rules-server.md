@@ -274,7 +274,9 @@ the headers beta use them.
 
 1. ADR 0016 and the spec amendments above. No code. *(Done 2026-10-08.)*
 2. Extract the guide check and the guide and facts renderers into a pure
-   crate; the core uses it. No change in behaviour.
+   crate; the core uses it. No change in behaviour. *(Done 2026-10-08:
+   crate `writing-guide`, which also holds the snapshot's JSON format,
+   `schema_version` 1, and the audience-address hash.)*
 3. `rules-server`: SQLite, publish API with a publisher token, versioned
    snapshots, `guide_rules` and `facts_lookup` over MCP with bearer
    tokens. Tests with an in-process client. Dockerfile.

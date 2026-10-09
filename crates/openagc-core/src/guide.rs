@@ -374,13 +374,7 @@ pub const GAP_GROUPS: &[(&str, &str)] = &[
 pub const MIN_GROUPS: usize = 5;
 
 /// Whether `address` belongs to a group with these members.
-pub(crate) fn is_member(address: &str, members: &[String]) -> bool {
-    let a = address.trim().to_lowercase();
-    members.iter().any(|m| {
-        let m = m.trim().to_lowercase();
-        m.strip_prefix('@').map_or(a == m, |d| a.ends_with(&format!("@{d}")))
-    })
-}
+pub(crate) use writing_guide::is_member;
 
 /// Fill the groups to `MIN_GROUPS` (not counting rejected ones) from the
 /// obvious gaps, each *suggested*. Returns how many were added.
@@ -805,22 +799,7 @@ pub(crate) fn markdown(entries: &[GuideEntry], groups: &[AudienceGroup], with_ev
 }
 
 pub(crate) fn scope_text(s: &GuideScope) -> String {
-    let mut parts = Vec::new();
-    if !s.groups.is_empty() {
-        parts.push(format!("for {}", s.groups.join(", ")));
-    }
-    if !s.people.is_empty() {
-        parts.push(format!("to {}", s.people.join(", ")));
-    }
-    if !s.message_types.is_empty() {
-        parts.push(format!("in {}", s.message_types.join(", ")));
-    }
-    if !s.languages.is_empty() {
-        // The draft's language is not known ahead: the agent applies these
-        // when it writes in one of them.
-        parts.push(format!("when writing in {}", s.languages.join(" or ")));
-    }
-    parts.join("; ")
+    writing_guide::scope_text(&s.into())
 }
 
 /// The guide as JSON for import and merging: entries without evidence
