@@ -27,7 +27,7 @@ impl Write for Captured {
 async fn logs_name_token_ids_and_nothing_secret() {
     let captured = Captured::default();
     let writer = captured.clone();
-    // As `openagc-rules` sets it, with the server's own lines at debug.
+    // As `kaluta-rules` sets it, with the server's own lines at debug.
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new("warn,rules_server=debug"))
         .with_writer(move || writer.clone())

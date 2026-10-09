@@ -1,0 +1,359 @@
+import AppKit
+import SwiftUI
+
+/// The thread list, backed by `NSTableView` (spec §13 rule 2): fixed row
+/// height, view reuse, and incremental inserts when a page is appended.
+/// SwiftUI `List` re-diffs and re-lays-out on every change and cannot hold
+/// 120 fps over tens of thousands of rows.
+struct ThreadListView: NSViewRepresentable {
+    @Environment(AppModel.self) private var model
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(model: model)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let table = ThreadTableView()
+        table.model = model
+        table.headerView = nil
+        table.style = .inset
+        table.rowHeight = ThreadRowView.height
+        table.usesAutomaticRowHeights = false
+        table.intercellSpacing = NSSize(width: 0, height: 0)
+        table.allowsMultipleSelection = true
+        table.allowsEmptySelection = true
+        table.backgroundColor = .clear
+        let column = NSTableColumn(identifier: ThreadRowView.identifier)
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
+        table.dataSource = context.coordinator
+        table.delegate = context.coordinator
+        table.target = context.coordinator
+        table.doubleAction = #selector(Coordinator.openClicked(_:))
+        table.setAccessibilityLabel("Threads")
+        model.focus.register(table, as: .list)
+
+        let scroll = NSScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        context.coordinator.table = table
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let store = model.threads
+        context.coordinator.update(rows: store.rows, generation: store.generation,
+                                   selected: model.selectedThreadIDs.union(model.selectedThreadID.map { [$0] } ?? []))
+        // Tab from the sidebar: the keyboard comes here, on the first
+        // message when none is selected (as clicking it would; it is shown
+        // and, after a moment, marked read), else on the one selected.
+        if context.coordinator.focusRequests != model.threadListFocusRequests {
+            context.coordinator.focusRequests = model.threadListFocusRequests
+            if let table = context.coordinator.table {
+                DispatchQueue.main.async {
+                    table.window?.makeFirstResponder(table)
+                    if table.selectedRow < 0, table.numberOfRows > 0 {
+                        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+                        table.scrollRowToVisible(0)
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        private let model: AppModel
+        private var rows: [ThreadRow] = []
+        private var generation = -1
+        private var applyingSelection = false
+        weak var table: NSTableView?
+        var focusRequests: Int
+
+        init(model: AppModel) {
+            self.model = model
+            focusRequests = model.threadListFocusRequests
+        }
+
+        func update(rows newRows: [ThreadRow], generation newGeneration: Int, selected: Set<String>) {
+            guard let table else { return }
+            if newGeneration != generation {
+                generation = newGeneration
+                rows = newRows
+                table.reloadData()
+            } else if newRows.count > rows.count, newRows.starts(with: rows, by: { $0.id == $1.id }) {
+                let added = IndexSet(integersIn: rows.count..<newRows.count)
+                rows = newRows
+                table.insertRows(at: added, withAnimation: [])
+            } else if newRows != rows {
+                rows = newRows
+                table.reloadData()
+            }
+            select(selected)
+        }
+
+        /// Make the table's selection match the model's, by thread id.
+        private func select(_ ids: Set<String>) {
+            guard let table else { return }
+            let target = IndexSet(rows.indices.filter { ids.contains(rows[$0].id) })
+            guard target != table.selectedRowIndexes else { return }
+            applyingSelection = true
+            table.selectRowIndexes(target, byExtendingSelection: false)
+            if let first = target.first, target.count == 1 { table.scrollRowToVisible(first) }
+            applyingSelection = false
+        }
+
+        /// A double-click opens the thread in its own window, or a draft in
+        /// a composer.
+        @objc func openClicked(_ sender: NSTableView) {
+            let row = sender.clickedRow
+            guard rows.indices.contains(row) else { return }
+            model.openThreads([rows[row].id])
+        }
+
+        func numberOfRows(in tableView: NSTableView) -> Int {
+            rows.count
+        }
+
+        /// Rows drag out as thread ids, so a sidebar label can take them.
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+            guard rows.indices.contains(row) else { return nil }
+            return ThreadDrag.payload(for: rows[row].id) as NSString
+        }
+
+        func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+            let view = tableView.makeView(withIdentifier: ThreadRowView.identifier, owner: nil) as? ThreadRowView
+                ?? ThreadRowView()
+            view.configure(with: rows[row], chips: ThreadRowView.chips(for: rows[row], labels: model.chipLabels,
+                                                                     excluding: model.threads.mailboxID),
+                           me: model.ownAddresses,
+                           markImportant: !(model.threads.mailboxID ?? "").split(separator: "+").contains("IMPORTANT"))
+            view.setAccessibilityCustomActions(accessibilityActions(for: rows[row]))
+            model.threads.rowWillAppear(at: row)
+            return view
+        }
+
+        /// VoiceOver's Actions rotor: what swipes and keys do (spec §14.3).
+        func accessibilityActions(for row: ThreadRow) -> [NSAccessibilityCustomAction] {
+            let id = row.id
+            let act = { [weak self] (name: String, perform: @escaping @MainActor (AppModel) -> Void) in
+                NSAccessibilityCustomAction(name: name) {
+                    guard let model = self?.model else { return false }
+                    model.selectedThreadIDs = []
+                    model.selectedThreadID = id
+                    perform(model)
+                    return true
+                }
+            }
+            return [
+                act("Archive") { $0.archiveSelection() },
+                act("Move to Trash") { $0.trashSelection() },
+                act(row.unreadCount > 0 ? "Mark as Read" : "Mark as Unread") { $0.toggleReadSelection() },
+                act(row.isStarred ? "Unstar" : "Star") { $0.toggleStarSelection() },
+            ] + (model.canJunk ? [act(model.isSpamMailbox ? "Not Junk" : "Mark as Junk") { $0.toggleJunkSelection() }] : [])
+              + (model.isArchive ? [] : [act("Reply") { $0.reply(all: false) }])
+        }
+
+        func tableViewSelectionDidChange(_ notification: Notification) {
+            guard !applyingSelection, let table else { return }
+            let selected = table.selectedRowIndexes.filter { $0 < rows.count }
+            // One thread shows in the reader; multi-select is for bulk actions.
+            model.selectedThreadIDs = selected.count > 1 ? Set(selected.map { rows[$0].id }) : []
+            model.selectedThreadID = selected.count == 1 ? rows[selected.first!].id : nil
+        }
+
+        /// Swipe left to archive, right to toggle read (spec §14.3).
+        func tableView(_ tableView: NSTableView, rowActionsForRow row: Int,
+                       edge: NSTableView.RowActionEdge) -> [NSTableViewRowAction] {
+            guard row < rows.count else { return [] }
+            let id = rows[row].id
+            let model = self.model
+            switch edge {
+            case .trailing:
+                let archive = NSTableViewRowAction(style: .destructive, title: "Archive") { _, _ in
+                    model.selectedThreadIDs = []
+                    model.selectedThreadID = id
+                    model.archiveSelection()
+                }
+                archive.backgroundColor = .systemPurple
+                return [archive]
+            case .leading:
+                let unread = rows[row].unreadCount > 0
+                let toggle = NSTableViewRowAction(style: .regular, title: unread ? "Read" : "Unread") { _, _ in
+                    model.selectedThreadIDs = []
+                    model.selectedThreadID = id
+                    model.toggleReadSelection()
+                    tableView.rowActionsVisible = false
+                }
+                toggle.backgroundColor = .systemBlue
+                return [toggle]
+            @unknown default:
+                return []
+            }
+        }
+    }
+}
+
+/// The thread table, with Mail-style single-key shortcuts and a context
+/// menu (spec §14.3). Keys act on the selection.
+/// Thread ids on the drag pasteboard, as prefixed strings so a stray text
+/// drag can never be mistaken for a thread.
+enum ThreadDrag {
+    static let prefix = "kaluta-thread:"
+
+    static func payload(for threadID: String) -> String { prefix + threadID }
+
+    static func threadIDs(in strings: [String]) -> [String] {
+        strings.compactMap { $0.hasPrefix(prefix) ? String($0.dropFirst(prefix.count)) : nil }
+    }
+}
+
+final class ThreadTableView: NSTableView {
+    weak var model: AppModel?
+
+    /// Gmail-style j/k: move the selection like the arrow keys.
+    private func moveSelection(by delta: Int) {
+        guard numberOfRows > 0 else { return }
+        let current = selectedRow < 0 ? (delta > 0 ? -1 : numberOfRows) : selectedRow
+        let next = min(max(current + delta, 0), numberOfRows - 1)
+        selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
+        scrollRowToVisible(next)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard let model, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+        switch event.charactersIgnoringModifiers {
+        case "e": model.archiveSelection()
+        case "u": model.toggleReadSelection()
+        case "s": model.toggleStarSelection()
+        case "l": showLabelMenu()
+        case "#": model.trashSelection()
+        case "!": model.toggleJunkSelection()
+        case "r": model.reply(all: false)
+        case "a": model.reply(all: true)
+        case "f": model.forward()
+        case "c": model.compose(.new(to: nil))
+        case "t": Task { await model.openTaskDialog() }
+        case "T": Task { await model.openBulkTasks() }
+        case "j": moveSelection(by: 1)
+        case "k": moveSelection(by: -1)
+        case "/": model.focusSearch()
+        default:
+            if event.keyCode == 36 || event.keyCode == 76 { // return, enter: open, as in Apple Mail
+                model.openThreads()
+            } else if event.keyCode == 51 || event.keyCode == 117 { // delete, forward delete
+                model.trashSelection()
+            } else {
+                super.keyDown(with: event)
+            }
+        }
+    }
+
+    /// Right-click acts on the clicked row, or the whole selection if the
+    /// clicked row is part of it.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let row = self.row(at: convert(event.locationInWindow, from: nil))
+        guard row >= 0, let model else { return nil }
+        if !selectedRowIndexes.contains(row) {
+            selectRowIndexes([row], byExtendingSelection: false)
+        }
+        let menu = NSMenu()
+        menu.addItem(ActionItem("Archive", key: "e") { model.archiveSelection() })
+        menu.addItem(ActionItem("Move to Inbox") { model.moveSelectionToInbox() })
+        menu.addItem(.separator())
+        menu.addItem(ActionItem("Mark as Read / Unread", key: "u") { model.toggleReadSelection() })
+        menu.addItem(ActionItem("Star / Unstar", key: "s") { model.toggleStarSelection() })
+        let labels = NSMenuItem(title: "Label", action: nil, keyEquivalent: "")
+        labels.submenu = labelMenu()
+        menu.addItem(labels)
+        menu.addItem(.separator())
+        menu.addItem(ActionItem("New Task from Email…", key: "t") { Task { await model.openTaskDialog() } })
+        menu.addItem(ActionItem("Create Tasks…", key: "T") { Task { await model.openBulkTasks() } })
+        menu.addItem(.separator())
+        if model.canJunk {
+            menu.addItem(ActionItem(model.isSpamMailbox ? "Not Junk" : "Mark as Junk", key: "!") { model.toggleJunkSelection() })
+        }
+        menu.addItem(ActionItem("Move to Trash", key: "\u{8}") { model.trashSelection() })
+        return menu
+    }
+
+    /// The label tree as nested menus: a parent label opens a submenu whose
+    /// first item is the parent itself (spec §14.3).
+    private func labelMenu() -> NSMenu {
+        let menu = NSMenu()
+        guard let model else { return menu }
+        let targets = Set(model.actionTargets)
+        let picker = LabelPickerModel(labels: model.mailboxes.labels,
+                                      targets: model.threads.rows.filter { targets.contains($0.id) }, filter: "")
+        let states = Dictionary(uniqueKeysWithValues: picker.rows.map { ($0.node.path, $0.state) })
+        func add(_ nodes: [LabelNode], to menu: NSMenu) {
+            for node in nodes {
+                let state = states[node.path] ?? .off
+                let own: NSMenuItem? = node.mailbox?.labelId.map { id in
+                    let item = ActionItem(node.children.isEmpty ? node.name : "\(node.name) (this label)") {
+                        model.setLabel(id, applied: state != .on)
+                    }
+                    item.state = state
+                    item.toolTip = node.path
+                    return item
+                }
+                if node.children.isEmpty {
+                    if let own { menu.addItem(own) }
+                    continue
+                }
+                let parent = NSMenuItem(title: node.name, action: nil, keyEquivalent: "")
+                let sub = NSMenu()
+                if let own {
+                    sub.addItem(own)
+                    sub.addItem(.separator())
+                }
+                add(node.children, to: sub)
+                parent.submenu = sub
+                menu.addItem(parent)
+            }
+        }
+        add(LabelTree.build(model.mailboxes.labels), to: menu)
+        if menu.items.isEmpty {
+            let empty = NSMenuItem(title: "No Labels", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        }
+        menu.addItem(.separator())
+        menu.addItem(ActionItem("New Label…") { [weak self] in self?.showLabelPicker() })
+        return menu
+    }
+
+    private func showLabelMenu() {
+        showLabelPicker()
+    }
+
+    /// The `l` popover: the label tree with a filter and "Create …".
+    private func showLabelPicker() {
+        guard let model else { return }
+        let row = selectedRow >= 0 ? selectedRow : 0
+        let rect = numberOfRows > 0 ? rect(ofRow: row) : visibleRect
+        LabelPickerPopover.show(relativeTo: rect, of: self, model: model)
+    }
+}
+
+/// A menu item that runs a closure.
+final class ActionItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(_ title: String, key: String = "", handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+        if !key.isEmpty { keyEquivalent = key; keyEquivalentModifierMask = [] }
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("not used") }
+
+    @objc private func run() { handler() }
+}

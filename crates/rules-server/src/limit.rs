@@ -4,7 +4,7 @@
 //! one per client address, under a larger ceiling for the whole server.
 //!
 //! A client's address is the peer's, or, when the peer is a proxy the
-//! operator trusts (`OPENAGC_RULES_TRUSTED_PROXY`), the nearest address in
+//! operator trusts (`KALUTA_RULES_TRUSTED_PROXY`), the nearest address in
 //! `X-Forwarded-For` that is not one of those proxies. IPv6 addresses count
 //! by their /64, which one host usually holds whole.
 
@@ -116,7 +116,7 @@ fn canonical(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// The networks in `OPENAGC_RULES_TRUSTED_PROXY`: comma- or space-separated.
+/// The networks in `KALUTA_RULES_TRUSTED_PROXY`: comma- or space-separated.
 pub fn parse_trusted(list: &[String]) -> Result<Vec<Cidr>, String> {
     list.iter().flat_map(|s| s.split([',', ' '])).filter(|s| !s.trim().is_empty()).map(Cidr::parse).collect()
 }

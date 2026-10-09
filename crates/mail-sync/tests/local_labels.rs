@@ -105,7 +105,7 @@ async fn setup(name: &str) -> (Arc<FakeProvider>, Db, SyncEngine) {
 
 /// `sync` `None`: the fake itself, whose labels are the truth (Gmail).
 async fn setup_with(name: &str, sync: Option<LabelSync>) -> (Arc<FakeProvider>, Db, SyncEngine) {
-    let dir = std::env::temp_dir().join(format!("openagc-local-labels-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-local-labels-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("scout@agents.example.com", NOW, 50));

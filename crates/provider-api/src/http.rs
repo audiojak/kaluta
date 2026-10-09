@@ -60,7 +60,7 @@ const TIMEOUT: Duration = Duration::from_secs(60);
 
 fn build_client(timeout: Duration) -> ProviderResult<Client> {
     Client::builder()
-        .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("Kaluta/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(10).min(timeout))
         .timeout(timeout)
         .gzip(true)

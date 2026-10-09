@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn generates_a_consistent_deterministic_mailbox() {
-        let dir = std::env::temp_dir().join(format!("openagc-demo-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-demo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         let stats = generate(&db, &DemoSpec { threads: 300, ..Default::default() }).unwrap();
@@ -445,7 +445,7 @@ mod tests {
     #[test]
     fn the_demo_has_bulk_mail_for_clean_up() {
         use crate::cleanup::{Query, Scope, View, groups};
-        let dir = std::env::temp_dir().join(format!("openagc-demo-cleanup-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-demo-cleanup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         generate(&db, &DemoSpec { threads: 2_000, ..Default::default() }).unwrap();

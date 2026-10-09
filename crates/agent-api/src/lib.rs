@@ -3,8 +3,8 @@
 //! events they produce, and the manager that owns live sessions.
 //!
 //! Nothing outside `agent-claude` / `agent-codex` knows a CLI flag. The only
-//! tools an agent gets are OpenAGC's MCP tools (spec §10), reached through
-//! the `openagc-mcp` shim described by [`McpEndpoint`].
+//! tools an agent gets are Kaluta's MCP tools (spec §10), reached through
+//! the `kaluta-mcp` shim described by [`McpEndpoint`].
 
 pub mod fake;
 mod manager;
@@ -62,7 +62,7 @@ impl AgentStatus {
     }
 }
 
-/// How the agent reaches OpenAGC's tools: the shim binary, the core's
+/// How the agent reaches Kaluta's tools: the shim binary, the core's
 /// per-launch socket, and the session the calls are bound to (spec §10.1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpEndpoint {
@@ -73,7 +73,7 @@ pub struct McpEndpoint {
 /// Everything a provider needs to start a session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SessionConfig {
-    /// OpenAGC's id for the session; tool calls carry it.
+    /// Kaluta's id for the session; tool calls carry it.
     pub session_id: SessionId,
     pub mcp: McpEndpoint,
     /// The bundled system-prompt addendum (spec §9.6).
@@ -136,7 +136,7 @@ impl PromptContext {
         if let Some(q) = self.search_query.as_deref().filter(|q| !q.is_empty()) {
             lines.push(format!("Current search: {q}"));
         }
-        (!lines.is_empty()).then(|| format!("[OpenAGC context]\n{}\n[/OpenAGC context]", lines.join("\n")))
+        (!lines.is_empty()).then(|| format!("[Kaluta context]\n{}\n[/Kaluta context]", lines.join("\n")))
     }
 }
 
@@ -338,8 +338,8 @@ mod tests {
         };
         assert_eq!(
             turn.full_prompt(),
-            "[OpenAGC context]\nCurrent mailbox: INBOX\nShowing: Inbox · 3 conversations\n\
-             Selected thread ids: t1, t2\nCurrent search: from:alex\n[/OpenAGC context]\n\nWhat needs a reply?"
+            "[Kaluta context]\nCurrent mailbox: INBOX\nShowing: Inbox · 3 conversations\n\
+             Selected thread ids: t1, t2\nCurrent search: from:alex\n[/Kaluta context]\n\nWhat needs a reply?"
         );
         let bare = TurnInput { prompt: "hi".into(), context: PromptContext::default() };
         assert_eq!(bare.full_prompt(), "hi");

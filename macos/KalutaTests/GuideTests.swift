@@ -1,0 +1,534 @@
+import Foundation
+import Testing
+@testable import Kaluta
+
+@MainActor
+struct GuideStoreTests {
+    private func demo() async throws -> AppModel {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        return model
+    }
+
+    @Test func entriesAreAddedDecidedAndUndoneThroughTheCore() async throws {
+        let model = try await demo()
+        let core = try #require(model.core)
+        #expect(try await core.guideCategories().count == 57)
+        let revision = model.guideRevision
+        let added = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .guideline, statement: "Sign off with 'John'",
+                                          scope: GuideScope(groups: [], people: [], messageTypes: [], languages: []),
+                                          check: nil),
+                 status: .proposed, source: .learned, origin: nil),
+        ], reason: "test")
+        let id = try #require(added.entries.first?.id)
+        let decided = try await core.applyGuideEdits([.decide(id: id, status: .accepted)], reason: "decide")
+        #expect(decided.version >= 1)
+        #expect(try await core.guideEntries([.accepted]).map(\.id) == [id])
+        try await core.undoGuideChange(decided.changeId)
+        #expect(try await core.guideEntry(id)?.status == .proposed)
+        for _ in 0..<100 where model.guideRevision == revision { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.guideRevision > revision, "changes reach the window as events")
+
+        let json = try await core.exportGuide(json: true)
+        #expect(try core.readGuideExport(json).entries.isEmpty, "only accepted entries are exported")
+    }
+}
+
+@MainActor
+struct GuideRunTests {
+    @Test func aLearningRunReportsProgressAndItsProposalsWaitUntilItIsDone() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let info = try await core.guideSampleInfo(count: 30, filter: GuideSampleFilter(excludePeople: [], excludeLabels: []))
+        #expect(info.sent > 0 && info.chosen > 0 && info.batches == (info.chosen + 19) / 20)
+
+        let run = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 30,
+                                                               filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
+                                                               focus: nil, agent: model.agent.providerID))
+        #expect(run.status == .running)
+        let deadline = ContinuousClock.now + .seconds(20)
+        while model.guideProgress?.run?.status != .done, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let progress = try #require(model.guideProgress, "progress arrives as events")
+        #expect(progress.run?.status == .done && progress.run?.done == progress.run?.total)
+        let decisions = try await core.guideDecisions()
+        #expect(!decisions.isEmpty && Int(progress.decisionsTotal) == decisions.count)
+        #expect(decisions.allSatisfy { !$0.evidence.isEmpty }, "every proposal quotes the user's mail")
+        #expect(model.agent.entries.isEmpty, "learning stays out of the agent column")
+    }
+}
+
+@MainActor
+struct GuideDecisionTests {
+    private func learned() async throws -> AppModel {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        _ = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 30,
+                                                          filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
+                                                          focus: nil, agent: model.agent.providerID))
+        for _ in 0..<200 where (try await core.guideProgress()).run?.status != .done {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        model.selectedMailboxID = AppModel.guideMailboxID
+        await model.guide.load()
+        model.guideProgress = try await core.guideProgress()
+        return model
+    }
+
+    @Test func decidingIsSavedAsItGoesAndUndoable() async throws {
+        let model = try await learned()
+        #expect(model.isGuide && model.listMailboxID == nil)
+        let first = try #require(model.guide.decisions.first)
+        let waiting = model.guideDecisionsWaiting
+        #expect(waiting == model.guide.decisions.count && waiting > 0)
+
+        await model.decideGuide(first, accept: true)
+        #expect(!model.guide.decisions.contains { $0.id == first.id })
+        #expect(model.guide.entries.contains { $0.id == first.id }, "accepted entries are the guide")
+        #expect(model.guideDecisionsWaiting == waiting - 1, "the decisions bar moves")
+        #expect(model.guide.categories.first { $0.id == first.category }?.accepted == 1)
+        let account = try #require(model.openAccountID)
+        #expect(model.undo.undoTitle(in: account) == "Undo Accept Entry")
+
+        model.undo.undo(in: account)
+        for _ in 0..<100 where model.guide.decisions.first?.id != first.id {
+            try await Task.sleep(for: .milliseconds(20))
+            await model.guide.load()
+        }
+        #expect(model.guide.decisions.contains { $0.id == first.id }, "undo puts the decision back")
+
+        let second = try #require(model.guide.decisions.last)
+        await model.decideGuide(second, accept: false)
+        #expect(!model.guide.entries.contains { $0.id == second.id })
+        #expect(try await model.core!.guideEntry(second.id)?.status == .rejected)
+    }
+
+    @Test func aProposalCanReplaceTheEntryItContradicts() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let scope = GuideScope.always
+        let mine = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .guideline, statement: "Sign off with 'Best, John'",
+                                          scope: scope, check: nil), status: .accepted, source: .you, origin: nil),
+            .add(fields: GuideEntryFields(category: "B6", kind: .guideline, statement: "Sign off with 'Cheers'",
+                                          scope: scope, check: nil), status: .proposed, source: .learned, origin: nil),
+        ], reason: "test").entries
+        await model.replaceGuideEntry(mine[0], with: mine[1])
+        #expect(try await core.guideEntry(mine[1].id)?.status == .accepted)
+        #expect(try await core.guideEntry(mine[0].id)?.status == .rejected)
+        #expect(model.undo.undoTitle(in: model.openAccountID) == "Undo Replace Entry")
+    }
+
+    /// Run Now starts the daily review once the account has learned (spec
+    /// §14.10); its progress arrives as events.
+    @Test func runNowReviewsAndReportsProgress() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let run = try await core.startAnalysisRun()
+        #expect(!run.daily)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while model.analysisProgress?.run?.status != .done, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let progress = try #require(model.analysisProgress, "progress arrives as events")
+        #expect(progress.available && progress.run?.id == run.id && progress.run?.status == .done)
+    }
+
+    /// Once the account has learned, what writing help writes is kept for
+    /// the daily review (spec §14.10), and the user's edits do not change it.
+    @Test func writingHelpKeepsWhatItWroteOnceTheAccountHasLearned() async throws {
+        let model = try await learned()
+        let core = try #require(model.core)
+        let page = try await core.threads(in: "INBOX")
+        let row = try #require(page.rows.first)
+        let detail = try await core.thread(row.id)
+        let message = try #require(detail?.messages.last)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        let written = store.body.string
+        var records: [AiCompositionInfo] = []
+        for _ in 0..<100 where records.isEmpty {
+            try await Task.sleep(for: .milliseconds(20))
+            records = try await core.aiCompositions()
+        }
+        let record = try #require(records.first)
+        #expect(record.source == "writing_help" && record.kind == "reply")
+        #expect(record.instruction == "Write a reply")
+        #expect(record.draftId == store.draftID)
+        #expect(record.aiText == written)
+
+        store.body = NSAttributedString(string: written + "\nThanks, John")
+        await store.save()
+        let after = try await core.aiCompositions()
+        #expect(after.first?.aiText == written)
+    }
+}
+
+@MainActor
+struct AudienceTests {
+    @Test func audiencesAreFilledConfirmedAndFoundForRecipients() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let filled = try await core.fillAudienceGroups()
+        #expect(filled.count == 5 && filled.allSatisfy { $0.status == .suggested })
+        let customers = try #require(filled.first { $0.name == "Customers" })
+        _ = try await core.saveAudienceGroup(AudienceGroup(id: customers.id, name: customers.name, status: .confirmed,
+                                                           description: customers.description, members: ["@acme.com"]))
+        #expect(try await core.audienceFor(["ann@acme.com", "bob@x.com"]) == ["Customers"])
+        let colleagues = try #require(filled.first { $0.name == "Colleagues" })
+        #expect(try await core.mergeAudienceGroups(into: customers.id, from: colleagues.id) == nil, "no entry to re-scope")
+        #expect(!(try await core.audienceGroups()).contains { $0.id == colleagues.id })
+    }
+}
+
+struct GuideInterviewTests {
+    private func category(_ id: String, learned: Bool, asked: Bool, accepted: UInt32 = 0) -> GuideCategoryInfo {
+        GuideCategoryInfo(id: id, group: String(id.prefix(1)), groupName: "", name: "Name \(id)", looksFor: "how \(id)",
+                          learned: learned, asked: asked, accepted: accepted, proposed: 0, evidence: 0)
+    }
+
+    @Test func askedCategoriesAndEmptyLearnedOnesGetQuestions() {
+        let categories = [category("A1", learned: true, asked: false),
+                          category("A2", learned: true, asked: false, accepted: 2),
+                          category("F1", learned: false, asked: true)]
+        let qs = GuideInterview.questions(categories: categories, signature: "John\nCEO", answered: ["F5"])
+        #expect(qs.contains { $0.id == "F4" } && qs.contains { $0.id == "empty-A1" })
+        #expect(!qs.contains { $0.id == "empty-A2" }, "a covered category is not asked about")
+        #expect(!qs.contains { $0.id == "F5" }, "answered questions are not asked again")
+        #expect(qs.first { $0.id == "F3" }?.suggestion == "John\nCEO")
+    }
+
+    @Test func answersBecomeEntries() throws {
+        let qs = GuideInterview.questions(categories: [], signature: nil, answered: [])
+        let bans = try #require(qs.first { $0.id == "C8" })
+        let banned = GuideInterview.entries(for: bans, choice: nil, text: "circle back,\n per my last email ,", fields: [])
+        #expect(banned.map(\.statement) == ["Never write “circle back”", "Never write “per my last email”"])
+        #expect(banned.allSatisfy { $0.kind == .rule && $0.check?.kind == .bannedPhrase })
+        #expect(banned[1].check?.value == "per my last email")
+        let facts = try #require(qs.first { $0.id == "F3" })
+        #expect(GuideInterview.entries(for: facts, choice: nil, text: "", fields: ["CEO"]).isEmpty, "facts are not guide entries")
+        let made = GuideInterview.facts(for: facts, fields: ["CEO, Actual AI", "", "Pacific"])
+        let fields = made.compactMap { edit -> FactFields? in if case let .add(f, _, _) = edit { f } else { nil } }
+        #expect(fields.map { "\($0.category)/\($0.label): \($0.value)" }
+                == ["work/Occupation or role: CEO, Actual AI", "availability/Time zone: Pacific"])
+        let invent = try #require(qs.first { $0.id == "F4" })
+        #expect(GuideInterview.entries(for: invent, choice: 0, text: "", fields: []).first?.kind == .rule)
+        #expect(GuideInterview.entries(for: invent, choice: nil, text: "", fields: []).isEmpty)
+    }
+}
+
+@MainActor
+struct GuideFollowingTests {
+    @Test func writingHelpFollowsTheGuideForItsRecipients() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .rule, statement: "Sign off with 'John'",
+                                          scope: .always, check: nil), status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let message = try #require(detail.messages.last)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+        #expect(ComposerAssistant.messageType(store) == "reply")
+
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done && assistant.followsGuide)
+        // The fake agent echoes the prompt: the guide reached it.
+        #expect(store.body.string.contains("Sign off with 'John'"))
+        #expect(store.body.string.contains("The user's writing guide (version"))
+        for _ in 0..<100 where store.draftID == 0 { try await Task.sleep(for: .milliseconds(20)) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(try await core.draftGuideVersion(store.draftID) != nil, "the draft records the version")
+    }
+}
+
+@MainActor
+struct GuideCheckTests {
+    @Test func aDraftThatBreaksACheckIsRewrittenOnceThenFlagged() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        // The fake agent echoes its prompt, and the writing-help prompt says
+        // "Answer with only the text": a banned "answer" fails every draft.
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "C8", kind: .rule, statement: "Never write 'answer'", scope: .always,
+                                          check: GuideCheck(kind: .bannedPhrase, value: "answer")),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: try #require(detail.messages.last).id, all: false))
+        let before = store.body.string
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        #expect(store.body.string.hasPrefix("You said: Your draft breaks the user's writing guide"), "rewritten once")
+        #expect(assistant.checkFailures == ["Uses “answer”, which your rules ban"], "then flagged")
+        assistant.undo()
+        #expect(store.body.string == before, "the user's own text is never checked or lost")
+        #expect(try await core.checkGuideDraft("Thanks, see you then.", recipients: [], messageType: "reply",
+                                               audiences: nil).isEmpty)
+    }
+}
+
+@MainActor
+struct AudienceDraftTests {
+    @Test func switchingAudienceWritesANewDraftAndSwitchingBackIsImmediate() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.saveAudienceGroup(AudienceGroup(id: 0, name: "Investors", status: .confirmed,
+                                                           description: "", members: ["@fund.com"]))
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "D1", kind: .guideline, statement: "Lead with the numbers",
+                                          scope: GuideScope(groups: ["Investors"], people: [], messageTypes: [], languages: []),
+                                          check: nil), status: .accepted, source: .you, origin: nil),
+            .add(fields: GuideEntryFields(category: "A1", kind: .guideline, statement: "Be warm", scope: .always, check: nil),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let row = try #require(model.threads.rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: try #require(detail.messages.last).id, all: false))
+        store.body = NSAttributedString(string: "My own words", attributes: [.font: ComposerHTML.bodyFont])
+        let assistant = ComposerAssistant()
+        await assistant.loadAudiences(core)
+        #expect(assistant.audienceChoices == ["Investors"])
+        assistant.instruction = "Write a reply"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        let first = store.body.string
+        #expect(!first.contains("Lead with the numbers") && assistant.writtenFor.isEmpty)
+
+        await assistant.switchAudience(to: ["Investors"], store: store, model: model)
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(store.body.string.contains("Lead with the numbers"), "the investors' guideline reached the prompt")
+        #expect(store.body.string.contains("My own words"), "from the user's own text, not the first draft")
+        #expect(assistant.writtenFor == ["Investors"])
+
+        let investors = store.body.string + " Edited."
+        store.body = NSAttributedString(string: investors, attributes: [.font: ComposerHTML.bodyFont])
+        await assistant.switchAudience(to: nil, store: store, model: model)
+        #expect(assistant.state == .done && store.body.string == first, "switching back is immediate")
+        assistant.undo()
+        #expect(store.body.string == investors, "undo goes back one step, keeping the user's edits")
+        await assistant.switchAudience(to: ["Investors"], store: store, model: model)
+        #expect(store.body.string == investors, "edits stay with their audience's draft")
+    }
+}
+
+@MainActor
+struct ChangeGuideTests {
+    @Test func aRequestBecomesQuestionsAndOnlyTheYesesApply() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "C1", kind: .rule, statement: "Use US spelling", scope: .always, check: nil),
+                 status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let questions = try await core.proposeGuideChange("Use British spelling", agent: model.agent.providerID)
+        #expect(questions.count == 2)
+        #expect(ChangeGuideSheet.statement(questions[0].edits[0]) == "Use British spelling")
+        #expect(try await core.guideEntries([.accepted]).count == 1, "nothing changed yet")
+        // Yes to the first only.
+        _ = await model.applyGuideEdits(questions[0].edits, reason: "change by prompt", actionName: "Change Guide",
+                                        notice: "Changed")
+        let now = try await core.guideEntries([.accepted]).map(\.statement)
+        #expect(Set(now) == ["Use US spelling", "Use British spelling"])
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where try await core.guideEntries([.accepted]).count > 1 { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(try await core.guideEntries([.accepted]).map(\.statement) == ["Use US spelling"])
+    }
+}
+
+@MainActor
+struct MergeGuideTests {
+    @Test func aFileMergesWithDecisionsWhereTheGuidesDiffer() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        _ = try await core.applyGuideEdits([
+            .add(fields: GuideEntryFields(category: "B6", kind: .guideline, statement: "Sign off with 'Best'", scope: .always,
+                                          check: nil), status: .accepted, source: .you, origin: nil),
+        ], reason: "test")
+        let file = """
+        {"format": "kaluta-writing-guide", "version": 1, "entries": [
+          {"category": "B6", "kind": "guideline", "statement": "Sign off with 'Cheers'"},
+          {"category": "A1", "kind": "guideline", "statement": "Be warm"}]}
+        """
+        let plan = try await core.planGuideMerge(fromAccount: nil, json: file, agent: model.agent.providerID)
+        #expect(plan.additions.map(\.statement) == ["Be warm"])
+        let decision = try #require(plan.decisions.first)
+        #expect(decision.mine.map(\.statement) == ["Sign off with 'Best'"])
+        // Take theirs, as the sheet would.
+        var edits: [GuideEdit] = plan.additions.map { .add(fields: $0, status: .accepted, source: .merged, origin: plan.origin) }
+        edits += decision.mine.map { .delete(id: $0.id) }
+        edits += decision.incoming.map { .add(fields: $0, status: .accepted, source: .merged, origin: plan.origin) }
+        _ = await model.applyGuideEdits(edits, reason: "merge", actionName: "Merge Guide", notice: "Merged")
+        let now = try await core.guideEntries([.accepted])
+        #expect(Set(now.map(\.statement)) == ["Be warm", "Sign off with 'Cheers'"])
+        #expect(now.allSatisfy { $0.source == .merged && $0.origin == "an exported guide" })
+    }
+}
+
+@MainActor
+struct FurtherAnalysisTests {
+    @Test func afterAFirstRunTheChoicesAreNewerOlderAndRecheck() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let none = GuideSampleFilter(excludePeople: [], excludeLabels: [])
+        func request(_ kind: GuideRunKind, _ count: UInt32, focus: String? = nil) -> GuideRunRequest {
+            GuideRunRequest(kind: kind, count: count, filter: none, focus: focus, agent: model.agent.providerID)
+        }
+        _ = try await core.startGuideRun(request(.latest, 20))
+        for _ in 0..<200 where (try await core.guideProgress()).run?.status != .done { try await Task.sleep(for: .milliseconds(50)) }
+        #expect(try await core.guideRunPreview(request(.newer, 1000)) == 0)
+        #expect(try await core.guideRunPreview(request(.older, 5)) == 5)
+        #expect(try await core.guideRunPreview(request(.recheck, 10)) == 10)
+        await model.improveGuide("E2")
+        #expect(model.guideProgress?.run?.kind == .improve && model.guideProgress?.run?.focus == "E2")
+    }
+}
+
+struct GuideTimeLeftTests {
+    private func run(_ status: GuideRunStatus, left: UInt32?) -> GuideRunInfo {
+        GuideRunInfo(id: 1, kind: .latest, focus: nil, status: status, total: 100, done: 40, batches: 5, batchesDone: 2,
+                     agent: nil, error: nil, startedAt: 0, finishedAt: nil, secondsLeft: left)
+    }
+
+    @Test func theTimeLeftReadsNaturally() {
+        #expect(GuideProgressBars.timeLeft(run(.running, left: nil)) == "Estimating the time left after the first batch…")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 20)) == "Less than a minute left")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 70)) == "About a minute left")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 12 * 60)) == "About 12 minutes left")
+        #expect(GuideProgressBars.timeLeft(run(.paused, left: 12 * 60)) == "About 12 minutes left once resumed")
+        #expect(GuideProgressBars.timeLeft(run(.running, left: 150 * 60)) == "About 2.5 hours left")
+        #expect(GuideProgressBars.timeLeft(run(.done, left: nil)) == nil)
+    }
+}
+
+@MainActor
+struct GuidePromptTests {
+    private func model() throws -> AppModel {
+        AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                 defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+    }
+
+    @Test func anAccountThatNeverLearnedIsInvitedOnceThenReminded() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        #expect(model.guidePrompt == .firstRun, "asked when the account opens")
+        model.answerGuideInvite(start: false)
+        #expect(model.showsGuideBanner, "put off: a reminder stays")
+
+        // Asked before: the banner, never the sheet again.
+        model.guideBannerAccount = nil
+        model.guideInviteChecked = []
+        await model.checkGuideInvite()
+        #expect(model.guidePrompt == nil && model.showsGuideBanner)
+        model.dismissGuideBanner()
+        model.guideInviteChecked = []
+        await model.checkGuideInvite()
+        #expect(model.guidePrompt == nil && !model.showsGuideBanner, "dismissed for good")
+    }
+
+    @Test func startingFromTheInvitationOpensTheLearnDialog() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        model.answerGuideInvite(start: true)
+        #expect(model.isGuide && model.guideSheet?.id == "learn" && !model.showsGuideBanner)
+    }
+
+    @Test func aFinishedRunAsksToReviewItsDecisions() async throws {
+        let model = try model()
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        model.guidePrompt = nil
+        let none = GuideSampleFilter(excludePeople: [], excludeLabels: [])
+        _ = try await core.startGuideRun(GuideRunRequest(kind: .latest, count: 20, filter: none, focus: nil,
+                                                         agent: model.agent.providerID))
+        for _ in 0..<250 where model.guidePrompt == nil { try await Task.sleep(for: .milliseconds(20)) }
+        guard case let .finished(decisions) = model.guidePrompt else {
+            Issue.record("no prompt: \(String(describing: model.guidePrompt))")
+            return
+        }
+        #expect(decisions > 0)
+        model.openGuideDecisionsNow()
+        // The decisions wait in the Writing Guide's Proposed section (spec §14.10).
+        let first = try #require(model.guide.decisions.first)
+        #expect(model.isGuide && model.analysis.selection == AnalysisStore.tag(first) && model.guidePrompt == nil)
+    }
+}
+
+@MainActor
+struct MissingFactsTests {
+    @Test func questionsAreReadOnlyFromAJSONAnswer() {
+        let qs = ComposerAssistant.questions(in: #"{"questions": [{"question": "What is your role?", "fact": "My role"}, {"question": " "}]}"#)
+        #expect(qs == [.init(question: "What is your role?", fact: "My role")])
+        #expect(ComposerAssistant.questions(in: "Hi Ann, {\"questions\": []} is fine") == nil, "a draft is a draft")
+    }
+
+    @Test func theAgentAsksForFactsThenWritesWithTheAnswersAndKeepsThem() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let store = ComposerStore(core: core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.new(to: nil))
+        let before = store.body.string
+        let assistant = ComposerAssistant()
+        assistant.instruction = "Write to an investor with facts about me and my company"
+        await assistant.run(store: store, model: model, original: "")
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        guard case let .asking(questions) = assistant.state else {
+            Issue.record("expected questions, got \(assistant.state)")
+            return
+        }
+        #expect(questions.map(\.fact) == ["Occupation or role", "What the company does"])
+        #expect(questions.map(\.category) == ["work", "work"])
+        #expect(store.body.string == before, "nothing written yet")
+
+        await assistant.answer([questions[0].id: "CEO of Actual AI"], save: true)
+        for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(assistant.state == .done)
+        #expect(store.body.string.contains("CEO of Actual AI"), "the answers reached the agent")
+        let facts = try await core.facts()
+        #expect(facts.map { "\($0.category)/\($0.label): \($0.value)" } == ["work/Occupation or role: CEO of Actual AI"],
+                "kept in Facts; the unanswered one is not")
+        #expect(facts.first?.source == .writingHelp)
+    }
+}

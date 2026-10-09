@@ -1,25 +1,25 @@
 # Architecture
 
-OpenAGC is a native macOS app (SwiftUI with AppKit where speed matters) on a
+Kaluta is a native macOS app (SwiftUI with AppKit where speed matters) on a
 Rust core. The core owns everything that is not drawing pixels: the mail
 store, Gmail sync, MIME, search, the agent stack and routines. Swift talks to
 it through one UniFFI object. The full design, with the reasons behind it, is
 in [SPECIFICATION.md](SPECIFICATION.md); this page is the map.
 
 ```text
-┌──────────────────────────── OpenAGC.app ────────────────────────────┐
+┌──────────────────────────── Kaluta.app ────────────────────────────┐
 │ SwiftUI / AppKit                                                     │
 │  MainWindow ─ Sidebar · ThreadList (NSTableView) · Reader (WKWebView)│
 │  Composer windows · Agent column · Routines window · Settings        │
 │  Stores (@Observable, main actor) ──▶ CoreClient (only UniFFI user)  │
 └──────────────────────────────┬───────────────────────────────────────┘
                                │ UniFFI (async calls, one event stream)
-┌──────────────────────────────▼──────────── openagc-core (Rust) ─────┐
+┌──────────────────────────────▼──────────── kaluta-core (Rust) ─────┐
 │  mail-store (SQLite, FTS5) ◀─ mail-sync (bootstrap, history, outbox) │
 │        ▲                         │                                   │
 │        │                    provider-gmail (REST) ─▶ Google          │
 │  agents: AgentManager ─▶ agent-claude / agent-codex ─▶ user's CLI    │
-│          MCP socket ◀─ openagc-mcp (spawned by the CLI)              │
+│          MCP socket ◀─ kaluta-mcp (spawned by the CLI)              │
 │          permissions (decide + session guard) · approvals · audit    │
 │  routines: model + prompt (agent-api) · scheduler · cloud (CLI)      │
 └──────────────────────────────────────────────────────────────────────┘
@@ -41,9 +41,9 @@ in [SPECIFICATION.md](SPECIFICATION.md); this page is the map.
 | `permissions` | Risk classes, policy, `decide`, per-session hard limits | domain |
 | `agent-mcp` | Tool catalog, the shim ↔ core socket protocol and server | domain, agent-api, permissions |
 | `writing-guide` | The guide's deterministic check, the guide and facts renderers, the rules server's snapshot format and audience-address hash; pure, shared with the rules server (§10.6) | — (serde, serde_json, sha2, thiserror only) |
-| `openagc-mcp` | The stdio MCP shim binary agents spawn | agent-mcp |
-| `openagc-core` | The UniFFI surface; ties everything together | all of the above |
-| `rules-server` | `openagc-rules`, the rules server for cloud agents: SQLite, a publish API and MCP over Streamable HTTP (§10.6, `docs/rules-server.md`); runs apart from the app | writing-guide (never the core or a store) |
+| `kaluta-mcp` | The stdio MCP shim binary agents spawn | agent-mcp |
+| `kaluta-core` | The UniFFI surface; ties everything together | all of the above |
+| `rules-server` | `kaluta-rules`, the rules server for cloud agents: SQLite, a publish API and MCP over Streamable HTTP (§10.6, `docs/rules-server.md`); runs apart from the app | writing-guide (never the core or a store) |
 
 `cargo xtask check-deps` enforces the right-hand column.
 
@@ -97,7 +97,7 @@ back to REST. Tests use an in-process fake IMAP server
 
 A prompt starts (or resumes) an agent session with the user's own Claude Code
 or Codex CLI. The CLI is given no built-in tools and exactly one MCP server,
-`openagc-mcp`, which forwards each tool call over a per-launch Unix socket to
+`kaluta-mcp`, which forwards each tool call over a per-launch Unix socket to
 the core. There every call passes the session's hard limits and the
 permission decision; reads are answered from the store, reversible changes go
 through the same outbox as the UI, and sends, forwards and deletes wait for
@@ -109,13 +109,13 @@ the user in the agent column. Every call is recorded. See
 A routine is data (buckets, rules, schedule); its prompt is generated per
 runner. Local routines run as agent sessions on a scheduler in the core.
 Claude cloud routines are created and updated through the user's `claude`
-CLI (`RemoteTrigger`), so OpenAGC never holds a claude.ai credential; their
+CLI (`RemoteTrigger`), so Kaluta never holds a claude.ai credential; their
 work is also inferred from label changes seen in Gmail history.
 
 ## Where to start reading
 
-- Swift entry: `macos/OpenAGC/App/OpenAGCApp.swift`, `AppModel.swift`,
+- Swift entry: `macos/Kaluta/App/KalutaApp.swift`, `AppModel.swift`,
   `Core/CoreClient.swift`.
-- Core entry: `crates/openagc-core/src/lib.rs`, then `mail.rs`, `sync.rs`,
+- Core entry: `crates/kaluta-core/src/lib.rs`, then `mail.rs`, `sync.rs`,
   `agents/`.
 - Tests: `cargo test` (Rust, fakes only) and `scripts/test-macos.sh test`.

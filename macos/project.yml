@@ -1,6 +1,6 @@
-name: OpenAGC
+name: Kaluta
 options:
-  bundleIdPrefix: ai.actual
+  bundleIdPrefix: org.kaluta
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
@@ -24,12 +24,12 @@ settings:
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
-    OPENAGC_ENTITLEMENTS: OpenAGC/Resources/OpenAGC.entitlements
+    KALUTA_ENTITLEMENTS: Kaluta/Resources/Kaluta.entitlements
     # Rust core artifacts written by scripts/build-core.sh (spec §4.1).
     SWIFT_INCLUDE_PATHS: $(SRCROOT)/../build/core/include
     LIBRARY_SEARCH_PATHS: $(SRCROOT)/../build/core/lib
 targets:
-  OpenAGCCore:
+  KalutaCore:
     # Debug builds may sign with a stable development identity
     # (scripts/dev-signing.sh); Local.xcconfig is gitignored and may be empty.
     configFiles:
@@ -37,7 +37,7 @@ targets:
     type: framework.static
     platform: macOS
     sources:
-      - path: ../build/core/swift/openagc_core.swift
+      - path: ../build/core/swift/kaluta_core.swift
         optional: true
     preBuildScripts:
       - name: Build Rust core
@@ -45,23 +45,23 @@ targets:
         basedOnDependencyAnalysis: false   # always run; cargo decides what to rebuild
         showEnvVars: false
         outputFiles:
-          - $(SRCROOT)/../build/core/swift/openagc_core.swift
-          - $(SRCROOT)/../build/core/include/openagc_coreFFI.h
+          - $(SRCROOT)/../build/core/swift/kaluta_core.swift
+          - $(SRCROOT)/../build/core/include/kaluta_coreFFI.h
           - $(SRCROOT)/../build/core/include/module.modulemap
-          - $(SRCROOT)/../build/core/lib/libopenagc_core.a
-          - $(SRCROOT)/../build/core/bin/openagc-mcp
+          - $(SRCROOT)/../build/core/lib/libkaluta_core.a
+          - $(SRCROOT)/../build/core/bin/kaluta-mcp
     settings:
       base:
         # The script writes outside the build directory and runs cargo.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
-        PRODUCT_BUNDLE_IDENTIFIER: ai.actual.openagc.core
-        PRODUCT_NAME: OpenAGCCore
+        PRODUCT_BUNDLE_IDENTIFIER: org.kaluta.Kaluta.core
+        PRODUCT_NAME: KalutaCore
         GENERATE_INFOPLIST_FILE: YES
         SKIP_INSTALL: YES
         # Generated code predates strict concurrency; keep it quiet here only.
         SWIFT_STRICT_CONCURRENCY: minimal
         SWIFT_VERSION: "5.0"
-  OpenAGC:
+  Kaluta:
     # Debug builds may sign with a stable development identity
     # (scripts/dev-signing.sh); Local.xcconfig is gitignored and may be empty.
     configFiles:
@@ -69,47 +69,47 @@ targets:
     type: application
     platform: macOS
     sources:
-      - path: OpenAGC
+      - path: Kaluta
     dependencies:
-      - target: OpenAGCCore
+      - target: KalutaCore
       - package: Sparkle
     postCompileScripts:
-      - name: Embed openagc-mcp
-        # Agent CLIs spawn <app>/Contents/MacOS/openagc-mcp (spec §10.1).
+      - name: Embed kaluta-mcp
+        # Agent CLIs spawn <app>/Contents/MacOS/kaluta-mcp (spec §10.1).
         script: |
-          install -m 0755 "$SRCROOT/../build/core/bin/openagc-mcp" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/openagc-mcp"
+          install -m 0755 "$SRCROOT/../build/core/bin/kaluta-mcp" "$TARGET_BUILD_DIR/$EXECUTABLE_FOLDER_PATH/kaluta-mcp"
         inputFiles:
-          - $(SRCROOT)/../build/core/bin/openagc-mcp
+          - $(SRCROOT)/../build/core/bin/kaluta-mcp
         outputFiles:
-          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/openagc-mcp
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_FOLDER_PATH)/kaluta-mcp
     info:
-      path: OpenAGC/Resources/Info.plist
+      path: Kaluta/Resources/Info.plist
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         # Sparkle compares this; release.yml sets it to the build number.
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Sparkle (spec §16). One appcast on main lists every release; betas
         # carry the "beta" channel (scripts/make-appcast.sh).
-        SUFeedURL: https://raw.githubusercontent.com/audiojak/openagc/main/appcast.xml
+        SUFeedURL: https://raw.githubusercontent.com/audiojak/kaluta/main/appcast.xml
         # Set by the release maintainer (docs/releasing.md). Empty disables
         # the updater, so development builds never check for updates.
         SUPublicEDKey: 7MkOQ+3AXyPMrh8zri1P40oRXY3+8FAui3b/B5xBcfE=
         SUEnableInstallerLauncherService: false
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.actual.openagc
-        PRODUCT_NAME: OpenAGC
-        OTHER_LDFLAGS: -lopenagc_core
+        PRODUCT_BUNDLE_IDENTIFIER: org.kaluta.Kaluta
+        PRODUCT_NAME: Kaluta
+        OTHER_LDFLAGS: -lkaluta_core
         ENABLE_HARDENED_RUNTIME: YES
         # Indirect so Local.xcconfig (dev signing) can swap the file.
-        CODE_SIGN_ENTITLEMENTS: $(OPENAGC_ENTITLEMENTS)
+        CODE_SIGN_ENTITLEMENTS: $(KALUTA_ENTITLEMENTS)
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_FILE: OpenAGC/Resources/Info.plist
-        INFOPLIST_KEY_CFBundleDisplayName: OpenAGC
+        INFOPLIST_FILE: Kaluta/Resources/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: Kaluta
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
-        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Actual AI and the OpenAGC contributors. MIT License."
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Actual AI and the Kaluta contributors. MIT License."
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-  OpenAGCTests:
+  KalutaTests:
     # Debug builds may sign with a stable development identity
     # (scripts/dev-signing.sh); Local.xcconfig is gitignored and may be empty.
     configFiles:
@@ -117,22 +117,22 @@ targets:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: OpenAGCTests
+      - path: KalutaTests
     dependencies:
-      - target: OpenAGC
+      - target: Kaluta
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.actual.openagc.tests
+        PRODUCT_BUNDLE_IDENTIFIER: org.kaluta.Kaluta.tests
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
-        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/OpenAGC.app/Contents/MacOS/OpenAGC"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Kaluta.app/Contents/MacOS/Kaluta"
 schemes:
-  OpenAGC:
+  Kaluta:
     build:
       targets:
-        OpenAGC: all
-        OpenAGCTests: [test]
+        Kaluta: all
+        KalutaTests: [test]
     test:
       targets:
-        - OpenAGCTests
+        - KalutaTests
       gatherCoverageData: false

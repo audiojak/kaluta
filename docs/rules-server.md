@@ -1,7 +1,7 @@
-# The rules server (`openagc-rules`)
+# The rules server (`kaluta-rules`)
 
 Cloud agents (a Claude cloud routine, an agent on another machine, a
-script) cannot reach OpenAGC on your Mac. `openagc-rules` gives them an
+script) cannot reach Kaluta on your Mac. `kaluta-rules` gives them an
 agent mailbox's writing guide and the facts you chose to share, published
 from the app, check their drafts against the guide, and take their
 reports of what they sent, for the app to record. It is one binary and one SQLite file; you run it yourself,
@@ -120,7 +120,7 @@ rest covers a leaked file or backup, not a hostile operator. Backups made
 before a mailbox went encrypted, or before a revocation or a refresh, hold
 what the file held then.
 
-Set `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` to refuse plaintext snapshots
+Set `KALUTA_RULES_REQUIRE_ENCRYPTION=1` to refuse plaintext snapshots
 (the project-hosted server does). A server that turns it on after storing
 plaintext publications serves none of them (`not_readable`) until the app
 publishes again, encrypted. Without it, a publication can be plaintext
@@ -132,29 +132,34 @@ its hashes (above).
 ## Run it
 
 ```sh
-cargo build --release -p rules-server        # target/release/openagc-rules
-openagc-rules --data-dir /var/lib/openagc-rules
+cargo build --release -p rules-server        # target/release/kaluta-rules
+kaluta-rules --data-dir /var/lib/kaluta-rules
 ```
 
 | Flag | Environment | Default | |
 |---|---|---|---|
-| `--listen` | `OPENAGC_RULES_LISTEN` | `127.0.0.1:8787` | Plain HTTP. Keep it on loopback behind a proxy. |
-| `--data-dir` | `OPENAGC_RULES_DATA_DIR` | `./data` | Holds `rules.sqlite3`. Made mode 0700, the file 0600. |
-| `--log` | `OPENAGC_RULES_LOG` | `info` | The server's own log level (`debug` adds health checks). Dependencies log at `warn`. |
-| `--rate-limit` | `OPENAGC_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registering a mailbox counts per client address, at the same rate; failed sign-ins are refused for a minute after 30 from one address (also off with `0`). |
-| `--trusted-proxy` | `OPENAGC_RULES_TRUSTED_PROXY` | unset | Your TLS proxy's address or network as the server sees it (`127.0.0.1`, `172.16.0.0/12`; comma-separated, or the flag repeated). Its `X-Forwarded-For` then names each client, for the limits on strangers (below). Unset, the client is the peer: behind a proxy, every stranger counts as the proxy. |
-| `--public-url` | `OPENAGC_RULES_PUBLIC_URL` | unset | The server's address as agents reach it, an origin alone (`https://rules.example.com`; `http://` only to `127.0.0.1` or `localhost`). Turns on OAuth sign-in with connect codes, which claude.ai connectors and cloud routines need; the OAuth issuer and the `/mcp` resource are made from it. |
-| | `OPENAGC_RULES_REGISTRATION_TOKEN` | unset | When set, registering a mailbox needs `Authorization: Bearer <it>`. Set it on any server strangers can reach. |
-| | `OPENAGC_RULES_REQUIRE_ENCRYPTION` | unset | `1` refuses plaintext snapshots (422 `encryption_required`) and reports for a mailbox that never published encrypted (409 `not_encrypted`); `GET /v1/server` says so, and the app then offers no choice. |
+| `--listen` | `KALUTA_RULES_LISTEN` | `127.0.0.1:8787` | Plain HTTP. Keep it on loopback behind a proxy. |
+| `--data-dir` | `KALUTA_RULES_DATA_DIR` | `./data` | Holds `rules.sqlite3`. Made mode 0700, the file 0600. |
+| `--log` | `KALUTA_RULES_LOG` | `info` | The server's own log level (`debug` adds health checks). Dependencies log at `warn`. |
+| `--rate-limit` | `KALUTA_RULES_RATE_LIMIT` | `120` | Requests per minute per token, in bursts of a minute's worth; `0` turns it off. Registering a mailbox counts per client address, at the same rate; failed sign-ins are refused for a minute after 30 from one address (also off with `0`). |
+| `--trusted-proxy` | `KALUTA_RULES_TRUSTED_PROXY` | unset | Your TLS proxy's address or network as the server sees it (`127.0.0.1`, `172.16.0.0/12`; comma-separated, or the flag repeated). Its `X-Forwarded-For` then names each client, for the limits on strangers (below). Unset, the client is the peer: behind a proxy, every stranger counts as the proxy. |
+| `--public-url` | `KALUTA_RULES_PUBLIC_URL` | unset | The server's address as agents reach it, an origin alone (`https://rules.example.com`; `http://` only to `127.0.0.1` or `localhost`). Turns on OAuth sign-in with connect codes, which claude.ai connectors and cloud routines need; the OAuth issuer and the `/mcp` resource are made from it. |
+| | `KALUTA_RULES_REGISTRATION_TOKEN` | unset | When set, registering a mailbox needs `Authorization: Bearer <it>`. Set it on any server strangers can reach. |
+| | `KALUTA_RULES_REQUIRE_ENCRYPTION` | unset | `1` refuses plaintext snapshots (422 `encryption_required`) and reports for a mailbox that never published encrypted (409 `not_encrypted`); `GET /v1/server` says so, and the app then offers no choice. |
+
+A server set up before the project was named Kaluta keeps working: each
+`OPENAGC_RULES_*` variable is read when its `KALUTA_RULES_*` one is unset,
+with a warning naming the new one. Its database and everything encrypted
+in it carry over unchanged.
 
 Other commands:
 
-- `openagc-rules forget-mailbox <address> [--data-dir …]` deletes a mailbox,
+- `kaluta-rules forget-mailbox <address> [--data-dir …]` deletes a mailbox,
   its snapshots and its agent tokens: for when the app has lost its
   publisher token and must register again.
-- `openagc-rules backup <file> [--data-dir …]` writes a consistent copy
+- `kaluta-rules backup <file> [--data-dir …]` writes a consistent copy
   of the database while the server runs (below).
-- `openagc-rules healthcheck [--listen …]` exits 0 if `GET /healthz`
+- `kaluta-rules healthcheck [--listen …]` exits 0 if `GET /healthz`
   answers 200 (the image has no curl).
 
 Logs go to standard error. It stops cleanly on Ctrl-C or SIGTERM.
@@ -162,13 +167,13 @@ Logs go to standard error. It stops cleanly on Ctrl-C or SIGTERM.
 ### Docker
 
 ```sh
-docker build -f crates/rules-server/Dockerfile -t openagc-rules .
-docker run -d --name openagc-rules --restart unless-stopped \
-  -p 127.0.0.1:8787:8787 -v openagc-rules:/data \
-  -e OPENAGC_RULES_REGISTRATION_TOKEN="$(openssl rand -hex 32)" \
-  -e OPENAGC_RULES_PUBLIC_URL=https://rules.example.com \
-  -e OPENAGC_RULES_TRUSTED_PROXY=172.16.0.0/12 \
-  openagc-rules
+docker build -f crates/rules-server/Dockerfile -t kaluta-rules .
+docker run -d --name kaluta-rules --restart unless-stopped \
+  -p 127.0.0.1:8787:8787 -v kaluta-rules:/data \
+  -e KALUTA_RULES_REGISTRATION_TOKEN="$(openssl rand -hex 32)" \
+  -e KALUTA_RULES_PUBLIC_URL=https://rules.example.com \
+  -e KALUTA_RULES_TRUSTED_PROXY=172.16.0.0/12 \
+  kaluta-rules
 ```
 
 The image runs as a non-root user (65532) on distroless, listens on
@@ -190,7 +195,7 @@ rules.example.com {
 Caddy gets and renews the certificate, and adds the client's address to
 `X-Forwarded-For` (replacing whatever the client sent, unless you tell
 Caddy to trust upstream proxies). Tell the server to believe it:
-`OPENAGC_RULES_TRUSTED_PROXY=127.0.0.1` for Caddy on the same host, or the
+`KALUTA_RULES_TRUSTED_PROXY=127.0.0.1` for Caddy on the same host, or the
 Docker bridge (`172.16.0.0/12`) when the server runs in Docker with
 `-p 127.0.0.1:8787:8787`, which is where Caddy's connections appear to come
 from. The server reads the header right to left and takes the first
@@ -213,7 +218,7 @@ Copy the database with SQLite's online backup, never by copying the file
 while the server writes:
 
 ```sh
-sqlite3 /var/lib/openagc-rules/rules.sqlite3 ".backup '/backups/rules-$(date +%F).sqlite3'"
+sqlite3 /var/lib/kaluta-rules/rules.sqlite3 ".backup '/backups/rules-$(date +%F).sqlite3'"
 ```
 
 Where there is no `sqlite3` (the image has none), the server makes the
@@ -221,13 +226,13 @@ same consistent copy itself (`VACUUM INTO`), to a file that must not exist
 yet:
 
 ```sh
-openagc-rules backup /backups/rules-$(date +%F).sqlite3 --data-dir /var/lib/openagc-rules
+kaluta-rules backup /backups/rules-$(date +%F).sqlite3 --data-dir /var/lib/kaluta-rules
 # Docker:
-docker exec openagc-rules /openagc-rules backup /tmp/backup.sqlite3
-docker cp openagc-rules:/tmp/backup.sqlite3 ./rules-$(date +%F).sqlite3
+docker exec kaluta-rules /kaluta-rules backup /tmp/backup.sqlite3
+docker cp kaluta-rules:/tmp/backup.sqlite3 ./rules-$(date +%F).sqlite3
 ```
 
-`openagc-rules backup` makes its copy readable by its owner only (0600), as
+`kaluta-rules backup` makes its copy readable by its owner only (0600), as
 the database is; with `sqlite3`, set the mode yourself (`umask 077`). A
 backup holds what the live file holds (above): with encryption at rest,
 sealed versions and reports, wrapped keys and hashes; keep it as private
@@ -238,14 +243,14 @@ agents need new tokens.
 
 ### Publish from the app
 
-In OpenAGC, Settings › Accounts, an agent mailbox's row has *Rules
+In Kaluta, Settings › Accounts, an agent mailbox's row has *Rules
 server*: *Publish to a Rules Server…* asks for the server's address
 (`https://rules.example.com`; plain `http://127.0.0.1:8787` works for a
 server on the same Mac) and, if you set one, the registration token. The
 sheet lists exactly what goes before anything does. Publishing registers
 the mailbox, keeps the publisher token in the Keychain and pushes; after
 that every change to the mailbox's writing guide or shared facts is
-pushed a few seconds later while OpenAGC is open, and the row says which
+pushed a few seconds later while Kaluta is open, and the row says which
 version the server has and when it was published. Which facts go is each
 fact's *Share with cloud agents* switch, in the mailbox's Facts.
 *Stop Publishing…* either leaves the last version on the server or removes
@@ -257,11 +262,11 @@ Cloud routines reach MCP servers only through the claude.ai connectors on
 the account, and those sign in with OAuth (a fixed `Authorization` header
 is a beta few organisations have). The server is its own minimal
 authorization server: there are no accounts on it and no passwords; the
-sign-in page asks for a **connect code** from OpenAGC. The server needs
-`OPENAGC_RULES_PUBLIC_URL`; without it the app says so and offers only a
+sign-in page asks for a **connect code** from Kaluta. The server needs
+`KALUTA_RULES_PUBLIC_URL`; without it the app says so and offers only a
 token.
 
-1. In OpenAGC, the agent mailbox's row in Settings › Accounts, *Cloud
+1. In Kaluta, the agent mailbox's row in Settings › Accounts, *Cloud
    agents* › *Connect a Cloud Agent…*: name the agent ("Weekly outreach
    routine"), choose *A claude.ai connector or cloud routine
    (recommended)* and *Make Code*. The sheet shows the server's MCP URL,
@@ -274,7 +279,7 @@ token.
    supported yet). Leave the client ID and secret empty.
 3. *Connect* opens the server's sign-in page. It names the app ("Claude")
    and where it goes back to (`claude.ai`). Enter the code and choose
-   *Connect*. Within a few seconds the sheet in OpenAGC says "Connected:
+   *Connect*. Within a few seconds the sheet in Kaluta says "Connected:
    Weekly outreach routine, from Claude."; *Done* closes it, and the code
    is gone.
 4. Add the connector to the routine's connections and paste the
@@ -288,7 +293,7 @@ token.
 ### Reports in the app
 
 At each sync of a publishing agent mailbox (at most once a minute) and on
-*Publish Now*, OpenAGC pulls the reports, keeps each in the mailbox's
+*Publish Now*, Kaluta pulls the reports, keeps each in the mailbox's
 store, records it as an AI composition written by `cloud:<agent name>`
 (once the mailbox has finished a learning run, as for every AI
 composition, ADR 0013), and only then acknowledges them, which deletes
@@ -315,11 +320,11 @@ with no report is reviewed as any other.
 ### Connect Claude Code, the Agent SDK or a script
 
 *Connect a Cloud Agent…* with *Claude Code, the Agent SDK or a script* and
-*Make Token* shows a token once (OpenAGC does not keep it: close the sheet
+*Make Token* shows a token once (Kaluta does not keep it: close the sheet
 and it is gone), with what to do with it:
 
 ```sh
-claude mcp add --transport http openagc-scout-rules https://rules.example.com/mcp \
+claude mcp add --transport http kaluta-scout-rules https://rules.example.com/mcp \
   --header "Authorization: Bearer oagc_agt_…"
 curl -H "Authorization: Bearer oagc_agt_…" \
   "https://rules.example.com/v1/m/scout@agents.example/guide?message_type=new"
@@ -328,10 +333,10 @@ curl -H "Authorization: Bearer oagc_agt_…" \
 and the same instructions for the agent's prompt. Whoever holds the token
 can read this mailbox's published guide and shared facts, check drafts and
 file reports, and nothing else, until *Revoke…*. Tokens work on a server without a public URL; the URL is
-then the address OpenAGC publishes to.
+then the address Kaluta publishes to.
 
 Claude Code should also be able to sign in with a connect code
-(`claude mcp add --transport http openagc-scout-rules
+(`claude mcp add --transport http kaluta-scout-rules
 https://rules.example.com/mcp`, then `/mcp` to authenticate; not yet tried
 by hand): it registers itself, returns to a loopback address on a port of
 its own, which the server matches without the port, and the page warns
@@ -347,7 +352,7 @@ your connector); one address may try 10 codes a minute, and the whole
 server takes at most 60 wrong codes a minute (right ones do not count).
 Registrations are 10 a minute per address and 120 across the server;
 sign-in pages 30 a minute per address and 600 across the server. Behind a
-proxy these need `OPENAGC_RULES_TRUSTED_PROXY` (above). Access tokens last an hour; refresh tokens 30 days and
+proxy these need `KALUTA_RULES_TRUSTED_PROXY` (above). Access tokens last an hour; refresh tokens 30 days and
 change at every refresh, with the grant's secret (the access tokens from
 before stop), and a refresh token or authorization code used twice revokes
 the agent (someone else has a copy). Clients that never
@@ -365,7 +370,7 @@ connect an agent are forgotten after a week.
   server strangers can reach, someone could register your address first
   and keep the app from publishing there (they could publish nothing in
   your name to your agents, whose tokens come from the app); set
-  `OPENAGC_RULES_REGISTRATION_TOKEN` to close registration to everyone who
+  `KALUTA_RULES_REGISTRATION_TOKEN` to close registration to everyone who
   does not have it, and `forget-mailbox` clears a squatted address.
 - **Agent tokens** are minted by the app through the publisher's API,
   named, scoped to one mailbox, shown once and revocable; revoking takes
@@ -395,7 +400,7 @@ Every publisher call answers an address that is not registered as it
 answers a wrong token, 401 `invalid_token`: only the mailbox's publisher
 token tells the two apart (the app registers again when a push gets a 401
 and the address turns out to be free). A
-401 carries `WWW-Authenticate: Bearer realm="openagc-rules"` (with
+401 carries `WWW-Authenticate: Bearer realm="kaluta-rules"` (with
 `error="invalid_token"` for a token that is unknown or revoked, and at
 `/mcp` with OAuth on `resource_metadata="<public URL>/.well-known/oauth-protected-resource", scope="rules"`),
 a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
@@ -431,7 +436,7 @@ five versions are kept.
 ### For agents (agent token)
 
 - **MCP** at `/mcp`, Streamable HTTP, stateless:
-  `claude mcp add --transport http openagc-scout-rules https://rules.example.com/mcp --header "Authorization: Bearer oagc_agt_…"`.
+  `claude mcp add --transport http kaluta-scout-rules https://rules.example.com/mcp --header "Authorization: Bearer oagc_agt_…"`.
 - **REST**, for scripts:
   `GET /v1/m/{address}/guide?to=ann@acme.com&to=…&message_type=reply`
   (`to` may repeat or be comma-separated),
@@ -467,7 +472,7 @@ agent's rate limit.
 without a token, answers `{"encryption": "required" | "optional",
 "version"}`.
 
-### OAuth (with `OPENAGC_RULES_PUBLIC_URL`)
+### OAuth (with `KALUTA_RULES_PUBLIC_URL`)
 
 The MCP authorization spec's shape (2025-06-18 and 2025-11-25): the
 server is the resource server for `<public URL>/mcp` and its own

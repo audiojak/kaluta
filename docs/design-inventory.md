@@ -1,13 +1,13 @@
 # Design pattern inventory
 
-Every visual and interaction pattern in `macos/OpenAGC` as of 2026-09-29,
-checked against `docs/design-system.md`, `macos/OpenAGC/Design/*.swift` and
+Every visual and interaction pattern in `macos/Kaluta` as of 2026-09-29,
+checked against `docs/design-system.md`, `macos/Kaluta/Design/*.swift` and
 `scripts/design-lint.sh`. It is the input for oagc-068.2, which writes the
 missing patterns into the design system and extends the lint.
 
 "Covered?" means the design system names the pattern and gives its rules:
 **Yes** (named, with rules), **Partly** (named, or a token covers part of
-it), **No** (not mentioned). Paths are relative to `macos/OpenAGC/`.
+it), **No** (not mentioned). Paths are relative to `macos/Kaluta/`.
 
 ## Surfaces
 
@@ -53,7 +53,7 @@ it), **No** (not mentioned). Paths are relative to `macos/OpenAGC/`.
 | --- | --- | --- | --- |
 | `CapsuleTabs` | `Design/Components.swift:95-137`; used `MainWindow.swift:184` | Yes | `pillWidth = 28` is a named constant. Counts go in help and VoiceOver, as documented. It has no keyboard navigation between pills beyond Tab. |
 | `TipCard` | `Components.swift:166-201`; `MainWindow.swift:170-177`; `Features/ThreadList/Tips.swift` | Yes | The dismiss help is fixed text ("will not come back"). Tip copy lives in `Tips.swift`. |
-| `hoverHelp` / `ToolTipArea` | `Components.swift:139-161` | Yes | Used widely. Misuses: menu-bar items call `.hoverHelp("")` or `.hoverHelp(reason)` (`App/OpenAGCApp.swift:112,162,166,170`), where tooltips never show. Several texts end with a full stop against the rule (`ImportMailbox.swift:103`, `AccountSettings.swift:70,156,196,213`, `RoutinesWindow.swift:333`). Orphan-store Delete has its help on the row, not on the button (`AccountSettings.swift:63-70`). The undo notice's close button says "Dismiss" in help and "Close" to VoiceOver (`Features/Undo/UndoNoticeView.swift:38,41`). |
+| `hoverHelp` / `ToolTipArea` | `Components.swift:139-161` | Yes | Used widely. Misuses: menu-bar items call `.hoverHelp("")` or `.hoverHelp(reason)` (`App/KalutaApp.swift:112,162,166,170`), where tooltips never show. Several texts end with a full stop against the rule (`ImportMailbox.swift:103`, `AccountSettings.swift:70,156,196,213`, `RoutinesWindow.swift:333`). Orphan-store Delete has its help on the row, not on the button (`AccountSettings.swift:63-70`). The undo notice's close button says "Dismiss" in help and "Close" to VoiceOver (`Features/Undo/UndoNoticeView.swift:38,41`). |
 | `ToolbarHelp` / `ToolbarToolTips` | `Features/MessageView/MessageToolbar.swift:131-196` | Yes | One source for toolbar tips. Its shortcut strings are inconsistent, see Behaviour. |
 | Undo notice | `Features/Undo/UndoNoticeView.swift`; `Features/Undo/MailUndo.swift:38-54,204-212` | Partly | The glass capsule is documented, but the notice's behaviour (8 s, pause on hover, focus or inactive window, one at a time, VoiceOver announcement, "Verb N conversations" wording) is only in the spec. It is also used for errors and non-undoable news ("Couldn't open the draft: …", "Already sent"); since oagc-068.3 those show no Undo button (`UndoNotice.offersUndo`). |
 | `Banner` | `Components.swift:46-75`; `MainWindow.swift:208`, `ThreadReaderView.swift:56`, `ComposerView.swift:59,64` | Yes | Good. The same "sign in again" state is a yellow attention `Banner` in the main window but an orange label in Settings (`AccountSettings.swift:28`, `:147`). |
@@ -79,11 +79,11 @@ it), **No** (not mentioned). Paths are relative to `macos/OpenAGC/`.
 | Pattern | Where | Covered? | Notes |
 | --- | --- | --- | --- |
 | Toolbar groups | `MessageToolbar.swift:6-86`; `App/MainWindow.swift:45,70` | Yes | This matches the doc. The composer toolbar (Attach, Discard, Send in one `.primaryAction` group, `ComposerView.swift:88-104`) and the Routines toolbar (New Routine) are not described. |
-| Disabled, not hidden | `MessageToolbar.swift:30-31`; `OpenAGCApp.swift:103-105` | Yes | Mostly followed. Exceptions: Approve All and Stop appear only when relevant (`AgentPanel.swift:240-250`), and the ListViewOptions menu appears only in the Inbox (`MessageToolbar.swift:12`). |
+| Disabled, not hidden | `MessageToolbar.swift:30-31`; `KalutaApp.swift:103-105` | Yes | Mostly followed. Exceptions: Approve All and Stop appear only when relevant (`AgentPanel.swift:240-250`), and the ListViewOptions menu appears only in the Inbox (`MessageToolbar.swift:12`). |
 | Shortcut text in help tags | `MessageToolbar.swift:143-171`; `KeyboardShortcuts.swift:20-64` | Partly | The doc's example is "Archive (E)". Help tags write list single keys in upper case ("Archive (E)", "Label (L)", "Star (S)"), which reads as ⇧E, while the Keyboard Shortcuts window lists them in lower case ("e"). The menu equivalents differ: Archive is ⌃⌘A, Star is ⇧⌘L. "Move to Trash (⌘⌫)" names the menu key but "Archive (E)" names the list key, with no rule for which a tag names. Return is written "(Return)" and Escape "(Esc)" in tags, but "↩" in the shortcuts window. |
 | Single keys in lists | `ThreadListView.swift:206-234` | No | Gmail/Mail keys (e, u, s, l, #, !, r, a, f, c, j, k, /, Return in Drafts, ⌫) apply only when no ⌘/⌃/⌥ is held. They are in the shortcuts window, but the rule "single keys act in the focused list; the same actions have ⌘ keys in menus" is not in the design system. The Tasks list will reuse e, r, a, f, c, ⌫ and ↩ with other meanings, so this needs writing down. |
-| ⌘ keys in menus | `OpenAGCApp.swift:107-211` | No | Menu shortcuts apply only when the mail window is key (`isMailWindow`, `:97-103`). Not documented. |
-| Shortcuts window completeness | `KeyboardShortcuts.swift` vs `OpenAGCApp.swift` | No | These are missing from the guide: ⇧⌘/ (Keyboard Shortcuts, `OpenAGCApp.swift:139`), ⌘Z/⇧⌘Z mail undo, ⌃1–⌃9 accounts (`AccountMenu.swift:63`), ⌘S in Routines (`RoutinesWindow.swift:338`), and the prompt's ↑/↓/Tab/Return/Escape. |
+| ⌘ keys in menus | `KalutaApp.swift:107-211` | No | Menu shortcuts apply only when the mail window is key (`isMailWindow`, `:97-103`). Not documented. |
+| Shortcuts window completeness | `KeyboardShortcuts.swift` vs `KalutaApp.swift` | No | These are missing from the guide: ⇧⌘/ (Keyboard Shortcuts, `KalutaApp.swift:139`), ⌘Z/⇧⌘Z mail undo, ⌃1–⌃9 accounts (`AccountMenu.swift:63`), ⌘S in Routines (`RoutinesWindow.swift:338`), and the prompt's ↑/↓/Tab/Return/Escape. |
 | Confirm vs undo | Undo: `MailUndo.swift`; confirm: `AccountSettings.swift:84`, `MessageWebView.swift:82` | No | "Act, then offer Undo; confirm only what cannot be undone" is in the plan, not the design system. Discard draft (when it has content), Delete leftover mail data and Delete routine now ask first (oagc-068.3). Still without confirmation: Remove API key (`AgentActivity.swift:35`), Clear Suggestions History (`AgentSettings.swift:35`); neither deletes mail. |
 | Destructive button role | `AgentPanel.swift:371`; `AccountSettings.swift:63,172`; `RoutinesWindow.swift:233,318`; `AgentActivity.swift:35` | No | `role: .destructive` is used for Reject (which is not destructive) and for Remove on buckets (undoable with Revert). There is no rule. |
 | Default and cancel actions | `ImportMailbox.swift:56-65,98`; `AgentActivity.swift:135` | No | Only 4 `keyboardShortcut(.defaultAction/.cancelAction)` in the app, and PromptEditor and HandoffSheet have none. The tip "(Esc)"/"(Return)" convention is informal. |
@@ -94,7 +94,7 @@ it), **No** (not mentioned). Paths are relative to `macos/OpenAGC/`.
 | Motion | `MainWindow.swift:9,69`; `UndoNoticeView.swift:48,53`; `AgentPanel.swift:27,91` | No | Every animation checks `accessibilityReduceMotion`. The durations (0.15, 0.2, 0.25 s, `.snappy`/`.easeOut`) are literals with no tokens. |
 | Hover and pointer | `UndoNoticeView.swift:45`; `AttachmentStrip.swift:59-61` | No | Hover pauses the notice. Click and double-click on tiles. |
 | Drag and drop | `ThreadListView.swift:101-105,182-192`; `SidebarView.swift:124-129`; `AttachmentStrip.swift:106-118`; `ComposerView.swift:111-115` | No | Threads drag onto labels, attachments drag out as file promises, and files drop onto the composer. |
-| Window sizes | `OpenAGCApp.swift:16,34,46,53`; `SettingsView.swift:25`; many `.frame(minWidth:)` | No | These are literals (1200×760, 720×560, 980×720, 900×720, 640×520, sheet widths 420/460/620). |
+| Window sizes | `KalutaApp.swift:16,34,46,53`; `SettingsView.swift:25`; many `.frame(minWidth:)` | No | These are literals (1200×760, 720×560, 980×720, 900×720, 640×520, sheet widths 420/460/620). |
 | Copy style | help texts; section headers; `Tips.swift` | Partly | "Short sentence without a full stop" is documented for help, and some texts break it (see `hoverHelp` above). Titles and buttons use title case. Section headers and sheet titles mix cases ("Import finished" vs "Import Mailbox"). British spelling ("summarise", "colour") sits beside "organize" and "Labeled" (`AccountSettings.swift:50`, `MailUndo.swift:50`). |
 
 ## Gaps to write down in oagc-068.2
@@ -217,7 +217,7 @@ numbers. The rest are still candidates.
 - **Help text ending in a full stop.** `hoverHelp\("[^"]*\.\"\)` (an
   addition to `help-lint.py`). The same rule could flag `.hoverHelp("")`.
 - **Tooltips on menu-bar items.** `.hoverHelp(` inside
-  `App/OpenAGCApp.swift` command groups, where it never shows.
+  `App/KalutaApp.swift` command groups, where it never shows.
 - **Undo notice for errors.** `undo\.show\("Couldn` and similar: errors
   should not use the undo notice.
 - **Date formatting outside the shared formatters.** `DateFormatter\(\)`,

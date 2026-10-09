@@ -78,7 +78,7 @@ fn inline_styles_are_filtered_to_safe_properties() {
 fn remote_images_are_rewritten_and_flagged() {
     let s = sanitize_html(r#"<img src="https://tracker.example/pixel.gif?u=123" width="1" height="1"><p>hi</p>"#);
     assert!(s.has_remote_images);
-    assert!(s.html.contains(r#"src="openagc-remote:https://tracker.example/pixel.gif?u=123""#), "{}", s.html);
+    assert!(s.html.contains(r#"src="kaluta-remote:https://tracker.example/pixel.gif?u=123""#), "{}", s.html);
     let plain = sanitize_html("<p>no images</p>");
     assert!(!plain.has_remote_images);
 }
@@ -86,7 +86,7 @@ fn remote_images_are_rewritten_and_flagged() {
 #[test]
 fn cid_and_small_data_images_are_kept_in_safe_forms() {
     let s = sanitize_html(r#"<img src="cid:logo123@example.org"><img src="data:image/png;base64,iVBORw0KGgo=">"#);
-    assert!(s.html.contains(r#"src="openagc-cid:logo123@example.org""#), "{}", s.html);
+    assert!(s.html.contains(r#"src="kaluta-cid:logo123@example.org""#), "{}", s.html);
     assert!(s.html.contains("data:image/png;base64,iVBORw0KGgo="), "{}", s.html);
     assert!(!s.has_remote_images);
     assert_absent(r#"<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=">"#, &["svg+xml"]);

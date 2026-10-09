@@ -870,7 +870,7 @@ impl PrimitiveService {
 
     pub fn with_base(base: &str) -> ProviderResult<Self> {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Kaluta/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .https_only(false) // tests talk to a local mock

@@ -9,7 +9,7 @@ use mail_store::{
 };
 
 fn open(name: &str) -> Db {
-    let dir: PathBuf = std::env::temp_dir().join(format!("openagc-mail-{name}-{}", std::process::id()));
+    let dir: PathBuf = std::env::temp_dir().join(format!("kaluta-mail-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     Db::open(&dir.join("mail.sqlite")).unwrap()
 }
@@ -154,6 +154,31 @@ fn a_metadata_update_keeps_an_existing_body_and_attachments() {
     assert_eq!(messages[0].attachments[0].filename, "report.pdf");
     assert_eq!(messages[0].body_state, mail_domain::BodyState::Full);
     assert_consistent(&db);
+}
+
+#[test]
+fn a_body_stored_before_the_rename_reads_with_the_new_schemes_and_quote_class() {
+    let db = open("body-rename");
+    let mut full = msg("m1", "a", 1_000, &["INBOX"]);
+    full.body = Some(Body {
+        text_plain: None,
+        html_sanitized: Some(
+            "<p>Hi <img src=\"openagc-cid:logo@x\"> <img src=\"openagc-remote:https://t.example/p.gif\"></p>\
+             <details class=\"openagc-quote\"><summary>•••</summary>said openagc-cid: once</details>"
+                .into(),
+        ),
+        has_remote_images: true,
+    });
+    write(&db, move |w| w.upsert_message(&full).unwrap());
+    let body = db.read_blocking(|c| read::get_body(c, &MessageId::new("m1"))).unwrap().unwrap();
+    assert_eq!(
+        body.html_sanitized.as_deref(),
+        Some(
+            "<p>Hi <img src=\"kaluta-cid:logo@x\"> <img src=\"kaluta-remote:https://t.example/p.gif\"></p>\
+             <details class=\"kaluta-quote\"><summary>•••</summary>said openagc-cid: once</details>"
+        ),
+        "only attribute values change, never the message's own words"
+    );
 }
 
 #[test]

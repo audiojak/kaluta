@@ -12,7 +12,7 @@ use writing_guide::Target;
 
 /// What mailbox mode tells an agent about a draft: the body rendered from
 /// Markdown to HTML and read back as text (`mail_mime`), checked against
-/// the guide for its recipients and type (`openagc-core`'s `draft_target`).
+/// the guide for its recipients and type (`kaluta-core`'s `draft_target`).
 fn mailbox_mode_check(to: &[&str], message_type: &str, body: &str) -> Vec<String> {
     let target = Target {
         recipients: to.iter().map(|t| t.to_lowercase()).collect(),

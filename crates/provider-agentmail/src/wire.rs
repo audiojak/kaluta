@@ -1,4 +1,4 @@
-//! AgentMail REST types: only the fields OpenAGC reads. Answers are plain
+//! AgentMail REST types: only the fields Kaluta reads. Answers are plain
 //! JSON objects; errors are `{name, code, message, fix, docs}`.
 
 use std::collections::HashMap;

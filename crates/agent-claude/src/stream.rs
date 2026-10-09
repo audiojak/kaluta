@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use agent_api::{AgentEvent, Usage, shorten, summarize_args};
 use serde_json::Value;
 
-const TOOL_PREFIX: &str = "mcp__openagc__";
+const TOOL_PREFIX: &str = "mcp__kaluta__";
 
 #[derive(Debug, Default)]
 pub struct StreamParser {
@@ -54,15 +54,15 @@ impl StreamParser {
             return vec![];
         }
         self.mcp_checked = true;
-        // Without the openagc server the agent can do nothing useful.
+        // Without the kaluta server the agent can do nothing useful.
         let servers = v["mcp_servers"].as_array().cloned().unwrap_or_default();
-        let ours = servers.iter().find(|s| s["name"] == "openagc");
+        let ours = servers.iter().find(|s| s["name"] == "kaluta");
         match ours.and_then(|s| s["status"].as_str()) {
             Some("connected") | None if ours.is_some() => vec![],
             Some(status) => {
-                vec![AgentEvent::TextDelta { text: format!("⚠︎ OpenAGC's mail tools did not start ({status}). ") }]
+                vec![AgentEvent::TextDelta { text: format!("⚠︎ Kaluta's mail tools did not start ({status}). ") }]
             }
-            None => vec![AgentEvent::TextDelta { text: "⚠︎ OpenAGC's mail tools are not available. ".into() }],
+            None => vec![AgentEvent::TextDelta { text: "⚠︎ Kaluta's mail tools are not available. ".into() }],
         }
     }
 
@@ -152,11 +152,11 @@ impl StreamParser {
 mod tests {
     use super::*;
 
-    const TRANSCRIPT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-1","tools":["mcp__openagc__mail_search"],"mcp_servers":[{"name":"openagc","status":"connected"}]}
+    const TRANSCRIPT: &str = r#"{"type":"system","subtype":"init","session_id":"sess-1","tools":["mcp__kaluta__mail_search"],"mcp_servers":[{"name":"kaluta","status":"connected"}]}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me search."}}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Looking"}}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" now."}}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"Looking now."},{"type":"tool_use","id":"toolu_1","name":"mcp__openagc__mail_search","input":{"query":"is:unread","limit":5}}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Looking now."},{"type":"tool_use","id":"toolu_1","name":"mcp__kaluta__mail_search","input":{"query":"is:unread","limit":5}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"{\"threads\":[]}"}]}]}}
 {"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Nothing unread."}}}
 {"type":"result","subtype":"success","is_error":false,"result":"Nothing unread.","session_id":"sess-1","total_cost_usd":0.0123,"usage":{"input_tokens":1200,"output_tokens":40,"cache_read_input_tokens":800}}"#;
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(e, vec![AgentEvent::TurnFailed { message: "The agent reached its turn limit.".into() }]);
 
         let mut p = StreamParser::default();
-        let e = p.parse_line(r#"{"type":"system","subtype":"init","session_id":"s","mcp_servers":[{"name":"openagc","status":"failed"}]}"#);
+        let e = p.parse_line(r#"{"type":"system","subtype":"init","session_id":"s","mcp_servers":[{"name":"kaluta","status":"failed"}]}"#);
         assert!(matches!(&e[..], [AgentEvent::TextDelta { text }] if text.contains("failed")));
         assert!(p.parse_line("not json").is_empty());
     }

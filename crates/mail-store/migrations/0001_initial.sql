@@ -1,4 +1,4 @@
--- OpenAGC mail store, schema v1 (spec §6.2).
+-- Kaluta mail store, schema v1 (spec §6.2).
 -- One database per account. Provider ids (Gmail's) are unique text columns;
 -- integer rowids are local and never leave the store.
 --

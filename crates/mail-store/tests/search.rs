@@ -22,7 +22,7 @@ struct M<'a> {
 }
 
 fn open() -> Db {
-    let dir = std::env::temp_dir().join(format!("openagc-search-{}-{}", std::process::id(), fastid()));
+    let dir = std::env::temp_dir().join(format!("kaluta-search-{}-{}", std::process::id(), fastid()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let messages = vec![

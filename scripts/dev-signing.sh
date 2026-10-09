@@ -4,7 +4,7 @@
 # Ad-hoc signed builds ("-") get a new identity on every build, and the
 # login Keychain ties each stored secret (the Gmail sign-in) to the exact
 # binary that wrote it, so every rebuild lost access to the account. A
-# self-signed "OpenAGC Dev" certificate keeps the identity constant across
+# self-signed "Kaluta Dev" certificate keeps the identity constant across
 # builds. It lives only in your login Keychain and is trusted only for code
 # signing; it does not let the app pass Gatekeeper on other Macs.
 #
@@ -18,7 +18,7 @@
 # codesign to use the key: choose "Always Allow".
 set -euo pipefail
 
-NAME="OpenAGC Dev"
+NAME="Kaluta Dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 XCCONFIG="$ROOT/macos/Local.xcconfig"
@@ -46,7 +46,7 @@ if [[ -n "$APPLE_DEV" && "${1:-}" != "--self-signed" ]]; then
 // rebuilds.
 CODE_SIGN_IDENTITY = Apple Development
 DEVELOPMENT_TEAM = $TEAM
-OPENAGC_ENTITLEMENTS = OpenAGC/Resources/OpenAGC-dev.entitlements
+KALUTA_ENTITLEMENTS = Kaluta/Resources/Kaluta-dev.entitlements
 EOF2
   echo "dev-signing: using \"$APPLE_DEV\" (team $TEAM); wrote $XCCONFIG"
   exit 0
@@ -67,9 +67,9 @@ else
   # A throwaway password: the .p12 exists only for this import.
   # macOS's importer only reads the older PKCS#12 ciphers.
   "$OPENSSL" pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -out "$TMP/dev.p12" -passout pass:openagc -name "$NAME" \
+    -out "$TMP/dev.p12" -passout pass:kaluta -name "$NAME" \
     -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
-  security import "$TMP/dev.p12" -k "$KEYCHAIN" -P openagc \
+  security import "$TMP/dev.p12" -k "$KEYCHAIN" -P kaluta \
     -T /usr/bin/codesign -T /usr/bin/security >/dev/null
   # Trust it for code signing in your user trust settings only. macOS may
   # ask for your login password here.
@@ -83,6 +83,6 @@ cat > "$XCCONFIG" <<EOF
 // a stable identity so the Keychain keeps trusting them across rebuilds.
 CODE_SIGN_IDENTITY = $NAME
 // No Team ID on a self-signed identity, so library validation must be off.
-OPENAGC_ENTITLEMENTS = OpenAGC/Resources/OpenAGC-dev.entitlements
+KALUTA_ENTITLEMENTS = Kaluta/Resources/Kaluta-dev.entitlements
 EOF
 echo "dev-signing: wrote $XCCONFIG"

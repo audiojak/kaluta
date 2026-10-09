@@ -127,7 +127,7 @@ impl Db {
     fn start_writer(&self, writer: Connection) -> StoreResult<()> {
         let (tx, rx) = mpsc::channel::<WriteJob>();
         thread::Builder::new()
-            .name("openagc-store-writer".into())
+            .name("kaluta-store-writer".into())
             .spawn(move || {
                 let mut conn = writer;
                 while let Ok(job) = rx.recv() {
@@ -306,12 +306,12 @@ fn check_version(conn: &Connection) -> StoreResult<()> {
     match current.cmp(&target) {
         std::cmp::Ordering::Equal => Ok(()),
         std::cmp::Ordering::Less => Err(StoreError::Version(format!(
-            "this mailbox's store is from an older OpenAGC (schema v{current}; this build reads v{target}); \
-             open OpenAGC once to update it"
+            "this mailbox's store is from an older Kaluta (schema v{current}; this build reads v{target}); \
+             open Kaluta once to update it"
         ))),
         std::cmp::Ordering::Greater => Err(StoreError::Version(format!(
-            "this mailbox's store is from a newer OpenAGC (schema v{current}; this build reads v{target}); \
-             update OpenAGC"
+            "this mailbox's store is from a newer Kaluta (schema v{current}; this build reads v{target}); \
+             update Kaluta"
         ))),
     }
 }
@@ -321,7 +321,7 @@ fn migrate(conn: &mut Connection) -> StoreResult<()> {
     let target = schema_version();
     if current > target {
         return Err(StoreError::Migration(format!(
-            "database schema v{current} is newer than this build (v{target}); update OpenAGC"
+            "database schema v{current} is newer than this build (v{target}); update Kaluta"
         )));
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
@@ -353,14 +353,14 @@ mod tests {
     use super::*;
 
     pub(crate) fn temp_db_path(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("openagc-store-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-store-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir.join("mail.sqlite")
     }
 
     #[test]
     fn two_openers_at_once_both_migrate_cleanly() {
-        let dir = std::env::temp_dir().join(format!("openagc-store-race-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-store-race-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("mail.sqlite");
         for _ in 0..5 {
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn an_existing_store_of_another_schema_is_refused_in_words() {
-        for (version, says) in [(3, "older OpenAGC"), (999, "newer OpenAGC")] {
+        for (version, says) in [(3, "older Kaluta"), (999, "newer Kaluta")] {
             let path = temp_db_path(&format!("existing-v{version}"));
             Db::open(&path).unwrap().close();
             let c = Connection::open(&path).unwrap();

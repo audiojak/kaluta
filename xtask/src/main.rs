@@ -6,6 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+mod brand;
 mod mcp_docs;
 mod perf;
 
@@ -19,12 +20,13 @@ fn main() -> Result<()> {
         .unwrap_or(perf::DEFAULT_MESSAGES);
     match cmd.as_str() {
         "check-deps" => check_deps(),
+        "check-brand" => brand::run(&root),
         "fixture" => perf::fixture(&root, messages, std::env::args().any(|a| a == "--force")).map(|_| ()),
         "perf" => perf::perf(&root, messages),
         "mcp-docs" => mcp_docs::run(&root, std::env::args().any(|a| a == "--check")),
         _ => {
             eprintln!(
-                "usage: cargo xtask <command>\n\ncommands:\n  check-deps              enforce the crate dependency direction (spec §3)\n  fixture [--messages N]  build the synthetic performance mailbox (default 100k)\n  perf [--messages N]     measure store operations against §1.3 budgets\n  mcp-docs [--check]      render the agent tool catalog to docs/mcp.md"
+                "usage: cargo xtask <command>\n\ncommands:\n  check-deps              enforce the crate dependency direction (spec §3)\n  check-brand             the old name only where it reads what it wrote (ADR 0017)\n  fixture [--messages N]  build the synthetic performance mailbox (default 100k)\n  perf [--messages N]     measure store operations against §1.3 budgets\n  mcp-docs [--check]      render the agent tool catalog to docs/mcp.md"
             );
             std::process::exit(2);
         }
@@ -57,7 +59,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         // server (spec §10.6): pure, no internal crates.
         ("rules-crypto", &[][..]),
         (
-            "openagc-core",
+            "kaluta-core",
             &[
                 "mail-domain",
                 "mail-store",
@@ -78,7 +80,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ),
         // Mailbox mode runs the core headless when the app is closed
         // (spec §10.1), reusing its tools rather than copying them.
-        ("openagc-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "openagc-core"][..]),
+        ("kaluta-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "kaluta-core"][..]),
         // The rules server for cloud agents (spec §10.6): the guide's
         // renderers and nothing of the app's (never the core or a store).
         ("rules-server", &["writing-guide", "rules-crypto"][..]),
@@ -89,7 +91,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
 
 /// Crates allowed to depend on UniFFI directly (spec §3: only the core
 /// knows about UniFFI; the bindgen binary is tooling).
-const UNIFFI_ALLOWED: &[&str] = &["openagc-core", "uniffi-bindgen-swift"];
+const UNIFFI_ALLOWED: &[&str] = &["kaluta-core", "uniffi-bindgen-swift"];
 
 /// Crates held to a fixed list of external dependencies, so they stay pure:
 /// the writing guide's check and renderers run in the rules server, which
@@ -139,7 +141,7 @@ fn check_deps() -> Result<()> {
                 errors.push(format!("{name} must stay pure: {dep_name} is not among its allowed dependencies"));
             }
             if dep_name == "uniffi" && !UNIFFI_ALLOWED.contains(&name) {
-                errors.push(format!("{name} must not depend on uniffi; only openagc-core exports to Swift"));
+                errors.push(format!("{name} must not depend on uniffi; only kaluta-core exports to Swift"));
             }
         }
     }

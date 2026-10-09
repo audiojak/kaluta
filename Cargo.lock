@@ -1461,6 +1461,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "kaluta-core"
+version = "0.1.0"
+dependencies = [
+ "agent-api",
+ "agent-claude",
+ "agent-codex",
+ "agent-mcp",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures",
+ "getrandom 0.3.4",
+ "mail-domain",
+ "mail-mime",
+ "mail-store",
+ "mail-sync",
+ "permissions",
+ "provider-agentmail",
+ "provider-api",
+ "provider-gmail",
+ "provider-primitive",
+ "reqwest 0.12.28",
+ "rules-crypto",
+ "rules-server",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uniffi",
+ "wiremock",
+ "writing-guide",
+ "zeroize",
+]
+
+[[package]]
+name = "kaluta-mcp"
+version = "0.1.0"
+dependencies = [
+ "agent-mcp",
+ "async-trait",
+ "futures",
+ "kaluta-core",
+ "mail-store",
+ "permissions",
+ "rmcp",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1739,59 +1792,6 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
-
-[[package]]
-name = "openagc-core"
-version = "0.1.0"
-dependencies = [
- "agent-api",
- "agent-claude",
- "agent-codex",
- "agent-mcp",
- "async-trait",
- "axum",
- "chrono",
- "futures",
- "getrandom 0.3.4",
- "mail-domain",
- "mail-mime",
- "mail-store",
- "mail-sync",
- "permissions",
- "provider-agentmail",
- "provider-api",
- "provider-gmail",
- "provider-primitive",
- "reqwest 0.12.28",
- "rules-crypto",
- "rules-server",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uniffi",
- "wiremock",
- "writing-guide",
- "zeroize",
-]
-
-[[package]]
-name = "openagc-mcp"
-version = "0.1.0"
-dependencies = [
- "agent-mcp",
- "async-trait",
- "futures",
- "mail-store",
- "openagc-core",
- "permissions",
- "rmcp",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "parking"

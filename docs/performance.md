@@ -9,7 +9,7 @@ records how they are measured and the latest numbers.
 cargo xtask fixture   # once: synthetic mailbox, ~130k messages, cached in build/fixtures
 cargo run --release -p xtask -- perf   # store operations, fails if a budget is missed
                                        # (`cargo xtask perf` is the same in a debug build)
-scripts/test-macos.sh test -only-testing:OpenAGCTests/PerformanceTests   # through the FFI
+scripts/test-macos.sh test -only-testing:KalutaTests/PerformanceTests   # through the FFI
 ```
 
 The Swift tests skip themselves when the fixture is absent.

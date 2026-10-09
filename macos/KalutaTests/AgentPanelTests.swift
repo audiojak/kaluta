@@ -1,0 +1,237 @@
+import Foundation
+import Testing
+@testable import Kaluta
+
+@MainActor
+struct AgentPanelTests {
+    private func demo() async throws -> AppModel {
+        let dir = CoreClient.testScratch()
+        let model = AppModel(core: try CoreClient(dataDirectory: dir))
+        await model.start(openDemo: true)
+        return model
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { throw Timeout() }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+    private struct Timeout: Error {}
+
+    @Test func testsNeverSeeTheRealAgents() async throws {
+        #expect(CoreClient.isRunningTests)
+        let model = try await demo()
+        await model.agent.loadProviders()
+        #expect(model.agent.providers.first?.status == .ready(version: "1.0.0 (fake)"))
+    }
+
+    @Test func askingOpensTheInspectorAndStreamsTheReply() async throws {
+        let model = try await demo()
+        await model.agent.loadProviders()
+        #expect(model.agent.isProviderReady)
+        await model.askAgent("What needs a reply?")
+        #expect(model.agent.isPresented)
+        try await waitUntil { !model.agent.isRunning && model.agent.entries.count >= 2 }
+        #expect(model.agent.entries.map(\.kind) == [.prompt("What needs a reply?"), .reply("You said: What needs a reply?")])
+        #expect(model.agent.lastUsage == "15 tokens")
+        model.agent.newConversation()
+        #expect(model.agent.entries.isEmpty && model.agent.sessionID == nil)
+    }
+
+    @Test func eventsBuildACompactTranscript() async throws {
+        let model = try await demo()
+        let agent = model.agent
+        await agent.loadProviders()
+        await agent.send("find it", context: .empty)
+        try await waitUntil { !agent.isRunning }
+        let session = try #require(agent.sessionID)
+        let thread = try #require(model.threads.rows.first)
+        await agent.apply(sessionID: session, events: [
+            .turnStarted,
+            .thinkingDelta(text: "Hmm"),
+            .toolCallStarted(callId: "c1", tool: "mail_search", argsSummary: "query: is:unread"),
+            .toolCallFinished(callId: "c1", ok: true, summary: "{}"),
+            .textDelta(text: "Here "),
+            .textDelta(text: "they are."),
+            .resultsAvailable(threadIds: [thread.id, "missing"], title: "Needs a reply"),
+            .turnFailed(message: "Oops"),
+        ])
+        let kinds = agent.entries.dropFirst(2).map(\.kind)
+        #expect(kinds[0] == .thinking("Hmm"))
+        #expect(kinds[1] == .tool(name: "mail_search", arguments: "query: is:unread", state: .succeeded, summary: "{}"))
+        #expect(kinds[2] == .reply("Here they are."))
+        if case let .results(title, rows) = kinds[3] {
+            #expect(rows.map(\.id) == [thread.id])
+            #expect(title == "Needs a reply")
+        } else {
+            Issue.record("\(kinds[3])")
+        }
+        #expect(kinds[4] == .error("Oops"))
+        #expect(!agent.isRunning)
+        // Events for another session are ignored.
+        await agent.apply(sessionID: "other", events: [.textDelta(text: "nope")])
+        #expect(agent.entries.count == 7)
+    }
+
+    @Test func resultsAreHeadedByTheAgentsTitleAndTheCount() {
+        #expect(AgentStore.resultsHeading("Needs a reply", count: 12) == "Needs a reply · 12 conversations")
+        #expect(AgentStore.resultsHeading(nil, count: 1) == "1 conversation")
+        #expect(AgentStore.resultsHeading("", count: 3) == "3 conversations")
+    }
+
+    /// Spec §9.7: with nothing selected, the list on screen is the context;
+    /// a selection narrows it and the row ids are left out.
+    @Test func theVisibleListIsTheContextUntilSomethingIsSelected() async throws {
+        let model = try await demo()
+        try await waitUntil { !model.threads.rows.isEmpty }
+        model.selectedThreadID = nil
+        model.selectedThreadIDs = []
+        let whole = model.promptContext
+        #expect(whole.mailboxId == "INBOX")
+        #expect(whole.visibleThreadIds == model.threads.rows.prefix(AppModel.maxVisibleInPrompt).map(\.id))
+        #expect(whole.selectedThreadIds.isEmpty)
+        let description = try #require(whole.listDescription)
+        #expect(description.hasPrefix("Inbox"), "\(description)")
+        #expect(description.contains("\(model.threads.rows.count) conversations"), "\(description)")
+
+        model.listFilters = [.unread]
+        #expect(model.listDescription?.hasSuffix("Unread") == true, "\(model.listDescription ?? "")")
+        model.listFilters = []
+
+        let first = try #require(model.threads.rows.first)
+        model.selectedThreadID = first.id
+        let narrowed = model.promptContext
+        #expect(narrowed.selectedThreadIds == [first.id])
+        #expect(narrowed.visibleThreadIds.isEmpty, "a selection narrows the context")
+        #expect(narrowed.listDescription != nil, "the list is still described")
+
+        model.selectedThreadID = nil
+        model.selectedMailboxID = AppModel.tasksMailboxID
+        #expect(model.listDescription == nil, "the Tasks page shows no mail list")
+        #expect(model.promptContext.visibleThreadIds.isEmpty)
+    }
+
+    @Test func toolTitlesAreFriendly() {
+        #expect(AgentStore.toolTitle("mail_search") == "Searched mail")
+        #expect(AgentStore.toolTitle("mail_future_tool") == "mail_future_tool")
+        #expect(AgentStore.usageText(input: 10, output: 5, cost: 0.0123) == "15 tokens · $0.012")
+        #expect(AgentStore.usageText(input: nil, output: nil, cost: nil) == nil)
+    }
+}
+
+@MainActor
+struct AgentHistoryTests {
+    @Test func aConversationCanBeReopenedAndContinued() async throws {
+        let dir = CoreClient.testScratch()
+        let model = AppModel(core: try CoreClient(dataDirectory: dir))
+        await model.start(openDemo: true)
+        let agent = model.agent
+        await agent.loadProviders()
+        await model.askAgent("first question")
+        var deadline = ContinuousClock.now + .seconds(5)
+        while agent.isRunning || agent.entries.count < 2 {
+            guard ContinuousClock.now < deadline else { Issue.record("timed out"); return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        let original = try #require(agent.sessionID)
+        agent.newConversation()
+        try await Task.sleep(for: .milliseconds(100))
+        await agent.loadHistory()
+        let stored = try #require(agent.history.first)
+        #expect(stored.title == "first question")
+
+        await agent.open(stored)
+        #expect(agent.entries.map(\.kind) == [.prompt("first question"), .reply("You said: first question")])
+        #expect(agent.resumeID == original && agent.sessionID == nil)
+
+        await model.askAgent("second")
+        deadline = ContinuousClock.now + .seconds(5)
+        while agent.isRunning || agent.entries.count < 4 {
+            guard ContinuousClock.now < deadline else { Issue.record("timed out"); return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(agent.sessionID == original, "the same conversation continues")
+        #expect(agent.entries.last?.kind == .reply("You said: second"))
+    }
+}
+
+@MainActor
+struct ApprovalCardTests {
+    @Test func proposalsBecomeCardsAndResolveFromTheirEvent() async throws {
+        let dir = CoreClient.testScratch()
+        let model = AppModel(core: try CoreClient(dataDirectory: dir))
+        await model.start(openDemo: true)
+        let agent = model.agent
+        await agent.loadProviders()
+        await model.askAgent("hi")
+        let session = try #require(agent.sessionID)
+        agent.isPresented = false
+        await agent.apply(sessionID: session, events: [
+            .actionProposed(actionId: 7, tool: "mail_send", summary: "Send “Lunch” to sam@example.org", draftId: 3),
+            .actionProposed(actionId: 8, tool: "mail_delete", summary: "Move 2 threads to Trash", draftId: nil),
+        ])
+        #expect(agent.isPresented, "a proposal brings the panel up")
+        #expect(agent.pendingProposals == [7, 8])
+        await agent.apply(sessionID: session, events: [.actionResolved(actionId: 7, approved: true)])
+        #expect(agent.pendingProposals == [8])
+        // Resolving an action the core no longer waits on marks it declined.
+        agent.resolve(8, approve: true)
+        #expect(agent.pendingProposals.isEmpty)
+        let states = agent.entries.compactMap { entry -> AgentStore.Entry.ProposalState? in
+            if case let .proposal(_, _, _, _, state) = entry.kind { state } else { nil }
+        }
+        #expect(states == [.approved, .rejected])
+    }
+
+    @Test func anApprovedHeldSendCanBeTakenBackFromItsCard() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: true)
+        let agent = model.agent
+        await agent.loadProviders()
+        await model.askAgent("hi")
+        let session = try #require(agent.sessionID)
+        let until = Date().addingTimeInterval(0.6)
+        var asked = 0
+        agent.heldUntil = { draftID in
+            asked += 1
+            return draftID == 3 && asked > 1 ? until : nil // held a moment after the approval
+        }
+        var tookBack: [Int64] = []
+        agent.takeBack = { draftID in tookBack.append(draftID); return true }
+        await agent.apply(sessionID: session, events: [
+            .actionProposed(actionId: 7, tool: "mail_send", summary: "Send “Lunch”", draftId: 3),
+            .actionProposed(actionId: 8, tool: "mail_forward", summary: "Forward “Plan”", draftId: 4),
+        ])
+        await agent.apply(sessionID: session, events: [.actionResolved(actionId: 7, approved: true)])
+        let state = { (id: Int64) -> AgentStore.Entry.ProposalState? in
+            for entry in agent.entries {
+                if case let .proposal(actionID, _, _, _, state) = entry.kind, actionID == id { return state }
+            }
+            return nil
+        }
+        let deadline = ContinuousClock.now + .seconds(3)
+        while state(7) == .approved, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(state(7) == .sending(until: until))
+        agent.undoSend(7)
+        agent.undoSend(7) // a second click does nothing
+        #expect(state(7) == .undoing)
+        while state(7) != .takenBack, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(state(7) == .takenBack)
+        #expect(tookBack == [3])
+
+        // A send that is not held (no delay, the demo) just reads Approved,
+        // and one whose hold ran out goes back to Approved too.
+        agent.holdLookup = .milliseconds(200)
+        await agent.apply(sessionID: session, events: [.actionResolved(actionId: 8, approved: true)])
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(state(8) == .approved)
+    }
+
+    @Test func reviewRequestsCarryTheAgentName() {
+        #expect(ComposeRequest.review(draftID: 3, agent: "Claude").agentName == "Claude")
+        #expect(ComposeRequest.draft(id: 3).agentName == nil)
+    }
+}

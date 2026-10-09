@@ -1,0 +1,25 @@
+[package]
+name = "kaluta-mcp"
+description = "Kaluta's MCP stdio server: the shim for the app's agent sessions, and mailbox mode for agents outside it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+agent-mcp.workspace = true
+kaluta-core.workspace = true
+rmcp.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "io-std"] }
+
+[dev-dependencies]
+futures = "0.3"
+mail-store.workspace = true
+async-trait.workspace = true
+permissions.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process", "time"] }
+
+[lints]
+workspace = true

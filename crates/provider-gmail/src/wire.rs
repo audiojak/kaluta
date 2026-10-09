@@ -1,4 +1,4 @@
-//! Gmail REST types (only the fields OpenAGC reads) and the `format=full`
+//! Gmail REST types (only the fields Kaluta reads) and the `format=full`
 //! payload walker.
 
 use base64::Engine;

@@ -2,7 +2,7 @@
 # Add a release to appcast.xml (spec §16). Run by the release maintainer (or
 # release.yml) after the DMG is notarized and stapled:
 #
-#   scripts/make-appcast.sh build/release/OpenAGC-0.2.0.dmg 0.2.0 [--beta]
+#   scripts/make-appcast.sh build/release/Kaluta-0.2.0.dmg 0.2.0 [--beta]
 #
 # The EdDSA private key comes from the maintainer's Keychain (created once
 # with generate_keys), or from $SPARKLE_ED_PRIVATE_KEY in CI. The DMG is
@@ -40,8 +40,8 @@ fi
 printf '%s' "${SPARKLE_ED_PRIVATE_KEY:-}" | "$tools/generate_appcast" \
   ${key_args[@]+"${key_args[@]}"} \
   ${channel[@]+"${channel[@]}"} \
-  --download-url-prefix "https://github.com/audiojak/openagc/releases/download/v${version}/" \
-  --link "https://github.com/audiojak/openagc" \
+  --download-url-prefix "https://github.com/audiojak/kaluta/releases/download/v${version}/" \
+  --link "https://github.com/audiojak/kaluta" \
   --maximum-versions 10 \
   "$work"
 

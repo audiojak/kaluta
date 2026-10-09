@@ -66,7 +66,7 @@ impl BucketColor {
         }
     }
 
-    /// A background from Gmail's label palette, for OpenAGC's own tools.
+    /// A background from Gmail's label palette, for Kaluta's own tools.
     pub fn gmail_hex(self) -> &'static str {
         match self {
             BucketColor::Red => "#fb4c2f",
@@ -144,7 +144,7 @@ pub struct Limits {
     pub get_thread_only_when_needed: bool,
 }
 
-/// What OpenAGC knows about the routine's cloud copy.
+/// What Kaluta knows about the routine's cloud copy.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloudState {
     pub trigger_id: Option<String>,

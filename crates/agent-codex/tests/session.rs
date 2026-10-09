@@ -28,7 +28,7 @@ fn config(d: &Path, resume: Option<&str>) -> SessionConfig {
     SessionConfig {
         session_id: SessionId("agent-3".into()),
         mcp: McpEndpoint {
-            shim_path: "/Apps/OpenAGC.app/Contents/MacOS/openagc-mcp".into(),
+            shim_path: "/Apps/Kaluta.app/Contents/MacOS/kaluta-mcp".into(),
             socket_path: "/tmp/s.sock".into(),
         },
         system_prompt_file: d.join("prompt.md"),
@@ -100,14 +100,14 @@ async fn a_turn_maps_codex_notifications_and_refuses_approval_requests() {
     let argv: Vec<String> = serde_json::from_str(&std::fs::read_to_string(d.join("argv.json")).unwrap()).unwrap();
     assert_eq!(&argv[..3], ["app-server", "--listen", "stdio://"]);
     let joined = argv.join(" ");
-    assert!(joined.contains(r#"mcp_servers={openagc={command="/Apps/OpenAGC.app/Contents/MacOS/openagc-mcp",args=["--socket","/tmp/s.sock","--session","agent-3"]"#), "{joined}");
+    assert!(joined.contains(r#"mcp_servers={kaluta={command="/Apps/Kaluta.app/Contents/MacOS/kaluta-mcp",args=["--socket","/tmp/s.sock","--session","agent-3"]"#), "{joined}");
     assert!(joined.contains(r#"sandbox_mode="read-only""#) && joined.contains(r#"approval_policy="never""#));
     assert!(joined.contains("--disable shell_tool") && joined.contains("--disable unified_exec"));
 
     let got = received(&d);
     assert_eq!(got[0]["method"], "initialize");
     assert!(got[0].get("jsonrpc").is_none(), "the protocol omits the jsonrpc field");
-    assert_eq!(got[0]["params"]["clientInfo"]["name"], "openagc");
+    assert_eq!(got[0]["params"]["clientInfo"]["name"], "kaluta");
     assert_eq!(got[1]["method"], "initialized");
     assert_eq!(got[2]["method"], "thread/start");
     assert_eq!(got[2]["params"]["sandbox"], "read-only");

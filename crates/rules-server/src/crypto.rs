@@ -143,12 +143,12 @@ impl NotRead {
         match self {
             Self::Unpublished => "nothing has been published to this mailbox yet",
             Self::Unreadable => {
-                "the published guide is encrypted and this agent does not have its key yet; OpenAGC gives it \
+                "the published guide is encrypted and this agent does not have its key yet; Kaluta gives it \
                  the key when it next publishes or syncs this mailbox, while it is open"
             }
             Self::PlaintextRefused => {
                 "the published guide was stored unencrypted before this server required encryption, and it serves \
-                 nothing unencrypted; OpenAGC publishes it again, encrypted, when the mailbox's guide or shared \
+                 nothing unencrypted; Kaluta publishes it again, encrypted, when the mailbox's guide or shared \
                  facts next change (or on Publish Now)"
             }
         }

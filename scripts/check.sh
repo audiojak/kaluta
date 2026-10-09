@@ -11,7 +11,7 @@ step clippy;     cargo clippy --workspace --all-targets --locked --quiet -- -D w
 step test
 # Tests make scratch data directories under the temp dir and leave them
 # (a crashed test cannot clean up); give the run its own, removed after.
-SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/openagc-tests.XXXXXX")"
+SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/kaluta-tests.XXXXXX")"
 trap 'rm -rf "$SCRATCH"' EXIT
 if ! out=$(TMPDIR="$SCRATCH/" cargo test --workspace --locked 2>&1); then
   echo "$out" | grep -E 'FAILED|panicked|^error|left:|right:' | head -40
@@ -19,6 +19,7 @@ if ! out=$(TMPDIR="$SCRATCH/" cargo test --workspace --locked 2>&1); then
 fi
 echo "$out" | awk '/^test result/ { passed += $4 } END { print passed " tests passed" }'
 step check-deps; cargo xtask check-deps
+step check-brand; cargo xtask check-brand
 step mcp-docs; cargo xtask mcp-docs --check
 step deny;       cargo deny check --hide-inclusion-graph 2>&1 | tail -1
 echo "all checks passed"

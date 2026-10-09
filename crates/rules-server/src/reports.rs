@@ -108,7 +108,7 @@ pub(crate) async fn file(state: &AppState, auth: &AgentAuth, mut a: ReportArgs) 
         return Err(ApiError::new(
             StatusCode::CONFLICT,
             "not_encrypted",
-            "this server keeps reports only for a mailbox that has published encrypted; OpenAGC does so when it \
+            "this server keeps reports only for a mailbox that has published encrypted; Kaluta does so when it \
              next publishes",
         ));
     }
@@ -162,7 +162,7 @@ pub(crate) async fn file(state: &AppState, auth: &AgentAuth, mut a: ReportArgs) 
         "report_id": id,
         "guide_check": guide_check,
         "version": check_version,
-        "message": "Queued for OpenAGC, which records it the next time it syncs this mailbox.",
+        "message": "Queued for Kaluta, which records it the next time it syncs this mailbox.",
     }))
 }
 

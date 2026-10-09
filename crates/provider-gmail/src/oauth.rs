@@ -195,13 +195,13 @@ pub async fn begin_with(
     Ok(PendingAuthorization { url: url.into(), redirect_uri, verifier: Redacted::new(verifier), state, listener })
 }
 
-const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>OpenAGC</title>\
+const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Kaluta</title>\
 <body style=\"font:15px -apple-system,system-ui;margin:4em;text-align:center\">\
-<h2>You're signed in</h2><p>You can close this window and return to OpenAGC.</p></body>";
+<h2>You're signed in</h2><p>You can close this window and return to Kaluta.</p></body>";
 
-const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>OpenAGC</title>\
+const FAILED_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Kaluta</title>\
 <body style=\"font:15px -apple-system,system-ui;margin:4em;text-align:center\">\
-<h2>Sign-in didn't complete</h2><p>Return to OpenAGC and try again.</p></body>";
+<h2>Sign-in didn't complete</h2><p>Return to Kaluta and try again.</p></body>";
 
 impl PendingAuthorization {
     /// Wait for the browser's redirect. Requests that are not the callback

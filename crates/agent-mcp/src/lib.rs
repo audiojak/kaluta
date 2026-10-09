@@ -1,9 +1,9 @@
-//! OpenAGC's MCP surface (spec §10): the tool catalog agents see, and the
-//! private socket protocol that carries tool calls from the `openagc-mcp`
+//! Kaluta's MCP surface (spec §10): the tool catalog agents see, and the
+//! private socket protocol that carries tool calls from the `kaluta-mcp`
 //! shim (spawned by the agent CLI) to the core inside the app.
 //!
 //! ```text
-//! agent CLI ──stdio/MCP──▶ openagc-mcp ──unix socket──▶ core ──▶ ToolHandler
+//! agent CLI ──stdio/MCP──▶ kaluta-mcp ──unix socket──▶ core ──▶ ToolHandler
 //! ```
 //!
 //! The shim is stateless: it lists the catalog and forwards each call with

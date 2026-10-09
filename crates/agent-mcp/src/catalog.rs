@@ -106,7 +106,7 @@ fn spec(tool: Tool) -> ToolSpec {
             ),
         ),
         Tool::PresentThreads => (
-            "Show threads to the user as a list in OpenAGC. Call it whenever the answer is a set of \
+            "Show threads to the user as a list in Kaluta. Call it whenever the answer is a set of \
              messages (which emails, who wrote, what needs a reply), instead of pasting email content \
              into your reply.",
             object(
@@ -205,8 +205,8 @@ fn spec(tool: Tool) -> ToolSpec {
     ToolSpec { tool, description, input_schema }
 }
 
-/// The tools of mailbox mode (`openagc-mcp --mailbox <address>`, spec
-/// §10.1): what an agent outside OpenAGC gets for one agent mailbox. Reads
+/// The tools of mailbox mode (`kaluta-mcp --mailbox <address>`, spec
+/// §10.1): what an agent outside Kaluta gets for one agent mailbox. Reads
 /// are the in-app tools of the same name; sending is one call that writes
 /// and sends, so an outside agent needs no draft ids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -272,7 +272,7 @@ macro_rules! send_note {
     () => {
         " It is checked against the mailbox's writing guide first, and what it breaks comes back as \
          guide_check. The mailbox's setting decides the rest: it is sent at once, or the user approves it first \
-         (rejected_by_user if not). When OpenAGC is closed the message is queued and goes out when OpenAGC next \
+         (rejected_by_user if not). When Kaluta is closed the message is queued and goes out when Kaluta next \
          opens."
     };
 }

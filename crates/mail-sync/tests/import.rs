@@ -7,7 +7,7 @@ use mail_store::{Db, consistency, read};
 use mail_sync::import::{ImportOptions, ImportStats, import_mbox, most_frequent_address};
 
 fn store(name: &str) -> Db {
-    let dir = std::env::temp_dir().join(format!("openagc-import-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-import-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     Db::open(&dir.join("mail.sqlite")).unwrap()
 }

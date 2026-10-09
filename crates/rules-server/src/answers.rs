@@ -3,7 +3,7 @@
 //! REST alike, from a mailbox's newest snapshot. The answers are mailbox mode's
 //! (§10.1, `docs/mcp.md`) plus the snapshot's `version` and
 //! `published_at`, the time the guide is "as of". There is no `send_mode`:
-//! a cloud agent sends through the service, not through OpenAGC.
+//! a cloud agent sends through the service, not through Kaluta.
 
 use serde::Deserialize;
 use serde_json::{Value, json};

@@ -1,0 +1,412 @@
+import Foundation
+import Observation
+import os
+
+/// The agent panel's state (spec §14.6): which agent, the live session, and
+/// a compact transcript built from the core's batched events.
+@MainActor
+@Observable
+final class AgentStore {
+    static let providerKey = "agentProvider"
+
+    /// One line (or block) of the transcript.
+    struct Entry: Identifiable, Equatable {
+        enum Kind: Equatable {
+            case prompt(String)
+            case reply(String)
+            case thinking(String)
+            case tool(name: String, arguments: String, state: ToolState, summary: String)
+            /// Threads the agent presented, under its heading.
+            case results(title: String?, rows: [ThreadRow])
+            case error(String)
+            /// Something the agent wants to do that the user decides.
+            case proposal(actionID: Int64, tool: String, summary: String, draftID: Int64?, state: ProposalState)
+        }
+
+        enum ProposalState: Equatable {
+            case pending, approved, rejected
+            /// An approved send held for Undo Send (spec §14.6a): it can be
+            /// taken back until then.
+            case sending(until: Date)
+            /// Taking the send back.
+            case undoing
+            /// The user took the send back; the draft is open to review.
+            case takenBack
+        }
+
+        enum ToolState: Equatable { case running, succeeded, failed }
+
+        let id: Int
+        var kind: Kind
+    }
+
+    private(set) var providers: [AgentProviderInfo] = []
+    var providerID: String {
+        didSet { defaults.set(providerID, forKey: Self.providerKey) }
+    }
+    private(set) var sessionID: String?
+    /// A stored conversation being shown; resumed on the next prompt.
+    private(set) var resumeID: String?
+    private(set) var history: [AgentSessionInfo] = []
+    private(set) var entries: [Entry] = []
+    private(set) var isRunning = false
+    var isPresented = false
+    /// Tokens and cost of the last turn, for the footer.
+    private(set) var lastUsage: String?
+
+    @ObservationIgnored private let core: CoreClient?
+    /// When a draft's send stops being held, if it is (set by the model
+    /// for this store's account).
+    @ObservationIgnored var heldUntil: (@MainActor (Int64) async -> Date?)?
+    /// Take a held send back and reopen its draft; false if it already went.
+    @ObservationIgnored var takeBack: (@MainActor (Int64) async -> Bool)?
+    /// How long to look for an approved send's hold: the core sends it
+    /// just after the approval.
+    @ObservationIgnored var holdLookup: Duration = .seconds(3)
+    @ObservationIgnored private var nextID = 0
+    @ObservationIgnored private var toolEntries: [String: Int] = [:]
+    @ObservationIgnored private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "agent")
+
+    @ObservationIgnored private let defaults: UserDefaults
+
+    init(core: CoreClient?, defaults: UserDefaults = CoreClient.appDefaults()) {
+        self.core = core
+        self.defaults = defaults
+        providerID = defaults.string(forKey: Self.providerKey) ?? "claude-code"
+    }
+
+    var provider: AgentProviderInfo? { providers.first { $0.id == providerID } }
+    var providerName: String { provider?.name ?? (providerID == "codex" ? "Codex" : "Claude") }
+
+    var isProviderReady: Bool {
+        if case .ready = provider?.status { return true }
+        return false
+    }
+
+    func loadProviders(refresh: Bool = false) async {
+        guard let core else { return }
+        providers = await core.agentProviders(refresh: refresh)
+        // Fall back to whichever agent is ready.
+        if !isProviderReady, let ready = providers.first(where: { if case .ready = $0.status { true } else { false } }) {
+            providerID = ready.id
+        }
+    }
+
+    /// When the last look found no agent ready, look again, afresh: the
+    /// answer was taken once at launch and may have been a bad moment. At
+    /// most every few seconds.
+    func ensureReady() async {
+        guard !isProviderReady, Date().timeIntervalSince(lastReadyCheck) > 5 else { return }
+        lastReadyCheck = Date()
+        await loadProviders(refresh: true)
+    }
+
+    @ObservationIgnored private var lastReadyCheck = Date.distantPast
+
+    /// Why the agent cannot be asked yet, in a line; nil when it can.
+    var notReadyReason: String? {
+        Self.notReadyReason(for: provider, named: providerName, loaded: !providers.isEmpty)
+    }
+
+    static func notReadyReason(for provider: AgentProviderInfo?, named name: String, loaded: Bool) -> String? {
+        guard let provider else { return loaded ? "\(name) isn't set up" : "Looking for \(name)…" }
+        switch provider.status {
+        case .ready: return nil
+        case .notInstalled: return "\(provider.name) isn't installed"
+        case .notAuthenticated: return "\(provider.name) needs you to sign in"
+        case .updateRequired: return "\(provider.name) needs an update"
+        case let .error(message): return "\(provider.name) couldn't be checked: \(message)"
+        }
+    }
+
+    // MARK: Prompts
+
+    func send(_ prompt: String, context: PromptContextInfo) async {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let core, !text.isEmpty, !isRunning else { return }
+        isPresented = true
+        append(.prompt(text))
+        isRunning = true
+        do {
+            if sessionID == nil {
+                if let resumeID {
+                    sessionID = try await core.resumeAgentSession(resumeID)
+                    self.resumeID = nil
+                } else {
+                    sessionID = try await core.startAgentSession(provider: providerID)
+                }
+            }
+            try await core.sendAgentPrompt(sessionID!, text, context: context)
+        } catch {
+            isRunning = false
+            append(.error(error.message))
+        }
+    }
+
+    func cancel() {
+        guard let core, let sessionID, isRunning else { return }
+        Task { try? await core.cancelAgentTurn(sessionID) }
+    }
+
+    /// Start over: close the session and clear the transcript.
+    func newConversation() {
+        if let core, let sessionID { Task { try? await core.closeAgentSession(sessionID) } }
+        sessionID = nil
+        resumeID = nil
+        entries = []
+        toolEntries = [:]
+        isRunning = false
+        lastUsage = nil
+    }
+
+    // MARK: Approvals
+
+    var pendingProposals: [Int64] {
+        entries.compactMap {
+            if case let .proposal(id, _, _, _, .pending) = $0.kind { id } else { nil }
+        }
+    }
+
+    /// The user's answer. The card updates at once; the core confirms with
+    /// `actionResolved`.
+    func resolve(_ actionID: Int64, approve: Bool) {
+        guard let core else { return }
+        do {
+            try core.resolveAgentAction(actionID, approve: approve)
+            decide(actionID, approved: approve)
+        } catch {
+            // Already decided (timed out, or the session ended).
+            setProposal(actionID, .rejected)
+        }
+    }
+
+    func approveAll() {
+        for id in pendingProposals { resolve(id, approve: true) }
+    }
+
+    /// A pending proposal was decided (here or by the core's event, which
+    /// may come second). An approved send or forward that the core holds
+    /// for Undo Send shows "Sending… Undo" until it goes.
+    private func decide(_ actionID: Int64, approved: Bool) {
+        guard let (tool, draftID, state) = proposal(actionID), state == .pending else { return }
+        setProposal(actionID, approved ? .approved : .rejected)
+        if approved, tool == "mail_send" || tool == "mail_forward", let draftID { watchHold(actionID, draftID: draftID) }
+    }
+
+    private func watchHold(_ actionID: Int64, draftID: Int64) {
+        guard let heldUntil else { return }
+        let lookup = holdLookup
+        Task {
+            let deadline = ContinuousClock.now + lookup
+            var until = await heldUntil(draftID)
+            while until == nil, ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(100))
+                until = await heldUntil(draftID)
+            }
+            // Not held (no delay, or the demo, which sends at once).
+            guard let until, proposal(actionID)?.state == .approved else { return }
+            setProposal(actionID, .sending(until: until))
+            try? await Task.sleep(for: .seconds(max(0, until.timeIntervalSinceNow)))
+            if case .sending = proposal(actionID)?.state { setProposal(actionID, .approved) } // not while undoing
+        }
+    }
+
+    /// Take back an approved send while it is held: the draft returns to
+    /// editing and opens in the review composer.
+    func undoSend(_ actionID: Int64) {
+        guard let (_, draftID, state) = proposal(actionID), case .sending = state, let draftID, let takeBack else { return }
+        setProposal(actionID, .undoing) // a second click does nothing
+        Task {
+            let tookBack = await takeBack(draftID)
+            if proposal(actionID)?.state == .undoing { setProposal(actionID, tookBack ? .takenBack : .approved) }
+        }
+    }
+
+    private func proposal(_ actionID: Int64) -> (tool: String, draftID: Int64?, state: Entry.ProposalState)? {
+        for entry in entries {
+            if case let .proposal(id, tool, _, draft, state) = entry.kind, id == actionID { return (tool, draft, state) }
+        }
+        return nil
+    }
+
+    private func setProposal(_ actionID: Int64, _ state: Entry.ProposalState) {
+        guard let i = entries.firstIndex(where: {
+            if case let .proposal(id, _, _, _, _) = $0.kind { id == actionID } else { false }
+        }), case let .proposal(id, tool, summary, draft, _) = entries[i].kind else { return }
+        entries[i].kind = .proposal(actionID: id, tool: tool, summary: summary, draftID: draft, state: state)
+    }
+
+    // MARK: History
+
+    func loadHistory() async {
+        guard let core else { return }
+        history = (try? await core.agentHistory()) ?? []
+    }
+
+    /// Show a stored conversation; the next prompt continues it.
+    func open(_ conversation: AgentSessionInfo) async {
+        guard let core, let items = try? await core.agentTranscript(conversation.sessionId) else { return }
+        newConversation()
+        providerID = conversation.provider
+        resumeID = conversation.sessionId
+        isPresented = true
+        for item in items {
+            switch item {
+            case let .prompt(text): append(.prompt(text))
+            case let .event(event): await ingest([event])
+            }
+        }
+        isRunning = false
+    }
+
+    // MARK: Events
+
+    func apply(sessionID: String, events: [AgentEventInfo]) async {
+        guard sessionID == self.sessionID else { return }
+        await ingest(events)
+    }
+
+    /// An agent outside Kaluta working in an agent mailbox (spec §10.1):
+    /// its session ids start with `outside-`.
+    static func isOutside(_ sessionID: String) -> Bool { sessionID.hasPrefix("outside-") }
+
+    /// "Claude Code (outside Kaluta)" for the activity log; nil for the app's own sessions.
+    static func outsideAgentName(_ sessionID: String) -> String? {
+        guard isOutside(sessionID) else { return nil }
+        let rest = sessionID.dropFirst("outside-".count)
+        let label = rest.split(separator: "-").dropLast().joined(separator: "-")
+        let name = switch label {
+        case "claude-code", "claude": "Claude Code"
+        case let l where l.hasPrefix("codex"): "Codex"
+        case "": "An agent"
+        default: label
+        }
+        return "\(name) (outside Kaluta)"
+    }
+
+    /// Only an outside agent's proposals reach the panel: the approval is
+    /// the user's whichever panel shows it. The core's summary says who
+    /// asks, from which mailbox, and what the message says; its draft is
+    /// in the agent mailbox's store, which this window may not show, so
+    /// the card offers no Review… and does not follow an Undo Send hold.
+    func applyOutside(_ events: [AgentEventInfo]) async {
+        for event in events {
+            switch event {
+            case let .actionProposed(actionID, tool, summary, _):
+                await ingest([.actionProposed(actionId: actionID, tool: tool, summary: summary, draftId: nil)])
+            case .actionResolved: await ingest([event])
+            default: break
+            }
+        }
+    }
+
+    private func ingest(_ events: [AgentEventInfo]) async {
+        for event in events {
+            switch event {
+            case .sessionStarted, .sessionEnded:
+                break
+            case .turnStarted:
+                isRunning = true
+            case let .textDelta(text):
+                appendText(text, thinking: false)
+            case let .thinkingDelta(text):
+                appendText(text, thinking: true)
+            case let .toolCallStarted(callID, tool, args):
+                toolEntries[callID] = append(.tool(name: tool, arguments: args, state: .running, summary: ""))
+            case let .toolCallFinished(callID, ok, summary):
+                if let id = toolEntries[callID], let i = entries.firstIndex(where: { $0.id == id }),
+                   case let .tool(name, args, _, _) = entries[i].kind {
+                    entries[i].kind = .tool(name: name, arguments: args, state: ok ? .succeeded : .failed, summary: summary)
+                }
+            case let .actionProposed(actionID, tool, summary, draftID):
+                append(.proposal(actionID: actionID, tool: tool, summary: summary, draftID: draftID, state: .pending))
+                isPresented = true
+            case let .actionResolved(actionID, approved):
+                decide(actionID, approved: approved)
+            case let .resultsAvailable(threadIDs, title):
+                let rows = await rows(for: threadIDs)
+                if !rows.isEmpty { append(.results(title: title, rows: rows)) }
+            case let .turnCompleted(input, output, cost):
+                isRunning = false
+                lastUsage = Self.usageText(input: input, output: output, cost: cost)
+            case let .turnFailed(message):
+                isRunning = false
+                append(.error(message))
+            }
+        }
+    }
+
+    private func rows(for ids: [String]) async -> [ThreadRow] {
+        guard let core else { return [] }
+        var out: [ThreadRow] = []
+        for id in ids {
+            if let detail = try? await core.thread(id) { out.append(detail.thread) }
+        }
+        return out
+    }
+
+    @discardableResult
+    private func append(_ kind: Entry.Kind) -> Int {
+        nextID += 1
+        entries.append(Entry(id: nextID, kind: kind))
+        return nextID
+    }
+
+    /// Consecutive deltas extend the last reply (or thinking) block.
+    private func appendText(_ text: String, thinking: Bool) {
+        if let last = entries.indices.last {
+            switch (entries[last].kind, thinking) {
+            case let (.reply(existing), false):
+                entries[last].kind = .reply(existing + text)
+                return
+            case let (.thinking(existing), true):
+                entries[last].kind = .thinking(existing + text)
+                return
+            default:
+                break
+            }
+        }
+        append(thinking ? .thinking(text) : .reply(text))
+    }
+
+    static func usageText(input: UInt64?, output: UInt64?, cost: Double?) -> String? {
+        var parts: [String] = []
+        if let input, let output { parts.append("\(input + output) tokens") }
+        if let cost { parts.append(String(format: "$%.3f", cost)) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "Searched mail" rather than "mail_search".
+    /// Over the agent's results: its title and the count, "Needs a reply ·
+    /// 12 conversations"; the count alone without a title.
+    static func resultsHeading(_ title: String?, count: Int) -> String {
+        let conversations = count == 1 ? "1 conversation" : "\(count.formatted()) conversations"
+        guard let title, !title.isEmpty else { return conversations }
+        return "\(title) · \(conversations)"
+    }
+
+    static func toolTitle(_ name: String) -> String {
+        switch name {
+        case "mail_search": "Searched mail"
+        case "mail_get_thread": "Read a thread"
+        case "mail_get_message": "Read a message"
+        case "mail_list_labels": "Listed labels"
+        case "facts_lookup": "Looked up your facts"
+        case "mail_get_attachment_text": "Read an attachment"
+        case "mail_present_threads": "Showed threads"
+        case "mail_create_draft": "Wrote a draft"
+        case "mail_update_draft": "Edited a draft"
+        case "mail_archive": "Archived"
+        case "mail_mark_read": "Marked read"
+        case "mail_mark_unread": "Marked unread"
+        case "mail_add_label": "Added a label"
+        case "mail_remove_label": "Removed a label"
+        case "mail_create_label": "Created a label"
+        case "guide_rules": "Read the writing guide"
+        case "mail_send": "Asked to send"
+        case "mail_forward": "Asked to forward"
+        case "mail_delete": "Asked to delete"
+        default: name
+        }
+    }
+}

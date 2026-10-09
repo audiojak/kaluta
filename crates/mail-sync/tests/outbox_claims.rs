@@ -28,9 +28,9 @@ use provider_api::{
 const NOW: i64 = 1_790_000_000_000;
 const OPS: usize = 1_000;
 
-const CHILD_MODE: &str = "OPENAGC_CLAIMS_CHILD";
-const CHILD_DB: &str = "OPENAGC_CLAIMS_DB";
-const CHILD_OUT: &str = "OPENAGC_CLAIMS_OUT";
+const CHILD_MODE: &str = "KALUTA_CLAIMS_CHILD";
+const CHILD_DB: &str = "KALUTA_CLAIMS_DB";
+const CHILD_OUT: &str = "KALUTA_CLAIMS_OUT";
 
 struct Quiet;
 impl SyncObserver for Quiet {
@@ -154,7 +154,7 @@ impl MailProvider for Counting {
 }
 
 fn store_path(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("openagc-claims-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-claims-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("mail.sqlite")

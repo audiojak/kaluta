@@ -25,14 +25,14 @@ if [[ -z "$identity" ]]; then
 fi
 
 (cd macos && xcodegen generate --quiet)
-xcodebuild -project macos/OpenAGC.xcodeproj -scheme OpenAGC -configuration Release \
+xcodebuild -project macos/Kaluta.xcodeproj -scheme Kaluta -configuration Release \
   -derivedDataPath "$app_build" -destination 'platform=macOS,arch=arm64' \
   MARKETING_VERSION="$version" \
   CODE_SIGN_IDENTITY="${identity:--}" \
   OTHER_CODE_SIGN_FLAGS="--timestamp --options runtime" \
   build > "$out/xcodebuild.log" 2>&1 || { grep -E "error:" "$out/xcodebuild.log" | head -20; exit 1; }
 
-app="$app_build/Build/Products/Release/OpenAGC.app"
+app="$app_build/Build/Products/Release/Kaluta.app"
 [[ -d "$app" ]] || { echo "release: build produced no app" >&2; exit 1; }
 
 # Re-sign inside out so every nested Mach-O carries the hardened runtime and
@@ -49,13 +49,13 @@ while IFS= read -r -d '' f; do
   if file "$f" | grep -q "Mach-O" && [[ "$f" != *.xpc/* && "$f" != *.app/Contents/MacOS/* ]]; then sign "$f"; fi
 done < <(find "$app/Contents/Frameworks" -type f -perm -u+x -print0)
 for fw in "$app"/Contents/Frameworks/*.framework; do sign "$fw"; done
-sign "$app/Contents/MacOS/openagc-mcp"
-entitlements=macos/OpenAGC/Resources/OpenAGC.entitlements
+sign "$app/Contents/MacOS/kaluta-mcp"
+entitlements=macos/Kaluta/Resources/Kaluta.entitlements
 if [[ -z "$identity" ]]; then
   # Ad-hoc signatures never share a team, so library validation would stop
   # the app loading its own frameworks. Dry runs only: a Developer ID build
   # keeps library validation on.
-  entitlements=$(mktemp -t openagc-adhoc).plist
+  entitlements=$(mktemp -t kaluta-adhoc).plist
   /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$entitlements" >/dev/null
 fi
 sign --entitlements "$entitlements" "$app"
@@ -76,12 +76,12 @@ codesign --verify --deep --strict "$app"
 [[ $fail -eq 0 ]] || exit 1
 echo "release: hardened runtime on every Mach-O"
 
-name="OpenAGC-$version"
+name="Kaluta-$version"
 dmg="$out/$name.dmg"
 stage=$(mktemp -d)
 cp -R "$app" "$stage/"
 ln -s /Applications "$stage/Applications"
-hdiutil create -volname "OpenAGC $version" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
+hdiutil create -volname "Kaluta $version" -srcfolder "$stage" -ov -format UDZO "$dmg" >/dev/null
 rm -rf "$stage"
 [[ -n "$identity" ]] && codesign --sign "$identity" --timestamp "$dmg"
 

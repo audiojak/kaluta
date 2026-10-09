@@ -1,5 +1,5 @@
 //! Gmail REST client (spec §7). A thin `reqwest` client over the dozen
-//! endpoints OpenAGC uses; auth, retries and quota come from
+//! endpoints Kaluta uses; auth, retries and quota come from
 //! `provider_api::HttpClient`.
 //!
 //! Message fetches go out as individual requests multiplexed over HTTP/2

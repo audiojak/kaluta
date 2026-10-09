@@ -8,7 +8,7 @@ use std::process::Command;
 use common::{MAILBOX, snapshot, start};
 
 fn rules(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_openagc-rules")).args(args).output().expect("run openagc-rules")
+    Command::new(env!("CARGO_BIN_EXE_kaluta-rules")).args(args).output().expect("run kaluta-rules")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -43,4 +43,19 @@ async fn backup_forget_and_healthcheck() {
     assert!(rules(&["healthcheck", "--listen", listen]).status.success());
     assert!(!rules(&["healthcheck", "--listen", "127.0.0.1:9"]).status.success());
     assert_eq!(rules(&["--bogus"]).status.code(), Some(2));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_setting_under_its_name_from_before_the_rename_still_works_with_a_warning() {
+    let s = start(0, None).await;
+    s.registered().await;
+    let out = Command::new(env!("CARGO_BIN_EXE_kaluta-rules"))
+        .args(["forget-mailbox", MAILBOX])
+        .env_remove("KALUTA_RULES_DATA_DIR")
+        .env("OPENAGC_RULES_DATA_DIR", &s.dir)
+        .output()
+        .expect("run kaluta-rules");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("OPENAGC_RULES_DATA_DIR is the old name of KALUTA_RULES_DATA_DIR"), "{err}");
 }

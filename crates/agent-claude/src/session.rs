@@ -1,6 +1,6 @@
 //! Claude Code sessions (spec §9.3): one `claude -p` subprocess per turn,
 //! continued with `--resume <session_id>`. The CLI gets no built-in tools
-//! and no MCP servers but OpenAGC's, and may only call those.
+//! and no MCP servers but Kaluta's, and may only call those.
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -56,11 +56,11 @@ pub(crate) struct ClaudeSession {
     turn: Option<Turn>,
 }
 
-/// The `--mcp-config` value: OpenAGC's shim, bound to this session.
+/// The `--mcp-config` value: Kaluta's shim, bound to this session.
 pub fn mcp_config(cfg: &SessionConfig) -> String {
     serde_json::json!({
         "mcpServers": {
-            "openagc": {
+            "kaluta": {
                 "type": "stdio",
                 "command": cfg.mcp.shim_path,
                 "args": ["--socket", cfg.mcp.socket_path, "--session", cfg.session_id.as_str()],
@@ -86,7 +86,7 @@ pub fn turn_args(cfg: &SessionConfig, prompt: &str, resume: Option<&str>) -> Vec
         "--tools",
         "",
         "--allowedTools",
-        "mcp__openagc__*",
+        "mcp__kaluta__*",
         // Anything not pre-allowed is denied, never prompted.
         "--permission-mode",
         "dontAsk",

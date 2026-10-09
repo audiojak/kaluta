@@ -67,7 +67,7 @@ fn outgoing(to: &[&str], subject: &str, in_reply_to: Option<&str>, date: Millis)
         to: to.iter().map(|t| EmailAddress::new(None, t)).collect(),
         subject: subject.into(),
         html: "<p>Hello there</p>".into(),
-        message_id: "q1@openagc.local".into(),
+        message_id: "q1@kaluta.local".into(),
         in_reply_to: in_reply_to.map(str::to_owned),
         references: in_reply_to.map(|p| vec![p.to_owned()]).unwrap_or_default(),
         date,
@@ -203,17 +203,17 @@ async fn an_inbox_key_needs_a_verified_organisation() {
     Mock::given(method("POST"))
         .and(path(inbox_path("api-keys")))
         .and(header("authorization", "Bearer verified"))
-        .and(body_partial_json(json!({ "name": "OpenAGC Scout" })))
+        .and(body_partial_json(json!({ "name": "Kaluta Scout" })))
         .respond_with(ok(json!({
-            "api_key_id": "k1", "api_key": "am_us_inbox", "prefix": "am_us", "name": "OpenAGC Scout",
+            "api_key_id": "k1", "api_key": "am_us_inbox", "prefix": "am_us", "name": "Kaluta Scout",
             "created_at": "2026-10-08T00:00:00Z", "inbox_id": INBOX
         })))
         .mount(&server)
         .await;
     let service = service(&server);
-    let refused = service.mailbox_api_key("unverified", INBOX, "OpenAGC Scout").await.unwrap_err();
+    let refused = service.mailbox_api_key("unverified", INBOX, "Kaluta Scout").await.unwrap_err();
     assert_eq!(refused, ProviderError::Forbidden(NOT_VERIFIED_YET.into()));
-    let key = service.mailbox_api_key("verified", INBOX, "OpenAGC Scout").await.unwrap();
+    let key = service.mailbox_api_key("verified", INBOX, "Kaluta Scout").await.unwrap();
     assert_eq!(key.expose(), "am_us_inbox");
 }
 
@@ -455,7 +455,7 @@ async fn a_send_becomes_agentmails_json_with_the_outbox_header_and_an_idempotenc
         .and(header("authorization", "Bearer am_us_test"))
         .and(body_partial_json(json!({
             "to": ["ada@example.com", "bo@example.com"], "subject": "Plans",
-            "headers": { "X-OpenAGC-Outbox-Id": "q1@openagc.local" }
+            "headers": { "X-Kaluta-Outbox-Id": "q1@kaluta.local" }
         })))
         .respond_with(ok(json!({ "message_id": "sent-1", "thread_id": "t9" })))
         .expect(1)
@@ -519,7 +519,7 @@ async fn after_a_timeout_the_retry_finds_the_mail_that_went_out_and_never_sends_
         ] })))
         .mount(&server)
         .await;
-    listed["headers"] = json!({ "x-openagc-outbox-id": "q1@openagc.local" });
+    listed["headers"] = json!({ "x-kaluta-outbox-id": "q1@kaluta.local" });
     Mock::given(method("GET")).and(path(inbox_path("messages/sent-1"))).respond_with(ok(listed)).mount(&server).await;
 
     let p = provider(&server).with_send_timeout(Duration::from_millis(200)).unwrap();
@@ -548,7 +548,7 @@ async fn another_process_finds_a_fresh_send_a_dead_one_left_by_its_header() {
     let server = MockServer::start().await;
     let mut listed = item("sent-1", "t9", &["sent"], "2026-10-08T10:00:00Z");
     listed["subject"] = json!("Plans");
-    listed["headers"] = json!({ "x-openagc-outbox-id": "q1@openagc.local" });
+    listed["headers"] = json!({ "x-kaluta-outbox-id": "q1@kaluta.local" });
     Mock::given(method("GET"))
         .and(path(inbox_path("messages")))
         .respond_with(ok(json!({ "count": 1, "messages": [listed] })))
@@ -561,8 +561,23 @@ async fn another_process_finds_a_fresh_send_a_dead_one_left_by_its_header() {
     // Another send (another Message-ID) is not taken for it.
     let other = String::from_utf8(outgoing(&["ada@example.com"], "Other", None, now_millis()))
         .unwrap()
-        .replace("q1@openagc.local", "q2@openagc.local");
+        .replace("q1@kaluta.local", "q2@kaluta.local");
     assert_eq!(provider(&server).already_sent(other.as_bytes()).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn a_send_left_in_flight_before_the_rename_is_found_by_its_old_header() {
+    let server = MockServer::start().await;
+    let mut listed = item("sent-1", "t9", &["sent"], "2026-10-08T10:00:00Z");
+    listed["subject"] = json!("Plans");
+    listed["headers"] = json!({ "x-openagc-outbox-id": "q1@kaluta.local" });
+    Mock::given(method("GET"))
+        .and(path(inbox_path("messages")))
+        .respond_with(ok(json!({ "count": 1, "messages": [listed] })))
+        .mount(&server)
+        .await;
+    let raw = outgoing(&["ada@example.com"], "Plans", None, now_millis());
+    assert_eq!(provider(&server).already_sent(&raw).await.unwrap(), Some(MessageId::new("sent-1")));
 }
 
 #[tokio::test]
@@ -623,7 +638,7 @@ async fn sends_say_why_agentmail_refused_them_and_oversized_ones_are_not_tried()
         to: vec![EmailAddress::new(None, "ada@example.com")],
         subject: "Big".into(),
         html: "<p>x</p>".into(),
-        message_id: "big@openagc.local".into(),
+        message_id: "big@kaluta.local".into(),
         attachments: vec![mail_mime::OutgoingAttachment {
             filename: "big.bin".into(),
             mime_type: "application/octet-stream".into(),

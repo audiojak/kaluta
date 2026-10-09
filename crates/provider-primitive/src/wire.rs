@@ -1,4 +1,4 @@
-//! Primitive REST types: only the fields OpenAGC reads. Every answer is an
+//! Primitive REST types: only the fields Kaluta reads. Every answer is an
 //! envelope `{"success": true, "data": ..., "meta": ...}`.
 
 use serde::Deserialize;

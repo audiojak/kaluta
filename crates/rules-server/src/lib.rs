@@ -1,4 +1,4 @@
-//! `openagc-rules`, the rules server for cloud agents (spec §10.6, ADR
+//! `kaluta-rules`, the rules server for cloud agents (spec §10.6, ADR
 //! 0016): it serves agent mailboxes' published writing guides and shared
 //! facts to agents that cannot reach the app (a Claude cloud routine, an
 //! agent on another machine).
@@ -29,7 +29,7 @@
 //! logs a token or what a snapshot says; request logs name the token's id.
 //!
 //! It depends on `writing-guide` for the guide's renderers and the
-//! snapshot format, and never on `openagc-core` (`cargo xtask check-deps`).
+//! snapshot format, and never on `kaluta-core` (`cargo xtask check-deps`).
 
 pub mod answers;
 mod crypto;
@@ -59,7 +59,7 @@ use limit::RateLimiter;
 pub const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 /// The realm in `WWW-Authenticate`.
-const REALM: &str = "openagc-rules";
+const REALM: &str = "kaluta-rules";
 
 /// How the server runs; read from flags and the environment by `main`.
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ pub struct Config {
     /// pushed an encrypted one (the project-hosted server sets it).
     pub require_encryption: bool,
     /// Proxies whose `X-Forwarded-For` names the client (addresses or CIDR
-    /// networks, `OPENAGC_RULES_TRUSTED_PROXY`): limits for strangers count
+    /// networks, `KALUTA_RULES_TRUSTED_PROXY`): limits for strangers count
     /// per client address, which behind a proxy is otherwise the proxy's.
     pub trusted_proxies: Vec<String>,
 }

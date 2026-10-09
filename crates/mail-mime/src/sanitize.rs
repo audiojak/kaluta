@@ -6,10 +6,10 @@
 //!   `<style>`, `<meta>`, `<base>` and comments are removed.
 //! - Inline `style` is kept but filtered to properties that cannot load a
 //!   URL or escape the message frame.
-//! - Remote images become `openagc-remote:<original url>`: the reader's
+//! - Remote images become `kaluta-remote:<original url>`: the reader's
 //!   scheme handler decides per message whether to fetch them (without
 //!   cookies or referrer) or show nothing, so "Load images" needs no
-//!   re-sanitizing. `cid:` becomes `openagc-cid:`; small `data:` images stay.
+//!   re-sanitizing. `cid:` becomes `kaluta-cid:`; small `data:` images stay.
 //! - Links keep only http, https and mailto, open externally, and carry
 //!   `rel="noopener noreferrer"`.
 
@@ -23,8 +23,8 @@ use ammonia::{Builder, UrlRelative};
 /// re-sanitized lazily.
 pub const SANITIZER_VERSION: u32 = 1;
 
-pub const REMOTE_SCHEME: &str = "openagc-remote";
-pub const CID_SCHEME: &str = "openagc-cid";
+pub const REMOTE_SCHEME: &str = "kaluta-remote";
+pub const CID_SCHEME: &str = "kaluta-cid";
 
 /// Largest inline `data:` image kept, in bytes of URL.
 const MAX_DATA_URL: usize = 256 * 1024;

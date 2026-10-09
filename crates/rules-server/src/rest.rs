@@ -241,8 +241,8 @@ async fn publish(
         if state.require_encryption {
             return Err(invalid(
                 "encryption_required",
-                "this server stores only encrypted snapshots (OPENAGC_RULES_REQUIRE_ENCRYPTION); turn encryption \
-                 on in OpenAGC"
+                "this server stores only encrypted snapshots (KALUTA_RULES_REQUIRE_ENCRYPTION); turn encryption \
+                 on in Kaluta"
                     .into(),
             ));
         }
@@ -314,7 +314,7 @@ async fn publish(
             StatusCode::UNPROCESSABLE_ENTITY,
             "encryption_required",
             "this mailbox publishes encrypted on this server and does not go back to plaintext; turn encryption on \
-             in OpenAGC (or have the operator forget the mailbox to start over)",
+             in Kaluta (or have the operator forget the mailbox to start over)",
         )),
         Pushed::Mismatch(v) => Err(ApiError::new(
             StatusCode::PRECONDITION_FAILED,
@@ -641,7 +641,7 @@ async fn connect_code(
             StatusCode::CONFLICT,
             "oauth_off",
             "this server signs agents in with OAuth only when its operator sets its public URL \
-             (OPENAGC_RULES_PUBLIC_URL); use an agent token instead",
+             (KALUTA_RULES_PUBLIC_URL); use an agent token instead",
         ));
     }
     let name = agent_name(&parse_json(&body)?)?;

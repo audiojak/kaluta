@@ -110,7 +110,7 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     assert_eq!(r.status(), StatusCode::NO_CONTENT);
     let r = s.get(Some(&agent), &format!("/v1/m/{MAILBOX}/guide")).await;
     assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(r.headers()["www-authenticate"], "Bearer realm=\"openagc-rules\", error=\"invalid_token\"");
+    assert_eq!(r.headers()["www-authenticate"], "Bearer realm=\"kaluta-rules\", error=\"invalid_token\"");
     let r = s
         .http
         .post(s.url("/mcp"))
@@ -129,7 +129,7 @@ async fn publish_then_read_through_rest_and_mcp_until_revoked() {
     assert_eq!(
         r.headers()["www-authenticate"],
         format!(
-            "Bearer realm=\"openagc-rules\", resource_metadata=\"{}/.well-known/oauth-protected-resource\", \
+            "Bearer realm=\"kaluta-rules\", resource_metadata=\"{}/.well-known/oauth-protected-resource\", \
              scope=\"rules\"",
             s.base
         ),

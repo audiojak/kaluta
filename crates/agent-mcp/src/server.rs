@@ -78,7 +78,7 @@ impl Drop for McpSocket {
 const MAX_SOCKET_PATH: usize = 103;
 
 /// `preferred` (created 0700), or — when a socket path there would be too
-/// long, as with a long home directory — `/tmp/openagc-<uid>`, used only
+/// long, as with a long home directory — `/tmp/kaluta-<uid>`, used only
 /// if it is a real directory owned by us.
 fn socket_dir(preferred: &Path) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(preferred)?;
@@ -88,7 +88,7 @@ fn socket_dir(preferred: &Path) -> std::io::Result<PathBuf> {
         return Ok(preferred.to_owned());
     }
     let uid = std::fs::metadata(preferred)?.uid();
-    let short = PathBuf::from(format!("/tmp/openagc-{uid}"));
+    let short = PathBuf::from(format!("/tmp/kaluta-{uid}"));
     match std::fs::create_dir(&short) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -207,7 +207,7 @@ mod tests {
     fn long_directories_fall_back_to_a_private_tmp_dir() {
         let base = std::env::temp_dir().join("x".repeat(80));
         let dir = socket_dir(&base).unwrap();
-        assert!(dir.to_string_lossy().starts_with("/tmp/openagc-"), "{dir:?}");
+        assert!(dir.to_string_lossy().starts_with("/tmp/kaluta-"), "{dir:?}");
         let meta = std::fs::metadata(&dir).unwrap();
         assert_eq!(meta.permissions().mode() & 0o777, 0o700);
         let short = std::env::temp_dir().join("s");

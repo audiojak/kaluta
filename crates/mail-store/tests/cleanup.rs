@@ -12,7 +12,7 @@ const DAY: i64 = 86_400_000;
 const NOW: i64 = 1_791_460_800_000;
 
 fn open(name: &str) -> Db {
-    let dir: PathBuf = std::env::temp_dir().join(format!("openagc-cleanup-{name}-{}", std::process::id()));
+    let dir: PathBuf = std::env::temp_dir().join(format!("kaluta-cleanup-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     Db::open(&dir.join("mail.sqlite")).unwrap()
 }

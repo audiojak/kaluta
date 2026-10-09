@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Build openagc-core and lay it out for Xcode (spec §4.1):
+# Build kaluta-core and lay it out for Xcode (spec §4.1):
 #   1. cargo build the static library
 #   2. generate Swift bindings, C header and modulemap with uniffi-bindgen-swift
 #   3. install them under build/core/, rewriting only files whose content changed
 #
 # Output (gitignored):
-#   build/core/include/   openagc_coreFFI.h + module.modulemap  (SWIFT_INCLUDE_PATHS)
-#   build/core/lib/       libopenagc_core.a                     (LIBRARY_SEARCH_PATHS)
-#   build/core/swift/     openagc_core.swift                    (compiled into OpenAGCCore)
-#   build/core/bin/       openagc-mcp                           (copied into Contents/MacOS)
+#   build/core/include/   kaluta_coreFFI.h + module.modulemap  (SWIFT_INCLUDE_PATHS)
+#   build/core/lib/       libkaluta_core.a                     (LIBRARY_SEARCH_PATHS)
+#   build/core/swift/     kaluta_core.swift                    (compiled into KalutaCore)
+#   build/core/bin/       kaluta-mcp                           (copied into Contents/MacOS)
 #
 # Xcode reads these paths directly at compile/link time. An XCFramework is
 # deliberately not used for development builds: Xcode copies XCFramework
@@ -31,10 +31,10 @@ fi
 
 TARGET=aarch64-apple-darwin
 OUT="$ROOT/build/core"
-LIB="$ROOT/target/$TARGET/$PROFILE/libopenagc_core.a"
-MODULE=openagc_coreFFI
+LIB="$ROOT/target/$TARGET/$PROFILE/libkaluta_core.a"
+MODULE=kaluta_coreFFI
 
-CARGO_FLAGS=(--package openagc-core --package openagc-mcp --target "$TARGET" --locked)
+CARGO_FLAGS=(--package kaluta-core --package kaluta-mcp --target "$TARGET" --locked)
 [[ "$PROFILE" == "release" ]] && CARGO_FLAGS+=(--release)
 
 # Pin the SDK and deployment target so C dependencies (bundled SQLite)
@@ -56,7 +56,7 @@ BINDGEN=(cargo run --quiet --locked --package uniffi-bindgen-swift --)
   --modulemap-filename module.modulemap "$LIB" "$STAGE/include"
 cp "$LIB" "$STAGE/lib/"
 # The MCP shim agent CLIs spawn (spec §10.1); the app bundles it.
-cp "$ROOT/target/$TARGET/$PROFILE/openagc-mcp" "$STAGE/bin/"
+cp "$ROOT/target/$TARGET/$PROFILE/kaluta-mcp" "$STAGE/bin/"
 
 # Install only what changed, so unchanged builds stay incremental.
 changed=0

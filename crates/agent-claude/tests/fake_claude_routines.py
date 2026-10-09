@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# A fake `claude` for OpenAGC's RemoteTrigger tests. It records how it was
+# A fake `claude` for Kaluta's RemoteTrigger tests. It records how it was
 # called and answers as `claude -p --output-format json` would after the
 # model called RemoteTrigger.
 import json, os, re, sys

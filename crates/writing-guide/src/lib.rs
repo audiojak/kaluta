@@ -4,7 +4,7 @@
 //! required phrases, length), the facts drafting may use, and the snapshot
 //! an agent mailbox publishes to a rules server.
 //!
-//! Pure and synchronous: no store, no runtime, no UniFFI. `openagc-core`
+//! Pure and synchronous: no store, no runtime, no UniFFI. `kaluta-core`
 //! converts its own records into these types and calls the same functions
 //! the rules server calls on a published [`Snapshot`], so mailbox mode, the
 //! in-app tools and the server answer alike.

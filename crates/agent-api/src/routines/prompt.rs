@@ -63,7 +63,7 @@ const CHATGPT: ToolMap = ToolMap {
 };
 
 const LOCAL: ToolMap = ToolMap {
-    tools: "OpenAGC's mail tools (mail_list_labels, mail_search, mail_get_thread, mail_create_label, mail_add_label, mail_archive)",
+    tools: "Kaluta's mail tools (mail_list_labels, mail_search, mail_get_thread, mail_create_label, mail_add_label, mail_archive)",
     list_labels: "mail_list_labels",
     create_label: Some("mail_create_label"),
     search: "mail_search",

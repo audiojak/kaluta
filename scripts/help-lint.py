@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Every button, menu button, toggle and picker in the app has a hover
 description (`.help(...)`), docs/design-system.md. Exempt: menu-bar
-commands (OpenAGCApp.swift), items inside a Menu (macOS shows no tooltips
+commands (KalutaApp.swift), items inside a Menu (macOS shows no tooltips
 there, nor in context menus) and lines marked `// no-help: <why>`.
 Usage: scripts/help-lint.py [--strict]"""
 import pathlib, re, sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent / "macos" / "OpenAGC"
+ROOT = pathlib.Path(__file__).resolve().parent.parent / "macos" / "Kaluta"
 CONTROL = re.compile(r'(?<![.\w])(Button|Menu|Toggle|Picker)\s*[\(\{]')
 findings = []
 for path in sorted(ROOT.rglob("*.swift")):
     rel = path.relative_to(ROOT)
-    if rel.as_posix() == "App/OpenAGCApp.swift":
+    if rel.as_posix() == "App/KalutaApp.swift":
         continue
     lines = path.read_text().split("\n")
     menu_depth = []  # indentation of open `Menu {` blocks
@@ -51,7 +51,7 @@ for path in sorted(ROOT.rglob("*.swift")):
 # which adds an AppKit tool tip. Toolbar content keeps .help, copied onto
 # the toolbar items by ToolbarToolTips.
 TOOLBAR = {"Features/MessageView/MessageToolbar.swift", "Features/Accounts/AccountMenu.swift", "App/Snapshot.swift",
-           "Design/Components.swift", "App/OpenAGCApp.swift"}
+           "Design/Components.swift", "App/KalutaApp.swift"}
 for path in sorted(ROOT.rglob("*.swift")):
     rel = path.relative_to(ROOT).as_posix()
     if rel in TOOLBAR:

@@ -283,7 +283,7 @@ async fn connection(
     if let Ok(value) = format!("Bearer {}", key.expose()).parse() {
         request.headers_mut().insert("authorization", value);
     }
-    if let Ok(value) = concat!("OpenAGC/", env!("CARGO_PKG_VERSION")).parse() {
+    if let Ok(value) = concat!("Kaluta/", env!("CARGO_PKG_VERSION")).parse() {
         request.headers_mut().insert("user-agent", value);
     }
     let tcp =
