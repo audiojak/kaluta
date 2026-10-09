@@ -794,3 +794,28 @@ async fn a_second_agent_sends_from_its_own_address() {
     let raw = "From: Writer <scout@abc.primitive.email>\r\nTo: ada@example.com\r\nSubject: Hi\r\nMessage-ID: <w1@x>\r\n\r\nHi\r\n";
     assert_eq!(writer.send(raw.as_bytes(), None).await.unwrap(), outbound_id("o5"));
 }
+
+// A long-poll that starts before the first sync has a cursor waits for it,
+// not for its whole wait: an agent's push loop that started first would
+// otherwise hear nothing for up to 20 s (oagc-7ouz).
+#[tokio::test]
+async fn a_long_poll_without_a_cursor_returns_when_the_first_cursor_is_seen() {
+    let server = MockServer::start().await;
+    let writer = Arc::new(agent(&server, WRITER, fixed(writer_routing()), &rate_limiter()));
+    let waiting = tokio::spawn({
+        let writer = writer.clone();
+        async move { writer.wait_for_change(Duration::from_secs(600)).await }
+    });
+    tokio::task::yield_now().await;
+    writer.remember_cursor("c0");
+    let answered = tokio::time::timeout(Duration::from_secs(5), waiting).await;
+    assert!(matches!(answered, Ok(Ok(Ok(false)))), "{answered:?}");
+    // A cursor seen before the wait starts: it long-polls from it at once.
+    Mock::given(path("/changes"))
+        .and(query_param("since", "c0"))
+        .respond_with(ok(json!({ "changes": [{ "kind": "email.visible", "email_id": "i1", "thread_id": null }],
+                                 "next_cursor": "c1", "has_more": false, "baseline": false })))
+        .mount(&server)
+        .await;
+    assert!(writer.wait_for_change(Duration::from_secs(600)).await.unwrap());
+}
