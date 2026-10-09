@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct CoreClientTests {
     private func tempDir() -> URL {
@@ -15,7 +15,7 @@ struct CoreClientTests {
 
     @Test func asyncCallsRunOnTheCoreRuntime() async throws {
         let client = try CoreClient(dataDirectory: tempDir())
-        #expect(try await client.pingAsync("hi") == "pong: hi (on openagc-core)")
+        #expect(try await client.pingAsync("hi") == "pong: hi (on kaluta-core)")
     }
 
     @MainActor
@@ -24,7 +24,7 @@ struct CoreClientTests {
         async let reply = client.pingAsync("main")
         // The main actor stays free to run other work while Rust sleeps.
         await Task.yield()
-        #expect(try await reply == "pong: main (on openagc-core)")
+        #expect(try await reply == "pong: main (on kaluta-core)")
     }
 
     @Test func versionComesFromTheCrate() throws {
@@ -57,7 +57,7 @@ struct AccountRegistryFFITests {
 struct TestIsolationTests {
     @Test func testsUseTheirOwnKeychainServiceAndNeverTheRealDataDirectory() throws {
         #expect(CoreClient.isRunningTests)
-        #expect(CoreClient.defaultSecrets().service == "ai.actual.openagc.tests")
+        #expect(CoreClient.defaultSecrets().service == "org.kaluta.Kaluta.tests")
         let real = try CoreClient.defaultDataDirectory().standardizedFileURL.path
         let hostCore = (NSApp.delegate as? AppDelegate)?.model?.core
         if let dir = hostCore?.dataDirectory {

@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct AttachmentTests {
@@ -23,7 +23,7 @@ struct AttachmentTests {
         #expect(FileManager.default.fileExists(atPath: file.url.path))
         #expect(try Data(contentsOf: file.url).starts(with: Data("%PDF".utf8)))
         let quarantine = try file.url.resourceValues(forKeys: [.quarantinePropertiesKey]).quarantineProperties
-        #expect(quarantine?[kLSQuarantineAgentNameKey as String] as? String == "OpenAGC")
+        #expect(quarantine?[kLSQuarantineAgentNameKey as String] as? String == "Kaluta")
 
         let again = try await model.core!.attachmentFile(attachment.id)
         #expect(again.url == file.url, "cached")

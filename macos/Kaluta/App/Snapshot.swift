@@ -3,55 +3,55 @@ import SwiftUI
 import os
 
 /// Headless UI verification without Screen Recording permission: launched
-/// with `-OpenAGCSnapshot /path.png`, the app renders its own main window
-/// to a PNG and quits. Always pair it with `-OpenAGCDataDirectory <tmp>`
-/// and `-OpenAGCDemo YES` so no real account is opened (see
+/// with `-KalutaSnapshot /path.png`, the app renders its own main window
+/// to a PNG and quits. Always pair it with `-KalutaDataDirectory <tmp>`
+/// and `-KalutaDemo YES` so no real account is opened (see
 /// scripts/snapshot.sh). Options (all user defaults, so also launch args):
-///   -OpenAGCSnapshotDelay <seconds>     wait before capturing (default 3)
-///   -OpenAGCSnapshotSelectFirst YES     select the first thread first
-///   -OpenAGCSnapshotMailbox <id>        switch mailbox first
-///   -OpenAGCSnapshotSelectIndex <n>     select row n instead
-///   -OpenAGCSnapshotAppearance dark|light
-///   -OpenAGCSnapshotSearch <query>      type a search first
-///   -OpenAGCSnapshotCompose new|reply|forward   open a composer and
+///   -KalutaSnapshotDelay <seconds>     wait before capturing (default 3)
+///   -KalutaSnapshotSelectFirst YES     select the first thread first
+///   -KalutaSnapshotMailbox <id>        switch mailbox first
+///   -KalutaSnapshotSelectIndex <n>     select row n instead
+///   -KalutaSnapshotAppearance dark|light
+///   -KalutaSnapshotSearch <query>      type a search first
+///   -KalutaSnapshotCompose new|reply|forward   open a composer and
 ///                                       capture it instead
-///   -OpenAGCSnapshotAgentPrompt <text>  ask the agent first (use with
-///                                       -OpenAGCFakeAgents YES)
-///   -OpenAGCSnapshotProposal <summary>  show a sample approval card
-///   -OpenAGCSnapshotWidth <points>      resize the main window first
-///   -OpenAGCSnapshotArchive YES         archive the selection first (shows
+///   -KalutaSnapshotAgentPrompt <text>  ask the agent first (use with
+///                                       -KalutaFakeAgents YES)
+///   -KalutaSnapshotProposal <summary>  show a sample approval card
+///   -KalutaSnapshotWidth <points>      resize the main window first
+///   -KalutaSnapshotArchive YES         archive the selection first (shows
 ///                                       the undo notice)
-///   -OpenAGCSnapshotAgentPanel YES      open the empty agent column and
+///   -KalutaSnapshotAgentPanel YES      open the empty agent column and
 ///                                       focus the prompt (suggestions)
-///   -OpenAGCSnapshotRoutine <runner>    open the Routines window (creating
+///   -KalutaSnapshotRoutine <runner>    open the Routines window (creating
 ///                                       a routine if there is none) and
 ///                                       capture it
-///   -OpenAGCSnapshotSyncDebugger YES    open the Sync Debugger and capture it
-///   -OpenAGCSnapshotCleanUp <view>      open Clean Up on a view (sender,
+///   -KalutaSnapshotSyncDebugger YES    open the Sync Debugger and capture it
+///   -KalutaSnapshotCleanUp <view>      open Clean Up on a view (sender,
 ///                                       people, subject, mailingList, time,
 ///                                       social, promotions, size) with its
 ///                                       largest group ticked, and capture it
-///   -OpenAGCSnapshotCleanUpScope all    …on All Mail instead of the Inbox
-///   -OpenAGCSnapshotCleanUpProgress YES …with a month of sample history on
+///   -KalutaSnapshotCleanUpScope all    …on All Mail instead of the Inbox
+///   -KalutaSnapshotCleanUpProgress YES …with a month of sample history on
 ///                                       the progress card
-///   -OpenAGCSnapshotCleanUpCard YES     …capturing the progress card alone (the
+///   -KalutaSnapshotCleanUpCard YES     …capturing the progress card alone (the
 ///                                       sidebar's glass hides it)
-///   -OpenAGCSnapshotCleanUpUnsubscribe one|all  …and ask to unsubscribe from
+///   -KalutaSnapshotCleanUpUnsubscribe one|all  …and ask to unsubscribe from
 ///                                       the largest group or every group (the
 ///                                       confirmation; never confirmed)
-///   -OpenAGCSnapshotCleanUpArchive YES  …and archive the ticked group (the
+///   -KalutaSnapshotCleanUpArchive YES  …and archive the ticked group (the
 ///                                       undo notice)
-///   -OpenAGCSnapshotCleanUpLoad loading|ask  …showing every header loading
+///   -KalutaSnapshotCleanUpLoad loading|ask  …showing every header loading
 ///                                       (the band) or the question asked
 ///                                       without IMAP (the sheet), sample
 ///                                       numbers: the demo has no sync window
-///   -OpenAGCSnapshotGuide category|decisions  run a learning pass with the
+///   -KalutaSnapshotGuide category|decisions  run a learning pass with the
 ///                                       fake agent on the demo mailbox, accept
 ///                                       some proposals, and show the Writing
 ///                                       Guide (a category, or the decisions)
-///   -OpenAGCSnapshotGuidePrompt banner|invite|ready  the writing guide's
+///   -KalutaSnapshotGuidePrompt banner|invite|ready  the writing guide's
 ///                                       invitation banner, or a prompt sheet
-///   -OpenAGCSnapshotAgentMailbox create|agentmail|path|add|switcher|pane|verify|banner|agentmail-banner|domain|domain-ready|two
+///   -KalutaSnapshotAgentMailbox create|agentmail|path|add|switcher|pane|verify|banner|agentmail-banner|domain|domain-ready|two
 ///                                       the Create an Agent Mailbox sheet (its
 ///                                       service step; AgentMail's email step;
 ///                                       with a service account: add or new, and
@@ -63,7 +63,7 @@ import os
 ///                                       AgentMail one's), its
 ///                                       own-domain sheet, or a second agent on
 ///                                       the same service account (spec §7.9)
-///   -OpenAGCSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents|reports
+///   -KalutaSnapshotRulesServer sheet|status|error|facts|connect-connector|connect-token|connect-nourl|agents|reports
 ///                                       a new agent mailbox (fake service) with
 ///                                       a guide and facts: the Publish to a
 ///                                       Rules Server sheet with its list, its
@@ -74,27 +74,27 @@ import os
 ///                                       or token, or for a server without a
 ///                                       public URL; or the row's cloud agents
 ///                                       (sample answers, spec §10.6)
-///   -OpenAGCSnapshotTaskList YES        add demo tasks, show the task list
+///   -KalutaSnapshotTaskList YES        add demo tasks, show the task list
 ///                                       and select the first task
-///   -OpenAGCSnapshotTask YES            open the task dialog on the selected
-///                                       thread (use -OpenAGCFakeAgents YES)
+///   -KalutaSnapshotTask YES            open the task dialog on the selected
+///                                       thread (use -KalutaFakeAgents YES)
 ///                                       and capture the sheet
-///   -OpenAGCSnapshotMode pdf            draw through AppKit's PDF (print) path
-///   -OpenAGCSnapshotMode layer          render the CALayer tree instead
+///   -KalutaSnapshotMode pdf            draw through AppKit's PDF (print) path
+///   -KalutaSnapshotMode layer          render the CALayer tree instead
 ///                                       (catches layer-only SwiftUI content)
 @MainActor
 enum Snapshot {
-    private static let logger = Logger(subsystem: "ai.actual.openagc", category: "snapshot")
+    private static let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "snapshot")
 
     /// A snapshot run: no prompts that would cover what is captured.
-    static var isRequested: Bool { UserDefaults.standard.string(forKey: "OpenAGCSnapshot") != nil }
+    static var isRequested: Bool { UserDefaults.standard.string(forKey: "KalutaSnapshot") != nil }
 
     static func scheduleIfRequested(delegate: AppDelegate) {
         let defaults = UserDefaults.standard
-        guard let path = defaults.string(forKey: "OpenAGCSnapshot") else { return }
-        let delay = defaults.object(forKey: "OpenAGCSnapshotDelay") as? Double
-            ?? Double(defaults.string(forKey: "OpenAGCSnapshotDelay") ?? "") ?? 3
-        switch defaults.string(forKey: "OpenAGCSnapshotAppearance") {
+        guard let path = defaults.string(forKey: "KalutaSnapshot") else { return }
+        let delay = defaults.object(forKey: "KalutaSnapshotDelay") as? Double
+            ?? Double(defaults.string(forKey: "KalutaSnapshotDelay") ?? "") ?? 3
+        switch defaults.string(forKey: "KalutaSnapshotAppearance") {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         case "light": NSApp.appearance = NSAppearance(named: .aqua)
         default: break
@@ -108,7 +108,7 @@ enum Snapshot {
             // Some AppKit animations (split view items) only run in the
             // active app.
             NSApp.activate()
-            if let width = Double(defaults.string(forKey: "OpenAGCSnapshotWidth") ?? ""),
+            if let width = Double(defaults.string(forKey: "KalutaSnapshotWidth") ?? ""),
                let main = NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
                 var frame = main.frame
                 frame.size.width = width
@@ -117,46 +117,46 @@ enum Snapshot {
                 main.setFrame(frame, display: true)
             }
             try? await Task.sleep(for: .seconds(delay / 2))
-            if let mailbox = defaults.string(forKey: "OpenAGCSnapshotMailbox") {
+            if let mailbox = defaults.string(forKey: "KalutaSnapshotMailbox") {
                 delegate.model?.selectedMailboxID = mailbox
                 try? await Task.sleep(for: .milliseconds(500))
             }
-            if let query = defaults.string(forKey: "OpenAGCSnapshotSearch") {
+            if let query = defaults.string(forKey: "KalutaSnapshotSearch") {
                 delegate.model?.searchText = query
                 try? await Task.sleep(for: .milliseconds(500))
             }
             if let rows = delegate.model?.threads.rows, !rows.isEmpty {
-                if let index = Int(defaults.string(forKey: "OpenAGCSnapshotSelectIndex") ?? ""), rows.indices.contains(index) {
+                if let index = Int(defaults.string(forKey: "KalutaSnapshotSelectIndex") ?? ""), rows.indices.contains(index) {
                     delegate.model?.selectedThreadID = rows[index].id
-                } else if defaults.bool(forKey: "OpenAGCSnapshotSelectFirst") {
+                } else if defaults.bool(forKey: "KalutaSnapshotSelectFirst") {
                     delegate.model?.selectedThreadID = rows[0].id
                 }
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotAgentPanel"), let model = delegate.model {
+            if defaults.bool(forKey: "KalutaSnapshotAgentPanel"), let model = delegate.model {
                 await model.agent.loadProviders()
                 model.agent.isPresented = true
                 try? await Task.sleep(for: .milliseconds(300))
                 model.focusAgentPrompt()
                 try? await Task.sleep(for: .milliseconds(500))
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotArchive"), let model = delegate.model {
+            if defaults.bool(forKey: "KalutaSnapshotArchive"), let model = delegate.model {
                 model.undo.runsClock = false
                 model.archiveSelection()
                 try? await Task.sleep(for: .milliseconds(500))
             }
-            if let prompt = defaults.string(forKey: "OpenAGCSnapshotAgentPrompt"), let model = delegate.model {
+            if let prompt = defaults.string(forKey: "KalutaSnapshotAgentPrompt"), let model = delegate.model {
                 await model.agent.loadProviders()
                 await model.askAgent(prompt)
                 try? await Task.sleep(for: .milliseconds(800))
                 // A sample approval card: the scripted agent cannot call tools.
-                if let summary = defaults.string(forKey: "OpenAGCSnapshotProposal"), let session = model.agent.sessionID {
+                if let summary = defaults.string(forKey: "KalutaSnapshotProposal"), let session = model.agent.sessionID {
                     await model.agent.apply(sessionID: session, events: [
                         .actionProposed(actionId: 1, tool: "mail_send", summary: summary, draftId: 1),
                     ])
                 }
             }
             var window: NSWindow?
-            if let runner = defaults.string(forKey: "OpenAGCSnapshotRoutine"), let model = delegate.model {
+            if let runner = defaults.string(forKey: "KalutaSnapshotRoutine"), let model = delegate.model {
                 if model.routines.routines.isEmpty {
                     await model.routines.create(runner: RoutineRunner(rawValue: runner) ?? .claudeCloud)
                 }
@@ -164,17 +164,17 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(800))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("routines") ?? false) }
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotSyncDebugger"), let model = delegate.model {
+            if defaults.bool(forKey: "KalutaSnapshotSyncDebugger"), let model = delegate.model {
                 model.openSyncDebugger?()
                 try? await Task.sleep(for: .milliseconds(1500))
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("sync-debugger") ?? false) }
             }
-            if let view = defaults.string(forKey: "OpenAGCSnapshotCleanUp"), let model = delegate.model {
+            if let view = defaults.string(forKey: "KalutaSnapshotCleanUp"), let model = delegate.model {
                 model.openCleanUp?()
                 try? await Task.sleep(for: .milliseconds(800))
                 let store = model.cleanUp
                 store.view = CleanUpViewKind(rawValue: view) ?? .sender
-                if defaults.string(forKey: "OpenAGCSnapshotCleanUpScope") == "all" { store.scope = .allMail }
+                if defaults.string(forKey: "KalutaSnapshotCleanUpScope") == "all" { store.scope = .allMail }
                 await store.open(accountID: model.openAccountID)
                 if let largest = store.groups.first {
                     store.setTicked(true, keys: [largest.key])
@@ -182,7 +182,7 @@ enum Snapshot {
                 }
                 // A month of history for the progress card: the demo has
                 // none, so sample counts falling to today's Inbox.
-                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpProgress"), let core = model.core,
+                if defaults.bool(forKey: "KalutaSnapshotCleanUpProgress"), let core = model.core,
                    let account = model.openAccountID, let now = store.progress?.now {
                     let start = Double(now) * 2.6
                     let counts = (0..<30).map { day -> UInt64 in
@@ -193,19 +193,19 @@ enum Snapshot {
                     try? await core.debugSeedInboxHistory(accountID: account, counts: counts, baseline: counts[0] + 140)
                     await store.loadProgress()
                 }
-                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpArchive") {
+                if defaults.bool(forKey: "KalutaSnapshotCleanUpArchive") {
                     model.undo.runsClock = false
                     await store.apply(.archive)
                 }
                 // The confirmation only: nothing is ever confirmed here (the
                 // demo's addresses are not to be contacted).
-                let unsubscribe = defaults.string(forKey: "OpenAGCSnapshotCleanUpUnsubscribe")
+                let unsubscribe = defaults.string(forKey: "KalutaSnapshotCleanUpUnsubscribe")
                 if let unsubscribe {
                     if unsubscribe == "all" { store.setTicked(true, keys: store.groups.map(\.key)) }
                     await store.refreshMessages()
                     store.askUnsubscribe()
                 }
-                let load = defaults.string(forKey: "OpenAGCSnapshotCleanUpLoad")
+                let load = defaults.string(forKey: "KalutaSnapshotCleanUpLoad")
                 if load == "loading" {
                     store.headerLoad = CleanUpHeaderLoad(total: 43_118, remaining: 31_406, widened: true)
                 } else if load == "ask", let account = model.openAccountID {
@@ -215,7 +215,7 @@ enum Snapshot {
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("cleanup") ?? false) }
                 // The sidebar's glass hides the card from self-snapshots:
                 // the left column's foot in a window of its own.
-                if defaults.bool(forKey: "OpenAGCSnapshotCleanUpCard") {
+                if defaults.bool(forKey: "KalutaSnapshotCleanUpCard") {
                     window = cleanUpCardWindow(model)
                     try? await Task.sleep(for: .milliseconds(500))
                 }
@@ -223,7 +223,7 @@ enum Snapshot {
                     window = sheet
                 }
             }
-            if let guide = defaults.string(forKey: "OpenAGCSnapshotGuide"), let model = delegate.model, let core = model.core {
+            if let guide = defaults.string(forKey: "KalutaSnapshotGuide"), let model = delegate.model, let core = model.core {
                 await model.agent.loadProviders()
                 _ = try? await core.startGuideRun(GuideRunRequest(kind: .latest, count: 40,
                                                                   filter: GuideSampleFilter(excludePeople: [], excludeLabels: []),
@@ -284,7 +284,7 @@ enum Snapshot {
                 try? await Task.sleep(for: .milliseconds(800))
             }
             // The writing guide's own prompts (spec §14.9): banner, invite, ready.
-            if let prompt = defaults.string(forKey: "OpenAGCSnapshotGuidePrompt"), let model = delegate.model {
+            if let prompt = defaults.string(forKey: "KalutaSnapshotGuidePrompt"), let model = delegate.model {
                 switch prompt {
                 case "banner": model.guideBannerAccount = model.openAccountID
                 case "invite": model.guidePrompt = .firstRun
@@ -295,7 +295,7 @@ enum Snapshot {
                     window = sheet
                 }
             }
-            if let agent = defaults.string(forKey: "OpenAGCSnapshotAgentMailbox"), let model = delegate.model,
+            if let agent = defaults.string(forKey: "KalutaSnapshotAgentMailbox"), let model = delegate.model,
                let core = model.core {
                 if agent == "create" {
                     model.beginAgentMailbox()
@@ -375,7 +375,7 @@ enum Snapshot {
                     window = sheet
                 }
             }
-            if let rules = defaults.string(forKey: "OpenAGCSnapshotRulesServer"), let model = delegate.model,
+            if let rules = defaults.string(forKey: "KalutaSnapshotRulesServer"), let model = delegate.model,
                let core = model.core, CoreClient.usesFakeAgentMail,
                let created = try? await model.createAgentMailbox(name: "Research Scout") {
                 let id = created.accountId
@@ -423,7 +423,7 @@ enum Snapshot {
                     let minutesAgo = Int64(Date().addingTimeInterval(-3 * 60).timeIntervalSince1970 * 1000)
                     try? core.debugSetRulesPublication(
                         id, serverURL: "https://rules.example.com", version: 12, publishedAt: minutesAgo,
-                        error: rules == "error" ? "rules.example.com no longer accepts this Mac's publisher token for research-scout@demo.primitive.email. The server's operator can forget the mailbox (openagc-rules forget-mailbox); then publish again." : nil)
+                        error: rules == "error" ? "rules.example.com no longer accepts this Mac's publisher token for research-scout@demo.primitive.email. The server's operator can forget the mailbox (kaluta-rules forget-mailbox); then publish again." : nil)
                     await model.reloadAccounts()
                     window = Self.rulesRowWindow(model, accountID: id)
                 }
@@ -434,14 +434,14 @@ enum Snapshot {
                     try? await Task.sleep(for: .milliseconds(300))
                 }
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotTaskList"), let model = delegate.model {
+            if defaults.bool(forKey: "KalutaSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID
                 try? await Task.sleep(for: .milliseconds(500))
                 model.selectTask(model.tasks.sections().first?.tasks.first?.id)
                 try? await Task.sleep(for: .milliseconds(800))
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotTask"), let model = delegate.model {
+            if defaults.bool(forKey: "KalutaSnapshotTask"), let model = delegate.model {
                 await model.agent.loadProviders()
                 try? await Task.sleep(for: .milliseconds(300))
                 await model.openTaskDialog()
@@ -449,7 +449,7 @@ enum Snapshot {
                 window = NSApp.windows.first { $0.isVisible && $0.sheetParent != nil }
                 FileHandle.standardError.write(Data("snapshot task sheet: \(window != nil)\n".utf8))
             }
-            if let compose = defaults.string(forKey: "OpenAGCSnapshotCompose"), let model = delegate.model {
+            if let compose = defaults.string(forKey: "KalutaSnapshotCompose"), let model = delegate.model {
                 try? await Task.sleep(for: .milliseconds(500))
                 switch compose {
                 case "reply": model.reply(all: true)
@@ -468,7 +468,7 @@ enum Snapshot {
             } else {
                 FileHandle.standardError.write(Data("snapshot state: no model\n".utf8))
             }
-            if defaults.bool(forKey: "OpenAGCSnapshotDumpViews"), let root = (window ?? NSApp.windows.first)?.contentView?.superview {
+            if defaults.bool(forKey: "KalutaSnapshotDumpViews"), let root = (window ?? NSApp.windows.first)?.contentView?.superview {
                 if let w = window ?? NSApp.windows.first {
                     let line = "window frame=\(w.frame.integral) contentMinSize=\(w.contentMinSize) contentMaxSize=\(w.contentMaxSize) screen=\(w.screen?.visibleFrame.integral ?? .zero)\n"
                     FileHandle.standardError.write(Data(line.utf8))
@@ -481,7 +481,7 @@ enum Snapshot {
             }
             capture(window, to: URL(filePath: path))
             // Left open to look at (a scratch demo run only, like every snapshot).
-            if defaults.bool(forKey: "OpenAGCSnapshotStay") { return }
+            if defaults.bool(forKey: "KalutaSnapshotStay") { return }
             // A sheet left open keeps the app from quitting.
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
@@ -637,7 +637,7 @@ enum Snapshot {
             logger.error("no window to snapshot")
             return
         }
-        if UserDefaults.standard.string(forKey: "OpenAGCSnapshotMode") == "pdf" {
+        if UserDefaults.standard.string(forKey: "KalutaSnapshotMode") == "pdf" {
             // AppKit's print path draws some SwiftUI content that bitmap
             // caching misses on macOS 26.
             let pdf = view.dataWithPDF(inside: view.bounds)
@@ -647,7 +647,7 @@ enum Snapshot {
             try? png.write(to: url)
             return
         }
-        if UserDefaults.standard.string(forKey: "OpenAGCSnapshotMode") == "layer",
+        if UserDefaults.standard.string(forKey: "KalutaSnapshotMode") == "layer",
            let layer = view.layer, let context = NSGraphicsContext(bitmapImageRep: rep) {
             context.cgContext.scaleBy(x: CGFloat(rep.pixelsWide) / view.bounds.width,
                                       y: CGFloat(rep.pixelsHigh) / view.bounds.height)

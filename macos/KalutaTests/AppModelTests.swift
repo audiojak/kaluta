@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct AppModelTests {
@@ -80,7 +80,7 @@ struct ModelReleaseTests {
         weak var weakModel: AppModel?
         do {
             let core = try CoreClient(dataDirectory: dir)
-            let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+            let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
             await model.start(openDemo: true)
             #expect(!model.threads.rows.isEmpty)
             #expect(!Self.openFiles(under: dir).isEmpty, "the demo's store is open")

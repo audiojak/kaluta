@@ -1,10 +1,10 @@
 import Foundation
-import OpenAGCCore
+import KalutaCore
 import os
 import PDFKit
 
 /// The app's handle on the Rust core. This is the only file that imports
-/// `OpenAGCCore` (spec §14.2); everything else talks to `CoreClient`.
+/// `KalutaCore` (spec §14.2); everything else talks to `CoreClient`.
 final class CoreClient: Sendable {
     private let core: Core
 
@@ -34,13 +34,13 @@ final class CoreClient: Sendable {
         core.setTextExtractor(extractor: PDFTextExtractor())
         let bundle = Bundle.main
         core.configureAgents(
-            shimPath: bundle.bundleURL.appending(path: "Contents/MacOS/openagc-mcp").path,
+            shimPath: bundle.bundleURL.appending(path: "Contents/MacOS/kaluta-mcp").path,
             systemPromptPath: bundle.url(forResource: "agent-system-prompt", withExtension: "md")?.path ?? "")
         // Agents outside the app reach agent mailboxes through it while it
-        // runs (spec §10.1, openagc-mcp --mailbox); tests never serve them.
+        // runs (spec §10.1, kaluta-mcp --mailbox); tests never serve them.
         if !Self.isRunningTests {
             do { try core.serveOutsideAgents() } catch {
-                Logger(subsystem: "ai.actual.openagc", category: "agent").warning("outside agents: \(String(describing: error), privacy: .public)")
+                Logger(subsystem: "org.kaluta.Kaluta", category: "agent").warning("outside agents: \(String(describing: error), privacy: .public)")
             }
             // Push what changed while closed to the rules servers agent
             // mailboxes publish to (spec §10.6).
@@ -48,7 +48,7 @@ final class CoreClient: Sendable {
         }
         // Tests never run the user's real agent CLIs (which would use their
         // account); neither do UI runs that ask for fakes.
-        if UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents") || Self.isRunningTests {
+        if UserDefaults.standard.bool(forKey: "KalutaFakeAgents") || Self.isRunningTests {
             core.debugUseFakeAgents()
         }
         // Agent mailboxes (spec §7.9): tests and fake-agent runs never
@@ -62,8 +62,8 @@ final class CoreClient: Sendable {
     /// tests, and in scratch runs that ask for fakes. Never on the real data
     /// directory, where a fake mailbox would mix with real ones.
     static var usesFakeAgentMail: Bool {
-        isRunningTests || (isScratchRun && (UserDefaults.standard.bool(forKey: "OpenAGCFakeAgents")
-            || UserDefaults.standard.bool(forKey: "OpenAGCFakeAgentMail")))
+        isRunningTests || (isScratchRun && (UserDefaults.standard.bool(forKey: "KalutaFakeAgents")
+            || UserDefaults.standard.bool(forKey: "KalutaFakeAgentMail")))
     }
 
     /// The app's Keychain items, or a separate service when hosting tests
@@ -71,18 +71,18 @@ final class CoreClient: Sendable {
     /// sign-ins. Everything that touches the Keychain defaults to this.
     static func defaultSecrets() -> KeychainSecretStore {
         if isRunningTests { return KeychainSecretStore(service: testSecretsService) }
-        return KeychainSecretStore(service: isScratchRun ? "ai.actual.openagc.scratch" : "ai.actual.openagc")
+        return KeychainSecretStore(service: isScratchRun ? "org.kaluta.Kaluta.scratch" : "org.kaluta.Kaluta")
     }
 
     /// The test host's Keychain service; emptied when the host starts and
     /// quits (`AppDelegate`).
-    static let testSecretsService = "ai.actual.openagc.tests"
+    static let testSecretsService = "org.kaluta.Kaluta.tests"
 
     /// Where the app's tests put scratch data: one directory per test-host
     /// process, which scripts/test-macos.sh removes after the run (and the
     /// sweeper after an hour), so tests need not clean up one by one.
     static let testScratchRoot = FileManager.default.temporaryDirectory
-        .appending(path: "openagc-apptests-\(ProcessInfo.processInfo.processIdentifier)", directoryHint: .isDirectory)
+        .appending(path: "kaluta-apptests-\(ProcessInfo.processInfo.processIdentifier)", directoryHint: .isDirectory)
 
     /// A fresh scratch directory for a test.
     static func testScratch() -> URL {
@@ -95,18 +95,18 @@ final class CoreClient: Sendable {
     /// (the test host and snapshots share its bundle id).
     /// One suite per process, shared by everything that remembers a
     /// setting, so a test run or snapshot is consistent with itself.
-    /// Launch arguments (`-OpenAGC…`) are still read from `.standard`:
+    /// Launch arguments (`-Kaluta…`) are still read from `.standard`:
     /// reading the argument domain writes nothing.
     static func appDefaults() -> UserDefaults { sharedDefaults }
 
     nonisolated(unsafe) private static let sharedDefaults: UserDefaults = {
         guard isRunningTests || isScratchRun else { return .standard }
-        return UserDefaults(suiteName: "openagc-scratch-\(UUID().uuidString)") ?? .standard
+        return UserDefaults(suiteName: "kaluta-scratch-\(UUID().uuidString)") ?? .standard
     }()
 
     /// Pointed at a throwaway data directory (snapshots, automation).
     static var isScratchRun: Bool {
-        !(UserDefaults.standard.string(forKey: "OpenAGCDataDirectory") ?? "").isEmpty
+        !(UserDefaults.standard.string(forKey: "KalutaDataDirectory") ?? "").isEmpty
     }
 
     static var isRunningTests: Bool {
@@ -595,14 +595,14 @@ final class CoreClient: Sendable {
     static func quarantine(_ url: URL) {
         var values = URLResourceValues()
         values.quarantineProperties = [
-            kLSQuarantineAgentNameKey as String: "OpenAGC",
+            kLSQuarantineAgentNameKey as String: "Kaluta",
             kLSQuarantineTypeKey as String: kLSQuarantineTypeOtherAttachment as String,
         ]
         var url = url
         do {
             try url.setResourceValues(values)
         } catch {
-            Logger(subsystem: "ai.actual.openagc", category: "attachments")
+            Logger(subsystem: "org.kaluta.Kaluta", category: "attachments")
                 .error("quarantine failed: \(error.localizedDescription, privacy: .public)")
         }
     }
@@ -1478,14 +1478,14 @@ final class CoreClient: Sendable {
         core.debugEmitThreadsChanged(mailboxId: mailboxID, threadIds: threadIDs)
     }
 
-    /// `~/Library/Logs/OpenAGC`, where the core writes `core.log`.
+    /// `~/Library/Logs/Kaluta`, where the core writes `core.log`.
     static func defaultLogDirectory() -> URL {
-        URL.libraryDirectory.appending(path: "Logs/OpenAGC", directoryHint: .isDirectory)
+        URL.libraryDirectory.appending(path: "Logs/Kaluta", directoryHint: .isDirectory)
     }
 
-    /// `~/Library/Application Support/OpenAGC`, created if missing.
+    /// `~/Library/Application Support/Kaluta`, created if missing.
     static func defaultDataDirectory() throws -> URL {
-        let dir = URL.applicationSupportDirectory.appending(path: "OpenAGC", directoryHint: .isDirectory)
+        let dir = URL.applicationSupportDirectory.appending(path: "Kaluta", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -1534,147 +1534,147 @@ private extension CoreClientError.Kind {
 // MARK: - Data records
 
 // Plain data records generated from Rust (spec §4.2). Aliased here so the
-// rest of the app can use them without importing OpenAGCCore; all calls
+// rest of the app can use them without importing KalutaCore; all calls
 // into the core still go through CoreClient.
-typealias AddressInfo = OpenAGCCore.AddressInfo
-typealias AgentActionInfo = OpenAGCCore.AgentActionInfo
-typealias AiCompositionInfo = OpenAGCCore.AiCompositionInfo
-typealias AgentEventInfo = OpenAGCCore.AgentEventInfo
-typealias AgentProviderInfo = OpenAGCCore.AgentProviderInfo
-typealias AgentSessionInfo = OpenAGCCore.AgentSessionInfo
-typealias AgentTranscriptItem = OpenAGCCore.AgentTranscriptItem
-typealias AgentStatusInfo = OpenAGCCore.AgentStatusInfo
-typealias AttachmentInfo = OpenAGCCore.AttachmentInfo
-typealias PromptContextInfo = OpenAGCCore.PromptContextInfo
+typealias AddressInfo = KalutaCore.AddressInfo
+typealias AgentActionInfo = KalutaCore.AgentActionInfo
+typealias AiCompositionInfo = KalutaCore.AiCompositionInfo
+typealias AgentEventInfo = KalutaCore.AgentEventInfo
+typealias AgentProviderInfo = KalutaCore.AgentProviderInfo
+typealias AgentSessionInfo = KalutaCore.AgentSessionInfo
+typealias AgentTranscriptItem = KalutaCore.AgentTranscriptItem
+typealias AgentStatusInfo = KalutaCore.AgentStatusInfo
+typealias AttachmentInfo = KalutaCore.AttachmentInfo
+typealias PromptContextInfo = KalutaCore.PromptContextInfo
 
 extension PromptContextInfo {
     /// No references at all: the agent works from the prompt alone.
     static let empty = PromptContextInfo(mailboxId: nil, listDescription: nil, visibleThreadIds: [],
                                          selectedThreadIds: [], searchQuery: nil)
 }
-typealias RoutineHandoff = OpenAGCCore.RoutineHandoff
-typealias RoutineInfo = OpenAGCCore.RoutineInfo
-typealias RoutinePreviewRow = OpenAGCCore.RoutinePreviewRow
-typealias RoutineRunInfo = OpenAGCCore.RoutineRunInfo
-typealias DraftAttachmentInfo = OpenAGCCore.DraftAttachmentInfo
-typealias DraftInfo = OpenAGCCore.DraftInfo
-typealias DraftStatus = OpenAGCCore.DraftStatus
-typealias LabelInfo = OpenAGCCore.LabelInfo
-typealias InboxCategory = OpenAGCCore.InboxCategory
-typealias SyncDiagnostics = OpenAGCCore.SyncDiagnostics
-typealias TransportOp = OpenAGCCore.TransportOp
-typealias TransportComparison = OpenAGCCore.TransportComparison
-typealias MailboxInfo = OpenAGCCore.MailboxInfo
-typealias SyncWindow = OpenAGCCore.SyncWindow
-typealias BodyWindow = OpenAGCCore.BodyWindow
-typealias UndoToken = OpenAGCCore.UndoToken
-typealias CleanupView = OpenAGCCore.CleanupView
-typealias CleanupScope = OpenAGCCore.CleanupScope
-typealias CleanupAction = OpenAGCCore.CleanupAction
-typealias CleanupGroup = OpenAGCCore.CleanupGroup
-typealias CleanupMessage = OpenAGCCore.CleanupMessage
-typealias CleanupResult = OpenAGCCore.CleanupResult
-typealias CleanupLoadStatus = OpenAGCCore.CleanupLoadStatus
-typealias CleanupLoadEstimate = OpenAGCCore.CleanupLoadEstimate
-typealias CleanupProgress = OpenAGCCore.CleanupProgress
-typealias CleanupDay = OpenAGCCore.CleanupDay
-typealias CleanupUnsubscribeTarget = OpenAGCCore.CleanupUnsubscribeTarget
-typealias CleanupUnsubscribeMethod = OpenAGCCore.CleanupUnsubscribeMethod
-typealias CleanupUnsubscribeResult = OpenAGCCore.CleanupUnsubscribeResult
-typealias AccountSummary = OpenAGCCore.AccountSummary
-typealias AccountKind = OpenAGCCore.AccountKind
-typealias AgentService = OpenAGCCore.AgentService
-typealias AgentSendMode = OpenAGCCore.AgentSendMode
-typealias AgentClient = OpenAGCCore.AgentClient
-typealias AgentConnection = OpenAGCCore.AgentConnection
-typealias AgentDomain = OpenAGCCore.AgentDomain
-typealias AgentSendRule = OpenAGCCore.AgentSendRule
-typealias AgentDnsRecord = OpenAGCCore.AgentDnsRecord
-typealias AgentMailboxPlan = OpenAGCCore.AgentMailboxPlan
-typealias AgentMailboxCreated = OpenAGCCore.AgentMailboxCreated
-typealias AgentVerification = OpenAGCCore.AgentVerification
-typealias ServiceAccountSummary = OpenAGCCore.ServiceAccountSummary
-typealias RulesPublication = OpenAGCCore.RulesPublication
-typealias RulesEncryption = OpenAGCCore.RulesEncryption
-typealias RulesPreview = OpenAGCCore.RulesPreview
-typealias RulesPreviewEntry = OpenAGCCore.RulesPreviewEntry
-typealias RulesPreviewFact = OpenAGCCore.RulesPreviewFact
-typealias RulesPreviewAudience = OpenAGCCore.RulesPreviewAudience
-typealias RulesConnectInfo = OpenAGCCore.RulesConnectInfo
-typealias RulesConnectCode = OpenAGCCore.RulesConnectCode
-typealias RulesAgentToken = OpenAGCCore.RulesAgentToken
-typealias RulesAgent = OpenAGCCore.RulesAgent
-typealias RulesAgentKind = OpenAGCCore.RulesAgentKind
-typealias CloudReportInfo = OpenAGCCore.CloudReportInfo
-typealias CloudReportMatch = OpenAGCCore.CloudReportMatch
-typealias AgentAdded = OpenAGCCore.AgentAdded
-typealias ImportStatus = OpenAGCCore.ImportStatus
-typealias BackfillStatus = OpenAGCCore.BackfillStatus
-typealias OrphanedStore = OpenAGCCore.OrphanedStore
-typealias MailboxScan = OpenAGCCore.MailboxScan
-typealias MailboxKind = OpenAGCCore.MailboxKind
-typealias MessageInfo = OpenAGCCore.MessageInfo
-typealias RenderedBody = OpenAGCCore.RenderedBody
-typealias ThreadDetail = OpenAGCCore.ThreadDetail
-typealias ThreadPage = OpenAGCCore.ThreadPage
-typealias ThreadRow = OpenAGCCore.ThreadRow
-typealias TaskItem = OpenAGCCore.TaskItem
-typealias NewTask = OpenAGCCore.NewTask
-typealias TaskEdit = OpenAGCCore.TaskEdit
-typealias TaskAction = OpenAGCCore.TaskAction
-typealias TaskSuggestion = OpenAGCCore.TaskSuggestion
-typealias GuideCategoryInfo = OpenAGCCore.GuideCategoryInfo
-typealias GuideEntry = OpenAGCCore.GuideEntry
-typealias GuideEntryFields = OpenAGCCore.GuideEntryFields
-typealias GuideEdit = OpenAGCCore.GuideEdit
-typealias GuideChange = OpenAGCCore.GuideChange
-typealias GuideKind = OpenAGCCore.GuideKind
-typealias GuideStatus = OpenAGCCore.GuideStatus
-typealias GuideSource = OpenAGCCore.GuideSource
-typealias GuideScope = OpenAGCCore.GuideScope
-typealias GuideCheck = OpenAGCCore.GuideCheck
-typealias GuideCheckKind = OpenAGCCore.GuideCheckKind
-typealias GuideQuote = OpenAGCCore.GuideQuote
-typealias GuideImport = OpenAGCCore.GuideImport
-typealias AudienceGroup = OpenAGCCore.AudienceGroup
-typealias AudienceStatus = OpenAGCCore.AudienceStatus
-typealias GuideProgress = OpenAGCCore.GuideProgress
-typealias GuideRunInfo = OpenAGCCore.GuideRunInfo
-typealias AnalysisProgress = OpenAGCCore.AnalysisProgress
-typealias FactInfo = OpenAGCCore.FactInfo
-typealias FactScope = OpenAGCCore.FactScope
-typealias FactMergeResult = OpenAGCCore.FactMergeResult
-typealias FactFields = OpenAGCCore.FactFields
-typealias FactEdit = OpenAGCCore.FactEdit
-typealias FactUse = OpenAGCCore.FactUse
-typealias FactSource = OpenAGCCore.FactSource
-typealias FactStatus = OpenAGCCore.FactStatus
-typealias FactChange = OpenAGCCore.FactChange
-typealias FactCategoryInfo = OpenAGCCore.FactCategoryInfo
-typealias CategoryEdit = OpenAGCCore.CategoryEdit
-typealias StarterSet = OpenAGCCore.StarterSet
-typealias StarterSetInfo = OpenAGCCore.StarterSetInfo
-typealias AnalysisQueue = OpenAGCCore.AnalysisQueue
-typealias ProposalPage = OpenAGCCore.ProposalPage
-typealias AnalysisFactProposalInfo = OpenAGCCore.AnalysisFactProposalInfo
-typealias FactsFrom = OpenAGCCore.FactsFrom
-typealias AnalysisSettings = OpenAGCCore.AnalysisSettings
-typealias AnalysisProposalInfo = OpenAGCCore.AnalysisProposalInfo
-typealias AnalysisPairInfo = OpenAGCCore.AnalysisPairInfo
-typealias AnalysisMetrics = OpenAGCCore.AnalysisMetrics
-typealias AnalysisOp = OpenAGCCore.AnalysisOp
-typealias GuideEntryHealth = OpenAGCCore.GuideEntryHealth
-typealias AnalysisRunInfo = OpenAGCCore.AnalysisRunInfo
-typealias GuideRunKind = OpenAGCCore.GuideRunKind
-typealias GuideRunStatus = OpenAGCCore.GuideRunStatus
-typealias GuideRunRequest = OpenAGCCore.GuideRunRequest
-typealias GuideSampleFilter = OpenAGCCore.GuideSampleFilter
-typealias GuideSampleInfo = OpenAGCCore.GuideSampleInfo
-typealias GuideRendered = OpenAGCCore.GuideRendered
-typealias GuideCheckFailure = OpenAGCCore.GuideCheckFailure
-typealias GuideChangeQuestion = OpenAGCCore.GuideChangeQuestion
-typealias GuideMergePlan = OpenAGCCore.GuideMergePlan
-typealias GuideMergeDecision = OpenAGCCore.GuideMergeDecision
+typealias RoutineHandoff = KalutaCore.RoutineHandoff
+typealias RoutineInfo = KalutaCore.RoutineInfo
+typealias RoutinePreviewRow = KalutaCore.RoutinePreviewRow
+typealias RoutineRunInfo = KalutaCore.RoutineRunInfo
+typealias DraftAttachmentInfo = KalutaCore.DraftAttachmentInfo
+typealias DraftInfo = KalutaCore.DraftInfo
+typealias DraftStatus = KalutaCore.DraftStatus
+typealias LabelInfo = KalutaCore.LabelInfo
+typealias InboxCategory = KalutaCore.InboxCategory
+typealias SyncDiagnostics = KalutaCore.SyncDiagnostics
+typealias TransportOp = KalutaCore.TransportOp
+typealias TransportComparison = KalutaCore.TransportComparison
+typealias MailboxInfo = KalutaCore.MailboxInfo
+typealias SyncWindow = KalutaCore.SyncWindow
+typealias BodyWindow = KalutaCore.BodyWindow
+typealias UndoToken = KalutaCore.UndoToken
+typealias CleanupView = KalutaCore.CleanupView
+typealias CleanupScope = KalutaCore.CleanupScope
+typealias CleanupAction = KalutaCore.CleanupAction
+typealias CleanupGroup = KalutaCore.CleanupGroup
+typealias CleanupMessage = KalutaCore.CleanupMessage
+typealias CleanupResult = KalutaCore.CleanupResult
+typealias CleanupLoadStatus = KalutaCore.CleanupLoadStatus
+typealias CleanupLoadEstimate = KalutaCore.CleanupLoadEstimate
+typealias CleanupProgress = KalutaCore.CleanupProgress
+typealias CleanupDay = KalutaCore.CleanupDay
+typealias CleanupUnsubscribeTarget = KalutaCore.CleanupUnsubscribeTarget
+typealias CleanupUnsubscribeMethod = KalutaCore.CleanupUnsubscribeMethod
+typealias CleanupUnsubscribeResult = KalutaCore.CleanupUnsubscribeResult
+typealias AccountSummary = KalutaCore.AccountSummary
+typealias AccountKind = KalutaCore.AccountKind
+typealias AgentService = KalutaCore.AgentService
+typealias AgentSendMode = KalutaCore.AgentSendMode
+typealias AgentClient = KalutaCore.AgentClient
+typealias AgentConnection = KalutaCore.AgentConnection
+typealias AgentDomain = KalutaCore.AgentDomain
+typealias AgentSendRule = KalutaCore.AgentSendRule
+typealias AgentDnsRecord = KalutaCore.AgentDnsRecord
+typealias AgentMailboxPlan = KalutaCore.AgentMailboxPlan
+typealias AgentMailboxCreated = KalutaCore.AgentMailboxCreated
+typealias AgentVerification = KalutaCore.AgentVerification
+typealias ServiceAccountSummary = KalutaCore.ServiceAccountSummary
+typealias RulesPublication = KalutaCore.RulesPublication
+typealias RulesEncryption = KalutaCore.RulesEncryption
+typealias RulesPreview = KalutaCore.RulesPreview
+typealias RulesPreviewEntry = KalutaCore.RulesPreviewEntry
+typealias RulesPreviewFact = KalutaCore.RulesPreviewFact
+typealias RulesPreviewAudience = KalutaCore.RulesPreviewAudience
+typealias RulesConnectInfo = KalutaCore.RulesConnectInfo
+typealias RulesConnectCode = KalutaCore.RulesConnectCode
+typealias RulesAgentToken = KalutaCore.RulesAgentToken
+typealias RulesAgent = KalutaCore.RulesAgent
+typealias RulesAgentKind = KalutaCore.RulesAgentKind
+typealias CloudReportInfo = KalutaCore.CloudReportInfo
+typealias CloudReportMatch = KalutaCore.CloudReportMatch
+typealias AgentAdded = KalutaCore.AgentAdded
+typealias ImportStatus = KalutaCore.ImportStatus
+typealias BackfillStatus = KalutaCore.BackfillStatus
+typealias OrphanedStore = KalutaCore.OrphanedStore
+typealias MailboxScan = KalutaCore.MailboxScan
+typealias MailboxKind = KalutaCore.MailboxKind
+typealias MessageInfo = KalutaCore.MessageInfo
+typealias RenderedBody = KalutaCore.RenderedBody
+typealias ThreadDetail = KalutaCore.ThreadDetail
+typealias ThreadPage = KalutaCore.ThreadPage
+typealias ThreadRow = KalutaCore.ThreadRow
+typealias TaskItem = KalutaCore.TaskItem
+typealias NewTask = KalutaCore.NewTask
+typealias TaskEdit = KalutaCore.TaskEdit
+typealias TaskAction = KalutaCore.TaskAction
+typealias TaskSuggestion = KalutaCore.TaskSuggestion
+typealias GuideCategoryInfo = KalutaCore.GuideCategoryInfo
+typealias GuideEntry = KalutaCore.GuideEntry
+typealias GuideEntryFields = KalutaCore.GuideEntryFields
+typealias GuideEdit = KalutaCore.GuideEdit
+typealias GuideChange = KalutaCore.GuideChange
+typealias GuideKind = KalutaCore.GuideKind
+typealias GuideStatus = KalutaCore.GuideStatus
+typealias GuideSource = KalutaCore.GuideSource
+typealias GuideScope = KalutaCore.GuideScope
+typealias GuideCheck = KalutaCore.GuideCheck
+typealias GuideCheckKind = KalutaCore.GuideCheckKind
+typealias GuideQuote = KalutaCore.GuideQuote
+typealias GuideImport = KalutaCore.GuideImport
+typealias AudienceGroup = KalutaCore.AudienceGroup
+typealias AudienceStatus = KalutaCore.AudienceStatus
+typealias GuideProgress = KalutaCore.GuideProgress
+typealias GuideRunInfo = KalutaCore.GuideRunInfo
+typealias AnalysisProgress = KalutaCore.AnalysisProgress
+typealias FactInfo = KalutaCore.FactInfo
+typealias FactScope = KalutaCore.FactScope
+typealias FactMergeResult = KalutaCore.FactMergeResult
+typealias FactFields = KalutaCore.FactFields
+typealias FactEdit = KalutaCore.FactEdit
+typealias FactUse = KalutaCore.FactUse
+typealias FactSource = KalutaCore.FactSource
+typealias FactStatus = KalutaCore.FactStatus
+typealias FactChange = KalutaCore.FactChange
+typealias FactCategoryInfo = KalutaCore.FactCategoryInfo
+typealias CategoryEdit = KalutaCore.CategoryEdit
+typealias StarterSet = KalutaCore.StarterSet
+typealias StarterSetInfo = KalutaCore.StarterSetInfo
+typealias AnalysisQueue = KalutaCore.AnalysisQueue
+typealias ProposalPage = KalutaCore.ProposalPage
+typealias AnalysisFactProposalInfo = KalutaCore.AnalysisFactProposalInfo
+typealias FactsFrom = KalutaCore.FactsFrom
+typealias AnalysisSettings = KalutaCore.AnalysisSettings
+typealias AnalysisProposalInfo = KalutaCore.AnalysisProposalInfo
+typealias AnalysisPairInfo = KalutaCore.AnalysisPairInfo
+typealias AnalysisMetrics = KalutaCore.AnalysisMetrics
+typealias AnalysisOp = KalutaCore.AnalysisOp
+typealias GuideEntryHealth = KalutaCore.GuideEntryHealth
+typealias AnalysisRunInfo = KalutaCore.AnalysisRunInfo
+typealias GuideRunKind = KalutaCore.GuideRunKind
+typealias GuideRunStatus = KalutaCore.GuideRunStatus
+typealias GuideRunRequest = KalutaCore.GuideRunRequest
+typealias GuideSampleFilter = KalutaCore.GuideSampleFilter
+typealias GuideSampleInfo = KalutaCore.GuideSampleInfo
+typealias GuideRendered = KalutaCore.GuideRendered
+typealias GuideCheckFailure = KalutaCore.GuideCheckFailure
+typealias GuideChangeQuestion = KalutaCore.GuideChangeQuestion
+typealias GuideMergePlan = KalutaCore.GuideMergePlan
+typealias GuideMergeDecision = KalutaCore.GuideMergeDecision
 
 // MARK: - Events
 
@@ -1770,7 +1770,7 @@ private final class EventBridge: EventListener, Sendable {
         // and tokens (logging::scrub), so they can be public. Messages from
         // core *errors* can quote user data and are logged `.private`.
         if case let .log(level, target, message) = event {
-            let logger = Logger(subsystem: "ai.actual.openagc", category: target)
+            let logger = Logger(subsystem: "org.kaluta.Kaluta", category: target)
             switch level {
             case .warn: logger.warning("\(message, privacy: .public)")
             case .error: logger.error("\(message, privacy: .public)")
@@ -1830,7 +1830,7 @@ private extension CoreClientEvent {
 }
 
 private extension CoreClientEvent.SyncState {
-    init(_ state: OpenAGCCore.SyncState) {
+    init(_ state: KalutaCore.SyncState) {
         switch state {
         case .idle: self = .idle
         case .bootstrapping: self = .bootstrapping

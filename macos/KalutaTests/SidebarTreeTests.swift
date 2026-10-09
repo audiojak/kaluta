@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct SidebarTreeTests {
@@ -34,7 +34,7 @@ struct SidebarTreeTests {
 
     @Test func expansionIsRememberedPerAccount() {
         let a = "a", b = "b"
-        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let expansion = LabelExpansion(defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         expansion.load(account: a)
         expansion.set("Customers", true)
         expansion.set("Projects/Launch", true)
@@ -50,7 +50,7 @@ struct SidebarTreeTests {
 
     @Test func onlyThreadPayloadsCountAsDroppedThreads() {
         #expect(ThreadDrag.threadIDs(in: [ThreadDrag.payload(for: "t1"), "hello", ThreadDrag.payload(for: "t2")]) == ["t1", "t2"])
-        #expect(ThreadDrag.threadIDs(in: ["openagc-thread"]).isEmpty)
+        #expect(ThreadDrag.threadIDs(in: ["kaluta-thread"]).isEmpty)
     }
 
     @Test func droppingThreadsOnALabelAppliesIt() async throws {
@@ -72,7 +72,7 @@ struct ImportantOnlyTests {
     @Test func theInboxCanShowOnlyImportantThreadsAndRemembersItPerAccount() async throws {
         let dir = CoreClient.testScratch()
         defer { try? FileManager.default.removeItem(at: dir) }
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         defaults.set(false, forKey: AppModel.showCategoriesKey("demo")) // tabs have their own tests
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         await model.start(openDemo: true)

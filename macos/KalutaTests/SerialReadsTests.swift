@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Store reads one at a time, and never stale after `await load()`.
 @MainActor

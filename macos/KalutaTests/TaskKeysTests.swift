@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// The task list's single keys (↩ r a f e c ⌫ j k) reach it through a
 /// key monitor, before the list's own type-to-select can take the letters

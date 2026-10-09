@@ -142,15 +142,15 @@ extension CloudAgentFlow {
     }
 
     static func noPublicURL(_ host: String) -> String {
-        "\(host) has no public address set, so claude.ai cannot sign in to it. Its operator sets OPENAGC_RULES_PUBLIC_URL; until then, use a token."
+        "\(host) has no public address set, so claude.ai cannot sign in to it. Its operator sets KALUTA_RULES_PUBLIC_URL; until then, use a token."
     }
 
-    /// The MCP server's name in an agent's settings: `openagc-scout-rules`
-    /// for `scout@…`, apart from the local `openagc-scout` (Connect an Agent…).
+    /// The MCP server's name in an agent's settings: `kaluta-scout-rules`
+    /// for `scout@…`, apart from the local `kaluta-scout` (Connect an Agent…).
     static func serverName(_ address: String) -> String {
         let local = address.split(separator: "@").first.map(String.init) ?? address
         let slug = local.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
-        return "openagc-\(slug.trimmingCharacters(in: CharacterSet(charactersIn: "-")))-rules"
+        return "kaluta-\(slug.trimmingCharacters(in: CharacterSet(charactersIn: "-")))-rules"
     }
 
     static func claudeMCPAdd(address: String, mcpURL: String, token: String) -> String {
@@ -163,7 +163,7 @@ extension CloudAgentFlow {
     }
 
     static func tokenWarning(_ address: String) -> String {
-        "This token is shown only now; OpenAGC does not keep it. Whoever holds it can read \(address)'s published writing guide and shared facts, check drafts and report sends, and nothing else, until you revoke it here."
+        "This token is shown only now; Kaluta does not keep it. Whoever holds it can read \(address)'s published writing guide and shared facts, check drafts and report sends, and nothing else, until you revoke it here."
     }
 
     /// "Works once, for 9:42 more."
@@ -180,7 +180,7 @@ extension CloudAgentFlow {
     /// What the user pastes into a routine's (or agent's) instructions.
     static func instructions(address: String) -> String {
         var lines = [
-            "You write email as \(address). Its writing guide and facts come from the OpenAGC rules server's tools.",
+            "You write email as \(address). Its writing guide and facts come from the Kaluta rules server's tools.",
             "Before writing each email, call guide_rules with the recipients' addresses (to) and the message type (new, reply or forward), and follow the guide it returns.",
             "When you need a fact about the user or their work (a calendar link, a role, an address), call facts_lookup with a category or a query. Use only facts it returns, and leave out any marked ask before using.",
         ]
@@ -189,7 +189,7 @@ extension CloudAgentFlow {
     }
 
     /// Checking each draft before it goes, and reporting each send after,
-    /// so OpenAGC records it as this agent's (spec §10.6).
+    /// so Kaluta records it as this agent's (spec §10.6).
     static let afterSendLines: [String] = [
         "Before sending each email, call check_draft with the recipients (to), the message type, the subject and the body in Markdown (body_markdown). Fix everything it lists in guide_check, and check again until the list is empty.",
         "Send through the mailbox's mail service. Then call report_send with the Message-ID the service gave the message (message_id), the recipients (to), the subject, when it was sent (sent_at), the body as sent (body_markdown) and check_draft's version (checked_version).",
@@ -206,7 +206,7 @@ struct ConnectCloudAgentSheet: View {
     @FocusState private var focused: Bool
 
     static let width: CGFloat = 600
-    static let help = URL(string: "https://github.com/audiojak/openagc/blob/main/docs/rules-server.md#connect-a-claudeai-connector-or-a-cloud-routine")!
+    static let help = URL(string: "https://github.com/audiojak/kaluta/blob/main/docs/rules-server.md#connect-a-claudeai-connector-or-a-cloud-routine")!
     /// How often the sheet asks whether the connector has signed in.
     static let poll: Duration = .seconds(5)
 
@@ -274,8 +274,8 @@ struct ConnectCloudAgentSheet: View {
                 .labelsHidden()
                 .hoverHelp("A connector signs in with a one-time code; anything else is given a token")
                 Text(flow.route == .connector
-                    ? "OpenAGC shows a one-time code, which you enter when claude.ai connects to the server."
-                    : "OpenAGC shows a token once, for the agent's settings.")
+                    ? "Kaluta shows a one-time code, which you enter when claude.ai connects to the server."
+                    : "Kaluta shows a token once, for the agent's settings.")
                     .font(TypeRole.caption).foregroundStyle(.secondary)
             }
             if flow.info == nil, flow.error == nil {

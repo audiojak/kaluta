@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "982F5821420F29993571F6A2"
-               BuildableName = "OpenAGC.app"
-               BlueprintName = "OpenAGC"
-               ReferencedContainer = "container:OpenAGC.xcodeproj">
+               BlueprintIdentifier = "A6055196DADDB4C4EE8AC713"
+               BuildableName = "Kaluta.app"
+               BlueprintName = "Kaluta"
+               ReferencedContainer = "container:Kaluta.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -29,10 +29,10 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8C028A5FF1B3DC8D34D09AF2"
-               BuildableName = "OpenAGCTests.xctest"
-               BlueprintName = "OpenAGCTests"
-               ReferencedContainer = "container:OpenAGC.xcodeproj">
+               BlueprintIdentifier = "D3E35DAB33040FEB09A72D5F"
+               BuildableName = "KalutaTests.xctest"
+               BlueprintName = "KalutaTests"
+               ReferencedContainer = "container:Kaluta.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,10 +46,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "982F5821420F29993571F6A2"
-            BuildableName = "OpenAGC.app"
-            BlueprintName = "OpenAGC"
-            ReferencedContainer = "container:OpenAGC.xcodeproj">
+            BlueprintIdentifier = "A6055196DADDB4C4EE8AC713"
+            BuildableName = "Kaluta.app"
+            BlueprintName = "Kaluta"
+            ReferencedContainer = "container:Kaluta.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -58,10 +58,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8C028A5FF1B3DC8D34D09AF2"
-               BuildableName = "OpenAGCTests.xctest"
-               BlueprintName = "OpenAGCTests"
-               ReferencedContainer = "container:OpenAGC.xcodeproj">
+               BlueprintIdentifier = "D3E35DAB33040FEB09A72D5F"
+               BuildableName = "KalutaTests.xctest"
+               BlueprintName = "KalutaTests"
+               ReferencedContainer = "container:Kaluta.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -82,10 +82,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "982F5821420F29993571F6A2"
-            BuildableName = "OpenAGC.app"
-            BlueprintName = "OpenAGC"
-            ReferencedContainer = "container:OpenAGC.xcodeproj">
+            BlueprintIdentifier = "A6055196DADDB4C4EE8AC713"
+            BuildableName = "Kaluta.app"
+            BlueprintName = "Kaluta"
+            ReferencedContainer = "container:Kaluta.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -99,10 +99,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "982F5821420F29993571F6A2"
-            BuildableName = "OpenAGC.app"
-            BlueprintName = "OpenAGC"
-            ReferencedContainer = "container:OpenAGC.xcodeproj">
+            BlueprintIdentifier = "A6055196DADDB4C4EE8AC713"
+            BuildableName = "Kaluta.app"
+            BlueprintName = "Kaluta"
+            ReferencedContainer = "container:Kaluta.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

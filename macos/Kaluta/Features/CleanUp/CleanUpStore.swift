@@ -188,7 +188,7 @@ final class CleanUpStore {
     @ObservationIgnored private let targetLoads = LatestLoad()
     /// Bumped whenever the pages are dropped; a page that arrives after is ignored.
     @ObservationIgnored private var pageEpoch = 0
-    @ObservationIgnored let logger = Logger(subsystem: "ai.actual.openagc", category: "cleanup")
+    @ObservationIgnored let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "cleanup")
     /// Bumped when a page arrives, so the table redraws its rows.
     private(set) var pageRevision = 0
 
@@ -800,9 +800,9 @@ struct CleanUpUnsubscribeQuestion: Identifiable, Equatable {
         let mail = targets.count - oneClick
         var parts: [String] = []
         if oneClick == 1, targets.count == 1, case let .oneClick(host) = targets[0].method {
-            parts.append("OpenAGC asks \(host) once to take you off the list. Nothing else is sent.")
+            parts.append("Kaluta asks \(host) once to take you off the list. Nothing else is sent.")
         } else if oneClick > 0 {
-            parts.append("OpenAGC asks each list's site once to take you off it. Nothing else is sent.")
+            parts.append("Kaluta asks each list's site once to take you off it. Nothing else is sent.")
         }
         if mail == 1, targets.count == 1, case let .mailto(to, _, _, _) = targets[0].method {
             parts.append("A message to \(to.joined(separator: ", ")) opens for you to read and send.")

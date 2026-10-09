@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Under the message body, as in Gmail (spec §14.5): the formatting OpenAGC
+/// Under the message body, as in Gmail (spec §14.5): the formatting Kaluta
 /// sends, each button lit while it is on at the cursor. It also marks the
 /// body as the place to type.
 struct FormattingBar: View {

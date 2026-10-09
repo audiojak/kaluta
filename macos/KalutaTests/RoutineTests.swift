@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct RoutineTests {

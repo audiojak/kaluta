@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Test hosts and snapshots share the app's bundle id, so AppKit would
     /// autosave their window and split-view frames into the user's real
-    /// preferences (a snapshot's `-OpenAGCSnapshotWidth` once resized the
+    /// preferences (a snapshot's `-KalutaSnapshotWidth` once resized the
     /// user's saved window). Such runs forget every autosave name as
     /// windows appear and become key; Snapshot does it again before it
     /// resizes anything.
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task.detached {
             let left = await core.sendHeldNow(timeout: .seconds(5))
             if left > 0 {
-                Logger(subsystem: "ai.actual.openagc", category: "app")
+                Logger(subsystem: "org.kaluta.Kaluta", category: "app")
                     .info("\(left) held send(s) will go at next launch")
             }
             let main = CFRunLoopGetMain()
@@ -94,10 +94,10 @@ extension NSWindow {
     static func refuseFrameAutosave() {
         guard !frameAutosaveRefused else { return }
         frameAutosaveRefused = true
-        swap(#selector(NSWindow.setFrameAutosaveName(_:)), #selector(NSWindow.openagc_setFrameAutosaveName(_:)))
-        swap(#selector(NSWindow.saveFrame(usingName:)), #selector(NSWindow.openagc_saveFrame(usingName:)))
+        swap(#selector(NSWindow.setFrameAutosaveName(_:)), #selector(NSWindow.kaluta_setFrameAutosaveName(_:)))
+        swap(#selector(NSWindow.saveFrame(usingName:)), #selector(NSWindow.kaluta_saveFrame(usingName:)))
         // Split views save their column widths under their own names.
-        swap(#selector(setter: NSSplitView.autosaveName), #selector(NSSplitView.openagc_setAutosaveName(_:)),
+        swap(#selector(setter: NSSplitView.autosaveName), #selector(NSSplitView.kaluta_setAutosaveName(_:)),
              in: NSSplitView.self)
     }
 
@@ -111,19 +111,19 @@ extension NSWindow {
 
     /// Swapped in for setFrameAutosaveName(_:): an empty name still clears
     /// (it reaches the original), anything else is refused.
-    @objc private func openagc_setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
-        if name.isEmpty { return openagc_setFrameAutosaveName(name) }
+    @objc private func kaluta_setFrameAutosaveName(_ name: NSWindow.FrameAutosaveName) -> Bool {
+        if name.isEmpty { return kaluta_setFrameAutosaveName(name) }
         return false
     }
 
     /// Swapped in for saveFrame(usingName:): saves nothing.
-    @objc private func openagc_saveFrame(usingName name: NSWindow.FrameAutosaveName) {}
+    @objc private func kaluta_saveFrame(usingName name: NSWindow.FrameAutosaveName) {}
 }
 
 extension NSSplitView {
     /// Swapped in for the `autosaveName` setter under
     /// `NSWindow.refuseFrameAutosave()`: a name is never set.
-    @objc fileprivate func openagc_setAutosaveName(_ name: NSSplitView.AutosaveName?) {
-        openagc_setAutosaveName(nil)
+    @objc fileprivate func kaluta_setAutosaveName(_ name: NSSplitView.AutosaveName?) {
+        kaluta_setAutosaveName(nil)
     }
 }

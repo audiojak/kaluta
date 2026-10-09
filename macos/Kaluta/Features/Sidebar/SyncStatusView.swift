@@ -29,7 +29,7 @@ struct SyncStatusView: View {
             .padding(.horizontal, Space.l)
             .padding(.vertical, Space.m)
             .accessibilityElement(children: .combine)
-            .hoverHelp(model.transportNote.map { "Using the Gmail API because \($0.prefix(1).lowercased() + $0.dropFirst()). OpenAGC tries IMAP again shortly; Window › Sync Debugger shows more." }
+            .hoverHelp(model.transportNote.map { "Using the Gmail API because \($0.prefix(1).lowercased() + $0.dropFirst()). Kaluta tries IMAP again shortly; Window › Sync Debugger shows more." }
                 ?? (model.backfillTransport == "imap" ? "Downloading over IMAP (Window › Sync Debugger)" : "Sync status"))
         }
     }

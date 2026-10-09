@@ -84,7 +84,7 @@ extension AppModel {
                             requestID: String = UUID().uuidString) async throws(CoreClientError)
         -> AgentMailboxCreated {
         guard let calls = agentMailboxCalls else {
-            throw CoreClientError(kind: .notFound, message: "OpenAGC is still starting")
+            throw CoreClientError(kind: .notFound, message: "Kaluta is still starting")
         }
         let created = try await calls.createAgentMailbox(service: service, name: name, humanEmail: humanEmail,
                                                          requestID: requestID)
@@ -100,7 +100,7 @@ extension AppModel {
     func addAgent(to serviceAccountID: String, name: String, domain: String? = nil,
                   requestID: String = UUID().uuidString) async throws(CoreClientError) -> AgentAdded {
         guard let calls = agentMailboxCalls else {
-            throw CoreClientError(kind: .notFound, message: "OpenAGC is still starting")
+            throw CoreClientError(kind: .notFound, message: "Kaluta is still starting")
         }
         let added = try await calls.addAgent(toServiceAccount: serviceAccountID, name: name, domain: domain,
                                              requestID: requestID)

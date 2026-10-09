@@ -391,7 +391,7 @@ final class AppModel {
     let cleanUp: CleanUpStore
     let core: CoreClient?
 
-    private let logger = Logger(subsystem: "ai.actual.openagc", category: "app")
+    private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "app")
     /// The event loop, observers and network monitor, ended with the model.
     @ObservationIgnored private let subscriptions = Subscriptions()
     private var signInSession: String?
@@ -429,9 +429,9 @@ final class AppModel {
 
     /// Open the remembered account, or the demo when asked for on launch.
     func start(openDemo: Bool? = nil) async {
-        let openDemo = openDemo ?? defaults.bool(forKey: "OpenAGCDemo")
+        let openDemo = openDemo ?? defaults.bool(forKey: "KalutaDemo")
         guard let core else {
-            accountState = .failed("The core failed to start. See ~/Library/Logs/OpenAGC/core.log.")
+            accountState = .failed("The core failed to start. See ~/Library/Logs/Kaluta/core.log.")
             return
         }
         listenForEvents(from: core)
@@ -1324,7 +1324,7 @@ final class AppModel {
     /// the threads the next action targets. Returns an error message to
     /// show, or nil on success.
     func createLabel(path: String, applyToTargets: Bool = true) async -> String? {
-        guard let core else { return "OpenAGC is not ready." }
+        guard let core else { return "Kaluta is not ready." }
         let ids = actionTargets
         do {
             let label = try await core.createLabel(path)
@@ -1410,7 +1410,7 @@ final class AppModel {
         subscriptions.network.pathUpdateHandler = { [weak core] path in
             if path.status == .satisfied { core?.syncNow() }
         }
-        subscriptions.network.start(queue: DispatchQueue(label: "ai.actual.openagc.network"))
+        subscriptions.network.start(queue: DispatchQueue(label: "org.kaluta.Kaluta.network"))
     }
 
     /// Set the mailbox without loading it (a switch loads the new account's).

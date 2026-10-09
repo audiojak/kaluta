@@ -18,13 +18,13 @@ struct OnboardingView: View {
                         .frame(height: 56)
                         .foregroundStyle(.primary)
                         .accessibilityHidden(true)
-                    Text("Welcome to OpenAGC").font(TypeRole.welcome)
+                    Text("Welcome to Kaluta").font(TypeRole.welcome)
                     Text("A Mac email client that works with the AI agents you already use.")
                         .foregroundStyle(.secondary)
                 }
 
                 VStack(alignment: .leading, spacing: Space.m) {
-                    Label("Your mail syncs straight from Google to this Mac. OpenAGC has no servers.", systemImage: "lock.shield")
+                    Label("Your mail syncs straight from Google to this Mac. Kaluta has no servers.", systemImage: "lock.shield")
                     Label("Agents see mail only when you ask them to, through tools you control.", systemImage: "sparkles")
                     Label("Sending and deleting always wait for your approval.", systemImage: "hand.raised")
                 }
@@ -50,7 +50,7 @@ struct OnboardingView: View {
                         .disabled(!client.isUsable)
                         .hoverHelp("Sign in with Google in your browser to add your Gmail")
                         Button("Explore a Demo Mailbox") { Task { await model.openDemoMailbox() } }
-                            .hoverHelp("Try OpenAGC with made-up mail; nothing leaves this Mac")
+                            .hoverHelp("Try Kaluta with made-up mail; nothing leaves this Mac")
                             .controlSize(.large)
                         Button("Create an Agent Mailbox…") { model.beginAgentMailbox() }
                             .hoverHelp("Give one of your agents an address of its own on Primitive or AgentMail")
@@ -73,7 +73,7 @@ struct OnboardingView: View {
                         Text("Create a “Desktop app” OAuth client in Google Cloud with the Gmail API enabled, then paste its ID and secret. Your own client avoids Google's unverified-app warning.")
                             .font(TypeRole.meta)
                             .foregroundStyle(.secondary)
-                        Link("Step-by-step instructions", destination: URL(string: "https://github.com/audiojak/openagc/blob/main/docs/google-oauth-client.md")!)
+                        Link("Step-by-step instructions", destination: URL(string: "https://github.com/audiojak/kaluta/blob/main/docs/google-oauth-client.md")!)
                             .font(TypeRole.meta)
                         GoogleClientFields()
                     }
@@ -95,7 +95,7 @@ private struct OnboardingAgents: View {
         let agent = model.agent
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Agents").font(TypeRole.heading)
-            Text("OpenAGC works with the Claude Code or Codex command-line tools you already have, signed in with your own account. You can add one later.")
+            Text("Kaluta works with the Claude Code or Codex command-line tools you already have, signed in with your own account. You can add one later.")
                 .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
             if agent.providers.isEmpty {

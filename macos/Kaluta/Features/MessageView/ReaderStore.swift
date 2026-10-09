@@ -92,7 +92,7 @@ final class ReaderStore {
     /// the account's own mail, so unlike remote images they are not gated.
     private func loadInlineImages(of detail: ThreadDetail, generation: Int) async {
         guard let core else { return }
-        for message in detail.messages where bodies[message.id]?.html?.contains("openagc-cid:") == true {
+        for message in detail.messages where bodies[message.id]?.html?.contains("kaluta-cid:") == true {
             for attachment in message.attachments {
                 guard let cid = attachment.contentId.map(Self.normalizedContentID), !cid.isEmpty,
                       attachment.mimeType.hasPrefix("image/"), attachment.size <= Self.inlineImageLimit,

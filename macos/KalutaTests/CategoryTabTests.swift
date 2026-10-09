@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct InboxCategoryRuleTests {
     private func counts(_ pairs: [(String, UInt32)]) -> [InboxCategory] {
@@ -47,7 +47,7 @@ struct CategoryTabModelTests {
     }
 
     @Test func theDemoInboxOpensOnPrimaryAndTabsNarrowIt() async throws {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         let model = try await demo(defaults)
         #expect(model.inboxCategoryTabs.first?.id == InboxCategories.primary)
         #expect(model.inboxCategoryTabs.count > 2, "the demo seeds several categories")
@@ -71,7 +71,7 @@ struct CategoryTabModelTests {
     }
 
     @Test func searchIgnoresTabsAndOtherMailboxesAreNotNarrowed() async throws {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         let model = try await demo(defaults)
         model.searchText = "invoice"
         let fromOtherTabs = { model.threads.rows.contains { !$0.labelIds.contains(InboxCategories.primary) } }
@@ -85,7 +85,7 @@ struct CategoryTabModelTests {
     }
 
     @Test func revealingAThreadSwitchesToItsTab() async throws {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         let model = try await demo(defaults)
         let social = try #require(try await model.core!.threads(in: "INBOX+CATEGORY_SOCIAL", limit: 1).rows.first)
         model.reveal(threadID: social.id)

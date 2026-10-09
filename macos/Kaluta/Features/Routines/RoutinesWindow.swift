@@ -373,7 +373,7 @@ private struct BucketEditor: View {
                 Label(name.capitalized, systemImage: "circle.fill").tag(name)
             }
         }
-        .hoverHelp("The label's colour in Gmail and OpenAGC")
+        .hoverHelp("The label's colour in Gmail and Kaluta")
         Picker("Review", selection: $bucket.cadence) {
             ForEach(RoutineDefinition.Bucket.cadences, id: \.self) { Text($0.capitalized).tag($0) }
         }
@@ -553,7 +553,7 @@ private struct HandoffSheet: View {
             if isChatGPT {
                 Text("1. Copy the prompt and open ChatGPT.\n2. Start a new chat, paste the prompt and ask ChatGPT to “create a scheduled task” with it, \(handoff.scheduleText.lowercased()).\n3. Make sure the Gmail app is connected in ChatGPT.")
             } else {
-                Text("1. Copy the prompt and open your routines at claude.ai.\n2. Create a routine, paste the prompt, add the Gmail connector, and set the schedule to \(handoff.cronUtc.map { "the cron `\($0)` (UTC)" } ?? handoff.scheduleText).\n3. Paste the new routine's link below so OpenAGC can show its runs.")
+                Text("1. Copy the prompt and open your routines at claude.ai.\n2. Create a routine, paste the prompt, add the Gmail connector, and set the schedule to \(handoff.cronUtc.map { "the cron `\($0)` (UTC)" } ?? handoff.scheduleText).\n3. Paste the new routine's link below so Kaluta can show its runs.")
             }
             ScrollView {
                 Text(handoff.prompt).font(TypeRole.codeCaption).textSelection(.enabled)
@@ -568,7 +568,7 @@ private struct HandoffSheet: View {
             CancelButton(title: "Close", help: "Close; you can set it up later (Esc)") { dismiss() }
             if !isChatGPT {
                 Button("Link Routine") { Task { await model.routines.attach(url: pasted) } }
-                    .hoverHelp("Connect the routine you created at claude.ai so OpenAGC shows its runs")
+                    .hoverHelp("Connect the routine you created at claude.ai so Kaluta shows its runs")
                     .disabled(pasted.isEmpty)
             }
             Button("Copy Prompt and Open") { model.routines.copyAndOpen(handoff) }
@@ -590,7 +590,7 @@ private struct LaunchAtLoginToggle: View {
     @State private var error: String?
 
     var body: some View {
-        Toggle("Open OpenAGC at login", isOn: Binding(get: { enabled }, set: { on in
+        Toggle("Open Kaluta at login", isOn: Binding(get: { enabled }, set: { on in
             do {
                 if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
                 enabled = on
@@ -599,7 +599,7 @@ private struct LaunchAtLoginToggle: View {
                 self.error = error.localizedDescription
             }
         }))
-        .hoverHelp("Start OpenAGC when you log in, so routines on this Mac run on time")
+        .hoverHelp("Start Kaluta when you log in, so routines on this Mac run on time")
         if let error {
             Text(error).font(TypeRole.caption).foregroundStyle(Tone.failure)
         }

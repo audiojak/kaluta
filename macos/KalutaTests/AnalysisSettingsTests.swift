@@ -1,13 +1,13 @@
 import Foundation
 import Testing
 import UserNotifications
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Analysis settings and its notification (spec §14.10).
 @MainActor
 struct AnalysisSettingsTests {
     @Test func theNotificationIsOptInOnceADayAndOnlyInTheBackground() throws {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         var posted: [UNNotificationRequest] = []
         let notifier = NewMailNotifier(defaults: defaults, post: { posted.append($0) })
         notifier.isAppActive = { false }
@@ -16,7 +16,7 @@ struct AnalysisSettingsTests {
         defaults.set(true, forKey: NewMailNotifier.analysisKey)
         notifier.isAppActive = { true }
         notifier.announceAnalysis(proposals: 3, accountID: "a", today: "2026-10-05")
-        #expect(posted.isEmpty, "not while OpenAGC is in front")
+        #expect(posted.isEmpty, "not while Kaluta is in front")
         notifier.isAppActive = { false }
         notifier.announceAnalysis(proposals: 3, accountID: "a", today: "2026-10-05")
         notifier.announceAnalysis(proposals: 1, accountID: "a", today: "2026-10-05")

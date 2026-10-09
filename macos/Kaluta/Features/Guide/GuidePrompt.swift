@@ -81,7 +81,7 @@ struct GuidePromptSheet: View {
         switch prompt {
         case .firstRun:
             Dialog(title: "Learn How You Write?",
-                   message: "OpenAGC can learn your writing style from the mail you have sent, so any AI that drafts "
+                   message: "Kaluta can learn your writing style from the mail you have sent, so any AI that drafts "
                        + "for you writes the way you do. It reads your sent mail with your own agent, in the "
                        + "background, and asks you to confirm what it found when it is done.") {
                 EmptyView()

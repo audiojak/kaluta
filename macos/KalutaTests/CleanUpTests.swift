@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// The Clean Up window's model (spec §14.12) against the demo mailbox.
 @MainActor
@@ -8,7 +8,7 @@ struct CleanUpTests {
     private func demo() async throws -> AppModel {
         let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
-                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         model.undo.runsClock = false
         await model.start(openDemo: true)
         await model.cleanUp.open(accountID: model.openAccountID)
@@ -245,7 +245,7 @@ struct CleanUpTests {
         store.askUnsubscribe()
         let question = try #require(store.unsubscribeQuestion)
         #expect(question.title == "Unsubscribe from Weekly Digest?")
-        #expect(question.message == "OpenAGC asks weekly-digest.example.org once to take you off the list. Nothing else is sent.")
+        #expect(question.message == "Kaluta asks weekly-digest.example.org once to take you off the list. Nothing else is sent.")
         store.unsubscribeQuestion = nil
 
         // Every list ticked: each once, the mailto one says where it writes.

@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct AppShellTests {
@@ -15,12 +15,12 @@ struct AppShellTests {
         #expect(NSWindow.frameAutosaveRefused)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
                               styleMask: [.titled], backing: .buffered, defer: true)
-        #expect(window.setFrameAutosaveName("openagc-test-window") == false)
+        #expect(window.setFrameAutosaveName("kaluta-test-window") == false)
         #expect(window.frameAutosaveName.isEmpty)
-        window.saveFrame(usingName: "openagc-test-window")
-        #expect(UserDefaults.standard.object(forKey: "NSWindow Frame openagc-test-window") == nil)
+        window.saveFrame(usingName: "kaluta-test-window")
+        #expect(UserDefaults.standard.object(forKey: "NSWindow Frame kaluta-test-window") == nil)
         let split = NSSplitView()
-        split.autosaveName = "openagc-test-split"
+        split.autosaveName = "kaluta-test-split"
         #expect(split.autosaveName == nil, "split views would save their column widths")
     }
 }

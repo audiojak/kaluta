@@ -32,13 +32,13 @@ jobs:
           KEY: ${{ secrets.NOTARY_KEY }}
         run: |
           echo "$KEY" | base64 --decode > notary.p8
-          xcrun notarytool store-credentials openagc --key notary.p8 \
+          xcrun notarytool store-credentials kaluta --key notary.p8 \
             --key-id "${{ secrets.NOTARY_KEY_ID }}" --issuer "${{ secrets.NOTARY_ISSUER }}"
           rm notary.p8
       - name: Build, sign, notarize
         env:
           DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
-          NOTARY_PROFILE: openagc
+          NOTARY_PROFILE: kaluta
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -50,10 +50,10 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           pre=""; [[ "$version" == *-* ]] && pre="--prerelease"
-          gh release create "$GITHUB_REF_NAME" build/release/*.dmg --title "OpenAGC $version" $pre --generate-notes
+          gh release create "$GITHUB_REF_NAME" build/release/*.dmg --title "Kaluta $version" $pre --generate-notes
       - name: Commit the appcast
         run: |
-          git config user.name "OpenAGC release"
+          git config user.name "Kaluta release"
           git config user.email "release@users.noreply.github.com"
           git fetch origin main && git checkout main
           cp build/appcast/appcast.xml appcast.xml

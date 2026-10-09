@@ -201,7 +201,7 @@ struct ThreadListView: NSViewRepresentable {
 /// Thread ids on the drag pasteboard, as prefixed strings so a stray text
 /// drag can never be mistaken for a thread.
 enum ThreadDrag {
-    static let prefix = "openagc-thread:"
+    static let prefix = "kaluta-thread:"
 
     static func payload(for threadID: String) -> String { prefix + threadID }
 

@@ -36,7 +36,7 @@ struct AgentSettings: View {
             } header: {
                 Text("Agents")
             } footer: {
-                Text("OpenAGC uses the Claude Code or Codex command-line tool you already have, signed in with your own account. It never reads their credentials.")
+                Text("Kaluta uses the Claude Code or Codex command-line tool you already have, signed in with your own account. It never reads their credentials.")
                     .foregroundStyle(.secondary)
             }
             Section {
@@ -113,7 +113,7 @@ struct AgentStatusText: Equatable {
                       "Version \(version) is installed but not signed in. Run \(cli == "codex" ? "codex login" : "claude") in Terminal to sign in.", false)
         case let .updateRequired(version, minimum):
             self.init("exclamationmark.arrow.circlepath",
-                      "Version \(version) is too old; OpenAGC needs \(minimum) or later.", false)
+                      "Version \(version) is too old; Kaluta needs \(minimum) or later.", false)
         case let .error(message):
             self.init("exclamationmark.triangle", "Couldn’t check: \(message)", false)
         }

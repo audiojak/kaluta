@@ -81,7 +81,7 @@ struct AccountSettings: View {
             } header: {
                 Text("Google sign-in client")
             } footer: {
-                Text("Your own client avoids Google's unverified-app warning. OpenAGC asks only for permission to read and organize mail (gmail.modify).")
+                Text("Your own client avoids Google's unverified-app warning. Kaluta asks only for permission to read and organize mail (gmail.modify).")
                     .foregroundStyle(.secondary)
             }
 
@@ -109,21 +109,21 @@ struct AccountSettings: View {
                         Spacer()
                         Button("Delete", role: .destructive) { deleting = orphan }
                     }
-                    .hoverHelp("A copy of downloaded mail that no account in OpenAGC uses any more. Gmail is not affected")
+                    .hoverHelp("A copy of downloaded mail that no account in Kaluta uses any more. Gmail is not affected")
                 }
                 HStack {
                     Button("Show Mail Data") {
                         if let dir = try? CoreClient.defaultDataDirectory() { NSWorkspace.shared.activateFileViewerSelecting([dir]) }
                     }
-                    .hoverHelp("Show the folder where OpenAGC keeps downloaded mail, in Finder")
+                    .hoverHelp("Show the folder where Kaluta keeps downloaded mail, in Finder")
                     Button("Show Logs") { NSWorkspace.shared.activateFileViewerSelecting([CoreClient.defaultLogDirectory()]) }
-                        .hoverHelp("Show OpenAGC's log files in Finder")
+                        .hoverHelp("Show Kaluta's log files in Finder")
                 }
             }
         }
         .formStyle(.grouped)
         .task(id: model.accounts.map(\.id)) { orphans = (try? await model.core?.orphanedStores()) ?? [] }
-        .confirmationDialog("Remove \(removing?.email ?? "this account") from OpenAGC?",
+        .confirmationDialog("Remove \(removing?.email ?? "this account") from Kaluta?",
                             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove", role: .destructive) { // no-help: confirmation dialog button
                 if let account = removing { Task { await model.removeAccount(account.id) } }
@@ -133,7 +133,7 @@ struct AccountSettings: View {
             if let removing, removing.kind == .agent {
                 Text(Self.removeAgentMessage(removing, service: model.serviceAccount(of: removing.id)))
             } else {
-                Text("OpenAGC forgets the sign-in and deletes the mail it downloaded for this account. Gmail itself is not changed.")
+                Text("Kaluta forgets the sign-in and deletes the mail it downloaded for this account. Gmail itself is not changed.")
             }
         }
     }
@@ -159,9 +159,9 @@ extension AccountSettings {
         let kind = service?.service ?? agent.service ?? .primitive
         let name = AppModel.serviceName(kind)
         if let service, service.agentAccountIds.count > 1 {
-            return "OpenAGC deletes the mail it downloaded for this agent. The service account and its key stay for its other agents, and the mailbox itself stays at \(name)."
+            return "Kaluta deletes the mail it downloaded for this agent. The service account and its key stay for its other agents, and the mailbox itself stays at \(name)."
         }
-        let message = "OpenAGC forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at \(name)."
+        let message = "Kaluta forgets the mailbox's key and deletes the mail it downloaded. The mailbox itself stays at \(name)."
         guard kind == .agentMail else { return message }
         return message + " Creating it again here with the same email gives it a new key, so a key shared with Copy API Key or used on another Mac stops working."
     }
@@ -178,7 +178,7 @@ extension AccountSettings {
     var reauthenticationHint: String {
         switch model.reauthenticationReason {
         case .savedSignInUnavailable:
-            "The saved sign-in isn't available to this copy of OpenAGC, so mail isn't syncing. Downloaded mail is kept; sign in again to resume."
+            "The saved sign-in isn't available to this copy of Kaluta, so mail isn't syncing. Downloaded mail is kept; sign in again to resume."
         case .googleRejected, nil:
             "Google asked you to sign in again."
         }
@@ -293,8 +293,8 @@ struct AccountRow: View {
                     CleanUpButton(accountID: account.id)
                 }
                 Button("Remove…", role: .destructive, action: onRemove)
-                    .hoverHelp(account.kind == .agent ? "Remove this agent's mailbox from OpenAGC; it stays at the service"
-                               : "Remove this account from OpenAGC; Gmail itself is not changed")
+                    .hoverHelp(account.kind == .agent ? "Remove this agent's mailbox from Kaluta; it stays at the service"
+                               : "Remove this account from Kaluta; Gmail itself is not changed")
             }
             TextField("Name", text: $name,
                       prompt: Text(account.kind == .archive ? "A name for this mailbox"
@@ -302,9 +302,9 @@ struct AccountRow: View {
                 .focused($nameFocused)
                 .onSubmit { Task { await rename() } }
                 .onChange(of: nameFocused) { _, focused in if !focused { Task { await rename() } } }
-                .hoverHelp(account.kind == .archive ? "What this mailbox is called in OpenAGC"
+                .hoverHelp(account.kind == .archive ? "What this mailbox is called in Kaluta"
                            : account.kind == .agent ? "The agent's name; mail it sends comes from this name"
-                           : "Shown beside the address in OpenAGC; leave empty to use your Google profile's name")
+                           : "Shown beside the address in Kaluta; leave empty to use your Google profile's name")
                 .onAppear { name = Self.editableName(account) }
                 .onChange(of: account.displayName) { name = Self.editableName(account) }
                 .onChange(of: account.email) { name = Self.editableName(account) }
@@ -338,7 +338,7 @@ struct AccountRow: View {
                 .disabled(sendMode == nil)
                 LabeledContent("Outside agents") {
                     Button("Connect an Agent…") { connecting = true }
-                        .hoverHelp("Let Claude Code or Codex on this Mac use this mailbox, even when OpenAGC is closed")
+                        .hoverHelp("Let Claude Code or Codex on this Mac use this mailbox, even when Kaluta is closed")
                 }
                 .sheet(isPresented: $connecting) { ConnectAgentSheet(accountID: account.id, address: account.email) }
                 // Cloud agents read the guide and shared facts there (spec §10.6).
@@ -356,7 +356,7 @@ struct AccountRow: View {
                         Text(choice.1).tag(choice.0)
                     }
                 }
-                .hoverHelp("How far back OpenAGC keeps a copy of this account's mail")
+                .hoverHelp("How far back Kaluta keeps a copy of this account's mail")
                 .disabled(window == nil)
                 LabeledContent("Downloads") {
                     Text(Self.transportText(imapEnabled: account.imapEnabled, transport: backfill?.transport))
@@ -365,7 +365,7 @@ struct AccountRow: View {
                 .hoverHelp("IMAP is used for downloading; the Gmail API for categories, drafts, changes made elsewhere and sending, and whenever IMAP fails")
                 if !account.imapEnabled, signedIn == true {
                     Button("Sign In Again for IMAP…") { Task { await model.signInAgainForIMAP(account.id) } }
-                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. OpenAGC still never deletes mail permanently")
+                        .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. Kaluta still never deletes mail permanently")
                 }
                 if account.imapEnabled {
                     // Tiered download (spec §7.4): older mail in the range
@@ -443,7 +443,7 @@ struct SyncWindowSection: View {
                     Text(choice.1).tag(choice.0)
                 }
             }
-            .hoverHelp("How far back OpenAGC keeps a copy of your mail")
+            .hoverHelp("How far back Kaluta keeps a copy of your mail")
             .disabled(window == nil)
         } header: {
             Text("Mail on this Mac")
@@ -468,7 +468,7 @@ struct GoogleClientFields: View {
     var body: some View {
         let client = GoogleClientConfiguration.effective()
         LabeledContent("Using") {
-            Text(client.isCustom ? "Your own client" : (client.isUsable ? "OpenAGC's client" : "No client in this build"))
+            Text(client.isCustom ? "Your own client" : (client.isUsable ? "Kaluta's client" : "No client in this build"))
         }
         TextField("Client ID", text: $customID)
         SecureField("Client secret (optional)", text: $customSecret)
@@ -476,13 +476,13 @@ struct GoogleClientFields: View {
             Button("Save") {
                 do {
                     try GoogleClientConfiguration.saveCustom(clientID: customID, clientSecret: customSecret)
-                    status = customID.isEmpty ? "Using OpenAGC's client." : "Saved. Sign in again to use it."
+                    status = customID.isEmpty ? "Using Kaluta's client." : "Saved. Sign in again to use it."
                 } catch {
                     status = String(describing: error)
                 }
             }
             .hoverHelp("Use this Google client for sign-in")
-            Link("How to create one", destination: URL(string: "https://github.com/audiojak/openagc/blob/main/docs/google-oauth-client.md")!)
+            Link("How to create one", destination: URL(string: "https://github.com/audiojak/kaluta/blob/main/docs/google-oauth-client.md")!)
             if let status { Text(status).foregroundStyle(.secondary).font(TypeRole.meta) }
         }
     }
@@ -495,8 +495,8 @@ struct PrivacySettings: View {
     var body: some View {
         Form {
             Section("What leaves this Mac") {
-                Label("Mail syncs directly between Google and this Mac. OpenAGC has no servers and collects nothing.", systemImage: "lock.shield")
-                Label("An agent sees mail only when you ask it something, through OpenAGC's tools, and every access is logged in Permissions › Activity.", systemImage: "sparkles")
+                Label("Mail syncs directly between Google and this Mac. Kaluta has no servers and collects nothing.", systemImage: "lock.shield")
+                Label("An agent sees mail only when you ask it something, through Kaluta's tools, and every access is logged in Permissions › Activity.", systemImage: "sparkles")
                 Label("A Claude cloud routine works on Anthropic's side, under the Gmail access you granted at claude.ai.", systemImage: "cloud")
             }
             .font(TypeRole.meta)

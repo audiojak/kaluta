@@ -372,7 +372,7 @@ final class ComposerAssistant {
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,
                        original: String, guide: String = "", facts: [String] = []) -> String {
         var parts = [
-            "You are helping write an email in OpenAGC's composer. The user asks: \(instruction)",
+            "You are helping write an email in Kaluta's composer. The user asks: \(instruction)",
             """
             Answer with only the text of the message body, ready to send: no subject line, no notes about \
             what you did, no Markdown, and do not repeat the quoted original. Do not create, change, send \

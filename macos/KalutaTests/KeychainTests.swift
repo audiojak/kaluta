@@ -1,11 +1,11 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Runs against the real Keychain under a throwaway service name.
 struct KeychainTests {
     @Test func setGetUpdateDeleteRoundTrip() throws {
-        let store = KeychainSecretStore(service: "ai.actual.openagc.tests.\(UUID().uuidString)")
+        let store = KeychainSecretStore(service: "org.kaluta.Kaluta.tests.\(UUID().uuidString)")
         #expect(try store.get("k") == nil)
         try store.set("k", "first")
         #expect(try store.get("k") == "first")
@@ -17,16 +17,16 @@ struct KeychainTests {
     }
 
     @Test func servicesAreIsolated() throws {
-        let a = KeychainSecretStore(service: "ai.actual.openagc.tests.\(UUID().uuidString)")
-        let b = KeychainSecretStore(service: "ai.actual.openagc.tests.\(UUID().uuidString)")
+        let a = KeychainSecretStore(service: "org.kaluta.Kaluta.tests.\(UUID().uuidString)")
+        let b = KeychainSecretStore(service: "org.kaluta.Kaluta.tests.\(UUID().uuidString)")
         try a.set("shared-key", "a")
         defer { try? a.delete("shared-key") }
         #expect(try b.get("shared-key") == nil)
     }
 
     @Test func deleteAllEmptiesOnlyItsService() throws {
-        let a = KeychainSecretStore(service: "ai.actual.openagc.tests.\(UUID().uuidString)")
-        let b = KeychainSecretStore(service: "ai.actual.openagc.tests.\(UUID().uuidString)")
+        let a = KeychainSecretStore(service: "org.kaluta.Kaluta.tests.\(UUID().uuidString)")
+        let b = KeychainSecretStore(service: "org.kaluta.Kaluta.tests.\(UUID().uuidString)")
         try a.set("one", "1")
         try a.set("two", "2")
         try b.set("one", "b")

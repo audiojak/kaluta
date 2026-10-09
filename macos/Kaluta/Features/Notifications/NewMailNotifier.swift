@@ -30,7 +30,7 @@ final class NewMailNotifier: NSObject {
     var openAnalysis: ((String?) -> Void)?
 
     private let defaults: UserDefaults
-    private let logger = Logger(subsystem: "ai.actual.openagc", category: "notifications")
+    private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "notifications")
     private var askedForPermission = false
 
     init(defaults: UserDefaults = CoreClient.appDefaults(), post: ((UNNotificationRequest) -> Void)? = nil) {

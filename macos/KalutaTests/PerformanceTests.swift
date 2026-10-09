@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// §1.3 performance targets measured through the FFI against the 100k
 /// fixture (`cargo xtask fixture`). Skipped when the fixture is absent.

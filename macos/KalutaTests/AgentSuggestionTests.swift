@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct AgentSuggestionModelTests {
     private func texts(_ s: [AgentSuggestion]) -> [String] { s.map(\.text) }
@@ -77,7 +77,7 @@ struct AgentSuggestionModelTests {
     }
 
     @Test func recentPromptsAreKeptPerAccountNewestFirstWithoutDuplicates() throws {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         let store = RecentPrompts(defaults: defaults)
         for i in 0..<25 { store.record("prompt \(i)", for: "a") }
         store.record("PROMPT 24", for: "a")
@@ -96,7 +96,7 @@ struct AgentSuggestionPanelTests {
     private func demo() async throws -> AppModel {
         let dir = CoreClient.testScratch()
         let model = AppModel(core: try CoreClient(dataDirectory: dir),
-                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
         await model.agent.loadProviders()
         return model

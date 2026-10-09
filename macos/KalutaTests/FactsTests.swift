@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Facts (spec §14.11): editing with Undo, Make Global, and what the
 /// interview keeps.
@@ -96,7 +96,7 @@ struct FactsMergeTests {
                                                                    use: .free, asOf: nil), status: .accepted, source: .you)],
                                           reason: "test")
         let json = """
-        {"openagc_facts": 1, "categories": [], "facts": [
+        {"kaluta_facts": 1, "categories": [], "facts": [
           {"category": "work", "label": "Occupation or role", "value": "CEO", "use": "free", "as_of": null},
           {"category": "availability", "label": "Time zone", "value": "Pacific", "use": "free", "as_of": null}]}
         """

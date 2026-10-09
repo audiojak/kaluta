@@ -76,11 +76,11 @@ private struct GeneralSettings: View {
                 if updater.isConfigured {
                     Toggle("Check for updates automatically", isOn: Binding(
                         get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
-                        .hoverHelp("Look for new versions of OpenAGC in the background")
+                        .hoverHelp("Look for new versions of Kaluta in the background")
                     Toggle("Include beta versions", isOn: $betas)
                         .hoverHelp("Also offer beta versions when checking for updates")
                     Button("Check Now") { updater.checkForUpdates() }
-                        .hoverHelp("Look for a new version of OpenAGC now")
+                        .hoverHelp("Look for a new version of Kaluta now")
                         .disabled(!updater.canCheckForUpdates)
                 } else {
                     Text("This build does not update itself. Official releases do.")

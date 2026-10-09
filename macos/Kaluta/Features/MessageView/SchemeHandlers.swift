@@ -2,13 +2,13 @@ import Foundation
 import UniformTypeIdentifiers
 import WebKit
 
-/// Serves `openagc-remote:<url>` images (spec §14.4). Blocked by default: a
+/// Serves `kaluta-remote:<url>` images (spec §14.4). Blocked by default: a
 /// transparent pixel is returned and nothing leaves the Mac. When allowed,
 /// the image is fetched without cookies, referrer or a stored cache, so a
 /// tracking pixel learns as little as possible.
 @MainActor
 final class RemoteImageSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "openagc-remote"
+    static let scheme = "kaluta-remote"
     var allowRemote = false
 
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
@@ -53,7 +53,7 @@ final class RemoteImageSchemeHandler: NSObject, WKURLSchemeHandler {
         tasks.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
     }
 
-    /// `openagc-remote:https://host/path` → `https://host/path`. Only http(s).
+    /// `kaluta-remote:https://host/path` → `https://host/path`. Only http(s).
     static func remoteURL(from url: URL?) -> URL? {
         guard let url, url.scheme == scheme else { return nil }
         let rest = String(url.absoluteString.dropFirst(scheme.count + 1))
@@ -71,18 +71,18 @@ final class RemoteImageSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 }
 
-/// An inline image's bytes, served for `openagc-cid:` references.
+/// An inline image's bytes, served for `kaluta-cid:` references.
 struct InlineImage: Equatable, Sendable {
     let data: Data
     let mimeType: String
 }
 
-/// Serves `openagc-cid:<content-id>` inline images from the message's
+/// Serves `kaluta-cid:<content-id>` inline images from the message's
 /// attachments. Until attachment bytes are fetched on demand (spec §14.3),
 /// inline images render as transparent placeholders.
 @MainActor
 final class CidSchemeHandler: NSObject, WKURLSchemeHandler {
-    static let scheme = "openagc-cid"
+    static let scheme = "kaluta-cid"
     /// Looks up inline attachment bytes by content id; `nil` if unavailable.
     var provider: ((String) -> (Data, String)?)?
 

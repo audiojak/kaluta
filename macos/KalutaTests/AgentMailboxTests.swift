@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Agent mailboxes (spec §7.9), against the core's in-memory service: tests
 /// never create an account at Primitive.
@@ -22,7 +22,7 @@ struct AgentMailboxTests {
     private func modelWithAnAccount() async throws -> (AppModel, CoreClient) {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 12)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         return (model, core)
     }
@@ -118,7 +118,7 @@ struct AgentMailboxTests {
     @Test func noDomainIsSuggestedForSharedMailHosts() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("me", email: "someone@gmail.com", threads: 2)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         #expect(model.suggestedAgentDomain == "")
     }
@@ -178,7 +178,7 @@ struct ServiceAccountFlowTests {
     private func modelWithAnAccount() async throws -> (AppModel, CoreClient, RecordingCalls) {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 4)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         let calls = RecordingCalls(core)
         model.agentMailboxCallsOverride = calls
@@ -367,7 +367,7 @@ struct EmptyMailboxKeyTests {
     @Test func cStartsAMessageInAnEmptyMailbox() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         _ = try await model.createAgentMailbox(name: "Scout")
         #expect(model.threads.rows.isEmpty, "a new mailbox is empty")
@@ -409,7 +409,7 @@ struct FailedSendTests {
     @Test func aRefusedSendIsShownWithWhy() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", threads: 2)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         #expect(model.failedSends.isEmpty)
         await model.refreshFailedSends()
@@ -501,7 +501,7 @@ struct TabIntoListTests {
     @Test func tabSelectsTheFirstMessageWhenNoneIsSelected() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", threads: 40)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         let first = try #require(model.threads.rows.first).id
         let second = try #require(model.threads.rows.dropFirst().first).id
@@ -543,7 +543,7 @@ struct AgentPromptFocusTests {
     @Test func askTheAgentFocusesThePromptField() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", threads: 3)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         NSApp.activate()
         let window = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 120), styleMask: [.titled],
@@ -579,7 +579,7 @@ struct AgentPromptFocusTests {
     @Test func askTheAgentFromAnotherWindowReachesThePrompt() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", threads: 3)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         NSApp.activate()
         let main = EmptyListWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 200), styleMask: [.titled],
@@ -635,7 +635,7 @@ struct AgentReadinessTests {
     /// The prompt field is never disabled; the line under it says why the
     /// agent cannot be asked yet.
     @Test func whyTheAgentCannotBeAskedIsSaidInALine() {
-        let store = AgentStore(core: nil, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let store = AgentStore(core: nil, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         #expect(store.notReadyReason == "Looking for Claude…", "nothing loaded yet")
         let reason = { (p: AgentProviderInfo?) in AgentStore.notReadyReason(for: p, named: "Claude", loaded: true) }
         #expect(reason(nil) == "Claude isn't set up")
@@ -649,7 +649,7 @@ struct AgentReadinessTests {
     /// looks again when asked, and stops looking once it is ready.
     @Test func lookingAgainFindsTheAgent() async throws {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
-        let store = AgentStore(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let store = AgentStore(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         #expect(!store.isProviderReady)
         await store.ensureReady()
         #expect(store.isProviderReady)

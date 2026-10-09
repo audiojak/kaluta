@@ -161,7 +161,7 @@ struct MainWindow: View {
         if model.isTaskList { return "Tasks" }
         if model.isGuide { return "Writing Guide" }
         if model.isFacts { return "Facts" }
-        return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "OpenAGC"
+        return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "Kaluta"
     }
 
     /// Under the title: "12 unread · Important only"; sync status is in

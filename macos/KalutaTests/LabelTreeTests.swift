@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct LabelTreeTests {
     private func label(_ name: String, unread: UInt32 = 0) -> MailboxInfo {

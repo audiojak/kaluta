@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct GuideStoreTests {
@@ -382,7 +382,7 @@ struct MergeGuideTests {
                                           check: nil), status: .accepted, source: .you, origin: nil),
         ], reason: "test")
         let file = """
-        {"format": "openagc-writing-guide", "version": 1, "entries": [
+        {"format": "kaluta-writing-guide", "version": 1, "entries": [
           {"category": "B6", "kind": "guideline", "statement": "Sign off with 'Cheers'"},
           {"category": "A1", "kind": "guideline", "statement": "Be warm"}]}
         """
@@ -443,7 +443,7 @@ struct GuideTimeLeftTests {
 struct GuidePromptTests {
     private func model() throws -> AppModel {
         AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
-                 defaults: try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")))
+                 defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
     }
 
     @Test func anAccountThatNeverLearnedIsInvitedOnceThenReminded() async throws {
@@ -503,7 +503,7 @@ struct MissingFactsTests {
 
     @Test func theAgentAsksForFactsThenWritesWithTheAnswersAndKeepsThem() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
-                             defaults: try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")))
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
         await model.start(openDemo: true)
         await model.agent.loadProviders()
         let core = try #require(model.core)

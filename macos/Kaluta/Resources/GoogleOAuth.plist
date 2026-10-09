@@ -4,7 +4,7 @@
   The shipped Google OAuth desktop client (spec §7.3). Installed apps cannot
   keep secrets, so these values are not confidential (Google's own guidance;
   Thunderbird and rclone ship theirs the same way). Google Cloud project
-  "openagc". Users can still bring their own client
+  "kaluta". Users can still bring their own client
   (Settings › Accounts › Advanced, docs/google-oauth-client.md).
 -->
 <plist version="1.0">

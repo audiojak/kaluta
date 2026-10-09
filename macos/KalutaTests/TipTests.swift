@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct TipTests {
@@ -34,7 +34,7 @@ struct TipTests {
     }
 
     @Test func actingOnATipDoesItAndPutsItAwayForGood() {
-        let suite = "openagc-tests-\(UUID().uuidString)"
+        let suite = "kaluta-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = AppModel(core: nil, defaults: defaults)
@@ -62,7 +62,7 @@ struct TipTests {
     }
 
     @Test func openingCleanUpRetiresItsTip() {
-        let suite = "openagc-tests-\(UUID().uuidString)"
+        let suite = "kaluta-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = AppModel(core: nil, defaults: defaults)

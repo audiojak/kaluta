@@ -65,7 +65,7 @@ final class AgentStore {
     @ObservationIgnored var holdLookup: Duration = .seconds(3)
     @ObservationIgnored private var nextID = 0
     @ObservationIgnored private var toolEntries: [String: Int] = [:]
-    @ObservationIgnored private let logger = Logger(subsystem: "ai.actual.openagc", category: "agent")
+    @ObservationIgnored private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "agent")
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -266,11 +266,11 @@ final class AgentStore {
         await ingest(events)
     }
 
-    /// An agent outside OpenAGC working in an agent mailbox (spec §10.1):
+    /// An agent outside Kaluta working in an agent mailbox (spec §10.1):
     /// its session ids start with `outside-`.
     static func isOutside(_ sessionID: String) -> Bool { sessionID.hasPrefix("outside-") }
 
-    /// "Claude Code (outside OpenAGC)" for the activity log; nil for the app's own sessions.
+    /// "Claude Code (outside Kaluta)" for the activity log; nil for the app's own sessions.
     static func outsideAgentName(_ sessionID: String) -> String? {
         guard isOutside(sessionID) else { return nil }
         let rest = sessionID.dropFirst("outside-".count)
@@ -281,7 +281,7 @@ final class AgentStore {
         case "": "An agent"
         default: label
         }
-        return "\(name) (outside OpenAGC)"
+        return "\(name) (outside Kaluta)"
     }
 
     /// Only an outside agent's proposals reach the panel: the approval is

@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct DesignTokenTests {
     @Test func spacingIsOneIncreasingScale() {

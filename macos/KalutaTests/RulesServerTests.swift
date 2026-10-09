@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Publishing an agent mailbox to a rules server (spec §10.6): the sheet's
 /// list, the status line and the per-fact switch. No server is contacted
@@ -21,7 +21,7 @@ struct RulesServerTests {
     private func agentMailbox() async throws -> (AppModel, CoreClient, String) {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
         try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 4)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         let created = try await model.createAgentMailbox(name: "Research Scout")
         func fact(_ c: String, _ l: String, _ v: String, _ u: FactUse) -> FactEdit {

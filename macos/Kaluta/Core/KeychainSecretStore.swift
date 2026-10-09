@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-/// OpenAGC's secrets in the macOS Keychain (spec §12): generic passwords
+/// Kaluta's secrets in the macOS Keychain (spec §12): generic passwords
 /// under one service, readable only after first unlock, never synced.
 ///
 /// Uses the data-protection keychain when the app is signed with a team
@@ -12,7 +12,11 @@ final class KeychainSecretStore: @unchecked Sendable {
     private let lock = NSLock()
     private var useDataProtection: Bool?
 
-    init(service: String = "ai.actual.openagc") {
+    /// The user's own items: Kaluta's, and OpenAGC's from before the
+    /// project was renamed, which the first launch copies and never changes.
+    static let realServices: Set<String> = ["org.kaluta.Kaluta", "ai.actual.openagc"]
+
+    init(service: String = "org.kaluta.Kaluta") {
         self.service = service
     }
 
@@ -63,7 +67,7 @@ final class KeychainSecretStore: @unchecked Sendable {
             var add = baseQuery(key)
             add[kSecValueData as String] = data
             add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            add[kSecAttrLabel as String] = "OpenAGC: \(key)"
+            add[kSecAttrLabel as String] = "Kaluta: \(key)"
             return SecItemAdd(add as CFDictionary, nil)
         }
         guard status == errSecSuccess else { throw KeychainError(status: status, operation: "add") }
@@ -79,7 +83,7 @@ final class KeychainSecretStore: @unchecked Sendable {
     /// Delete every item under this service (the test host's, between
     /// runs). Never used on the app's own service.
     func deleteAll() throws(KeychainError) {
-        precondition(service != "ai.actual.openagc", "never empty the user's own Keychain items")
+        precondition(!Self.realServices.contains(service), "never empty the user's own Keychain items")
         // Both keychains: items may sit in the login keychain from runs
         // that fell back to it, while the data-protection one answers
         // "not found". The login keychain deletes one item per call.

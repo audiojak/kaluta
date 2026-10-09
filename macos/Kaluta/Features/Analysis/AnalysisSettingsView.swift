@@ -43,7 +43,7 @@ struct AnalysisSettingsView: View {
             }
             Section {
                 Toggle("Notify me of new proposals", isOn: $notify)
-                    .hoverHelp("Once a day, when a review finds something and OpenAGC is not in front")
+                    .hoverHelp("Once a day, when a review finds something and Kaluta is not in front")
             }
             if model.openAccountID != nil, model.reviewsAvailable {
                 Section("Last review") {

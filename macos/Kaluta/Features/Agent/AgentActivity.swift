@@ -50,7 +50,7 @@ struct AgentPermissionsSettings: View {
             } header: {
                 Text("Claude API Key (Optional)")
             } footer: {
-                Text("Only needed if your Claude subscription cannot be used from the command line. OpenAGC passes it to the claude process; it is never sent anywhere else.")
+                Text("Only needed if your Claude subscription cannot be used from the command line. Kaluta passes it to the claude process; it is never sent anywhere else.")
                     .foregroundStyle(.secondary)
             }
             Section {
@@ -116,7 +116,7 @@ struct AgentActivityView: View {
                 TableColumn("Action") { a in Text(AgentStore.toolTitle(a.tool)) }
                     .width(min: 110, ideal: 140)
                 TableColumn("Agent") { a in
-                    Text(AgentStore.outsideAgentName(a.sessionId) ?? "In OpenAGC").foregroundStyle(.secondary)
+                    Text(AgentStore.outsideAgentName(a.sessionId) ?? "In Kaluta").foregroundStyle(.secondary)
                 }
                 .width(min: 90, ideal: 150)
                 TableColumn("Decision") { a in Text(Self.stateText(a.state)).foregroundStyle(Self.stateColor(a.state)) }
@@ -184,7 +184,7 @@ struct AgentActivityView: View {
 
     private func export() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "openagc-agent-activity.jsonl"
+        panel.nameFieldStringValue = "kaluta-agent-activity.jsonl"
         panel.allowedContentTypes = [UTType(filenameExtension: "jsonl") ?? .json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? Self.jsonLines(actions).write(to: url, atomically: true, encoding: .utf8)

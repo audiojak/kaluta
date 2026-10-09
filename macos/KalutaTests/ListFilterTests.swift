@@ -1,11 +1,11 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct ListFilterTests {
     private func demo() async throws -> AppModel {
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         defaults.set(false, forKey: AppModel.showCategoriesKey("demo"))
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()), defaults: defaults)
         await model.start(openDemo: true)

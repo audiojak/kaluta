@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SVG="$ROOT/macos/Icon/kaluta-icon.svg"
-SET="$ROOT/macos/OpenAGC/Resources/Assets.xcassets/AppIcon.appiconset"
+SET="$ROOT/macos/Kaluta/Resources/Assets.xcassets/AppIcon.appiconset"
 mkdir -p "$SET"
 images=()
 for size in 16 32 128 256 512; do

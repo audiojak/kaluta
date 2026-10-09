@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct AgentSettingsTests {
     private func info(_ id: String, _ status: AgentStatusInfo) -> AgentProviderInfo {
@@ -23,7 +23,7 @@ struct AgentSettingsTests {
 struct AgentPermissionTests {
     @Test func thePolicyFollowsTheUsersChoices() async throws {
         let dir = CoreClient.testScratch()
-        let defaults = try #require(UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)"))
+        let defaults = try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)"))
         let model = AppModel(core: try CoreClient(dataDirectory: dir), defaults: defaults)
         defaults.set(["mail_archive"], forKey: AppModel.agentApprovalKey)
         model.applyAgentPolicy()

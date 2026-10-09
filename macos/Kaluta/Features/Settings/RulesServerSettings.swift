@@ -137,7 +137,7 @@ struct PublishRulesSheet: View {
     @FocusState private var focused: Bool
 
     static let width: CGFloat = 560
-    static let howTo = URL(string: "https://github.com/audiojak/openagc/blob/main/docs/rules-server.md#run-it")!
+    static let howTo = URL(string: "https://github.com/audiojak/kaluta/blob/main/docs/rules-server.md#run-it")!
 
     var body: some View {
         Dialog(title: "Publish to a Rules Server", message: Self.message(name), width: Self.width) {
@@ -216,7 +216,7 @@ struct PublishRulesSheet: View {
     static func encryptionNote(_ encryption: RulesEncryption?) -> String? {
         switch encryption {
         case .required: "This server keeps what you publish encrypted; agents read it with their own token."
-        case .unsupported: "This server runs an older openagc-rules that cannot keep what you publish encrypted: turn encryption off under Advanced, or ask its operator to update it."
+        case .unsupported: "This server runs an older kaluta-rules that cannot keep what you publish encrypted: turn encryption off under Advanced, or ask its operator to update it."
         case .optional, nil: nil
         }
     }
@@ -235,7 +235,7 @@ struct PublishRulesSheet: View {
     }
 
     static func message(_ name: String) -> String {
-        "Cloud agents, such as a Claude routine or an agent on another machine, can then read \(name)'s writing guide and the facts you share, as of the last version published. Changes are published as you make them, while OpenAGC is open."
+        "Cloud agents, such as a Claude routine or an agent on another machine, can then read \(name)'s writing guide and the facts you share, as of the last version published. Changes are published as you make them, while Kaluta is open."
     }
 
     private var canPublish: Bool {

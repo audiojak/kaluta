@@ -31,7 +31,7 @@ final class RoutinesStore {
     private(set) var scopeCount: Int?
 
     @ObservationIgnored private let core: CoreClient?
-    @ObservationIgnored private let logger = Logger(subsystem: "ai.actual.openagc", category: "routines")
+    @ObservationIgnored private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "routines")
 
     init(core: CoreClient?) {
         self.core = core

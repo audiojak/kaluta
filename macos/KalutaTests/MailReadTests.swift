@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct MailReadTests {
     private func seededClient(threads: UInt32 = 120) async throws -> CoreClient {

@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SwiftUI
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Proposed rules in the Writing Guide (spec §14.10): its dot, the learning
 /// decisions beside the review's proposals, and deciding them with Undo.

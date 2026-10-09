@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 struct EmailDocumentTests {
     private func message(_ id: String, read: Bool = true, html: String? = "<p>x</p>", from: String = "Ann") -> EmailDocument.Message {
@@ -88,10 +88,10 @@ struct LinkSafetyTests {
 @MainActor
 struct SchemeHandlerTests {
     @Test func remoteURLsAreUnwrappedOnlyForHTTP() {
-        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "openagc-remote:https://img.example.com/a.png?x=1"))
+        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:https://img.example.com/a.png?x=1"))
             == URL(string: "https://img.example.com/a.png?x=1"))
-        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "openagc-remote:file:///etc/passwd")) == nil)
-        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "openagc-remote:javascript:alert(1)")) == nil)
+        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:file:///etc/passwd")) == nil)
+        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:javascript:alert(1)")) == nil)
         #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "https://img.example.com/a.png")) == nil)
     }
 }

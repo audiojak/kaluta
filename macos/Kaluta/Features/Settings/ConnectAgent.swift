@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// Connect an Agent… (spec §10.1): add an agent mailbox to Claude Code's or
-/// Codex's MCP servers, through the bundled `openagc-mcp --mailbox`. The
+/// Codex's MCP servers, through the bundled `kaluta-mcp --mailbox`. The
 /// sheet shows exactly what is written and where before anything is, backs
 /// the file up first, and offers the command to run instead.
 struct ConnectAgentSheet: View {
@@ -70,11 +70,14 @@ struct ConnectAgentSheet: View {
     }
 
     static func message(_ address: String) -> String {
-        "Let Claude Code or Codex use \(address) — its writing guide, facts and mail, and sending as it — even when OpenAGC is closed. Sends follow When Agents Send; with OpenAGC closed they wait until it opens. Your own accounts stay out of reach."
+        "Let Claude Code or Codex use \(address) — its writing guide, facts and mail, and sending as it — even when Kaluta is closed. Sends follow When Agents Send; with Kaluta closed they wait until it opens. Your own accounts stay out of reach."
     }
 
     static func whereText(_ plan: AgentConnection) -> String {
         let file = (plan.configPath as NSString).abbreviatingWithTildeInPath
+        if let old = plan.replacesOldName {
+            return "Replaces the \(old) entry OpenAGC wrote in \(file) with this one, after copying the file as it is:"
+        }
         switch (plan.fileExists, plan.replaces) {
         case (true, true): return "Replaces the \(plan.serverName) entry in \(file), after copying the file as it is:"
         case (true, false): return "Adds this to \(file), after copying the file as it is:"

@@ -86,7 +86,7 @@ enum RoutineRunner: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .claudeCloud: "Claude cloud"
-        case .local: "This Mac (OpenAGC)"
+        case .local: "This Mac (Kaluta)"
         case .chatGptCloud: "ChatGPT"
         case .claudeDesktop: "Claude Desktop"
         }
@@ -104,13 +104,13 @@ enum RoutineRunner: String, CaseIterable, Identifiable {
     var explanation: String {
         switch self {
         case .claudeCloud:
-            "Runs on Anthropic's cloud on your Claude plan, even when this Mac is off. Needs Claude Code signed in with your claude.ai account and Gmail connected at claude.ai. OpenAGC sets it up through your claude command; the routine then works under Claude's Gmail permissions, not OpenAGC's approval rules."
+            "Runs on Anthropic's cloud on your Claude plan, even when this Mac is off. Needs Claude Code signed in with your claude.ai account and Gmail connected at claude.ai. Kaluta sets it up through your claude command; the routine then works under Claude's Gmail permissions, not Kaluta's approval rules."
         case .local:
-            "Runs here with your installed Claude Code or Codex, through OpenAGC's tools and approval rules. Needs this Mac awake and OpenAGC open at the scheduled time."
+            "Runs here with your installed Claude Code or Codex, through Kaluta's tools and approval rules. Needs this Mac awake and Kaluta open at the scheduled time."
         case .chatGptCloud:
-            "Runs on OpenAI's cloud on your ChatGPT plan. Needs the Gmail app connected in ChatGPT; unattended label changes may need approval there. OpenAGC can't create it for you: it copies the prompt and opens ChatGPT."
+            "Runs on OpenAI's cloud on your ChatGPT plan. Needs the Gmail app connected in ChatGPT; unattended label changes may need approval there. Kaluta can't create it for you: it copies the prompt and opens ChatGPT."
         case .claudeDesktop:
-            "Runs in the Claude Desktop app's scheduled tasks on this Mac. OpenAGC can't create it for you: it copies the prompt for you to paste."
+            "Runs in the Claude Desktop app's scheduled tasks on this Mac. Kaluta can't create it for you: it copies the prompt for you to paste."
         }
     }
 
@@ -118,7 +118,7 @@ enum RoutineRunner: String, CaseIterable, Identifiable {
     var scheduleNote: String? {
         switch self {
         case .claudeCloud: "Claude cloud runs at most hourly and uses UTC; it may start a few minutes late."
-        case .local: "Runs only while OpenAGC is open. A run missed while it was closed is noted, not made up."
+        case .local: "Runs only while Kaluta is open. A run missed while it was closed is noted, not made up."
         default: nil
         }
     }

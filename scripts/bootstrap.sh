@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the developer toolchain for OpenAGC. Idempotent.
+# Install the developer toolchain for Kaluta. Idempotent.
 # Requires Homebrew and Xcode (App Store) selected with xcode-select.
 set -euo pipefail
 

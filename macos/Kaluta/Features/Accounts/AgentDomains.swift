@@ -127,7 +127,7 @@ struct AgentDomainForm: View {
 
     private var message: String? {
         guard let domain else {
-            return "Give the agent an address on a domain you own. You add a few DNS records where the domain is managed; OpenAGC checks them for you."
+            return "Give the agent an address on a domain you own. You add a few DNS records where the domain is managed; Kaluta checks them for you."
         }
         if domain.verified { return "Choose the agent's address on it. Mail to any address there comes to this mailbox." }
         return "Create each record at your DNS host (where the domain is managed). Changes can take a few minutes to an hour to be seen."

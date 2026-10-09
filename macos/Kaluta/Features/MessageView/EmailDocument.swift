@@ -7,7 +7,7 @@ enum EmailDocument {
     /// Everything but inline styles and our own image schemes is blocked.
     /// Remote images are still gated by the scheme handler.
     static let contentSecurityPolicy =
-        "default-src 'none'; img-src openagc-cid: openagc-remote: data:; style-src 'unsafe-inline'"
+        "default-src 'none'; img-src kaluta-cid: kaluta-remote: data:; style-src 'unsafe-inline'"
 
     struct Message: Equatable {
         let id: String
@@ -160,12 +160,12 @@ enum EmailDocument {
     @media (prefers-color-scheme: dark) { .badge { color: #FFB45C; } }
     blockquote { margin: \(px(Space.m)) 0; padding-left: \(px(Space.m)); border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }
     a { color: LinkText; }
-    .body details.openagc-quote { margin: \(px(Space.l)) 0 0; }
-    .body details.openagc-quote > summary { display: inline-block; padding: 0 \(px(Space.m)); \
+    .body details.kaluta-quote { margin: \(px(Space.l)) 0 0; }
+    .body details.kaluta-quote > summary { display: inline-block; padding: 0 \(px(Space.m)); \
     border-radius: \(px(Radius.card)); cursor: pointer; \
     font: 700 12px/16px -apple-system, system-ui; letter-spacing: 1px; color: GrayText; \
     background: color-mix(in srgb, CanvasText 9%, transparent); }
-    .body details.openagc-quote > summary:hover { background: color-mix(in srgb, CanvasText 16%, transparent); }
-    .body details.openagc-quote[open] > summary { margin-bottom: \(px(Space.m)); }
+    .body details.kaluta-quote > summary:hover { background: color-mix(in srgb, CanvasText 16%, transparent); }
+    .body details.kaluta-quote[open] > summary { margin-bottom: \(px(Space.m)); }
     """
 }

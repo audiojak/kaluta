@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 @Suite(.serialized)
@@ -13,7 +13,7 @@ struct AccountSwitchTests {
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", name: "Work Me", threads: 40)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 12)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         return model
     }

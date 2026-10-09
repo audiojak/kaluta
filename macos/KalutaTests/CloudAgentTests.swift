@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 /// Records what Connect a Cloud Agent… and the cloud agents' list ask of
 /// the core, and answers as a rules server would. No server is contacted.
@@ -38,7 +38,7 @@ private final class RecordingRulesCalls: RulesAgentCalls, @unchecked Sendable {
     func rulesConnectCodeMint(_ accountID: String, name: String) async throws(CoreClientError) -> RulesConnectCode {
         record("code \(name)")
         guard oauth else {
-            throw CoreClientError(kind: .invalidInput, message: "set OPENAGC_RULES_PUBLIC_URL; use an agent token instead")
+            throw CoreClientError(kind: .invalidInput, message: "set KALUTA_RULES_PUBLIC_URL; use an agent token instead")
         }
         let n = lock.withLock { minted += 1; return minted }
         return RulesConnectCode(code: n == 1 ? "ABCDE-FGHJK" : "MNPQR-STUVW", name: name,
@@ -157,7 +157,7 @@ struct CloudAgentTests {
         #expect(flow.code == nil)
         #expect(calls.calls.filter { $0.hasPrefix("token") } == ["token Nightly digest script"])
         #expect(CloudAgentFlow.claudeMCPAdd(address: address, mcpURL: "https://rules.example.com/mcp", token: token.token)
-            == "claude mcp add --transport http openagc-research-scout-rules https://rules.example.com/mcp --header \"Authorization: Bearer oagc_agt_0123456789abcdef_secret\"")
+            == "claude mcp add --transport http kaluta-research-scout-rules https://rules.example.com/mcp --header \"Authorization: Bearer oagc_agt_0123456789abcdef_secret\"")
         #expect(CloudAgentFlow.curl(address: address, baseURL: "https://rules.example.com", token: token.token)
             == "curl -H \"Authorization: Bearer oagc_agt_0123456789abcdef_secret\" \"https://rules.example.com/v1/m/\(address)/guide?message_type=new\"")
         let warning = CloudAgentFlow.tokenWarning(address)
@@ -189,7 +189,7 @@ struct CloudAgentTests {
         await flow.mint()
         #expect(!calls.calls.contains { $0.hasPrefix("code") })
         #expect(CloudAgentFlow.noPublicURL(flow.host)
-            == "127.0.0.1:8787 has no public address set, so claude.ai cannot sign in to it. Its operator sets OPENAGC_RULES_PUBLIC_URL; until then, use a token.")
+            == "127.0.0.1:8787 has no public address set, so claude.ai cannot sign in to it. Its operator sets KALUTA_RULES_PUBLIC_URL; until then, use a token.")
         flow.route = .token
         await flow.mint()
         #expect(flow.token != nil)
@@ -237,7 +237,7 @@ struct CloudAgentTests {
                                revokedAt: nil, lastUsedAt: nil)
         #expect(CloudAgentList.detail(token, now: now).hasPrefix("Token · made "))
         #expect(CloudAgentList.detail(token, now: now).hasSuffix("· not used yet"))
-        #expect(CloudAgentFlow.serverName("Research.Scout@x.example") == "openagc-research-scout-rules")
+        #expect(CloudAgentFlow.serverName("Research.Scout@x.example") == "kaluta-research-scout-rules")
     }
 
     @Test func anExpiredCodeSaysSo() {
@@ -284,7 +284,7 @@ struct CloudAgentTests {
 
     private func modelWith(_ calls: RecordingRulesCalls) async throws -> AppModel {
         let core = try CoreClient(dataDirectory: CoreClient.testScratch())
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         model.rulesAgentCallsOverride = calls
         return model
     }

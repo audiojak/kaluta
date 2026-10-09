@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct AgentPanelTests {
@@ -187,7 +187,7 @@ struct ApprovalCardTests {
 
     @Test func anApprovedHeldSendCanBeTakenBackFromItsCard() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
-                             defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: true)
         let agent = model.agent
         await agent.loadProviders()

@@ -79,7 +79,7 @@ final class ComposerStore {
     /// For the recipient field's completions, pinned like everything else.
     var drafts: DraftClient? { core }
     private let attachmentsDirectory: URL
-    private let logger = Logger(subsystem: "ai.actual.openagc", category: "composer")
+    private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "composer")
     private var autosaveTask: Task<Void, Never>?
     private var loading = true
 

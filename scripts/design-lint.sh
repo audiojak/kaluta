@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Design-system lint (docs/design-system.md): outside macos/OpenAGC/Design/,
+# Design-system lint (docs/design-system.md): outside macos/Kaluta/Design/,
 # SwiftUI views take spacing and radii from the tokens and draw no raw
 # Divider(). Menus may use Divider() (they are separators there, not
 # rules); mark such lines with `// menu`. Status colours come from `Tone`
@@ -10,7 +10,7 @@
 # Usage: scripts/design-lint.sh [--strict]   (--strict exits 1 on findings)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$ROOT/macos/OpenAGC"
+SRC="$ROOT/macos/Kaluta"
 cd "$SRC" || exit 2
 
 findings=$(grep -rnE \

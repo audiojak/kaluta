@@ -2,9 +2,9 @@ import SwiftUI
 import os
 
 @main
-struct OpenAGCApp: App {
+struct KalutaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = AppModel(core: OpenAGCApp.makeCore(), defaults: OpenAGCApp.defaults)
+    @State private var model = AppModel(core: KalutaApp.makeCore(), defaults: KalutaApp.defaults)
     @State private var updater = Updater()
 
     /// A test host or scratch run (demo data, throwaway preferences).
@@ -16,14 +16,14 @@ struct OpenAGCApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("OpenAGC", id: "main") {
+        WindowGroup("Kaluta", id: "main") {
             MainWindow()
                 .environment(model)
                 .onAppear { appDelegate.model = model }
         }
         .defaultSize(width: 1200, height: 760)
         // Test and scratch runs share the app's saved window state with
-        // the user's own OpenAGC: a scratch run that closed its window made
+        // the user's own Kaluta: a scratch run that closed its window made
         // the next launch open with none. They neither save nor restore it.
         .restorationBehavior(Self.isolated ? .disabled : .automatic)
         // Restored state with no mail window (it was closed before quitting,
@@ -97,7 +97,7 @@ struct OpenAGCApp: App {
     private static func makeCore() -> CoreClient? {
         do {
             // Snapshots and automation point the app at a throwaway data
-            // directory (`-OpenAGCDataDirectory /tmp/x`) so they can never
+            // directory (`-KalutaDataDirectory /tmp/x`) so they can never
             // open, or start syncing, the user's real accounts.
             // Hosting unit tests, the app itself must never open the user's
             // accounts, read their Keychain items or start a real sync: it
@@ -105,7 +105,7 @@ struct OpenAGCApp: App {
             let scratch = CoreClient.isRunningTests
                 ? CoreClient.testScratchRoot.appending(path: "test-host-\(UUID().uuidString)").path
                 : nil
-            if let override = scratch ?? UserDefaults.standard.string(forKey: "OpenAGCDataDirectory"), !override.isEmpty {
+            if let override = scratch ?? UserDefaults.standard.string(forKey: "KalutaDataDirectory"), !override.isEmpty {
                 let dir = URL(filePath: override, directoryHint: .isDirectory)
                 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 return try CoreClient(dataDirectory: dir, logDirectory: dir.appending(path: "Logs"),
@@ -114,7 +114,7 @@ struct OpenAGCApp: App {
             return try CoreClient(dataDirectory: CoreClient.defaultDataDirectory(),
                                   logDirectory: CoreClient.defaultLogDirectory())
         } catch {
-            Logger(subsystem: "ai.actual.openagc", category: "app")
+            Logger(subsystem: "org.kaluta.Kaluta", category: "app")
                 .fault("core failed to start: \(String(describing: error), privacy: .public)")
             return nil
         }
@@ -166,7 +166,7 @@ struct MailCommands: Commands {
         CommandGroup(replacing: .help) {
             Button("Keyboard Shortcuts") { openWindow(id: "shortcuts") }
                 .keyboardShortcut("/", modifiers: [.command, .shift])
-            Link("OpenAGC on GitHub", destination: URL(string: "https://github.com/audiojak/openagc")!)
+            Link("Kaluta on GitHub", destination: URL(string: "https://github.com/audiojak/kaluta")!)
         }
         CommandGroup(after: .windowList) {
             // As Mail's Message Viewer: the mail window back after closing it.
@@ -264,7 +264,7 @@ extension FocusedValues {
     @Entry var isMailWindow: Bool?
 }
 
-/// OpenAGC › Accounts: the avatar menu's items, with ⌃1–⌃9 (spec §7.7).
+/// Kaluta › Accounts: the avatar menu's items, with ⌃1–⌃9 (spec §7.7).
 struct AccountsCommands: View {
     let model: AppModel
     @Environment(\.openSettings) private var openSettings

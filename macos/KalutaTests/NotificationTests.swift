@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import Testing
 import UserNotifications
-@testable import OpenAGC
+@testable import Kaluta
 
 @MainActor
 struct NotificationTests {
@@ -14,7 +14,7 @@ struct NotificationTests {
     }
 
     private func notifier(active: Bool = false) -> (NewMailNotifier, () -> [UNNotificationRequest], UserDefaults) {
-        let defaults = UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!
+        let defaults = UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!
         var posted: [UNNotificationRequest] = []
         let notifier = NewMailNotifier(defaults: defaults) { posted.append($0) }
         notifier.isAppActive = { active }
@@ -84,7 +84,7 @@ struct NotificationTests {
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 20)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 20)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         #expect(model.openAccountID == "work")
         #expect(model.notificationTag(for: "home") == .init(id: "home", label: "home@example.com"))
@@ -99,7 +99,7 @@ struct NotificationTests {
         let core = try CoreClient(dataDirectory: dir)
         try await core.addDemoAccount("work", email: "work@example.com", threads: 10)
         try await core.addDemoAccount("home", email: "home@example.com", threads: 10)
-        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "openagc-tests-\(UUID().uuidString)")!)
+        let model = AppModel(core: core, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
         await model.start(openDemo: false)
         try await core.setSyncWindow(.year, for: "home")
         #expect(try await core.syncWindow(for: "home") == .year)

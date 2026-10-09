@@ -1,5 +1,5 @@
 import Foundation
-import OpenAGCCore
+import KalutaCore
 
 /// The compose calls a composer makes, pinned to the account it opened on
 /// (spec §7.7): switching the main window to another account must not make
