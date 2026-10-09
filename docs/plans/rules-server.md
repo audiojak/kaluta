@@ -1,8 +1,12 @@
 # Plan: a rules server for cloud agents
 
 Status: decided (2026-10-08); nothing built. The maintainer took every
-recommendation below (*Decisions, 2026-10-08*).
-Bead oagc-ikr. Follows [agent-mailboxes.md](agent-mailboxes.md) and
+recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
+[ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
+amendments are written. OAuth now comes before *Connect a Cloud Agent…*
+(*Checked 2026-10-08*, below).
+Bead oagc-ikr (plan, closed); the build is epic oagc-gmn7, *Rules server for cloud
+agents*. Follows [agent-mailboxes.md](agent-mailboxes.md) and
 [headless-mcp.md](headless-mcp.md).
 
 ## Why
@@ -235,9 +239,40 @@ Every recommendation above, as answered:
   `mcp_connections` names, §11.1) can carry a static `Authorization`
   header. It decides the order of steps 5 and 7.
 
-## Steps (proposed)
+**Checked 2026-10-08 (docs only; nothing signed in to).** Yes, but not
+for everyone:
 
-1. ADR 0016 and the spec amendments above. No code.
+- A custom connector added by URL offers *Sign in now*, *Sign in when
+  needed* (both OAuth) or *No sign-in*. With *No sign-in* the user can
+  add up to four **Request headers**, `authorization` among the offered
+  names, sent as entered on every request (`Bearer <token>`, scheme
+  included), stored encrypted and not shown again. Headers cannot be
+  changed afterwards: the connector is removed and added again.
+- But: "Request header authentication is in beta and available to a
+  limited set of organizations." Without it the dialog has no *Request
+  headers* section.
+- Routines use the claude.ai connectors on the account; a server added
+  with `claude mcp add` does not reach them. A routine with exactly one
+  repository may instead declare the server in a committed `.mcp.json`;
+  OpenAGC's routines have no repository (§11.1), and a token must not
+  be committed.
+- Cloud sessions run no sign-in of their own: they use the authorization
+  the user granted in claude.ai.
+
+Sources:
+[Add a connector that isn't in the directory](https://claude.com/docs/connectors/custom/add-unlisted#authenticate-with-request-headers),
+[Get started with custom connectors using remote MCP](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp),
+[Automate work with routines](https://code.claude.com/docs/en/routines#connectors).
+
+So for most users a cloud routine, the main case, reaches the server
+only through OAuth (or the secret URL). **OAuth moves before *Connect a
+Cloud Agent…*** (steps below, renumbered). Bearer tokens stay the base:
+Claude Code, the Agent SDK, scripts, and claude.ai organisations with
+the headers beta use them.
+
+## Steps (proposed; reordered 2026-10-08)
+
+1. ADR 0016 and the spec amendments above. No code. *(Done 2026-10-08.)*
 2. Extract the guide check and the guide and facts renderers into a pure
    crate; the core uses it. No change in behaviour.
 3. `rules-server`: SQLite, publish API with a publisher token, versioned
@@ -246,11 +281,14 @@ Every recommendation above, as answered:
 4. App: *Publish to a Rules Server…* in an agent mailbox's settings: the
    URL, the list of what is shared, push on change, a status line
    ("Version 12, published 3 minutes ago").
-5. App: *Connect a Cloud Agent…*: name, mint, show once, revoke; the
-   `claude mcp add --transport http …` line and routine instructions.
-6. `check_draft` and `report_send`; the app pulls reports at sync and
+5. OAuth with connect codes: the server as its own minimal authorization
+   server, consent by a one-time code from the app. Moved up from 7:
+   claude.ai connectors carry a header only in a limited beta.
+6. App: *Connect a Cloud Agent…*: name, mint, show once, revoke; a
+   connect code for claude.ai connectors and routines, a token for the
+   rest; the `claude mcp add --transport http …` line and routine
+   instructions.
+7. `check_draft` and `report_send`; the app pulls reports at sync and
    records them (ADR 0013).
-7. OAuth with connect codes (before step 5 if claude.ai connectors
-   cannot carry a header).
 8. Encryption at rest.
 9. The project-hosted instance: operations notes, backups, the price.

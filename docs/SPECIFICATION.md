@@ -40,6 +40,7 @@ The short version. Everything below elaborates on these.
 | Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent-mail service accounts' API keys, one per service account) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
+| Rules server | *(Amendment 2026-10-08, ADR 0016; decided, not built.)* Cloud agents read an agent mailbox's published guide and shared facts, check drafts and report sends through `openagc-rules`, a separate server in this repository (MCP over HTTP plus a small REST API, SQLite), self-hosted or run by the project; it never holds mail or a key that sends (§10.6) |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
 | Routines | Structured routine model → generated prompt; runs locally (OpenAGC agent stack) or as a Claude cloud routine created/updated/run through the user's own `claude` CLI (`RemoteTrigger`, verified), with paste hand-off as fallback; ChatGPT by hand-off only; OpenAGC never holds claude.ai/ChatGPT credentials |
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
@@ -65,6 +66,9 @@ The short version. Everything below elaborates on these.
    into cadence labels — runnable locally or handed off to the user's
    Claude/ChatGPT cloud (§11).
 6. No project-operated backend of any kind.
+   *(Amended 2026-10-08, ADR 0016: the project runs nothing that sees
+   mail. It may run a rules server (§10.6), the same code users can run
+   themselves, holding only what a user publishes to it.)*
 
 ### 1.2 Non-Goals (MVP)
 
@@ -73,6 +77,9 @@ no calendar, no autonomous background sending, no
 embeddings, no shell access for agents, no App Store build.
 *(Amended 2026-10-06: an agent mailbox (§7.9) may let its agents send
 without approval; the user's own accounts never do.)*
+*(Amended 2026-10-08, ADR 0016: "no cloud" means no mail in the cloud.
+An agent mailbox's guide and chosen facts may be published to a rules
+server for cloud agents (§10.6); mail never is.)*
 
 ### 1.3 The performance goal
 
@@ -1997,6 +2004,108 @@ did the agent see?" is always answerable. *(Amended 2026-10-08:* reads by
 an agent outside the app while the app is closed are not recorded, since
 that process keeps the store read-only; its sends are, §10.1.)
 
+### 10.6 Rules server **(Amendment 2026-10-08, ADR 0016)**
+
+*(Decided 2026-10-08; not built.)* Plan `docs/plans/rules-server.md`.
+
+Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
+machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
+server gives them an agent mailbox's guide and facts, checks their
+drafts and takes their reports. It serves agent mailboxes only (§7.9);
+the user's own accounts are never published.
+
+**Topology.** `openagc-rules` (crate `rules-server`) is one binary with
+one SQLite file, separate from the app. It speaks MCP over Streamable
+HTTP to agents and a small REST API to the app and scripts, from one
+handler set. It runs plain HTTP behind the user's TLS proxy (the docs
+show Caddy). It depends on a pure crate holding the guide's
+deterministic check and the guide and facts renderers, which
+`openagc-core` uses too, so both answer alike. It never depends on
+`openagc-core`. The app is the source of truth; the server holds copies.
+One server may hold several mailboxes, each apart from the others.
+
+**Tools.** The names and answers are mailbox mode's (§10.1), so an
+agent's instructions work with either. There are no mail tools: a cloud
+agent reads and sends through the service with its key.
+
+| Tool | Input | Answer |
+|---|---|---|
+| `guide_rules` | `to`, `message_type` | The guide for those recipients and that type, whose mailbox it is, the name it sends as and the service's limits, from the snapshot, with its version and when it was published |
+| `facts_lookup` | `category`, `query` | The matching facts shared with cloud agents, with the version |
+| `check_draft` | `to`, `message_type`, `subject`, `body_markdown` | `guide_check`: what the draft breaks (banned and required phrases, patterns, length). Deterministic; no model calls |
+| `report_send` | `message_id` or `to`, `subject`, `sent_at`, body, and the snapshot version it was checked against | `{"queued": true}`; the report waits for the app |
+
+REST: `PUT` a snapshot (publisher token), `GET` and `DELETE` reports
+(publisher token), and read-only `GET`s of the guide and facts (agent
+token).
+
+**Tokens.** Every request carries a token as `Authorization: Bearer`.
+- *Publisher token:* one per mailbox per server, made when the app
+  first publishes and kept in the Keychain (§12). Only it can push a
+  snapshot or pull reports.
+- *Agent tokens:* minted in the app (*Connect a Cloud Agent…*), named by
+  the user ("Weekly outreach routine"), scoped to one mailbox, shown
+  once, revocable. The server stores only a hash; the app keeps the id
+  and name. A report names its token, so the activity log says which
+  agent sent.
+- *OAuth* for clients that take only a URL: the server is its own
+  minimal authorization server; its consent page asks for a one-time
+  connect code shown in the app, never a password. There are no user
+  accounts on the server. A claude.ai custom connector, which a cloud
+  routine uses, can send a fixed `Authorization` header only where the
+  *Request headers* beta is offered (checked 2026-10-08), so OAuth comes
+  before *Connect a Cloud Agent…* in the build.
+- A secret URL (`/m/<token>/mcp`) is the fallback for connectors with no
+  sign-in; URLs end up in logs, and the sheet says so.
+
+**Snapshot and versions.** The app pushes a full snapshot on change,
+debounced, with a version that only goes up and `If-Match` on the
+previous one. The app is the only writer: a refused push re-reads the
+server's version and pushes again. Every answer carries the version and
+its age; with the app closed nothing changes, and agents see the guide
+"as of" a time. The server keeps the last few versions, so a report can
+name the one it was checked against. Settings shows "Version 12,
+published 3 minutes ago".
+
+**Reports and retention.** Reports carry what the agent wrote, never
+mail it read. The app pulls them at sync, matches them to sent mail by
+Message-ID and records them as AI compositions (§14.10, agent
+`cloud:<token name>`), so the daily review sees them. A send with no
+report is still reviewed. The server deletes a report once the app has
+pulled it, and every report after 30 days regardless. Proposals from
+cloud agents will use the same queue later.
+
+**What is shared.**
+- Accepted rules and guidelines, with their scope and checks; never
+  evidence quotes, which come from sent mail.
+- Audience groups, with each address as a salted hash: the salt goes
+  with the snapshot, and the server hashes the `to` it is given before
+  matching.
+- Facts, by a *Share with cloud agents* switch on each fact (§14.11). On
+  by default for the mailbox's own *Use freely* facts; off by default
+  for *Ask before using* (an unattended agent cannot ask) and for global
+  facts (ADR 0012); never for *Never share*.
+- Never mail, keys or tokens of any service.
+The publish sheet lists exactly what goes before the first push.
+
+**Encryption at rest.** The snapshot is encrypted with a key
+(`rules.snapshot_key.<account>`, §12) wrapped for each agent token; the
+server unwraps it in memory for a request and never stores it. A leaked
+database or backup shows nothing. Required on the project-hosted server,
+optional when self-hosted. It does not protect against an operator who
+changes the code, and the docs say so.
+
+**Sending.** The server never sends and never holds a service key, an
+OAuth token or mail. An agent calls `check_draft`, fixes what breaks,
+sends through the service with its key, then calls `report_send`.
+
+**Hosting.** A static binary, and a Docker image on GitHub's registry
+built from this repository's releases. The project-hosted server is the
+same image, versions and settings; it comes only after self-hosting
+works, is priced at cost, and charges for running it (machine, domain
+and TLS, backups, uptime, abuse handling), never for features. No
+feature and no build flag exists only there.
+
 ---
 
 ## 11. Routines — Scheduled Mail Sorting
@@ -2348,6 +2457,11 @@ Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
 shared by its agents, §7.9; for mailboxes created before 2026-10-08 the
 service account's id is the agent's account id, so the name is
 unchanged).
+*(Amended 2026-10-08, ADR 0016; not built.)* `rules.publish_token.<server>.<account>`
+(the publisher token for one agent mailbox on one rules server, §10.6) and,
+with encryption at rest, `rules.snapshot_key.<account>`. Agent tokens for
+the rules server are shown once and never stored by the app, which keeps
+only their ids and names.
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens
@@ -3692,6 +3806,9 @@ the other tips, until put away or until Clean Up is opened.)*
 
 Mailbox content, OAuth tokens, the ability to send as the user, the agent
 CLI's credentials (not ours, but in our process tree), the user's files.
+*(Amended 2026-10-08, ADR 0016:* an agent mailbox's guide and shared
+facts once published to a rules server (§10.6), and the tokens that reach
+them.)
 
 ### 15.2 Adversaries
 
@@ -3702,6 +3819,14 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 3. **Local malware** with the same UID (out of scope beyond not making
    things worse; we cannot defend against it).
 4. **The project itself** — must be *unable* to see mail (no backend).
+   *(Amended 2026-10-08, ADR 0016: it may run a rules server, which
+   still never holds mail.)*
+5. **A leaked rules-server agent token** *(amendment 2026-10-08)* — reads
+   one mailbox's published rules and shared facts and can file reports,
+   until revoked.
+6. **The rules server's operator** *(amendment 2026-10-08)* — the user,
+   or the project for the hosted server; can read what was published
+   during requests.
 
 ### 15.3 Controls
 
@@ -3719,6 +3844,9 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 | Attachments | Never auto-opened; saved with quarantine xattr (`com.apple.quarantine`) so Gatekeeper applies; agent gets extracted text only |
 | Log leakage | `Redacted` newtypes; email bodies never logged above `trace`, which is compiled out in release |
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
+| The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
+| Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)* |
+| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses as salted hashes; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)* |
 
 ### 15.4 What the MVP does *not* protect against
 
