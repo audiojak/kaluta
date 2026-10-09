@@ -816,3 +816,18 @@ async fn spam_and_trash_events_move_mail_out_of_the_inbox_and_back_as_agentmail_
         "as `to_local` reads the same labels"
     );
 }
+
+#[tokio::test]
+async fn a_failed_signed_download_never_carries_its_url() {
+    // Nothing listens on port 1 of the loopback address: the connection
+    // is refused locally, and the error must not quote the signed URL.
+    let server = MockServer::start().await;
+    let p = provider(&server);
+    let signed = "http://127.0.0.1:1/cdn/m1.eml?X-Amz-Signature=deadbeef1234&X-Amz-Credential=AKIAX";
+    let err = p.download(signed).await.unwrap_err();
+    let text = format!("{err} {err:?}");
+    assert!(matches!(err, ProviderError::Network(_)), "{err:?}");
+    for leak in ["deadbeef1234", "AKIAX", "X-Amz", "/cdn/m1.eml", "127.0.0.1:1"] {
+        assert!(!text.contains(leak), "{leak} in {text}");
+    }
+}

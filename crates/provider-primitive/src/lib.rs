@@ -859,7 +859,7 @@ impl PrimitiveService {
             .timeout(Duration::from_secs(30))
             .https_only(false) // tests talk to a local mock
             .build()
-            .map_err(|e| ProviderError::Network(e.to_string()))?;
+            .map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         Ok(Self { client, base: base.trim_end_matches('/').to_owned() })
     }
 
@@ -872,9 +872,9 @@ impl PrimitiveService {
 
     /// A call's body as text, or its error classified and worded.
     async fn call_text(&self, request: reqwest::RequestBuilder) -> ProviderResult<String> {
-        let response = request.send().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let response = request.send().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         let status = response.status();
-        let body = response.text().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let body = response.text().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         if status.is_success() {
             return Ok(body);
         }

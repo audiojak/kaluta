@@ -254,16 +254,43 @@ pub(crate) fn write(
         }
         None => None,
     };
-    let tmp = path.with_extension("openagc-tmp");
-    std::fs::write(&tmp, text).map_err(storage)?;
-    let mode = std::fs::metadata(&path).map(|m| m.permissions());
-    let mode = mode.unwrap_or_else(|_| {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::Permissions::from_mode(0o600)
-    });
-    std::fs::set_permissions(&tmp, mode).map_err(storage)?;
-    std::fs::rename(&tmp, &path).map_err(storage)?;
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&path).map(|m| m.permissions().mode() & 0o777).unwrap_or(0o600);
+    replace(&path, text.as_bytes(), mode, |_| Ok(())).map_err(storage)?;
     Ok(backup)
+}
+
+/// Replace `path` with `contents` atomically: a temp file beside it,
+/// created new (never following a planted link) with `mode` from the
+/// start, so the config's contents (which may hold other servers' tokens)
+/// are never readable by others even for a moment; then renamed over it.
+/// The temp file is removed on any error. `before_rename` lets tests look
+/// at the temp file and force a failure.
+fn replace(
+    path: &Path,
+    contents: &[u8],
+    mode: u32,
+    before_rename: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let file = path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos());
+    let tmp = path.with_file_name(format!(".{file}.openagc-tmp-{}-{}", std::process::id(), nanos.unwrap_or(0)));
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).mode(mode).open(&tmp)?;
+    let result = (|| {
+        // The umask may have taken bits from `mode`; never adds any.
+        out.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        out.write_all(contents)?;
+        out.sync_all()?;
+        drop(out);
+        before_rename(&tmp)?;
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 impl Core {
@@ -420,5 +447,45 @@ mod tests {
         std::fs::write(&file, inline).unwrap();
         assert!(write(&h.0, None, AgentClient::Codex, shim, ADDRESS).is_err());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), inline);
+    }
+
+    fn leftovers(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.to_string_lossy().contains("openagc-tmp"))
+            .collect()
+    }
+
+    #[test]
+    fn the_temp_copy_is_private_from_creation_and_never_left_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let h = home("temp");
+        let file = h.0.join(".claude.json");
+        std::fs::write(&file, r#"{"mcpServers": {"github": {"env": {"TOKEN": "secret"}}}}"#).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // The process umask (022 here) would make a plain write 0644.
+        let mut seen = None;
+        let failed = replace(&file, b"{}", 0o600, |tmp| {
+            seen = Some(std::fs::symlink_metadata(tmp).unwrap().permissions().mode() & 0o777);
+            Err(std::io::Error::other("forced"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(seen, Some(0o600), "no group or other bits, ever");
+        assert!(leftovers(&h.0).is_empty(), "the temp file is removed on failure");
+        assert!(std::fs::read_to_string(&file).unwrap().contains("secret"), "the file is untouched");
+
+        // A replace that succeeds keeps the mode and leaves nothing behind.
+        replace(&file, b"{\"a\": 1}", 0o600, |_| Ok(())).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"a\": 1}");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(leftovers(&h.0).is_empty());
+
+        // The whole write: the temp file is 0600 for a new file too.
+        let codex = h.0.join(".codex/config.toml");
+        write(&h.0, None, AgentClient::Codex, Path::new(SHIM), ADDRESS).unwrap();
+        assert_eq!(std::fs::metadata(&codex).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(leftovers(&h.0.join(".codex")).is_empty());
     }
 }

@@ -155,6 +155,9 @@ fn groups(core: &Core, view: CleanupView) -> Vec<crate::cleanup::CleanupGroup> {
 fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let server = rt.block_on(MockServer::start());
+    // The local server stands in for the list's site: a test-only allowance.
+    test_server::register(server.address().port());
+    let shown = format!("127.0.0.1:{}", server.address().port());
     rt.block_on(
         Mock::given(http_method("POST"))
             .and(path("/u/digest"))
@@ -194,7 +197,7 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
     .unwrap();
     assert_eq!(targets.len(), 2);
     assert_eq!(targets[0].name, "Weekly Digest");
-    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: "127.0.0.1".into() });
+    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: shown.clone() }, "a port is shown");
     assert_eq!(
         targets[1].method,
         CleanupUnsubscribeMethod::Mailto {
@@ -214,7 +217,7 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
         [CleanupUnsubscribeResult {
             keys: vec!["digest.example.org".into()],
             name: "Weekly Digest".into(),
-            host: "127.0.0.1".into(),
+            host: shown,
             error: None
         }]
     );
@@ -236,6 +239,7 @@ fn one_click_posts_once_to_the_local_server_and_the_group_says_unsubscribed() {
 fn a_failure_or_a_redirect_is_reported_in_words_and_not_recorded() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let server = rt.block_on(MockServer::start());
+    test_server::register(server.address().port());
     rt.block_on(
         Mock::given(http_method("POST")).and(path("/broken")).respond_with(ResponseTemplate::new(500)).mount(&server),
     );
@@ -263,7 +267,10 @@ fn a_failure_or_a_redirect_is_reported_in_words_and_not_recorded() {
         .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::Sender, CleanupScope::Inbox, targets))
         .unwrap();
     assert_eq!(results.len(), 2);
-    assert_eq!(results[0].error.as_deref(), Some("127.0.0.1 answered 500 Internal Server Error"));
+    assert_eq!(
+        results[0].error,
+        Some(format!("127.0.0.1:{} answered 500 Internal Server Error", server.address().port()))
+    );
     assert_eq!(
         results[1].error.as_deref(),
         Some("the list wants you to open a page at landing.example.org to finish"),
@@ -280,6 +287,7 @@ fn a_failure_or_a_redirect_is_reported_in_words_and_not_recorded() {
 fn new_mail_since_the_confirmation_is_never_posted_to() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let server = rt.block_on(MockServer::start());
+    test_server::register(server.address().port());
     rt.block_on(Mock::given(http_method("POST")).respond_with(ResponseTemplate::new(200)).mount(&server));
     let shown = format!("<{}/u/shown>", server.uri());
     let (_temp, core) =
@@ -288,7 +296,10 @@ fn new_mail_since_the_confirmation_is_never_posted_to() {
     let targets =
         block_on(core.cleanup_unsubscribe_targets("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, keys))
             .unwrap();
-    assert_eq!(targets[0].method, CleanupUnsubscribeMethod::OneClick { host: "127.0.0.1".into() });
+    assert_eq!(
+        targets[0].method,
+        CleanupUnsubscribeMethod::OneClick { host: format!("127.0.0.1:{}", server.address().port()) }
+    );
 
     // While the sheet is open, newer mail of the list arrives with another address.
     let db = block_on(core.store_for("acct")).unwrap();
@@ -368,4 +379,148 @@ fn only_secure_addresses_are_posted_to() {
     let post = |u: &str| block_on(post_one_click(&Url::parse(u).unwrap()));
     assert_eq!(post("http://list.example/u"), Err("list.example is not a secure address".into()));
     assert_eq!(post("https://me:secret@list.example/u"), Err("list.example is not a secure address".into()));
+}
+
+#[test]
+fn one_click_never_goes_to_an_internal_host_or_another_port() {
+    for internal in [
+        "https://127.0.0.1/u",
+        "https://10.1.2.3/u",
+        "https://[::1]/u",
+        "https://[fd00::1]/u",
+        "https://localhost/u",
+        "https://intranet/u",
+        "https://printer.local/u",
+        "https://app.localhost/u",
+        "https://vault.internal/u",
+        "https://router.lan/u",
+        "https://nas.home.arpa/u",
+        "https://nas.home.arpa./u",
+        "https://list.example:8443/u",
+        "https://list.example:80/u",
+    ] {
+        assert!(!postable(&Url::parse(internal).unwrap()), "{internal} is not posted to");
+    }
+    assert!(postable(&Url::parse("https://list.example/u").unwrap()));
+    assert!(postable(&Url::parse("https://list.example:443/u").unwrap()), "443 is the default");
+    // A list naming 127.0.0.1 as its own site (List-Id or sender) is not
+    // offered one-click there, whatever the port.
+    let post = Some(ONE_CLICK_BODY);
+    let loopback = owners(Some("127.0.0.1"), Some("x@127.0.0.1"));
+    assert_eq!(method("<https://127.0.0.1/u>", post, &loopback), None);
+    assert_eq!(method("<https://127.0.0.1:8443/u>", post, &loopback), None);
+    let private = owners(Some("192.168.1.1"), Some("x@192.168.1.1"));
+    assert!(matches!(
+        method("<https://192.168.1.1/u>, <mailto:leave@192.168.1.1>", post, &private),
+        Some(Method::Mailto(_))
+    ));
+    let local = owners(Some("list.corp.internal"), None);
+    assert_eq!(method("<https://unsub.corp.internal/u>", post, &local), None);
+    // Plain http to the loopback address is refused unless a test
+    // registered that very port for its local server.
+    assert!(!postable(&Url::parse("http://127.0.0.1:9/u").unwrap()));
+}
+
+#[test]
+fn only_public_addresses_are_connected_to() {
+    let private = [
+        "127.0.0.1",
+        "127.9.9.9",
+        "0.0.0.0",
+        "10.0.0.1",
+        "172.16.0.1",
+        "172.31.255.255",
+        "192.168.1.1",
+        "100.64.0.1",
+        "100.127.255.254",
+        "169.254.169.254",
+        "224.0.0.251",
+        "255.255.255.255",
+        "::",
+        "::1",
+        "fe80::1",
+        "fc00::1",
+        "fd12:3456::1",
+        "ff02::1",
+        "::ffff:10.0.0.1",
+        "::ffff:127.0.0.1",
+        "64:ff9b::a00:1",
+    ];
+    for ip in private {
+        assert!(!public_address(ip.parse().unwrap()), "{ip} is not public");
+    }
+    for ip in ["93.184.216.34", "100.128.0.1", "172.32.0.1", "2606:2800:220:1::1", "::ffff:93.184.216.34"] {
+        assert!(public_address(ip.parse().unwrap()), "{ip} is public");
+    }
+    let at = |ip: &str| std::net::SocketAddr::new(ip.parse().unwrap(), 443);
+    assert_eq!(checked_addresses("list.example", &[at("93.184.216.34")]), Ok(vec![at("93.184.216.34")]));
+    // One private answer among public ones refuses the lot: a rebinding
+    // name may hand out both.
+    assert_eq!(
+        checked_addresses("list.example", &[at("93.184.216.34"), at("10.0.0.1")]),
+        Err("list.example leads to a private address".into())
+    );
+    assert_eq!(checked_addresses("list.example", &[]), Err("list.example could not be found".into()));
+}
+
+#[test]
+fn a_name_that_resolves_inside_is_refused_before_connecting() {
+    // The lookup is the test's: nothing leaves the Mac.
+    let url = Url::parse("https://list.example/u").unwrap();
+    for inside in ["127.0.0.1", "10.0.0.7", "169.254.169.254", "::1", "fd00::7"] {
+        let addr = std::net::SocketAddr::new(inside.parse().unwrap(), 443);
+        let got = block_on(post_resolved(&url, move |_host: String| async move { Ok(vec![addr]) }));
+        assert_eq!(got, Err("list.example leads to a private address".into()), "{inside}");
+    }
+}
+
+#[test]
+fn the_post_goes_to_the_address_that_was_checked() {
+    // The client is pinned to the checked address: the name is never looked
+    // up again (it would not resolve), and the request still arrives.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    rt.block_on(
+        Mock::given(http_method("POST"))
+            .and(header("host", format!("pinned.invalid:{}", server.address().port()).as_str()))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&server),
+    );
+    let client = pinned_client("pinned.invalid", &[*server.address()]).unwrap();
+    let url = format!("http://pinned.invalid:{}/u", server.address().port());
+    let status = rt.block_on(async { client.post(url).body(ONE_CLICK_BODY).send().await.map(|r| r.status()) });
+    assert_eq!(status.unwrap(), 200);
+    rt.block_on(server.verify());
+}
+
+#[test]
+fn a_list_on_the_loopback_address_is_not_offered_one_click() {
+    // Without the test-only allowance (this server's port is not
+    // registered), a List-Id or sender of 127.0.0.1 no longer makes the
+    // loopback address a one-click target, on any port.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let server = rt.block_on(MockServer::start());
+    rt.block_on(Mock::given(http_method("POST")).respond_with(ResponseTemplate::new(200)).mount(&server));
+    let header = format!("<{}/u>, <mailto:leave@127.0.0.1>", server.uri());
+    let (_temp, core) =
+        account("loopback", vec![list_mail("l1", "digest@127.0.0.1", Some("127.0.0.1"), &header, true, NOW)]);
+    let targets = block_on(core.cleanup_unsubscribe_targets(
+        "acct".into(),
+        CleanupView::MailingList,
+        CleanupScope::Inbox,
+        vec!["127.0.0.1".into()],
+    ))
+    .unwrap();
+    assert_eq!(targets.len(), 1);
+    assert!(matches!(targets[0].method, CleanupUnsubscribeMethod::Mailto { .. }), "only the mailto is offered");
+    let forged = vec![CleanupUnsubscribeTarget {
+        method: CleanupUnsubscribeMethod::OneClick { host: format!("127.0.0.1:{}", server.address().port()) },
+        ..targets[0].clone()
+    }];
+    let results = rt
+        .block_on(core.cleanup_unsubscribe("acct".into(), CleanupView::MailingList, CleanupScope::Inbox, forged))
+        .unwrap();
+    assert_eq!(results[0].error.as_deref(), Some(REVIEW_AGAIN));
+    assert!(rt.block_on(server.received_requests()).unwrap().is_empty(), "nothing posted");
 }

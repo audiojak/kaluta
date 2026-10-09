@@ -3634,6 +3634,19 @@ the other tips, until put away or until Clean Up is opened.)*
 - *Archive Them Too* archives only the groups whose one-click succeeded or
   whose message opened in the composer; the sheet says so ("Archives only
   the lists that take you off, and those whose message opens for you to
+- *Never to the local network* *(amendment 2026-10-08, oagc-cp3.1)*.
+  `List-Id` and `From` are the sender's to write, so the one-click
+  address must also be https on port 443 at a host name (not an IP
+  literal), with at least two labels and not under `.local`,
+  `.localhost`, `.internal`, `.lan`, `.home.arpa`, `.intranet` or
+  `.corp`. When posting, the name is looked up once and refused if any
+  answer is loopback, unspecified, private (RFC 1918), shared (CGNAT
+  100.64/10), link-local, multicast, reserved, unique-local (fc00::/7)
+  or an IPv6 form of one of those; the POST then connects to exactly the
+  addresses checked (no second lookup, no proxy), so a name cannot
+  rebind between the check and the connection. Unit tests' local
+  servers are allowed by port through a `cfg(test)`-only list that the
+  app does not compile.
   send"). Groups that failed or had no link stay, still ticked.
 - *Spam leaves the user's own sent mail alone* (`SENT`): it is not spam,
   and whether Gmail accepts `SPAM` on a sent message is a hand-check (a

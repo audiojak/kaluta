@@ -69,7 +69,7 @@ impl AgentMailService {
             .timeout(Duration::from_secs(30))
             .https_only(false) // tests talk to a local mock
             .build()
-            .map_err(|e| ProviderError::Network(e.to_string()))?;
+            .map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         Ok(Self { client, base: base.trim_end_matches('/').to_owned() })
     }
 
@@ -86,9 +86,9 @@ impl AgentMailService {
     }
 
     async fn call_raw(&self, request: reqwest::RequestBuilder) -> ProviderResult<(u16, String)> {
-        let response = request.send().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let response = request.send().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         let status = response.status().as_u16();
-        let body = response.text().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let body = response.text().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         Ok((status, body))
     }
 }

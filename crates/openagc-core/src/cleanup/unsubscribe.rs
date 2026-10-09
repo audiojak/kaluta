@@ -14,7 +14,9 @@
 //! list arrived since, nothing is posted and the user is asked to look
 //! again. One-click is offered only to an address on the list's own site
 //! (the same registrable domain as its `List-Id` or its sender), so a
-//! message cannot send the POST to an unrelated host.
+//! message cannot send the POST to an unrelated host, and never to the
+//! local network: https on 443 at a public-looking name, whose addresses
+//! are all public when looked up, and the POST connects to exactly those.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -103,13 +105,129 @@ pub(crate) fn is_one_click(post: Option<&str>) -> bool {
     post.is_some_and(|p| p.trim().eq_ignore_ascii_case(ONE_CLICK_BODY))
 }
 
-/// An address the one-click POST may go to: https, a host, no user name
-/// or password. (Tests also allow plain http to the loopback address,
-/// where their local server listens.)
+/// Name suffixes that only ever mean a private network: mDNS, loopback
+/// names, and the names people and routers give their own networks.
+const PRIVATE_SUFFIXES: &[&str] = &["local", "localhost", "internal", "lan", "home.arpa", "intranet", "corp"];
+
+/// An address the one-click POST may go to: https on the default port, a
+/// public-looking host name (not an IP address, not a single label, not a
+/// private suffix such as `.local` or `.internal`), no user name or
+/// password. The name's addresses are checked again when posting
+/// ([`checked_addresses`]). (Unit tests also allow plain http to the
+/// loopback port their local server registered; that allowance is not
+/// compiled into the app.)
 pub(crate) fn postable(url: &Url) -> bool {
-    let secure =
-        url.scheme() == "https" || (cfg!(test) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1"));
-    secure && url.host_str().is_some_and(|h| !h.is_empty()) && url.username().is_empty() && url.password().is_none()
+    if url.username() != "" || url.password().is_some() {
+        return false;
+    }
+    if test_server::allowed(url) {
+        return true;
+    }
+    let Some(host) = url.host_str() else { return false };
+    if host.trim_start_matches('[').trim_end_matches(']').parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    let private = PRIVATE_SUFFIXES.iter().any(|s| host == *s || host.ends_with(&format!(".{s}")));
+    url.scheme() == "https" && url.port().is_none() && host.contains('.') && !private
+}
+
+/// What the confirmation names: the host, with its port if it is not the
+/// default (never, for an address [`postable`] lets through, outside tests).
+pub(crate) fn shown_host(url: &Url) -> String {
+    let host = url.host_str().unwrap_or("").to_owned();
+    match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host,
+    }
+}
+
+/// Whether the one-click POST may connect to `ip`: a public unicast
+/// address. Loopback, unspecified, private (RFC 1918), shared (CGNAT
+/// 100.64/10), link-local, multicast, broadcast, benchmarking, reserved,
+/// unique-local (fc00::/7) and site-local addresses are not, nor IPv6
+/// addresses that carry one of those (IPv4-mapped, NAT64).
+pub(crate) fn public_address(ip: std::net::IpAddr) -> bool {
+    use std::net::{IpAddr, Ipv4Addr};
+    fn v4(ip: Ipv4Addr) -> bool {
+        let [a, b, c, _] = ip.octets();
+        !(ip.is_loopback()
+            || ip.is_unspecified()
+            || ip.is_private()
+            || ip.is_link_local()
+            || ip.is_multicast()
+            || ip.is_broadcast()
+            || ip.is_documentation()
+            || a == 0
+            || (a == 100 && (64..128).contains(&b))
+            || (a == 192 && b == 0 && c == 0)
+            || (a == 198 && (18..20).contains(&b))
+            || a >= 240)
+    }
+    match ip {
+        IpAddr::V4(ip) => v4(ip),
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return v4(mapped);
+            }
+            let s = ip.segments();
+            if s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0, 0, 0, 0] {
+                let [_, _, _, _, _, _, hi, lo] = s;
+                return v4(Ipv4Addr::new((hi >> 8) as u8, hi as u8, (lo >> 8) as u8, lo as u8));
+            }
+            !(ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || (s[0] & 0xffc0) == 0xfec0
+                || s[0..6] == [0, 0, 0, 0, 0, 0]
+                || (s[0] == 0x2001 && s[1] == 0xdb8))
+        }
+    }
+}
+
+/// The addresses `host` resolved to, if every one is public; a single
+/// private answer refuses them all (a rebinding name may give both).
+pub(crate) fn checked_addresses(
+    host: &str,
+    addrs: &[std::net::SocketAddr],
+) -> Result<Vec<std::net::SocketAddr>, String> {
+    if addrs.is_empty() {
+        return Err(format!("{host} could not be found"));
+    }
+    if addrs.iter().any(|a| !public_address(a.ip())) {
+        return Err(format!("{host} leads to a private address"));
+    }
+    Ok(addrs.to_vec())
+}
+
+/// The unit tests' local servers: plain http to 127.0.0.1 on a port a test
+/// registered. Outside `cfg(test)` nothing is ever allowed, so the app
+/// cannot be made to post to the loopback address.
+pub(crate) mod test_server {
+    use reqwest::Url;
+
+    #[cfg(test)]
+    static PORTS: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+
+    /// Allow posting to `http://127.0.0.1:<port>` in this test run.
+    #[cfg(test)]
+    pub(crate) fn register(port: u16) {
+        PORTS.lock().unwrap().push(port);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn allowed(url: &Url) -> bool {
+        url.scheme() == "http"
+            && url.host_str() == Some("127.0.0.1")
+            && url.port().is_some_and(|p| PORTS.lock().unwrap().contains(&p))
+    }
+
+    #[cfg(not(test))]
+    pub(crate) fn allowed(_url: &Url) -> bool {
+        false
+    }
 }
 
 /// Percent-decoding as RFC 6068 means it: `+` stays a plus.
@@ -251,9 +369,7 @@ pub(crate) fn resolve(view: CleanupView, rows: Vec<ListHeadersOf>) -> Vec<Resolv
             .or_else(|| row.from.as_ref().map(|f| f.email.clone()))
             .unwrap_or_else(|| row.key.clone());
         let shown = match &method {
-            Method::OneClick(url) => {
-                CleanupUnsubscribeMethod::OneClick { host: url.host_str().unwrap_or("").to_owned() }
-            }
+            Method::OneClick(url) => CleanupUnsubscribeMethod::OneClick { host: shown_host(url) },
             Method::Mailto(m) => CleanupUnsubscribeMethod::Mailto {
                 to: m.to.clone(),
                 cc: m.cc.clone(),
@@ -289,17 +405,49 @@ pub(crate) const REVIEW_AGAIN: &str = "New mail arrived from this list; review i
 /// wants a page opened to finish, which is the user's to do, so the
 /// answer names where it points.
 pub(crate) async fn post_one_click(url: &Url) -> Result<(), String> {
-    let host = url.host_str().unwrap_or("the list").to_owned();
-    if !postable(url) {
-        return Err(format!("{host} is not a secure address"));
-    }
-    let client = reqwest::Client::builder()
+    post_resolved(url, |host: String| async move {
+        tokio::net::lookup_host((host.as_str(), 443)).await.map(|a| a.collect())
+    })
+    .await
+}
+
+/// A client that connects to `addrs` for `host` and nowhere else: the name
+/// is not looked up again (no window for it to change between the check
+/// and the connection), and no proxy is used (a proxy would resolve it
+/// itself).
+pub(crate) fn pinned_client(host: &str, addrs: &[std::net::SocketAddr]) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
         .timeout(TIMEOUT)
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .resolve_to_addrs(host, addrs)
         .user_agent("OpenAGC")
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.without_url().to_string())
+}
+
+/// [`post_one_click`] with the name lookup given: the host's addresses are
+/// looked up once, refused unless all are public, and the POST connects to
+/// exactly those.
+pub(crate) async fn post_resolved<L, F>(url: &Url, lookup: L) -> Result<(), String>
+where
+    L: FnOnce(String) -> F,
+    F: std::future::Future<Output = std::io::Result<Vec<std::net::SocketAddr>>>,
+{
+    let host = url.host_str().unwrap_or("the list").to_owned();
+    let shown = shown_host(url);
+    if !postable(url) {
+        return Err(format!("{shown} is not a secure address"));
+    }
+    let addrs = if test_server::allowed(url) {
+        let port = url.port().unwrap_or(80);
+        vec![std::net::SocketAddr::from(([127, 0, 0, 1], port))]
+    } else {
+        let found = lookup(host.clone()).await.map_err(|_| format!("{host} could not be found"))?;
+        checked_addresses(&host, &found)?
+    };
+    let client = pinned_client(&host, &addrs)?;
     let answer = client
         .post(url.clone())
         .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
@@ -320,9 +468,9 @@ pub(crate) async fn post_one_click(url: &Url) -> Result<(), String> {
                 None => "the list wants you to open a page to finish".to_owned(),
             })
         }
-        Ok(r) => Err(format!("{host} answered {}", r.status())),
-        Err(e) if e.is_timeout() => Err(format!("{host} did not answer in time")),
-        Err(_) => Err(format!("{host} could not be reached")),
+        Ok(r) => Err(format!("{shown} answered {}", r.status())),
+        Err(e) if e.is_timeout() => Err(format!("{shown} did not answer in time")),
+        Err(_) => Err(format!("{shown} could not be reached")),
     }
 }
 
@@ -381,7 +529,7 @@ impl Core {
                 let resolved = if still { resolve(view, rows) } else { vec![] };
                 let url = match resolved.as_slice() {
                     [one] => match &one.method {
-                        Method::OneClick(url) if url.host_str() == Some(shown.as_str()) => Some((url.clone(), one)),
+                        Method::OneClick(url) if shown_host(url) == *shown => Some((url.clone(), one)),
                         _ => None,
                     },
                     _ => None,
@@ -399,14 +547,14 @@ impl Core {
                 let url = &url;
                 let error = post_one_click(url).await.err();
                 if let Some(e) = &error {
-                    tracing::info!(host = url.host_str().unwrap_or(""), error = %e, "one-click unsubscribe failed");
+                    tracing::info!(host = %shown_host(url), error = %e, "one-click unsubscribe failed");
                 } else {
                     done.extend(resolved.identities.iter().cloned());
                 }
                 results.push(CleanupUnsubscribeResult {
                     keys: resolved.target.keys.clone(),
                     name: resolved.target.name.clone(),
-                    host: url.host_str().unwrap_or("").to_owned(),
+                    host: shown_host(url),
                     error,
                 });
             }
