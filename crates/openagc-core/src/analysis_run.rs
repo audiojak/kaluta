@@ -607,6 +607,19 @@ pub(crate) mod tests {
         .unwrap();
     }
 
+    /// Stop the app's own scheduler, which ticks on its own task with the
+    /// wall clock, so a test that drives `analysis_tick` itself with the
+    /// time it chooses is the only thing reading and changing the runs.
+    /// Called before [`learned`]: until then a tick in flight finds
+    /// Analysis unavailable and changes nothing.
+    pub(crate) fn stop_scheduler(core: &Core) {
+        let task = core.agents.scheduler.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = rt(task);
+        }
+    }
+
     /// The app's own scheduler would start the day's review meanwhile.
     pub(crate) fn no_schedule(core: &Core) {
         let db = core.db().unwrap();
@@ -874,18 +887,13 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn a_review_paused_on_an_earlier_day_gives_way_to_todays() {
-        let s = crate::guide::tests::demo("analysis-stale-pause");
-        let core = &s.1;
-        core.debug_use_fake_agents();
-        learned(core);
-        let now = mail_sync::now_millis();
-        let left = pair(core, now - 3 * DAY, 0.3);
+    /// A review paused by the user at `paused_at`, with one pair left.
+    fn paused_review(core: &Core, paused_at: Millis) -> i64 {
+        let left = pair(core, paused_at - DAY, 0.3);
         let db = core.db().unwrap();
-        let old = rt(db.write(move |tx| {
+        rt(db.write(move |tx| {
             let new = NewRun {
-                day: &day_of(now - 2 * DAY),
+                day: &day_of(paused_at),
                 trigger: "daily",
                 agent: Some("claude-code"),
                 matched: 1,
@@ -894,25 +902,70 @@ pub(crate) mod tests {
                 pairs: &[left],
                 batch_size: COMPARE_BATCH,
             };
-            let id = store::create_run(tx, &new, now - 2 * DAY)?;
-            store::set_run_status(tx, id, "paused", None, now - 2 * DAY)?;
+            let id = store::create_run(tx, &new, paused_at)?;
+            store::set_run_status(tx, id, "paused", None, paused_at)?;
             Ok(id)
         }))
-        .unwrap();
-        settled(core);
-        rt(core.analysis_tick_inner(now)).unwrap();
-        // The app's own scheduler may have taken the attempt: wait for the
-        // run that replaces the old one, not the old one cancelled.
-        for _ in 0..3000 {
-            if block_on(core.analysis_progress()).unwrap().run.is_some_and(|r| r.id != old) {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        .unwrap()
+    }
+
+    /// The first moment of the local day after the one `ms` falls on.
+    fn next_local_midnight(ms: Millis) -> Millis {
+        use chrono::TimeZone;
+        let today = chrono::Local.timestamp_millis_opt(ms).earliest().unwrap().date_naive();
+        let midnight = today.succ_opt().unwrap().and_hms_opt(0, 0, 0).unwrap();
+        chrono::Local.from_local_datetime(&midnight).earliest().unwrap().timestamp_millis()
+    }
+
+    /// The paused run is replaced by `now`'s: cancelled, with the pair it
+    /// had not reached in the new run.
+    fn replaced(core: &Arc<Core>, old: i64) {
         let today = wait_done(core);
         assert_ne!(today.id, old);
         assert_eq!(today.total, 1, "the pair the paused run had not reached");
+        let db = core.db().unwrap();
         assert_eq!(rt(db.read(move |c| store::get_run(c, old))).unwrap().unwrap().status, "cancelled");
+    }
+
+    // The scheduler is stopped and every tick is given its time: the app's
+    // own tick, running meanwhile with the wall clock, could take the day's
+    // one attempt (its start refused while the test made the paused run)
+    // and leave today's review an hour away (oagc-ol1h).
+    #[test]
+    fn a_review_paused_on_an_earlier_day_gives_way_to_todays() {
+        let s = crate::guide::tests::demo("analysis-stale-pause");
+        let core = &s.1;
+        stop_scheduler(core);
+        core.debug_use_fake_agents();
+        learned(core);
+        let now = mail_sync::now_millis();
+        let old = paused_review(core, now - 2 * DAY);
+        settled(core);
+        rt(core.analysis_tick_inner(now)).unwrap();
+        replaced(core, old);
+    }
+
+    #[test]
+    fn a_review_paused_late_yesterday_gives_way_just_after_midnight_and_not_before() {
+        let s = crate::guide::tests::demo("analysis-midnight");
+        let core = &s.1;
+        stop_scheduler(core);
+        core.debug_use_fake_agents();
+        learned(core);
+        let midnight = next_local_midnight(mail_sync::now_millis());
+        let old = paused_review(core, midnight - 60_000);
+        settled(core);
+        // The same day still: it stays paused, and nothing starts.
+        rt(core.analysis_tick_inner(midnight - 1)).unwrap();
+        let progress = block_on(core.analysis_progress()).unwrap().run.unwrap();
+        assert_eq!((progress.id, progress.status), (old, GuideRunStatus::Paused));
+        assert_eq!(runs(core), 1);
+        // The next day: today's review takes over.
+        rt(core.analysis_tick_inner(midnight)).unwrap();
+        replaced(core, old);
+        let today = block_on(core.analysis_progress()).unwrap().run.unwrap();
+        assert_eq!(today.day, day_of(midnight));
+        assert_ne!(today.day, day_of(midnight - 1));
     }
 
     #[test]
