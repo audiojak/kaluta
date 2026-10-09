@@ -124,10 +124,7 @@ impl Claimant {
         };
         sweep(&dir);
         let path = dir.join(format!("{id}.lock"));
-        let locked = File::options().read(true).write(true).create(true).truncate(false).open(&path).and_then(|f| {
-            f.try_lock().map_err(std::io::Error::from)?;
-            Ok(f)
-        });
+        let locked = lock_own(&path);
         match locked {
             Ok(file) => Self { id, dir: Some(dir), lock: Some((file, path)) },
             Err(e) => {
@@ -153,14 +150,55 @@ impl Claimant {
         match File::options().read(true).write(true).open(&path) {
             Err(e) => e.kind() == std::io::ErrorKind::NotFound,
             Ok(file) => match file.try_lock() {
-                Ok(()) => {
+                // Unlocked: dead, and its file is removed, if the name still
+                // means the file locked here. A new file under the name is
+                // a claimant still registering: not gone.
+                Ok(()) if same_file(&path, &file) => {
                     let _ = std::fs::remove_file(&path);
                     true
                 }
+                Ok(()) => std::fs::symlink_metadata(&path).is_err(),
                 Err(_) => false,
             },
         }
     }
+}
+
+/// Whether `path` still names the very file `file` has open.
+fn same_file(path: &Path, file: &File) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::symlink_metadata(path), file.metadata()) {
+        (Ok(named), Ok(open)) => named.dev() == open.dev() && named.ino() == open.ino(),
+        _ => false,
+    }
+}
+
+/// Remove the lock file at `path`, which `file` holds locked, only while
+/// the name still refers to it: never a newer file of the same name.
+fn remove_if_same(path: &Path, file: &File) {
+    if same_file(path, file) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Create and lock this claimant's own lock file. A sweep may lock and
+/// remove a file between its creation and our lock (it looks like a dead
+/// claimant's for that instant), so after locking, the name must still
+/// refer to the file we locked; if not (or the sweep holds it), start
+/// again with a fresh file.
+fn lock_own(path: &Path) -> std::io::Result<File> {
+    let mut last = std::io::Error::other("lock file kept being swept");
+    for _ in 0..100 {
+        let file = File::options().read(true).write(true).create(true).truncate(false).open(path)?;
+        match file.try_lock() {
+            Ok(()) if same_file(path, &file) => return Ok(file),
+            Ok(()) => {}
+            Err(e) => last = std::io::Error::from(e),
+        }
+        drop(file);
+        std::thread::yield_now();
+    }
+    Err(last)
 }
 
 impl Drop for Claimant {
@@ -171,7 +209,8 @@ impl Drop for Claimant {
     }
 }
 
-/// Remove the lock files of dead claimants (any that can be locked).
+/// Remove the lock files of dead claimants: only one this sweep holds
+/// locked itself, and only while its name still refers to that file.
 fn sweep(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for path in entries.flatten().map(|e| e.path()) {
@@ -179,7 +218,7 @@ fn sweep(dir: &Path) {
             && let Ok(file) = File::options().read(true).write(true).open(&path)
             && file.try_lock().is_ok()
         {
-            let _ = std::fs::remove_file(&path);
+            remove_if_same(&path, &file);
         }
     }
 }
@@ -622,5 +661,41 @@ mod tests {
         assert_eq!(db.write_blocking(move |tx| recover_in_flight(tx, &m, 11)).unwrap(), 2);
         assert_eq!(state(&db, mine).0, "pending");
         assert_eq!(state(&db, legacy).0, "pending");
+    }
+
+    #[test]
+    fn a_sweep_never_takes_a_new_claimants_lock_file() {
+        // Claimants register while others sweep as hard as they can: every
+        // claimant must end up holding a lock on the file its name points
+        // to, so nobody can take it for gone while it lives.
+        let (_db, path) = store("sweep-race");
+        let dir = path.parent().unwrap().join(CLAIMS_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        let observer = Claimant::register(&path);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sweepers: Vec<_> = (0..3)
+            .map(|_| {
+                let (dir, stop) = (dir.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    while !stop.load(Ordering::Relaxed) {
+                        sweep(&dir);
+                    }
+                })
+            })
+            .collect();
+        let mut bad = Vec::new();
+        for _ in 0..3000 {
+            let c = Claimant::register(&path);
+            if c.id().starts_with(NO_LOCK) {
+                bad.push(format!("{} has no lock", c.id()));
+            } else if observer.is_gone(c.id()) {
+                bad.push(format!("{} taken for gone while alive", c.id()));
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        for s in sweepers {
+            s.join().unwrap();
+        }
+        assert!(bad.is_empty(), "{} of 3000: {:?}", bad.len(), &bad[..bad.len().min(5)]);
     }
 }

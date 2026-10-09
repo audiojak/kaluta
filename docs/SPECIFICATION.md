@@ -777,7 +777,12 @@ forever on the other.
   kernel drops it when the process dies, however it dies, and a reused pid
   cannot fool it. A drainer renews its lease every 15 s while the
   provider call runs, and records the call's outcome only if it still
-  holds the claim.
+  holds the claim. Lock files of dead drainers are cleared at
+  registration, but only by whoever holds the file locked itself and only
+  while the name still refers to that file (same inode); a new drainer,
+  after locking its file, checks the name still refers to it and starts
+  again with a fresh file if a sweep took it in the instant between
+  creating and locking it *(amendment 2026-10-08, oagc-cp3.5)*.
 - *Recovery,* at the start of each drain: an op in flight goes back to
   pending if it is the drainer's own (an interrupted drain), unnamed (left
   by a build from before claims: the old single-process recovery at

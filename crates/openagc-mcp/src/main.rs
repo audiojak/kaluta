@@ -164,6 +164,14 @@ impl MailboxShim {
                 }
                 // The app answered and refused: say why.
                 Err(agent_mcp::client::ClientError::Refused(why)) => return Err(Outcome::error("denied", why)),
+                // A socket someone else could have placed: never used, and
+                // not quietly replaced by the headless core either.
+                Err(e @ agent_mcp::client::ClientError::Untrusted(_)) => {
+                    return Err(Outcome::error(
+                        "unsafe_socket",
+                        format!("{e}. Quit and reopen OpenAGC, or remove the folder if it is not yours."),
+                    ));
+                }
                 // Not running (a socket left by a crash): headless.
                 Err(agent_mcp::client::ClientError::Connect(_)) => {}
             }
