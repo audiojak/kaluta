@@ -138,9 +138,15 @@ async fn reports_are_queued_pulled_and_gone_once_acknowledged() {
         (Some("Nightly digest script"), Value::Null, Value::Null)
     );
 
+    // Ids are this database's: the listing names its epoch, made with it,
+    // the same at every pull.
+    let epoch = all["epoch"].as_str().unwrap().to_owned();
+    assert!(epoch.len() == 32 && epoch.bytes().all(|b| b.is_ascii_hexdigit()), "{epoch}");
+
     // Paging by cursor.
     let page = pull(&s, &publisher, "?limit=1").await;
     assert_eq!((page["reports"].as_array().unwrap().len(), page["more"].clone()), (1, json!(true)));
+    assert_eq!(page["epoch"], epoch.as_str());
     let rest = pull(&s, &publisher, &format!("?after={first}")).await;
     assert_eq!(rest["reports"][0]["id"], r2["id"]);
 

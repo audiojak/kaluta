@@ -2278,7 +2278,7 @@ cloud agents will use the same queue later.
   10,000 reports, dropping the oldest and counting them (`dropped`). The
   publisher pulls with `GET /v1/mailboxes/{address}/reports?after=&limit=`
   (oldest first, at most 500, with each agent's name and kind, `pending`,
-  `dropped` and `more`) and acknowledges with `POST …/reports/ack
+  `dropped`, `more` and the database's `epoch`) and acknowledges with `POST …/reports/ack
   {"up_to_id"}`, which deletes them; an hourly sweep deletes any older
   than 30 days. Agents' REST: `POST /v1/m/{address}/check` and
   `POST /v1/m/{address}/reports`. A report is the agent's own words: the
@@ -2291,7 +2291,17 @@ cloud agents will use the same queue later.
   composition when the account records them (source `agent`, agent
   `cloud:<agent name>`, no draft, the body's text and sanitized HTML, the
   reported Message-ID, the time it says it was sent), and acknowledges
-  only after that transaction commits. Matching, at each pull and each
+  only after that transaction commits. *(Amendment 2026-10-09,
+  oagc-gmn7.13.)* It acknowledges only up to the last of the leading run
+  of reports it recorded: one that does not open or read holds the
+  acknowledgement back and is tried at each pull, and after 5 pulls is
+  given up on (acknowledged unread and counted); the Settings status line
+  says "N reports couldn't be read" (`RulesPublication.unreadable_reports`,
+  those still tried and those given up on since publishing started). The
+  server's listing names its database's `epoch` (random, made with the
+  database, migration 6), and the app keys reports by server, epoch and
+  id, so a database restored or made again, which reuses ids, never has
+  its new reports taken for old ones. Matching, at each pull and each
   sync: the sent message (SENT, not a draft) whose Message-ID is the
   report's; else one to a recipient of the report (To, Cc or Bcc) with
   its subject (case and spaces aside) sent within 10 minutes of the

@@ -87,6 +87,9 @@ pub struct RulesPublication {
     pub pending: bool,
     /// The last version went encrypted (spec §10.6, encryption at rest).
     pub encrypted: bool,
+    /// Cloud agents' reports that could not be opened or read: those still
+    /// being tried and those given up on since publishing started.
+    pub unreadable_reports: u32,
 }
 
 /// Whether a rules server keeps snapshots encrypted at rest (spec §10.6).
@@ -239,6 +242,14 @@ struct Record {
     /// in plaintext.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     key_id: Option<String>,
+    /// Reports given up on unread since publishing started (spec §10.6):
+    /// acknowledged so they stop holding back the rest, and counted.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    unreadable_reports: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 impl Record {
@@ -377,6 +388,10 @@ pub(crate) struct RulesState {
     pulling: tokio::sync::Mutex<()>,
     /// When each account's reports were last pulled at a sync.
     pulled: Mutex<HashMap<String, std::time::Instant>>,
+    /// Reports that did not open or read, by account and the server's key
+    /// for them: how many pulls they failed. Each holds back the
+    /// acknowledgement until it reads or is given up on.
+    report_failures: Mutex<HashMap<(String, String, i64), u32>>,
     /// Record files are read and rewritten under this.
     records: Mutex<()>,
     /// Accounts with a change not pushed yet.
@@ -407,6 +422,12 @@ impl RulesState {
 
     fn is_pending(&self, account: &str) -> bool {
         self.pending.lock().unwrap_or_else(|e| e.into_inner()).contains(account)
+    }
+
+    /// How many of `account`'s reports are failing to read and still tried.
+    fn failing_reports(&self, account: &str) -> u32 {
+        let failures = self.report_failures.lock().unwrap_or_else(|e| e.into_inner());
+        u32::try_from(failures.keys().filter(|(a, _, _)| a == account).count()).unwrap_or(u32::MAX)
     }
 
     #[cfg(test)]
@@ -1006,6 +1027,7 @@ impl Core {
             error: r.error,
             pending: r.enabled && self.rules.is_pending(account_id),
             encrypted: r.key_id.is_some(),
+            unreadable_reports: r.unreadable_reports.saturating_add(self.rules.failing_reports(account_id)),
         })
     }
 }
@@ -1102,7 +1124,9 @@ impl Core {
             let same = existing.as_ref().filter(|r| r.server_url == server.url);
             let has_token = core.secrets.get(key.clone())?.is_some();
             let record = match same {
-                Some(r) if has_token => Record { enabled: true, encrypt: Some(encrypt), ..r.clone() },
+                Some(r) if has_token => {
+                    Record { enabled: true, encrypt: Some(encrypt), unreadable_reports: 0, ..r.clone() }
+                }
                 _ => {
                     let _guard = core.rules.pushing.lock().await;
                     let token = core
@@ -1375,6 +1399,7 @@ impl Core {
             encrypt: Some(true),
             // Shown as published in plaintext, as the docs' pictures are.
             key_id: None,
+            unreadable_reports: 0,
         };
         {
             let _guard = self.rules.records.lock().unwrap_or_else(|e| e.into_inner());

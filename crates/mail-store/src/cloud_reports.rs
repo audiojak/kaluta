@@ -29,6 +29,8 @@ pub const BY_RECIPIENT_SUBJECT: &str = "recipient_subject";
 /// A report as pulled.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NewReport {
+    /// The rules server's URL, with `#<epoch>` when the server names its
+    /// database's epoch: report ids are unique within one database only.
     pub server: String,
     pub server_id: i64,
     pub agent_id: String,

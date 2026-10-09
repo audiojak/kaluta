@@ -1099,3 +1099,83 @@ fn publications_from_before_encryption_and_on_a_server_that_requires_it_go_encry
     assert_eq!((s.version.is_some(), s.encrypted, s.error.as_deref()), (true, true, None), "{s:?}");
     assert!(!holds(&required.stored_bytes(), "Call her Annie"));
 }
+
+#[test]
+fn a_report_that_does_not_read_holds_back_the_acknowledgement_and_a_new_server_database_is_new() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let mock = rt.block_on(MockServer::start());
+    let (_t, core, _secrets, id) = setup("reports-unread");
+    let address = core.agent_meta(&id).unwrap().address;
+    let mount = |m: Mock| rt.block_on(m.mount(&mock));
+    mount(
+        Mock::given(method("POST"))
+            .and(path("/v1/mailboxes"))
+            .respond_with(json_response(201, json!({ "publisher_token": "oagc_pub_test" }))),
+    );
+    mount(
+        Mock::given(method("PUT"))
+            .and(path(format!("/v1/mailboxes/{address}/snapshot")))
+            .respond_with(json_response(200, json!({ "version": 1 }))),
+    );
+    let report = |id: i64, subject: &str| {
+        json!({ "id": id, "agent_id": "0123456789abcdef", "agent_name": "Routine", "agent_kind": "token",
+                "received_at": "2026-10-09T10:00:00Z", "to": ["ann@acme.com"], "subject": subject,
+                "body_markdown": "Hi", "check": { "version": 1, "guide_check": [] } })
+    };
+    // Sealed to a key this Mac does not have: it does not open.
+    let unreadable = json!({ "id": 6, "agent_id": "0123456789abcdef", "received_at": "2026-10-09T10:00:00Z",
+                             "to": [], "subject": "", "body_markdown": "", "sealed": "AAAA" });
+    let listed = json!({ "reports": [report(5, "Five"), unreadable, report(7, "Seven")],
+                         "pending": 3, "dropped": 0, "more": false, "epoch": "aaaa" });
+    let tries = u64::from(reports::MAX_REPORT_TRIES);
+    mount(
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/mailboxes/{address}/reports")))
+            .respond_with(json_response(200, listed))
+            .up_to_n_times(tries),
+    );
+    mount(
+        Mock::given(method("POST"))
+            .and(path(format!("/v1/mailboxes/{address}/reports/ack")))
+            .respond_with(json_response(200, json!({ "deleted": 1 }))),
+    );
+    block_on(core.clone().rules_publish_start(id.clone(), mock.uri(), None, false)).unwrap();
+    let pull = || crate::runtime::runtime().block_on(core.rules_pull_reports(&id)).unwrap();
+    let acked = || -> Vec<i64> {
+        rt.block_on(mock.received_requests())
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path().ends_with("/reports/ack"))
+            .map(|r| serde_json::from_slice::<Value>(&r.body).unwrap()["up_to_id"].as_i64().unwrap())
+            .collect()
+    };
+
+    // The one that does not open holds the acknowledgement at the one
+    // before it: never deleted unread while it is tried. The one after is
+    // recorded all the same.
+    assert_eq!(pull(), 2);
+    assert_eq!(acked(), [5]);
+    assert_eq!(core.rules_publish_status(id.clone()).unwrap().unreadable_reports, 1, "said in the status");
+    for _ in 2..tries {
+        assert_eq!(pull(), 0, "recorded once");
+    }
+    assert_eq!(acked(), vec![5; usize::try_from(tries).unwrap() - 1]);
+    // Given up on at the last try: acknowledged past, and still counted.
+    assert_eq!(pull(), 0);
+    assert_eq!(acked().last(), Some(&7));
+    assert_eq!(core.rules_publish_status(id.clone()).unwrap().unreadable_reports, 1);
+
+    // The server's database is made again: its ids start over under a new
+    // epoch, and a new report with an old id is new here.
+    let again = json!({ "reports": [report(5, "Five again")], "pending": 1, "dropped": 0, "more": false,
+                        "epoch": "bbbb" });
+    mount(
+        Mock::given(method("GET"))
+            .and(path(format!("/v1/mailboxes/{address}/reports")))
+            .respond_with(json_response(200, again)),
+    );
+    assert_eq!(pull(), 1);
+    let subjects: Vec<String> =
+        block_on(core.rules_reports(id.clone(), 10)).unwrap().into_iter().map(|r| r.subject).collect();
+    assert!(subjects.contains(&"Five again".to_owned()) && subjects.contains(&"Five".to_owned()), "{subjects:?}");
+}

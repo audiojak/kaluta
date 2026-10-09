@@ -2,7 +2,8 @@ import SwiftUI
 
 /// An agent mailbox's *Rules server* row in Settings › Accounts (spec
 /// §10.6): *Publish to a Rules Server…*, then the status line ("Version 12,
-/// published 3 minutes ago", or why the last push failed), *Publish Now*
+/// published 3 minutes ago", and how many cloud agents' reports could not
+/// be read, if any; or why the last push failed), *Publish Now*
 /// and *Stop Publishing…*; while it publishes, its cloud agents.
 struct RulesServerRow: View {
     @Environment(AppModel.self) private var model
@@ -82,7 +83,10 @@ struct RulesServerRow: View {
         case (true, nil): state = status.error == nil ? "Publishing…" : "Not published yet"
         }
         let sealed = status.encrypted && status.version != nil ? " · encrypted" : ""
-        return "\(status.serverUrl) · \(state)\(sealed)"
+        // Cloud agents' reports that did not open or read (spec §10.6).
+        let unread = status.unreadableReports
+        let unreadable = unread == 0 ? "" : " · \(unread) \(unread == 1 ? "report" : "reports") couldn't be read"
+        return "\(status.serverUrl) · \(state)\(sealed)\(unreadable)"
     }
 
     private func publishNow() async {

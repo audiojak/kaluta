@@ -29,6 +29,9 @@ pub(crate) const PULL_EVERY: Duration = Duration::from_secs(60);
 /// Reports asked for at once, and pages per pull.
 const PAGE: u32 = 200;
 const MAX_PAGES: usize = 20;
+/// Pulls a report that does not open or read is tried at before it is
+/// given up on (acknowledged unread, and counted in the status).
+pub(crate) const MAX_REPORT_TRIES: u32 = 5;
 /// What a report may hold here, whatever the server let through.
 const MAX_BODY: usize = 256 * 1024;
 const MAX_LINE: usize = 998;
@@ -190,6 +193,43 @@ pub(crate) fn record_reports(
     Ok(new)
 }
 
+impl RulesState {
+    /// How far a page of reports may be acknowledged: up to the last of the
+    /// leading run that read (or was given up on after [`MAX_REPORT_TRIES`]
+    /// pulls), so a report that failed is never deleted unread while it is
+    /// still tried. And how many were given up on now.
+    pub(crate) fn acknowledgeable(
+        &self,
+        account: &str,
+        server: &str,
+        read: &[(i64, Option<NewReport>)],
+    ) -> (Option<i64>, u32) {
+        let mut failures = self.report_failures.lock().unwrap_or_else(|e| e.into_inner());
+        let mut up_to = None;
+        let mut given_up = 0;
+        let mut held = false;
+        for (id, report) in read {
+            let key = (account.to_owned(), server.to_owned(), *id);
+            if report.is_some() {
+                failures.remove(&key);
+            } else {
+                let tries = failures.entry(key.clone()).or_insert(0);
+                *tries += 1;
+                if *tries >= MAX_REPORT_TRIES && !held {
+                    failures.remove(&key);
+                    given_up += 1;
+                } else {
+                    held = true;
+                }
+            }
+            if !held {
+                up_to = Some(*id);
+            }
+        }
+        (up_to, given_up)
+    }
+}
+
 impl Core {
     /// After a sync of `account_id`: pull its reports if it publishes and
     /// the last pull was a while ago, then match those still waiting for
@@ -264,38 +304,61 @@ impl Core {
                 401 => return Err(Failure::Final(format!("{host} no longer accepts this Mac's publisher token"))),
                 _ => return Err(Failure::Final(format!("{host} did not give the reports: {}", a.says()))),
             }
-            let listed = a.body["reports"].as_array().cloned().unwrap_or_default();
-            let Some(last) = listed.iter().filter_map(|r| r["id"].as_i64()).max() else { break };
-            let opened: Vec<Value> =
-                listed.iter().filter_map(|r| encryption::opened_report(app.as_ref(), &address, r.clone())).collect();
-            if opened.len() < listed.len() {
-                // Sealed to a key this Mac no longer has: nothing can open them.
-                tracing::warn!(account = account_id, lost = listed.len() - opened.len(), "reports that do not open");
-            }
-            let reports: Vec<NewReport> = opened.iter().filter_map(|r| parse(r, &server.url)).collect();
+            // The server's database's epoch keys its report ids: a database
+            // restored or made again reuses ids, never its epoch.
+            let key = match a.body["epoch"].as_str().filter(|e| !e.is_empty()) {
+                Some(epoch) => format!("{}#{}", server.url, line(epoch, 64)),
+                None => server.url.clone(),
+            };
+            let mut listed: Vec<(i64, Value)> = a.body["reports"]
+                .as_array()
+                .map(|l| l.iter().filter_map(|r| Some((r["id"].as_i64().filter(|id| *id > 0)?, r.clone()))).collect())
+                .unwrap_or_default();
+            listed.sort_by_key(|(id, _)| *id);
+            let Some(last) = listed.last().map(|(id, _)| *id) else { break };
+            // Each opened and read, or `None`.
+            let read: Vec<(i64, Option<NewReport>)> = listed
+                .into_iter()
+                .map(|(id, r)| {
+                    let report = encryption::opened_report(app.as_ref(), &address, r).and_then(|r| parse(&r, &key));
+                    (id, report)
+                })
+                .collect();
             if a.body["dropped"].as_i64().is_some_and(|n| n > 0) {
                 tracing::warn!(account = account_id, dropped = %a.body["dropped"], "the server dropped reports for room");
             }
+            let reports: Vec<NewReport> = read.iter().filter_map(|(_, r)| r.clone()).collect();
             let now = mail_sync::now_millis();
             new += db
                 .write(move |tx| record_reports(tx, &reports, now))
                 .await
                 .map_err(|e| Failure::Final(e.to_string()))?;
-            // Recorded: now they may go from the server.
-            let ack = client
-                .post(server.endpoint(&["v1", "mailboxes", &address, "reports", "ack"]))
-                .bearer_auth(&token)
-                .json(&json!({ "up_to_id": last }));
-            let acked = send(ack, &host).await?;
-            if acked.status != 200 {
-                return Err(transient(&host, &acked).unwrap_or_else(|| {
-                    Failure::Final(format!("{host} did not take the acknowledgement: {}", acked.says()))
-                }));
+            // Recorded: they may go from the server, up to the first that
+            // did not read and is still being tried.
+            let (up_to, given_up) = self.rules.acknowledgeable(account_id, &key, &read);
+            if given_up > 0 {
+                tracing::warn!(account = account_id, given_up, "reports that do not open or read, given up on");
+                self.update_rules_record(account_id, |r| {
+                    r.unreadable_reports = r.unreadable_reports.saturating_add(given_up);
+                })?;
             }
-            after = last;
-            if a.body["more"] != true {
+            if let Some(up_to) = up_to {
+                let ack = client
+                    .post(server.endpoint(&["v1", "mailboxes", &address, "reports", "ack"]))
+                    .bearer_auth(&token)
+                    .json(&json!({ "up_to_id": up_to }));
+                let acked = send(ack, &host).await?;
+                if acked.status != 200 {
+                    return Err(transient(&host, &acked).unwrap_or_else(|| {
+                        Failure::Final(format!("{host} did not take the acknowledgement: {}", acked.says()))
+                    }));
+                }
+            }
+            // One held back: what follows it comes again at the next pull.
+            if up_to != Some(last) || a.body["more"] != true {
                 break;
             }
+            after = last;
         }
         // Agents that connected since the last push get the newest snapshot
         // key (spec §10.6); at most once a minute, with the pull.

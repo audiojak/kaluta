@@ -108,6 +108,12 @@ struct RulesServerTests {
             == "https://rules.example.com · Version 12, published 3 minutes ago · encrypted")
         first.encrypted = true
         #expect(!RulesServerRow.statusLine(first).contains("encrypted"))
+        // Reports that could not be opened or read are counted.
+        var unread = status
+        unread.unreadableReports = 1
+        #expect(RulesServerRow.statusLine(unread).hasSuffix("· 1 report couldn't be read"))
+        unread.unreadableReports = 3
+        #expect(RulesServerRow.statusLine(unread).hasSuffix("· 3 reports couldn't be read"))
         #expect(PublishRulesSheet.encryptionNote(.optional) == nil)
         #expect(PublishRulesSheet.encryptionNote(.required)?.contains("encrypted") == true)
         #expect(PublishRulesSheet.encryptionNote(.unsupported)?.contains("Advanced") == true)

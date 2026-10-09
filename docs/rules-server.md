@@ -292,7 +292,15 @@ At each sync of a publishing agent mailbox (at most once a minute) and on
 store, records it as an AI composition written by `cloud:<agent name>`
 (once the mailbox has finished a learning run, as for every AI
 composition, ADR 0013), and only then acknowledges them, which deletes
-them on the server; pulled twice, a report is recorded once. Each is
+them on the server; pulled twice, a report is recorded once. It
+acknowledges only up to the first report it could not open or read
+(sealed to a key the Mac no longer has, say), which is tried again at the
+next pulls and given up on after five, unread; the *Rules server* line
+then says how many reports couldn't be read. Report ids are the server
+database's: the listing names its `epoch`, a random id made with it, and
+the app keys reports by it, so a server whose database is restored or
+made again (and so reuses ids) never has its new reports taken for old
+ones. Each is
 matched to the mailbox's sent mail by the Message-ID it names (brackets
 and spaces ignored), else to a message to one of its recipients with its
 subject sent within 10 minutes of the time it gives; one whose mail has
@@ -404,7 +412,7 @@ a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 | `GET /v1/mailboxes/{address}/agent-tokens` | | `{"agent_tokens": [{"id", "name", "kind", "created_at", "revoked_at", "last_used_at", "agent_key", "readable"}], "key_id"}`: every agent, `kind` `token` or `oauth` (a grant made with a connect code, which adds `client_name`); `last_used_at` is when it was last let in, to the minute, or null; `agent_key` its key sealed to the app (null until it has one), `readable` whether it can read the newest version; `key_id` the newest version's key id, null when it is plaintext |
 | `DELETE /v1/mailboxes/{address}/agent-tokens/{id}` | | 204; revokes a token or a grant (and its OAuth tokens) |
 | `POST /v1/mailboxes/{address}/connect-codes` | `{"name"}` | 201 `{"id", "name", "code", "expires_at"}`; the code is shown only here. 409 `oauth_off` without a public URL, 429 `too_many_codes` with 10 unused |
-| `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>` | | `{"reports": [{"id", "agent_id", "agent_name", "agent_kind", "received_at", "message_id", "to", "subject", "sent_at", "body_markdown", "checked_version", "check": {"version", "guide_check"}, "sealed"}], "pending", "dropped", "more"}`; with encryption at rest `sealed` holds the Message-ID, recipients, subject, body and check sealed to the app, and those fields are empty, oldest first, after the cursor (0 for all), at most `limit` (100 by default, 500 at most) |
+| `GET /v1/mailboxes/{address}/reports?after=<id>&limit=<n>` | | `{"reports": [{"id", "agent_id", "agent_name", "agent_kind", "received_at", "message_id", "to", "subject", "sent_at", "body_markdown", "checked_version", "check": {"version", "guide_check"}, "sealed"}], "pending", "dropped", "more", "epoch"}` (`epoch`: the database's random id, which report ids are unique within); with encryption at rest `sealed` holds the Message-ID, recipients, subject, body and check sealed to the app, and those fields are empty, oldest first, after the cursor (0 for all), at most `limit` (100 by default, 500 at most) |
 | `POST /v1/mailboxes/{address}/reports/ack` | `{"up_to_id"}` | `{"deleted"}`; the reports up to that id are gone |
 | `DELETE /v1/mailboxes/{address}` | | 204; the mailbox, its snapshots, its tokens and its reports are gone |
 

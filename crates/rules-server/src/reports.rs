@@ -219,21 +219,23 @@ fn report_json(r: &ReportRow, agent_name: &str, agent_kind: &str) -> Value {
 }
 
 /// The mailbox's reports after `after`, oldest first: `{"reports",
-/// "pending", "dropped", "more"}`.
+/// "pending", "dropped", "more", "epoch"}`.
 pub(crate) async fn list(state: &AppState, mailbox_id: i64, after: i64, limit: i64) -> Result<Value, ApiError> {
     let limit = limit.clamp(1, MAX_LIST);
     let now = db::now_ms();
-    let (rows, (pending, dropped)) = state
+    let (rows, (pending, dropped), epoch) = state
         .db
         .run(move |c| {
             db::sweep_reports(c, now)?;
-            Ok((db::reports(c, mailbox_id, after, limit + 1)?, db::report_counts(c, mailbox_id)?))
+            Ok((db::reports(c, mailbox_id, after, limit + 1)?, db::report_counts(c, mailbox_id)?, db::epoch(c)?))
         })
         .await?;
     let more = i64::try_from(rows.len()).unwrap_or(i64::MAX) > limit;
     let reports: Vec<Value> =
         rows.iter().take(usize::try_from(limit).unwrap_or(usize::MAX)).map(|(r, n, k)| report_json(r, n, k)).collect();
-    Ok(json!({ "reports": reports, "pending": pending, "dropped": dropped, "more": more }))
+    // Ids are this database's: a restored or recreated one reuses them, so
+    // the app keys what it pulled by the epoch too.
+    Ok(json!({ "reports": reports, "pending": pending, "dropped": dropped, "more": more, "epoch": epoch }))
 }
 
 /// The app has recorded the reports up to `up_to_id`: they go.
