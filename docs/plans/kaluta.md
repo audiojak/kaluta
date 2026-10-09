@@ -25,7 +25,7 @@ while it runs. Commit and push after every closed issue; never push to
   and adds no site, pages or hosting.
 - **App icon: option A, ink on white.** The logo in black on a white
   tile with a faint warm-grey gradient (`#FFFFFF` → `#E9E6E1`), the mark
-  about 600 of the 1024 canvas wide, nudged to sit optically centred.
+  about 600 of the 1024 canvas wide (760 since 2026-10-09, maintainer), nudged to sit optically centred.
   `scripts/make-icon.sh` renders it, so a designer's final icon is a
   one-file swap.
 - **The GitHub repo is renamed later**, by the maintainer, to
