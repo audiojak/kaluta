@@ -163,7 +163,7 @@ struct Report {
 }
 
 async fn run(n: usize, name: &str) -> Report {
-    let dir = std::env::temp_dir().join(format!("openagc-scale-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-scale-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 500));

@@ -296,7 +296,7 @@ pub struct IncrementalReport {
     /// Messages that arrived since the last sync, unread in the Inbox and
     /// not sent by the user: what a new-mail notification is about.
     pub new_mail: Vec<NewMail>,
-    /// Label changes made outside OpenAGC.
+    /// Label changes made outside Kaluta.
     pub external_label_changes: Vec<ExternalLabelChange>,
 }
 
@@ -342,7 +342,7 @@ pub struct SyncEngine {
     /// This engine as an outbox drainer: its claims name it, and its lock
     /// file tells other drainers it is alive (spec §7.4, outbox claims).
     pub(crate) claimant: Arc<mail_store::outbox::Claimant>,
-    /// Label changes OpenAGC itself pushed recently, so history sync can
+    /// Label changes Kaluta itself pushed recently, so history sync can
     /// tell them from changes made elsewhere (spec §11.6).
     pub(crate) own_changes: std::sync::Mutex<Vec<OwnChange>>,
     /// Queued ids the headers pass asked for and did not get (gone from
@@ -366,7 +366,7 @@ pub(crate) struct OwnChange {
     pub at: Millis,
 }
 
-/// A label change seen in history that OpenAGC did not make: another
+/// A label change seen in history that Kaluta did not make: another
 /// client, a filter, or a cloud routine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalLabelChange {
@@ -1338,7 +1338,7 @@ impl SyncEngine {
         Ok(report)
     }
 
-    /// Drop the changes OpenAGC's outbox made; group the rest per message.
+    /// Drop the changes Kaluta's outbox made; group the rest per message.
     fn not_ours(&self, labeled: Vec<(MessageId, ThreadId, Vec<LabelId>, bool)>) -> Vec<ExternalLabelChange> {
         let now = crate::outbox::now_millis();
         let mut own = self.own_changes.lock().unwrap_or_else(|e| e.into_inner());

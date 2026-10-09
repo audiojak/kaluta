@@ -155,7 +155,7 @@ pub enum DbError {
     Sqlite(#[from] rusqlite::Error),
     #[error("data directory {0}: {1}")]
     Io(PathBuf, std::io::Error),
-    #[error("the database is from a newer openagc-rules (schema {0}; this build knows {known})", known = MIGRATIONS.len())]
+    #[error("the database is from a newer kaluta-rules (schema {0}; this build knows {known})", known = MIGRATIONS.len())]
     TooNew(u32),
     #[error("database task failed: {0}")]
     Task(String),
@@ -953,7 +953,7 @@ mod tests {
     use super::*;
 
     fn scratch() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("openagc-rules-db-{}", crate::tokens::new_id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-rules-db-{}", crate::tokens::new_id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }

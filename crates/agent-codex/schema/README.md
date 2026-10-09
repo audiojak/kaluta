@@ -10,7 +10,7 @@ codex app-server generate-json-schema --experimental --out /tmp/codex-schema
 Only the files the adapter uses are kept (the full bundle is 4 MB):
 `initialize`, `thread/start`, `thread/resume`, `turn/start`,
 `turn/interrupt`, the notifications it maps to agent events, and the
-server-request union (all of which OpenAGC refuses). The adapter's request
+server-request union (all of which Kaluta refuses). The adapter's request
 shapes are checked against these files by `tests/schema.rs`.
 
 When upgrading Codex, regenerate, diff against this directory, and add a new

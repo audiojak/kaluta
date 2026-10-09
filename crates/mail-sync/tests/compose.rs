@@ -21,7 +21,7 @@ fn me() -> EmailAddress {
 }
 
 async fn setup(name: &str) -> (Arc<FakeProvider>, Db, SyncEngine) {
-    let dir = std::env::temp_dir().join(format!("openagc-compose-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-compose-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));
@@ -244,7 +244,7 @@ async fn a_draft_whose_attachment_vanished_fails_without_blocking_the_queue() {
         drafts::DraftRecord {
             subject: "Broken".into(),
             attachments: vec![drafts::DraftAttachment {
-                path: "/nonexistent/openagc/file.pdf".into(),
+                path: "/nonexistent/kaluta/file.pdf".into(),
                 filename: "file.pdf".into(),
                 mime_type: "application/pdf".into(),
                 size: 1,

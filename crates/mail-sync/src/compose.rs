@@ -209,7 +209,7 @@ pub async fn draft_for_editing(
 pub(crate) async fn draft_raw(db: &Db, draft: DraftRecord, from: &EmailAddress) -> SyncResult<Vec<u8>> {
     let domain = from.email.rsplit('@').next().unwrap_or("localhost").to_owned();
     let (_, outgoing) =
-        outgoing_message(db, draft, from, format!("{}.openagc@{domain}", random_token()), now_millis()).await?;
+        outgoing_message(db, draft, from, format!("{}.kaluta@{domain}", random_token()), now_millis()).await?;
     mail_mime::build_draft(&outgoing).map_err(|e| SyncError::Store(StoreError::Invalid(e.to_string())))
 }
 
@@ -232,7 +232,7 @@ pub async fn send_draft(
         return Err(StoreError::Invalid("this draft is already being sent".into()).into());
     }
     let domain = from.email.rsplit('@').next().unwrap_or("localhost").to_owned();
-    let rfc822_id = format!("{}.openagc@{domain}", random_token());
+    let rfc822_id = format!("{}.kaluta@{domain}", random_token());
     let now = now_millis();
     let (draft, outgoing) = outgoing_message(db, draft, &from, rfc822_id.clone(), now).await?;
     let raw = mail_mime::build(&outgoing).map_err(|e| SyncError::Store(StoreError::Invalid(e.to_string())))?;

@@ -276,10 +276,11 @@ async fn send_posts_base64url_raw_with_the_thread() {
 #[tokio::test]
 async fn an_earlier_attempt_of_a_send_is_found_by_its_message_id() {
     let (server, gmail) = setup().await;
-    let raw = b"From: me@example.com\r\nTo: a@example.com\r\nMessage-ID: <k3.openagc@example.com>\r\nSubject: Hi\r\n\r\nHello";
+    let raw =
+        b"From: me@example.com\r\nTo: a@example.com\r\nMessage-ID: <k3.kaluta@example.com>\r\nSubject: Hi\r\n\r\nHello";
     Mock::given(method("GET"))
         .and(path("/users/me/messages"))
-        .and(query_param("q", "rfc822msgid:k3.openagc@example.com"))
+        .and(query_param("q", "rfc822msgid:k3.kaluta@example.com"))
         .and(query_param("includeSpamTrash", "true"))
         .respond_with(
             ResponseTemplate::new(200)

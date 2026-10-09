@@ -46,7 +46,7 @@ fn message(id: &str, thread: &str, age_days: i64, labels: &[&str]) -> FetchedMes
 }
 
 fn setup(name: &str) -> (Arc<FakeProvider>, Db, Arc<Recorder>, SyncEngine) {
-    let dir = std::env::temp_dir().join(format!("openagc-sync-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-sync-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 3));
@@ -114,7 +114,7 @@ async fn bootstrap_queues_by_priority_and_backfill_fills_the_store() {
     let body = db.read(|c| read::get_body(c, &MessageId::new("inbox-unread"))).await.unwrap().unwrap();
     let html = body.html_sanitized.unwrap();
     assert!(!html.contains("script"), "{html}");
-    assert!(html.contains("openagc-remote:https://t.example/p.gif"));
+    assert!(html.contains("kaluta-remote:https://t.example/p.gif"));
     assert!(body.has_remote_images);
 
     // The UI heard about it, and the final progress is idle.
@@ -835,7 +835,7 @@ async fn label_changes_made_elsewhere_are_reported_and_our_own_are_not() {
 
     // Something else (a cloud routine) files a message and archives it.
     fake.relabel(&MessageId::new("inbox-unread"), &[LabelId::new("Label_7")], &[LabelId::new("INBOX")]);
-    // OpenAGC archives another through its outbox.
+    // Kaluta archives another through its outbox.
     engine.apply_change(mail_sync::LocalChange::archive(vec![ThreadId::new("t2")]), true).await.unwrap();
     engine.drain_outbox().await.unwrap();
 

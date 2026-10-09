@@ -360,7 +360,7 @@ async fn sending_posts_one_recipient_with_threading_and_an_idempotency_key() {
         .await;
     let p = provider(&server);
     let raw = "From: Scout <scout@abc.primitive.email>\r\nTo: Ada <ada@example.com>\r\nSubject: Re: Hello\r\n\
-Message-ID: <r1@openagc>\r\nIn-Reply-To: <m1@example.com>\r\nReferences: <m1@example.com>\r\n\r\nThanks\r\n";
+Message-ID: <r1@kaluta>\r\nIn-Reply-To: <m1@example.com>\r\nReferences: <m1@example.com>\r\n\r\nThanks\r\n";
     assert_eq!(p.send(raw.as_bytes(), None).await.unwrap(), outbound_id("o2"));
 
     let two = "From: scout@abc.primitive.email\r\nTo: a@example.com\r\nCc: b@example.com\r\nSubject: x\r\n\r\nx\r\n";

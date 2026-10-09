@@ -634,7 +634,7 @@ mod tests {
     use crate::compositions::{self, Kind, NewComposition, Recipients, Source};
 
     fn db(name: &str) -> (Db, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("openagc-analysis-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-analysis-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (Db::open(&dir.join("mail.sqlite")).unwrap(), dir)
     }

@@ -2,7 +2,7 @@
 //!
 //! There is no public routines API. The user's `claude` CLI has a built-in
 //! `RemoteTrigger` tool that manages them with the CLI's own claude.ai
-//! login, so OpenAGC never holds a claude.ai credential. Each call spawns
+//! login, so Kaluta never holds a claude.ai credential. Each call spawns
 //! `claude -p` with that one tool, no MCP servers and `dontAsk`, asks it to
 //! call RemoteTrigger with an exact body, and parses the JSON it returns
 //! strictly. The endpoint is internal and undocumented: any surprise is an

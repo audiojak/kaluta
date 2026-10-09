@@ -1,4 +1,4 @@
-//! Codex sessions (spec §9.4): a `codex app-server` per OpenAGC session,
+//! Codex sessions (spec §9.4): a `codex app-server` per Kaluta session,
 //! JSON-RPC over stdio (newline-delimited, no `"jsonrpc"` field), one
 //! Codex thread, one turn at a time.
 //!
@@ -25,7 +25,7 @@ use tokio::sync::oneshot;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Features that would give the agent anything beyond OpenAGC's tools.
+/// Features that would give the agent anything beyond Kaluta's tools.
 pub const DISABLED_FEATURES: &[&str] = &[
     "shell_tool",
     "unified_exec",
@@ -48,7 +48,7 @@ pub fn server_args(cfg: &SessionConfig) -> Vec<String> {
     let toml_str = |s: &Path| format!("\"{}\"", s.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""));
     // Replacing the whole table drops the user's own MCP servers.
     let mcp = format!(
-        "mcp_servers={{openagc={{command={},args=[\"--socket\",{},\"--session\",\"{}\"],\
+        "mcp_servers={{kaluta={{command={},args=[\"--socket\",{},\"--session\",\"{}\"],\
          default_tools_approval_mode=\"auto\",tool_timeout_sec=900,startup_timeout_sec=20}}}}",
         toml_str(&cfg.mcp.shim_path),
         toml_str(&cfg.mcp.socket_path),
@@ -140,7 +140,7 @@ impl CodexSession {
             .request(
                 "initialize",
                 json!({
-                    "clientInfo": { "name": "openagc", "title": "OpenAGC", "version": env!("CARGO_PKG_VERSION") },
+                    "clientInfo": { "name": "kaluta", "title": "Kaluta", "version": env!("CARGO_PKG_VERSION") },
                     "capabilities": { "experimentalApi": true },
                 }),
             )
@@ -279,11 +279,11 @@ impl Reader {
                     let _ = w.send(result);
                 }
             }
-            // A request from Codex (approvals, elicitations): OpenAGC's own
+            // A request from Codex (approvals, elicitations): Kaluta's own
             // permission engine gates inside the tools, so none are granted.
             (Some(id), Some(method)) => {
                 tracing::warn!(method, "refused a Codex server request");
-                let reply = json!({ "id": id, "error": { "code": -32601, "message": "OpenAGC does not allow this" } });
+                let reply = json!({ "id": id, "error": { "code": -32601, "message": "Kaluta does not allow this" } });
                 let _ = write_line(&self.stdin, &reply).await;
             }
             (None, Some(method)) => self.notification(method, &msg["params"]),

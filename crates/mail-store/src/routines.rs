@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn routines_and_runs() {
-        let dir = std::env::temp_dir().join(format!("openagc-routines-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-routines-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         let row = RoutineRow {

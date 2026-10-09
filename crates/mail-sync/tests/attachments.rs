@@ -15,7 +15,7 @@ impl SyncObserver for Quiet {
 
 #[tokio::test]
 async fn attachments_download_once_and_inline_bytes_need_no_request() {
-    let dir = std::env::temp_dir().join(format!("openagc-attachments-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-attachments-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));

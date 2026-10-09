@@ -8,7 +8,7 @@ use crate::error::StoreResult;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentSessionRow {
-    /// OpenAGC's session id.
+    /// Kaluta's session id.
     pub uuid: String,
     pub provider: String,
     /// The provider's id for resuming.
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn sessions_and_transcripts() {
-        let dir = std::env::temp_dir().join(format!("openagc-agents-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-agents-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         db.write_blocking(|tx| {

@@ -10,7 +10,7 @@ yanked = "deny"
 
 [licenses]
 version = 2
-# OpenAGC is MIT; dependencies must be compatible with MIT distribution.
+# Kaluta is MIT; dependencies must be compatible with MIT distribution.
 allow = [
   "MIT",
   "MIT-0",

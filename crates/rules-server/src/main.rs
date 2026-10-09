@@ -1,24 +1,24 @@
-//! `openagc-rules`: the rules server for cloud agents (spec §10.6).
+//! `kaluta-rules`: the rules server for cloud agents (spec §10.6).
 //!
 //! ```text
-//! openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
-//! openagc-rules forget-mailbox <address> [--data-dir <dir>]
-//! openagc-rules backup <file> [--data-dir <dir>]
-//! openagc-rules healthcheck [--listen <addr>]
+//! kaluta-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
+//! kaluta-rules forget-mailbox <address> [--data-dir <dir>]
+//! kaluta-rules backup <file> [--data-dir <dir>]
+//! kaluta-rules healthcheck [--listen <addr>]
 //! ```
 //!
 //! Each flag has an environment variable, which the flag overrides:
-//! `OPENAGC_RULES_LISTEN` (default `127.0.0.1:8787`), `OPENAGC_RULES_DATA_DIR`
-//! (default `./data`), `OPENAGC_RULES_LOG` (default `info`),
-//! `OPENAGC_RULES_RATE_LIMIT` (requests per minute per token, default 120),
-//! `OPENAGC_RULES_PUBLIC_URL` (the server's https:// origin as agents reach
+//! `KALUTA_RULES_LISTEN` (default `127.0.0.1:8787`), `KALUTA_RULES_DATA_DIR`
+//! (default `./data`), `KALUTA_RULES_LOG` (default `info`),
+//! `KALUTA_RULES_RATE_LIMIT` (requests per minute per token, default 120),
+//! `KALUTA_RULES_PUBLIC_URL` (the server's https:// origin as agents reach
 //! it; turns on OAuth sign-in with connect codes),
-//! `OPENAGC_RULES_TRUSTED_PROXY` (the TLS proxy's address or CIDR network,
+//! `KALUTA_RULES_TRUSTED_PROXY` (the TLS proxy's address or CIDR network,
 //! comma-separated, whose `X-Forwarded-For` names the client; the flag
 //! repeats).
-//! `OPENAGC_RULES_REGISTRATION_TOKEN`, only from the environment, makes
+//! `KALUTA_RULES_REGISTRATION_TOKEN`, only from the environment, makes
 //! registering a mailbox need that bearer token.
-//! `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` refuses plaintext snapshots (the
+//! `KALUTA_RULES_REQUIRE_ENCRYPTION=1` refuses plaintext snapshots (the
 //! project-hosted server sets it; spec §10.6, encryption at rest).
 //!
 //! Plain HTTP: put it behind a TLS proxy (`docs/rules-server.md`).
@@ -32,10 +32,10 @@ use std::time::Duration;
 use rules_server::{Config, Db, db};
 
 const USAGE: &str =
-    "usage: openagc-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
-       openagc-rules forget-mailbox <address> [--data-dir <dir>]
-       openagc-rules backup <file> [--data-dir <dir>]
-       openagc-rules healthcheck [--listen <addr>]";
+    "usage: kaluta-rules [serve] [--listen <addr>] [--data-dir <dir>] [--log <filter>] [--rate-limit <n>] [--public-url <url>] [--trusted-proxy <cidr>]
+       kaluta-rules forget-mailbox <address> [--data-dir <dir>]
+       kaluta-rules backup <file> [--data-dir <dir>]
+       kaluta-rules healthcheck [--listen <addr>]";
 
 const DEFAULT_LISTEN: &str = "127.0.0.1:8787";
 
@@ -56,22 +56,31 @@ struct Args {
     trusted_proxies: Vec<String>,
 }
 
+/// A `KALUTA_RULES_*` setting, or the `OPENAGC_RULES_*` one a server set
+/// up before the project was named Kaluta has, with a warning naming the
+/// new one.
 fn env(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+    let read = |n: &str| std::env::var(n).ok().filter(|v| !v.trim().is_empty());
+    read(name).or_else(|| {
+        let old = format!("OPENAGC_{}", name.strip_prefix("KALUTA_")?);
+        let value = read(&old)?;
+        eprintln!("kaluta-rules: {old} is the old name of {name}; rename it, as the old one will stop working");
+        Some(value)
+    })
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = Args {
         command: Command::Serve,
-        listen: env("OPENAGC_RULES_LISTEN").unwrap_or_else(|| DEFAULT_LISTEN.into()),
-        data_dir: env("OPENAGC_RULES_DATA_DIR").map_or_else(|| PathBuf::from("data"), PathBuf::from),
-        log: env("OPENAGC_RULES_LOG").unwrap_or_else(|| "info".into()),
+        listen: env("KALUTA_RULES_LISTEN").unwrap_or_else(|| DEFAULT_LISTEN.into()),
+        data_dir: env("KALUTA_RULES_DATA_DIR").map_or_else(|| PathBuf::from("data"), PathBuf::from),
+        log: env("KALUTA_RULES_LOG").unwrap_or_else(|| "info".into()),
         rate_limit: 120,
-        public_url: env("OPENAGC_RULES_PUBLIC_URL"),
-        trusted_proxies: env("OPENAGC_RULES_TRUSTED_PROXY").into_iter().collect(),
+        public_url: env("KALUTA_RULES_PUBLIC_URL"),
+        trusted_proxies: env("KALUTA_RULES_TRUSTED_PROXY").into_iter().collect(),
     };
-    if let Some(v) = env("OPENAGC_RULES_RATE_LIMIT") {
-        args.rate_limit = v.parse().map_err(|_| format!("OPENAGC_RULES_RATE_LIMIT {v:?} is not a number"))?;
+    if let Some(v) = env("KALUTA_RULES_RATE_LIMIT") {
+        args.rate_limit = v.parse().map_err(|_| format!("KALUTA_RULES_RATE_LIMIT {v:?} is not a number"))?;
     }
     let mut it = std::env::args().skip(1).peekable();
     match it.peek().map(String::as_str) {
@@ -105,7 +114,7 @@ fn parse_args() -> Result<Args, String> {
                 args.rate_limit = v.parse().map_err(|_| format!("--rate-limit {v:?} is not a number"))?;
             }
             "--version" => {
-                println!("openagc-rules {}", env!("CARGO_PKG_VERSION"));
+                println!("kaluta-rules {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "--help" | "-h" => {
@@ -122,7 +131,7 @@ fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("openagc-rules: {e}\n{USAGE}");
+            eprintln!("kaluta-rules: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
@@ -137,12 +146,12 @@ fn main() -> ExitCode {
 fn serve(args: &Args) -> ExitCode {
     // Dependencies log at warn: what they say at info and below can carry
     // request contents. The server's own lines never do.
-    let filter = tracing_subscriber::EnvFilter::try_new(format!("warn,rules_server={0},openagc_rules={0}", args.log))
+    let filter = tracing_subscriber::EnvFilter::try_new(format!("warn,rules_server={0},kaluta_rules={0}", args.log))
         .or_else(|_| tracing_subscriber::EnvFilter::try_new(&args.log));
     let filter = match filter {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("openagc-rules: --log {:?}: {e}", args.log);
+            eprintln!("kaluta-rules: --log {:?}: {e}", args.log);
             return ExitCode::from(2);
         }
     };
@@ -151,16 +160,16 @@ fn serve(args: &Args) -> ExitCode {
     let config = Config {
         data_dir: args.data_dir.clone(),
         rate_limit_per_minute: args.rate_limit,
-        registration_token: env("OPENAGC_RULES_REGISTRATION_TOKEN"),
+        registration_token: env("KALUTA_RULES_REGISTRATION_TOKEN"),
         public_url: args.public_url.clone(),
-        require_encryption: env("OPENAGC_RULES_REQUIRE_ENCRYPTION")
+        require_encryption: env("KALUTA_RULES_REQUIRE_ENCRYPTION")
             .is_some_and(|v| matches!(v.trim(), "1" | "true" | "yes")),
         trusted_proxies: args.trusted_proxies.clone(),
     };
     let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("openagc-rules: {e}");
+            eprintln!("kaluta-rules: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -186,7 +195,7 @@ fn serve(args: &Args) -> ExitCode {
             registration_open = config.registration_token.is_none(),
             oauth = config.public_url.as_deref().unwrap_or("off"),
             trusted_proxies = config.trusted_proxies.join(","),
-            "openagc-rules {} serving",
+            "kaluta-rules {} serving",
             env!("CARGO_PKG_VERSION")
         );
         match axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
@@ -247,11 +256,11 @@ fn forget(args: &Args, address: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(false) => {
-            eprintln!("openagc-rules: {address} is not registered here");
+            eprintln!("kaluta-rules: {address} is not registered here");
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("openagc-rules: {e}");
+            eprintln!("kaluta-rules: {e}");
             ExitCode::FAILURE
         }
     }
@@ -269,9 +278,9 @@ fn backup(args: &Args, file: &std::path::Path) -> ExitCode {
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     if let Err(e) = options.open(file) {
         if e.kind() == std::io::ErrorKind::AlreadyExists {
-            eprintln!("openagc-rules: {} exists; give a new file", file.display());
+            eprintln!("kaluta-rules: {} exists; give a new file", file.display());
         } else {
-            eprintln!("openagc-rules: {}: {e}", file.display());
+            eprintln!("kaluta-rules: {}: {e}", file.display());
         }
         return ExitCode::FAILURE;
     }
@@ -291,7 +300,7 @@ fn backup(args: &Args, file: &std::path::Path) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("openagc-rules: {e}");
+            eprintln!("kaluta-rules: {e}");
             ExitCode::FAILURE
         }
     }
@@ -307,7 +316,7 @@ fn healthcheck(listen: &str) -> ExitCode {
         a
     });
     let Some(addr) = addr else {
-        eprintln!("openagc-rules: cannot resolve {listen}");
+        eprintln!("kaluta-rules: cannot resolve {listen}");
         return ExitCode::FAILURE;
     };
     let check = || -> std::io::Result<bool> {
@@ -321,11 +330,11 @@ fn healthcheck(listen: &str) -> ExitCode {
     match check() {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => {
-            eprintln!("openagc-rules: unhealthy");
+            eprintln!("kaluta-rules: unhealthy");
             ExitCode::FAILURE
         }
         Err(e) => {
-            eprintln!("openagc-rules: {e}");
+            eprintln!("kaluta-rules: {e}");
             ExitCode::FAILURE
         }
     }

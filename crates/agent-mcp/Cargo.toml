@@ -1,6 +1,6 @@
 [package]
 name = "agent-mcp"
-description = "MCP tool catalog and the socket protocol between the openagc-mcp shim and the core."
+description = "MCP tool catalog and the socket protocol between the kaluta-mcp shim and the core."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

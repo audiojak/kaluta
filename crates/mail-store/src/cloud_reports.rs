@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn a_report_is_kept_once_and_its_body_cleared_with_the_ai_texts() {
-        let dir = std::env::temp_dir().join(format!("openagc-cloud-reports-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-cloud-reports-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         let r = NewReport {

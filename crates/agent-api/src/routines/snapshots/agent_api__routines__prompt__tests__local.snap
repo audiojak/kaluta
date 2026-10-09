@@ -6,7 +6,7 @@ This is an automated, unattended run. The user is not present to answer question
 
 Sort the user's mail matching `is:important newer_than:1d -in:sent -in:draft` into cadence-based review labels under “Marked Important”, so nothing important is lost but the inbox stays clear.
 
-Use OpenAGC's mail tools (mail_list_labels, mail_search, mail_get_thread, mail_create_label, mail_add_label, mail_archive). The user is me@example.com. They also receive mail at me@work.example and me@side.example. They are frequently CC'd on mail to team@work.example.
+Use Kaluta's mail tools (mail_list_labels, mail_search, mail_get_thread, mail_create_label, mail_add_label, mail_archive). The user is me@example.com. They also receive mail at me@work.example and me@side.example. They are frequently CC'd on mail to team@work.example.
 
 ## Step 1 — Ensure the labels exist
 

@@ -57,7 +57,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         // server (spec §10.6): pure, no internal crates.
         ("rules-crypto", &[][..]),
         (
-            "openagc-core",
+            "kaluta-core",
             &[
                 "mail-domain",
                 "mail-store",
@@ -78,7 +78,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ),
         // Mailbox mode runs the core headless when the app is closed
         // (spec §10.1), reusing its tools rather than copying them.
-        ("openagc-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "openagc-core"][..]),
+        ("kaluta-mcp", &["mail-domain", "agent-api", "permissions", "agent-mcp", "kaluta-core"][..]),
         // The rules server for cloud agents (spec §10.6): the guide's
         // renderers and nothing of the app's (never the core or a store).
         ("rules-server", &["writing-guide", "rules-crypto"][..]),
@@ -89,7 +89,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
 
 /// Crates allowed to depend on UniFFI directly (spec §3: only the core
 /// knows about UniFFI; the bindgen binary is tooling).
-const UNIFFI_ALLOWED: &[&str] = &["openagc-core", "uniffi-bindgen-swift"];
+const UNIFFI_ALLOWED: &[&str] = &["kaluta-core", "uniffi-bindgen-swift"];
 
 /// Crates held to a fixed list of external dependencies, so they stay pure:
 /// the writing guide's check and renderers run in the rules server, which
@@ -139,7 +139,7 @@ fn check_deps() -> Result<()> {
                 errors.push(format!("{name} must stay pure: {dep_name} is not among its allowed dependencies"));
             }
             if dep_name == "uniffi" && !UNIFFI_ALLOWED.contains(&name) {
-                errors.push(format!("{name} must not depend on uniffi; only openagc-core exports to Swift"));
+                errors.push(format!("{name} must not depend on uniffi; only kaluta-core exports to Swift"));
             }
         }
     }

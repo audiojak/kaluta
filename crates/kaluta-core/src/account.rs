@@ -1,0 +1,1435 @@
+//! Gmail sign-in, per-account credentials and starting sync (spec §7.3).
+//!
+//! Swift opens the authorization URL in the user's browser; Rust owns the
+//! loopback listener, the code exchange and the Keychain writes (through
+//! [`SecretStore`]). Tokens never cross back into Swift.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use mail_store::Db;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use mail_domain::Redacted;
+use mail_sync::SyncEngine;
+use provider_api::{MailProvider, ProviderError};
+use provider_gmail::GmailProvider;
+use provider_gmail::oauth::{self, GoogleTokenSource, OAuthClient, PendingAuthorization};
+use serde::{Deserialize, Serialize};
+
+use crate::secrets::{self, keys};
+use crate::sync::{EventObserver, SyncService};
+use crate::{Core, CoreError, ErrorKind, runtime};
+
+/// How long to wait for the user to finish in the browser.
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct OAuthClientConfig {
+    pub client_id: String,
+    /// Google requires it for desktop clients; it is not confidential.
+    pub client_secret: Option<String>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SignInStart {
+    pub session_id: String,
+    /// Open this in the user's default browser.
+    pub authorization_url: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConnectedAccount {
+    pub account_id: String,
+    pub email: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredClient {
+    client_id: String,
+    client_secret: Option<String>,
+}
+
+/// An account's backfill transport (spec §7.4 IMAP amendment).
+/// One sync operation, for the Sync Debugger.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportOp {
+    /// "list", "headers", "bodies", "changes", "drafts", "search", "write".
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    /// Why the API served it, if it did.
+    pub reason: Option<String>,
+    pub at: i64,
+    pub millis: u64,
+    pub items: u32,
+    pub ok: bool,
+}
+
+/// How an account is syncing, by transport (docs/plans/imap-first-sync.md).
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SyncDiagnostics {
+    pub syncing: bool,
+    pub backfill: BackfillStatus,
+    /// When IMAP is tried again, if paused after failures.
+    pub breaker_open_until: Option<i64>,
+    pub consecutive_imap_failures: u32,
+    pub last_imap_error: Option<String>,
+    /// The latest operation for each job.
+    pub latest_by_job: Vec<TransportOp>,
+    /// Newest first, up to 200.
+    pub recent: Vec<TransportOp>,
+    /// What Gmail's IMAP server supports, from the last login.
+    pub imap_capabilities: Vec<String>,
+    /// IMAP bytes per day before the API takes over.
+    pub imap_budget_bytes: u64,
+}
+
+/// One job measured one way (the Sync Debugger's comparison).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TransportComparison {
+    pub job: String,
+    /// "imap" or "api".
+    pub via: String,
+    pub note: Option<String>,
+    pub millis: u64,
+    pub items: u32,
+    /// Why it was not measured, or how it failed.
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
+pub struct BackfillStatus {
+    /// "rest", "imap", "imap-refused", or "none" when not syncing.
+    pub transport: String,
+    pub imap_bytes_today: u64,
+    /// Messages stored for the account (Settings suggests IMAP above
+    /// about 20,000 without it).
+    pub stored_messages: u64,
+}
+
+/// IMAP backfill with the label-name map refreshed from the store before
+/// each batch, so labels created since sync started resolve.
+struct LabelRefreshingImap {
+    inner: Arc<provider_gmail::imap::ImapBackfill>,
+    labels: provider_gmail::imap::LabelNames,
+    db: mail_store::Db,
+}
+
+#[async_trait::async_trait]
+impl provider_api::BackfillSource for LabelRefreshingImap {
+    async fn fetch(
+        &self,
+        ids: &[mail_domain::MessageId],
+    ) -> provider_api::ProviderResult<Vec<provider_api::FetchedMessage>> {
+        self.refresh_labels().await;
+        self.inner.fetch(ids).await
+    }
+
+    async fn fetch_headers(
+        &self,
+        ids: &[mail_domain::MessageId],
+    ) -> provider_api::ProviderResult<Option<Vec<provider_api::FetchedMessage>>> {
+        self.refresh_labels().await;
+        self.inner.fetch_headers(ids).await
+    }
+
+    async fn list(&self, query: &str) -> provider_api::ProviderResult<Option<Vec<mail_domain::MessageId>>> {
+        self.inner.list(query).await
+    }
+
+    async fn watch(&self, max: std::time::Duration) -> provider_api::ProviderResult<Option<bool>> {
+        self.inner.watch(max).await
+    }
+
+    fn cheap_headers(&self) -> bool {
+        self.inner.cheap_headers()
+    }
+
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+}
+
+impl LabelRefreshingImap {
+    async fn refresh_labels(&self) {
+        if let Ok(labels) = self.db.read(mail_store::read::list_labels).await {
+            let names = labels.into_iter().map(|l| (l.name, l.id)).collect();
+            *self.labels.write().unwrap_or_else(|e| e.into_inner()) = names;
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct AccountState {
+    pending: Mutex<HashMap<String, (PendingAuthorization, OAuthClientConfig)>>,
+    /// IMAP backfill sources by account, for status.
+    imap: Mutex<HashMap<String, Arc<provider_gmail::imap::ImapBackfill>>>,
+    /// Cancels for sign-ins waiting on the browser.
+    cancels: Mutex<HashMap<String, Arc<tokio::sync::Notify>>>,
+    /// One sync service per account; every signed-in account syncs in the
+    /// background, whichever the window shows (spec §7.7).
+    sync: Mutex<HashMap<String, Arc<SyncService>>>,
+}
+
+impl AccountState {
+    fn all(&self) -> Vec<Arc<SyncService>> {
+        self.sync.lock().unwrap_or_else(|e| e.into_inner()).values().cloned().collect()
+    }
+
+    fn take(&self, account_id: &str) -> Option<Arc<SyncService>> {
+        self.sync.lock().unwrap_or_else(|e| e.into_inner()).remove(account_id)
+    }
+}
+
+/// The avatar's file name inside the account directory.
+pub(crate) const AVATAR_FILE: &str = "avatar.jpg";
+
+impl Core {
+    /// Download the account picture into the account directory. Returns the
+    /// file name on success; failures are logged and ignored.
+    pub(crate) async fn save_avatar(&self, http: &reqwest::Client, account_id: &str, url: &str) -> Option<String> {
+        let dir = crate::registry::accounts_dir(&self.data_path()).join(account_id);
+        match oauth::download_picture(http, &oauth::sized_picture_url(url, 96)).await {
+            Ok(bytes) => {
+                let written =
+                    tokio::fs::create_dir_all(&dir).await.and(tokio::fs::write(dir.join(AVATAR_FILE), bytes).await);
+                match written {
+                    Ok(()) => Some(AVATAR_FILE.to_owned()),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "could not save the account picture");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "could not download the account picture");
+                None
+            }
+        }
+    }
+
+    /// The sync service of the account this work acts on (scoped or current).
+    pub(crate) fn sync_service(&self) -> Option<Arc<SyncService>> {
+        let id = self.effective_account_id()?;
+        self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned()
+    }
+
+    /// An account's sync service, if it is syncing.
+    pub(crate) fn accounts_sync_service(&self, account_id: &str) -> Option<Arc<SyncService>> {
+        self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(account_id).cloned()
+    }
+
+    /// Whether an account's sync is running.
+    pub(crate) fn is_syncing(&self, account_id: &str) -> bool {
+        self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).contains_key(account_id)
+    }
+
+    /// If the account granted full mail access, an IMAP source for its
+    /// backfill bodies (spec §7.4 IMAP amendment).
+    fn imap_if_granted(
+        &self,
+        account_id: &str,
+        rest: Arc<dyn MailProvider>,
+    ) -> Option<Arc<dyn provider_api::BackfillSource>> {
+        let entry = crate::registry::load_index(&self.data_path()).into_iter().find(|e| e.id == account_id)?;
+        if entry.imap != Some(true) {
+            return None;
+        }
+        let tokens = self.token_source(account_id).ok()?;
+        self.imap_source(account_id, provider_gmail::imap::ImapConfig::gmail(&entry.email), tokens, rest)
+    }
+
+    /// An IMAP backfill source for an account whose store is open (tests
+    /// point it at the fake server).
+    pub(crate) fn imap_source(
+        &self,
+        account_id: &str,
+        config: provider_gmail::imap::ImapConfig,
+        tokens: Arc<dyn provider_api::TokenSource>,
+        rest: Arc<dyn MailProvider>,
+    ) -> Option<Arc<dyn provider_api::BackfillSource>> {
+        let db = self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.get(account_id).cloned()?;
+        let labels: provider_gmail::imap::LabelNames = Default::default();
+        let imap = Arc::new(provider_gmail::imap::ImapBackfill::new(config, tokens, rest, labels.clone()));
+        self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).insert(account_id.to_owned(), imap.clone());
+        Some(Arc::new(LabelRefreshingImap { inner: imap, labels, db }))
+    }
+
+    /// Drop an account's IMAP source (removal).
+    pub(crate) fn forget_imap(&self, account_id: &str) {
+        self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).remove(account_id);
+    }
+
+    /// Stop one account's sync (removal, sign-in again).
+    pub(crate) fn stop_sync_for(&self, account_id: &str) {
+        if let Some(service) = self.accounts.take(account_id) {
+            service.stop();
+        }
+    }
+}
+
+pub(crate) fn client_key(account_id: &str) -> String {
+    format!("oauth.client.{account_id}")
+}
+
+/// The account already holding `email`'s mail, if any: sign-in again must
+/// not start a second store for the same mailbox. Each store records the
+/// address it syncs (`sync_state.account_email`) once bootstrapped.
+fn existing_account_id(data_dir: &Path, email: &str) -> Option<String> {
+    let wanted = email.trim().to_lowercase();
+    let entries = std::fs::read_dir(data_dir.join("accounts")).ok()?;
+    for entry in entries.flatten() {
+        let id = entry.file_name().to_string_lossy().into_owned();
+        if id == "demo" {
+            continue;
+        }
+        let path = entry.path().join("mail.sqlite");
+        if !path.is_file() {
+            continue;
+        }
+        let stored = Db::open(&path)
+            .ok()
+            .and_then(|db| db.read_blocking(|c| mail_store::read::sync_state(c, "account_email")).ok().flatten());
+        if stored.is_some_and(|e| e.trim().to_lowercase() == wanted) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// A fresh account id (also used for archive accounts).
+pub(crate) fn new_account_id() -> Result<String, CoreError> {
+    random_id()
+}
+
+fn random_id() -> Result<String, CoreError> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// How far back mail is downloaded (spec §7.4); mirrors `mail_sync::SyncWindow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncWindow {
+    Month,
+    HalfYear,
+    Year,
+    Everything,
+}
+
+impl From<SyncWindow> for mail_sync::SyncWindow {
+    fn from(w: SyncWindow) -> Self {
+        match w {
+            SyncWindow::Month => Self::Month,
+            SyncWindow::HalfYear => Self::HalfYear,
+            SyncWindow::Year => Self::Year,
+            SyncWindow::Everything => Self::Everything,
+        }
+    }
+}
+
+impl From<mail_sync::SyncWindow> for SyncWindow {
+    fn from(w: mail_sync::SyncWindow) -> Self {
+        match w {
+            mail_sync::SyncWindow::Month => Self::Month,
+            mail_sync::SyncWindow::HalfYear => Self::HalfYear,
+            mail_sync::SyncWindow::Year => Self::Year,
+            mail_sync::SyncWindow::Everything => Self::Everything,
+        }
+    }
+}
+
+/// Which part of the window gets full messages over IMAP (spec §7.4,
+/// tiered download); mirrors `mail_sync::BodyWindow`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BodyWindow {
+    Month,
+    HalfYear,
+    Year,
+    /// Everything in the sync window.
+    Window,
+}
+
+impl From<BodyWindow> for mail_sync::BodyWindow {
+    fn from(w: BodyWindow) -> Self {
+        match w {
+            BodyWindow::Month => Self::Month,
+            BodyWindow::HalfYear => Self::HalfYear,
+            BodyWindow::Year => Self::Year,
+            BodyWindow::Window => Self::Window,
+        }
+    }
+}
+
+impl From<mail_sync::BodyWindow> for BodyWindow {
+    fn from(w: mail_sync::BodyWindow) -> Self {
+        match w {
+            mail_sync::BodyWindow::Month => Self::Month,
+            mail_sync::BodyWindow::HalfYear => Self::HalfYear,
+            mail_sync::BodyWindow::Year => Self::Year,
+            mail_sync::BodyWindow::Window => Self::Window,
+        }
+    }
+}
+
+impl From<ProviderError> for CoreError {
+    fn from(e: ProviderError) -> Self {
+        let kind = match &e {
+            ProviderError::Unauthorized => ErrorKind::Auth,
+            ProviderError::Forbidden(_) => ErrorKind::PermissionDenied,
+            ProviderError::NotFound(_) => ErrorKind::NotFound,
+            ProviderError::RateLimited { .. } => ErrorKind::RateLimited,
+            ProviderError::Network(_)
+            | ProviderError::Server { .. }
+            | ProviderError::Decode(_)
+            | ProviderError::Unavailable(_) => ErrorKind::Network,
+            ProviderError::CursorExpired | ProviderError::Invalid(_) => ErrorKind::Internal,
+        };
+        CoreError::new(kind, e.to_string())
+    }
+}
+
+impl From<mail_sync::SyncError> for CoreError {
+    fn from(e: mail_sync::SyncError) -> Self {
+        match e {
+            mail_sync::SyncError::Provider(p) => p.into(),
+            mail_sync::SyncError::Store(s) => s.into(),
+            other => CoreError::new(ErrorKind::Internal, other.to_string()),
+        }
+    }
+}
+
+impl Core {
+    /// Start sync for the open account with an explicit provider (tests use
+    /// the in-memory fake; the app uses Gmail via `start_sync`).
+    #[cfg(test)]
+    pub(crate) fn start_sync_with(self: &Arc<Self>, provider: Arc<dyn MailProvider>) -> Result<(), CoreError> {
+        self.start_sync_with_backfill(provider, None)
+    }
+
+    /// Start sync with an optional bulk backfill source, set before the
+    /// service starts so no batch goes the other way first.
+    pub(crate) fn start_sync_with_backfill(
+        self: &Arc<Self>,
+        provider: Arc<dyn MailProvider>,
+        backfill: Option<Arc<dyn provider_api::BackfillSource>>,
+    ) -> Result<(), CoreError> {
+        let db = self.db()?;
+        // Everything this account's sync reports is tagged with it, so a
+        // background account never updates the window's (spec §7.7).
+        let events = self.account_events();
+        let settled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observer = Arc::new(EventObserver { events: events.clone(), settled: Some(settled.clone()) });
+        let engine = Arc::new(SyncEngine::new(provider, db, observer));
+        if let Some(source) = backfill {
+            engine.set_backfill_source(source);
+        }
+        let weak = Arc::downgrade(self);
+        let scoped_for_attribution = self.effective_account_id();
+        let attribute: crate::sync::ExternalChanges = Arc::new(move |changes| {
+            if let Some(core) = weak.upgrade() {
+                let account = scoped_for_attribution.clone();
+                runtime::runtime().spawn(crate::registry::scoped(account, async move {
+                    core.attribute_routine_changes(changes).await
+                }));
+            }
+        });
+        let account =
+            self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
+        // An agent mailbox that publishes pulls its cloud agents' reports
+        // after each sync, so they meet the sent mail they describe.
+        let after_sync: Option<crate::sync::AfterSync> = self.is_agent(&account).then(|| {
+            let weak = Arc::downgrade(self);
+            let id = account.clone();
+            Arc::new(move || {
+                if let Some(core) = weak.upgrade() {
+                    let id = id.clone();
+                    runtime::runtime().spawn(crate::registry::scoped(Some(id.clone()), async move {
+                        core.rules_after_sync(&id).await;
+                    }));
+                }
+            }) as crate::sync::AfterSync
+        });
+        let service =
+            SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), after_sync, settled);
+        let old = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).insert(account, service);
+        if let Some(old) = old {
+            old.stop();
+        }
+        Ok(())
+    }
+
+    fn gmail_provider(&self, account_id: &str) -> Result<Arc<dyn MailProvider>, CoreError> {
+        Ok(Arc::new(GmailProvider::new(self.token_source(account_id)?)?))
+    }
+
+    /// The provider that syncs an account, by its kind, with its bulk or
+    /// push source: Gmail (IMAP when granted), or an agent mailbox's
+    /// service (spec §7.9).
+    fn provider_for(&self, account_id: &str) -> Result<crate::agent_mailbox::SyncSources, CoreError> {
+        if self.is_agent(account_id) {
+            return self.agent_provider(account_id);
+        }
+        let provider = self.gmail_provider(account_id)?;
+        let imap = self.imap_if_granted(account_id, provider.clone());
+        Ok((provider, imap))
+    }
+
+    /// The account's Google token source, from its stored sign-in.
+    fn token_source(&self, account_id: &str) -> Result<Arc<GoogleTokenSource>, CoreError> {
+        let refresh = secrets::get_redacted(self.secrets.as_ref(), &keys::refresh_token(account_id))?
+            .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this account needs to sign in again"))?;
+        let client_json = self
+            .secrets
+            .get(client_key(account_id))?
+            .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this account needs to sign in again"))?;
+        let stored: StoredClient =
+            serde_json::from_str(&client_json).map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+        let client =
+            OAuthClient { client_id: stored.client_id, client_secret: stored.client_secret.map(Redacted::new) };
+        Ok(GoogleTokenSource::new(client, refresh))
+    }
+
+    /// Refresh an account's name and picture if the picture is over a week
+    /// old or missing (spec §7.7). Best effort: failures are logged.
+    async fn refresh_identity(&self, entry: &crate::registry::IndexEntry) {
+        // Only Google accounts have a profile to refresh.
+        if entry.kind != crate::registry::AccountKind::Gmail {
+            return;
+        }
+        const WEEK: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+        let avatar = crate::registry::accounts_dir(&self.data_path()).join(&entry.id).join(AVATAR_FILE);
+        let fresh = tokio::fs::metadata(&avatar)
+            .await
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < WEEK));
+        if fresh {
+            return;
+        }
+        let Ok(source) = self.token_source(&entry.id) else { return };
+        let Ok(http) = reqwest_client() else { return };
+        let identity = match provider_api::TokenSource::access_token(source.as_ref()).await {
+            Ok(token) => oauth::fetch_userinfo(&http, oauth::USERINFO_URL, &token).await,
+            Err(e) => Err(e),
+        };
+        let identity = match identity {
+            Ok(identity) => identity,
+            Err(e) => {
+                // Accounts from before the profile scope: fine, initials stay.
+                tracing::info!(account = %entry.id, error = %e, "account picture not refreshed");
+                return;
+            }
+        };
+        let avatar_file = match &identity.picture {
+            Some(url) => self.save_avatar(&http, &entry.id, url).await,
+            None => None,
+        };
+        let mut updated = entry.clone();
+        updated.display_name = identity.name.or(updated.display_name);
+        updated.avatar_file = avatar_file.or(updated.avatar_file);
+        let _ = self.register_account(updated).await;
+    }
+}
+
+#[uniffi::export]
+impl Core {
+    /// Begin Gmail sign-in: returns the URL Swift opens in the browser.
+    /// `full_access` also asks for `https://mail.google.com/`, which IMAP
+    /// needs; the app always asks for it (docs/plans/imap-first-sync.md).
+    pub async fn begin_gmail_sign_in(
+        &self,
+        client: OAuthClientConfig,
+        login_hint: Option<String>,
+        full_access: bool,
+    ) -> Result<SignInStart, CoreError> {
+        if client.client_id.trim().is_empty() {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "an OAuth client ID is required"));
+        }
+        let oauth_client = OAuthClient {
+            client_id: client.client_id.trim().to_owned(),
+            client_secret: client.client_secret.clone().filter(|s| !s.is_empty()).map(Redacted::new),
+        };
+        let pending =
+            runtime::run(async move { Ok(oauth::begin(&oauth_client, login_hint.as_deref(), full_access).await?) })
+                .await?;
+        let session_id = random_id()?;
+        let url = pending.url.clone();
+        self.accounts.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(session_id.clone(), (pending, client));
+        self.accounts
+            .cancels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.clone(), Arc::new(tokio::sync::Notify::new()));
+        Ok(SignInStart { session_id, authorization_url: url })
+    }
+
+    /// Wait for the browser to finish, then create the account: exchange
+    /// the code, read the address from Gmail, store credentials in the
+    /// Keychain and open the account's store.
+    pub async fn complete_gmail_sign_in(self: Arc<Self>, session_id: String) -> Result<ConnectedAccount, CoreError> {
+        let (pending, config) = self
+            .accounts
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&session_id)
+            .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no sign-in in progress"))?;
+        let cancel = self.accounts.cancels.lock().unwrap_or_else(|e| e.into_inner()).get(&session_id).cloned();
+        let core = self.clone();
+        let session = session_id.clone();
+        let result = runtime::run(async move {
+            let code = match cancel {
+                Some(cancel) => tokio::select! {
+                    code = pending.wait_for_code(SIGN_IN_TIMEOUT) => code?,
+                    () = cancel.notified() => {
+                        return Err(CoreError::new(ErrorKind::Cancelled, "sign-in cancelled"));
+                    }
+                },
+                None => pending.wait_for_code(SIGN_IN_TIMEOUT).await?,
+            };
+            let client = OAuthClient {
+                client_id: config.client_id.trim().to_owned(),
+                client_secret: config.client_secret.clone().filter(|s| !s.is_empty()).map(Redacted::new),
+            };
+            let http = reqwest_client()?;
+            let tokens = oauth::exchange_code(&http, oauth::TOKEN_URL, &client, &code).await?;
+            let refresh = tokens.refresh_token.clone().ok_or_else(|| {
+                CoreError::new(
+                    ErrorKind::Auth,
+                    "Google did not return a refresh token; remove Kaluta's access in your Google account and try again",
+                )
+            })?;
+            let identity = tokens.id_token.as_deref().and_then(oauth::identity_from_id_token).unwrap_or_default();
+            let grants_imap = tokens.grants_imap();
+            let source = GoogleTokenSource::new(client, Redacted::new(refresh.clone()));
+            source.prime(tokens.access_token, tokens.expires_in).await;
+            let gmail = GmailProvider::new(source)?;
+            let profile = gmail.profile().await?;
+
+            // Signing in again keeps the account (and its downloaded mail).
+            let data_dir = PathBuf::from(&core.config.data_dir);
+            let email = profile.email.clone();
+            let existing = tokio::task::spawn_blocking(move || existing_account_id(&data_dir, &email))
+                .await
+                .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+            let account_id = match existing {
+                Some(id) => id,
+                None => random_id()?,
+            };
+            core.secrets.set(keys::refresh_token(&account_id), refresh)?;
+            let stored = StoredClient { client_id: config.client_id.trim().to_owned(), client_secret: config.client_secret };
+            core.secrets.set(
+                client_key(&account_id),
+                serde_json::to_string(&stored).map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?,
+            )?;
+            // The avatar is a nicety: a failed download leaves initials.
+            let avatar_file = match &identity.picture {
+                Some(url) => core.save_avatar(&http, &account_id, url).await,
+                None => None,
+            };
+            core.register_account(crate::registry::IndexEntry {
+                id: account_id.clone(),
+                kind: crate::registry::AccountKind::Gmail,
+                email: profile.email.clone(),
+                display_name: identity.name.clone(),
+                avatar_file,
+                added_at: mail_sync::now_millis(),
+                imap: Some(grants_imap),
+                named_by_user: false,
+                service: None,
+            })
+            .await?;
+            tracing::info!(account = %account_id, "gmail account connected");
+            Ok(ConnectedAccount { account_id, email: profile.email })
+        })
+        .await;
+        self.accounts.cancels.lock().unwrap_or_else(|e| e.into_inner()).remove(&session);
+        result
+    }
+
+    /// Stop a sign-in, whether or not the app is already waiting on it.
+    pub fn cancel_gmail_sign_in(&self, session_id: String) {
+        self.accounts.pending.lock().unwrap_or_else(|e| e.into_inner()).remove(&session_id);
+        if let Some(cancel) = self.accounts.cancels.lock().unwrap_or_else(|e| e.into_inner()).remove(&session_id) {
+            // A stored permit: works even if the wait has not started yet.
+            cancel.notify_one();
+        }
+    }
+
+    /// Start syncing the open account with Gmail.
+    pub fn start_sync(self: Arc<Self>) -> Result<(), CoreError> {
+        let account_id =
+            self.current_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
+        // Restarts a running sync: after signing in again the token changed.
+        let (provider, backfill) = self.provider_for(&account_id)?;
+        self.start_sync_with_backfill(provider, backfill)
+    }
+
+    /// Ask Gmail for `query` too and download up to `limit` matching
+    /// messages this Mac does not have (outside the sync window). Returns
+    /// how many arrived; 0 for accounts without a server.
+    pub async fn search_server(&self, query: String, limit: u32) -> Result<u32, CoreError> {
+        let Some(service) = self.sync_service() else { return Ok(0) };
+        runtime::run(async move {
+            Ok(service.engine().search_server(&query, limit as usize).await.map_err(CoreError::from)? as u32)
+        })
+        .await
+    }
+
+    /// Whether the open account has mail stored with headers only (tiered
+    /// download): search then asks Gmail too for free-text queries.
+    pub async fn has_header_only_mail(&self) -> Result<bool, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.read(mail_store::read::has_header_only).await?) }).await
+    }
+
+    /// Download every message in `account_id`'s window again, so labels
+    /// and bodies match Gmail (Settings › Accounts › Refresh from Gmail).
+    /// Returns how many are queued.
+    pub async fn refresh_from_server(&self, account_id: String) -> Result<u64, CoreError> {
+        self.store_for(&account_id).await?;
+        let service = crate::registry::scoped(Some(account_id.clone()), async { self.sync_service() }).await;
+        let Some(service) = service else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "that account is not syncing"));
+        };
+        runtime::run(async move {
+            let queued = service.engine().refetch_all().await.map_err(CoreError::from)?;
+            service.sync_now();
+            Ok(queued)
+        })
+        .await
+    }
+
+    /// Download these messages' bodies next: the user opened a message
+    /// that only has headers so far (spec §7.4 headers-first).
+    pub async fn prioritize_messages(&self, message_ids: Vec<String>) -> Result<(), CoreError> {
+        let Some(service) = self.sync_service() else { return Ok(()) };
+        let ids = message_ids.into_iter().map(mail_domain::MessageId).collect();
+        runtime::run(async move { service.prioritize(ids).await.map_err(CoreError::from) }).await
+    }
+
+    /// Download these messages' bodies now if only their headers are here
+    /// (spec §7.4 tiered download): the reader opened them. If that fails
+    /// (offline) they are fetched first once sync can. Returns how many
+    /// arrived.
+    pub async fn ensure_bodies(&self, message_ids: Vec<String>) -> Result<u32, CoreError> {
+        let Some(service) = self.sync_service() else { return Ok(0) };
+        let ids: Vec<mail_domain::MessageId> = message_ids.into_iter().map(mail_domain::MessageId).collect();
+        runtime::run(async move {
+            match service.engine().ensure_bodies(ids.clone()).await {
+                Ok(n) => Ok(n as u32),
+                Err(e) => {
+                    let _ = service.prioritize(ids).await;
+                    Err(e.into())
+                }
+            }
+        })
+        .await
+    }
+
+    /// Which transport serves each sync job for an account, why, the
+    /// breaker, and recent operations (docs/plans/imap-first-sync.md): for
+    /// the Sync Debugger and the sync footer. Empty when not syncing.
+    pub async fn sync_diagnostics(&self, account_id: String) -> SyncDiagnostics {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let imap = self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let (imap_capabilities, imap_budget_bytes) =
+            imap.map_or_else(|| (Vec::new(), 0), |i| (i.capabilities(), i.daily_budget_bytes()));
+        let status = self.backfill_status(account_id).await;
+        let Some(service) = service else {
+            return SyncDiagnostics {
+                syncing: false,
+                backfill: status,
+                imap_capabilities,
+                imap_budget_bytes,
+                ..Default::default()
+            };
+        };
+        let snap = service.engine().transport_snapshot();
+        let op = |r: &mail_sync::transport::OpRecord| TransportOp {
+            job: r.job.name().to_owned(),
+            via: r.via.name().to_owned(),
+            reason: r.reason.clone(),
+            at: r.at,
+            millis: r.millis,
+            items: r.items as u32,
+            ok: r.ok,
+        };
+        SyncDiagnostics {
+            syncing: true,
+            backfill: status,
+            breaker_open_until: snap.breaker_open_until,
+            consecutive_imap_failures: snap.consecutive_failures,
+            last_imap_error: snap.last_imap_error.clone(),
+            latest_by_job: snap.latest_by_job().iter().map(op).collect(),
+            recent: snap.recent.iter().map(op).collect(),
+            imap_capabilities,
+            imap_budget_bytes,
+        }
+    }
+
+    /// Time each sync job over IMAP and over the API for an account (the
+    /// Sync Debugger's comparison). Reads only; changes no mail.
+    pub async fn compare_transports(&self, account_id: String) -> Result<Vec<TransportComparison>, CoreError> {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let Some(service) = service else {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "that account is not syncing"));
+        };
+        let rows = runtime::run(async move {
+            service.engine().compare_transports(Default::default()).await.map_err(CoreError::from)
+        })
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| TransportComparison {
+                job: r.job.name().to_owned(),
+                via: r.via.name().to_owned(),
+                note: r.note,
+                millis: r.millis,
+                items: r.items.min(u32::MAX as usize) as u32,
+                error: r.error,
+            })
+            .collect())
+    }
+
+    /// How an account's backfill is fetching bodies (Settings shows it).
+    pub async fn backfill_status(&self, account_id: String) -> BackfillStatus {
+        let service = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let imap = self.accounts.imap.lock().unwrap_or_else(|e| e.into_inner()).get(&account_id).cloned();
+        let transport = service.map(|s| s.engine().backfill_source_name().to_owned()).unwrap_or_else(|| "none".into());
+        let imap_bytes_today = match imap {
+            Some(imap) => runtime::run(async move { Ok(imap.bytes_today().await) }).await.unwrap_or(0),
+            None => 0,
+        };
+        let db = self.open_accounts.read().unwrap_or_else(|e| e.into_inner()).stores.get(&account_id).cloned();
+        let stored_messages = match db {
+            Some(db) => runtime::run(async move {
+                Ok(db
+                    .read(|c| Ok(c.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get::<_, i64>(0))?))
+                    .await?
+                    .max(0) as u64)
+            })
+            .await
+            .unwrap_or(0),
+            None => 0,
+        };
+        BackfillStatus { transport, imap_bytes_today, stored_messages }
+    }
+
+    /// Start syncing every Gmail account that has a stored sign-in, in the
+    /// background (spec §7.7). Accounts already syncing are left alone; an
+    /// account whose sign-in cannot be read is skipped and listed in the
+    /// result so the app can ask for a sign-in when it is shown.
+    pub async fn start_all_sync(self: Arc<Self>) -> Result<Vec<String>, CoreError> {
+        let core = self.clone();
+        runtime::run(async move {
+            let data_dir = core.data_path();
+            let entries = tokio::task::spawn_blocking(move || crate::registry::load_index(&data_dir))
+                .await
+                .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+            let mut needs_sign_in = Vec::new();
+            for entry in entries
+                .into_iter()
+                .filter(|e| matches!(e.kind, crate::registry::AccountKind::Gmail | crate::registry::AccountKind::Agent))
+            {
+                if entry.kind == crate::registry::AccountKind::Agent
+                    && let Err(e) = core.repair_agent_address(&entry.id, &entry.email).await
+                {
+                    tracing::warn!(account = %entry.id, error = %e, "agent mailbox's address not repaired");
+                }
+                if core.is_syncing(&entry.id) {
+                    // Already started (the open account): still refresh its
+                    // name and picture.
+                    let refresher = core.clone();
+                    tokio::spawn(async move { refresher.refresh_identity(&entry).await });
+                    continue;
+                }
+                let (provider, backfill) = match core.provider_for(&entry.id) {
+                    Ok(found) => found,
+                    Err(e) => {
+                        tracing::warn!(account = %entry.id, error = %e, "not syncing: no usable sign-in");
+                        needs_sign_in.push(entry.id);
+                        continue;
+                    }
+                };
+                // One account's broken store must not stop the others.
+                if let Err(e) = core.store_for(&entry.id).await {
+                    tracing::warn!(account = %entry.id, error = %e, "not syncing: the store would not open");
+                    continue;
+                }
+                let started = crate::registry::SCOPED_ACCOUNT
+                    .sync_scope(entry.id.clone(), || core.start_sync_with_backfill(provider, backfill));
+                if let Err(e) = started {
+                    tracing::warn!(account = %entry.id, error = %e, "could not start sync");
+                }
+                let refresher = core.clone();
+                tokio::spawn(async move { refresher.refresh_identity(&entry).await });
+            }
+            Ok(needs_sign_in)
+        })
+        .await
+    }
+
+    /// Stop every account's sync (quitting, tests).
+    pub fn stop_sync(&self) {
+        let all: Vec<_> =
+            self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).drain().map(|(_, s)| s).collect();
+        for service in all {
+            service.stop();
+        }
+    }
+
+    /// The app became active or inactive; adjusts every account's poll
+    /// interval and syncs immediately on activation.
+    pub fn set_app_active(&self, active: bool) {
+        for service in self.accounts.all() {
+            service.set_active(active);
+        }
+    }
+
+    /// How far back the open account downloads mail (spec §7.4).
+    pub async fn sync_window(&self) -> Result<SyncWindow, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            let stored = db.read(|c| mail_store::read::sync_state(c, mail_sync::KEY_WINDOW)).await?;
+            Ok(stored.as_deref().and_then(mail_sync::SyncWindow::parse).unwrap_or_default().into())
+        })
+        .await
+    }
+
+    /// Change how far back mail is downloaded. Widening queues the extra
+    /// mail; narrowing stops fetching older mail but keeps what is stored.
+    pub async fn set_sync_window(&self, window: SyncWindow) -> Result<(), CoreError> {
+        let window: mail_sync::SyncWindow = window.into();
+        let service = self.sync_service();
+        match service {
+            Some(service) => {
+                let engine = service.clone();
+                runtime::run(async move { engine.engine().set_window(window).await.map_err(CoreError::from) }).await?;
+                service.sync_now();
+                Ok(())
+            }
+            None => {
+                let db = self.db()?;
+                runtime::run(async move {
+                    // The user's window: its headers-only tier is not
+                    // Clean Up's (spec §14.12), as `set_window` does.
+                    db.write(move |tx| {
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_WINDOW, window.as_str())?;
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_CLEANUP_HEADERS, "no")
+                    })
+                    .await?;
+                    Ok(())
+                })
+                .await
+            }
+        }
+    }
+
+    /// `sync_window` for a given account (Settings lists every account).
+    pub async fn sync_window_for(&self, account_id: String) -> Result<SyncWindow, CoreError> {
+        self.store_for(&account_id).await?;
+        crate::registry::scoped(Some(account_id), self.sync_window()).await
+    }
+
+    /// `set_sync_window` for a given account.
+    pub async fn set_sync_window_for(&self, account_id: String, window: SyncWindow) -> Result<(), CoreError> {
+        self.store_for(&account_id).await?;
+        crate::registry::scoped(Some(account_id), self.set_sync_window(window)).await
+    }
+
+    /// Which part of `account_id`'s window gets full messages when it
+    /// downloads over IMAP (spec §7.4, tiered download).
+    pub async fn body_window_for(&self, account_id: String) -> Result<BodyWindow, CoreError> {
+        let db = self.store_for(&account_id).await?;
+        runtime::run(async move {
+            let stored = db.read(|c| mail_store::read::sync_state(c, mail_sync::KEY_BODY_WINDOW)).await?;
+            Ok(stored.as_deref().and_then(mail_sync::BodyWindow::parse).unwrap_or_default().into())
+        })
+        .await
+    }
+
+    /// Change it. Widening queues bodies for header-only mail now inside
+    /// it; narrowing keeps bodies already stored.
+    pub async fn set_body_window_for(&self, account_id: String, body_window: BodyWindow) -> Result<(), CoreError> {
+        let db = self.store_for(&account_id).await?;
+        let body_window: mail_sync::BodyWindow = body_window.into();
+        let service = crate::registry::scoped(Some(account_id), async { self.sync_service() }).await;
+        runtime::run(async move {
+            match service {
+                Some(service) => {
+                    service.engine().set_body_window(body_window).await.map_err(CoreError::from)?;
+                    service.sync_now();
+                }
+                // Not syncing: the next start re-tiers from the stored value.
+                None => {
+                    db.write(move |tx| {
+                        mail_store::read::set_sync_state(tx, mail_sync::KEY_BODY_WINDOW, body_window.as_str())
+                    })
+                    .await?
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Sync now (foreground, wake from sleep, network regained, ⌘R). IMAP
+    /// is tried again at once even if it failed lately.
+    pub fn sync_now(&self) {
+        for service in self.accounts.all() {
+            service.engine().reset_transport();
+            service.sync_now();
+        }
+    }
+
+    /// Whether an account has stored credentials (so sync can start). A
+    /// Keychain that refuses to answer is an error, not "no credentials":
+    /// the user must be told to sign in again rather than see nothing.
+    pub fn account_has_credentials(&self, account_id: String) -> Result<bool, CoreError> {
+        let key = self.agent_key_name(&account_id).unwrap_or_else(|| keys::refresh_token(&account_id));
+        match self.secrets.get(key) {
+            Ok(token) => Ok(token.is_some()),
+            Err(e) => {
+                tracing::warn!(error = %e, "could not read the stored sign-in from the Keychain");
+                Err(e)
+            }
+        }
+    }
+
+    /// Remove an account: stop sync, forget its credentials and delete its
+    /// local mail store. Gmail itself is not touched. Same as
+    /// `remove_account`.
+    pub async fn sign_out(&self, account_id: String) -> Result<(), CoreError> {
+        self.remove_account(account_id).await
+    }
+}
+
+fn reqwest_client() -> Result<reqwest::Client, CoreError> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| CoreError::new(ErrorKind::Network, e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex as StdMutex;
+
+    use futures::executor::block_on;
+    use mail_domain::{EmailAddress, LabelId, MessageId, ThreadId};
+    use provider_api::fake::FakeProvider;
+    use provider_api::{FetchedBody, FetchedMessage};
+
+    use crate::{Core, CoreConfig, CoreEvent, EventListener, SyncState};
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Recorder(StdMutex<Vec<CoreEvent>>);
+    impl EventListener for Recorder {
+        fn on_event(&self, _account: Option<String>, event: CoreEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    fn message(id: &str, labels: &[&str]) -> FetchedMessage {
+        FetchedMessage {
+            id: MessageId::new(id),
+            thread_id: ThreadId::new(format!("t-{id}")),
+            label_ids: labels.iter().map(|l| LabelId::new(*l)).collect(),
+            internal_date: 1_790_000_000_000,
+            from: Some(EmailAddress::new(None, "a@example.com")),
+            subject: format!("Subject {id}"),
+            body: Some(FetchedBody { text: Some("hi".into()), html: None, attachments: vec![] }),
+            ..Default::default()
+        }
+    }
+
+    fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
+        for _ in 0..200 {
+            if condition() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    #[derive(Default)]
+    struct Tagged(StdMutex<Vec<(Option<String>, CoreEvent)>>);
+    impl EventListener for Tagged {
+        fn on_event(&self, account: Option<String>, event: CoreEvent) {
+            self.0.lock().unwrap().push((account, event));
+        }
+    }
+
+    #[test]
+    fn every_account_syncs_in_the_background_into_its_own_store() {
+        let dir = std::env::temp_dir().join(format!("kaluta-core-multisync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tagged = Arc::new(Tagged::default());
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            tagged.clone(),
+        )
+        .unwrap();
+        let work = Arc::new(FakeProvider::new("work@example.com", 1_790_000_000_000, 50));
+        work.seed(message("w1", &["INBOX"]));
+        work.seed(message("w2", &["INBOX", "UNREAD"]));
+        let home = Arc::new(FakeProvider::new("home@example.com", 1_790_000_000_000, 50));
+        home.seed(message("h1", &["INBOX"]));
+        for (id, fake) in [("work", work.clone()), ("home", home.clone())] {
+            block_on(core.store_for(id)).unwrap();
+            crate::registry::SCOPED_ACCOUNT.sync_scope(id.to_owned(), || core.start_sync_with(fake)).unwrap();
+        }
+        // The window shows work; home syncs behind it.
+        block_on(core.clone().set_current_account("work".into())).unwrap();
+        let inbox = |account: &str| {
+            block_on(crate::registry::scoped(Some(account.to_owned()), core.list_threads("INBOX".into(), None, 10)))
+                .map(|p| p.rows.len())
+                .unwrap_or(0)
+        };
+        wait_for("both accounts bootstrapped", || inbox("work") == 2 && inbox("home") == 1);
+
+        home.deliver(message("h2", &["INBOX", "UNREAD"]));
+        core.sync_now();
+        wait_for("home picks up new mail while not shown", || inbox("home") == 2);
+        assert_eq!(inbox("work"), 2, "work did not see home's mail");
+        wait_for("home's new mail announced, tagged home", || {
+            tagged
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(a, e)| a.as_deref() == Some("home") && matches!(e, CoreEvent::NewMail { .. }))
+        });
+        let events = tagged.0.lock().unwrap().clone();
+        assert!(
+            events.iter().all(|(a, e)| !matches!(e, CoreEvent::ThreadsChanged { .. }) || a.is_some()),
+            "every change is tagged with its account"
+        );
+        core.stop_sync();
+        assert!(!core.is_syncing("work") && !core.is_syncing("home"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn with_imap_granted_backfill_bodies_come_over_imap_and_the_rest_stays_on_the_api() {
+        use provider_gmail::imap::{ImapConfig, ImapEndpoint};
+        use provider_gmail::imap_fake::{FakeImapMessage, FakeImapServer, SPAM};
+
+        let dir = std::env::temp_dir().join(format!("kaluta-core-imap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let tagged = Arc::new(Tagged::default());
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            tagged.clone(),
+        )
+        .unwrap();
+        block_on(core.clone().set_current_account("acct".into())).unwrap();
+        crate::runtime::runtime().block_on(async {
+            let server = FakeImapServer::start("tok").await;
+            // The API lists two messages; IMAP holds their bodies. The ids
+            // match the way Gmail's do: hex in the API, decimal over IMAP.
+            let rest = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+            for (n, msgid) in [(1u32, 0x1a0000000000001u64), (2, 0x1a0000000000002)] {
+                let mut m = message(&format!("{msgid:x}"), &["INBOX"]);
+                m.subject = "listed only".into();
+                m.body = None;
+                rest.seed(m);
+                let raw = format!(
+                    "From: Sender <s@example.com>\r\nTo: me@example.com\r\nSubject: IMAP {n}\r\nMessage-ID: <imap{n}@example.com>\r\nDate: Mon, 01 Sep 2025 10:00:00 +0000\r\n\r\nBody {n} over IMAP\r\n"
+                );
+                server.add(FakeImapMessage {
+                    uid: n,
+                    msgid,
+                    thrid: msgid,
+                    // Message 2 is a promotion: Gmail's IMAP says so only
+                    // through a search.
+                    labels: if n == 2 {
+                        vec!["\\Inbox".into(), "category:promotions".into()]
+                    } else {
+                        vec!["\\Inbox".into()]
+                    },
+                    flags: vec![],
+                    raw: raw.into_bytes(),
+                });
+            }
+            // Spam lives outside All Mail, in a folder of its own (with
+            // UIDs of its own); the API does not know it at all.
+            server.add_to(
+                SPAM,
+                FakeImapMessage {
+                    uid: 1,
+                    msgid: 0x1a0000000000009,
+                    thrid: 0x1a0000000000009,
+                    labels: vec![],
+                    flags: vec![],
+                    raw: b"From: Spammer <x@example.com>\r\nTo: me@example.com\r\nSubject: IMAP spam\r\nMessage-ID: <spam@example.com>\r\nDate: Mon, 01 Sep 2025 10:00:00 +0000\r\n\r\nBuy now\r\n".to_vec(),
+                },
+            );
+            let config = ImapConfig { endpoint: ImapEndpoint::Plain(server.addr), ..ImapConfig::gmail("me@example.com") };
+            let imap = core.imap_source("acct", config, Arc::new(provider_api::token::StaticToken("tok".into())), rest.clone());
+            assert!(imap.is_some());
+            core.start_sync_with_backfill(rest.clone(), imap).unwrap();
+            for _ in 0..200 {
+                let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
+                // Subjects arrive with the headers pass; wait for the bodies too.
+                if rows.len() == 2 && rows.iter().all(|r| r.subject.starts_with("IMAP")) && server.body_fetches() == 3 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            let rows = core.list_threads("INBOX".into(), None, 10).await.unwrap().rows;
+            let mut subjects: Vec<String> = rows.iter().map(|r| r.subject.clone()).collect();
+            subjects.sort();
+            assert_eq!(subjects, ["IMAP 1", "IMAP 2"], "bodies came over IMAP");
+            assert_eq!(server.body_fetches(), 3);
+            let spam = core.list_threads("SPAM".into(), None, 10).await.unwrap().rows;
+            assert_eq!(spam.iter().map(|r| r.subject.as_str()).collect::<Vec<_>>(), ["IMAP spam"], "Spam synced over IMAP");
+            assert!(server.header_fetches() >= 2, "headers first");
+            assert_eq!(rest.fetch_calls.load(std::sync::atomic::Ordering::SeqCst), 0, "no REST body fetches");
+            let status = core.backfill_status("acct".into()).await;
+            assert_eq!(status.transport, "imap");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.syncing && diag.breaker_open_until.is_none());
+            let bodies = diag.latest_by_job.iter().find(|op| op.job == "bodies").expect("bodies recorded");
+            assert_eq!((bodies.via.as_str(), bodies.ok), ("imap", true));
+            let list = diag.latest_by_job.iter().find(|op| op.job == "list").expect("listing recorded");
+            assert_eq!((list.via.as_str(), list.reason.as_deref()), ("imap", None), "listed over IMAP");
+            let changes = diag.latest_by_job.iter().find(|op| op.job == "changes");
+            assert!(changes.is_none_or(|c| c.via == "api" && c.reason.is_some()), "changes: the API, and why");
+            assert!(status.imap_bytes_today > 0);
+            assert_eq!(core.backfill_status("other".into()).await.transport, "none");
+
+            // Inbox categories come from IMAP searches, as the messages
+            // themselves carry none.
+            let mut promotions = 0;
+            for _ in 0..200 {
+                let counts = core.inbox_categories(false, None).await.unwrap_or_default();
+                promotions = counts.iter().find(|c| c.id == "CATEGORY_PROMOTIONS").map_or(0, |c| c.total_count);
+                if promotions == 1 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(promotions, 1, "the promotion was found by an IMAP search");
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let op = diag.latest_by_job.iter().find(|op| op.job == "categories").expect("categories recorded");
+            assert_eq!(op.via, "imap");
+
+            // New mail arrives at once over IDLE, without waiting for the
+            // 30 s poll or a sync_now.
+            let mut fresh = message("1a0000000000003", &["INBOX", "UNREAD"]);
+            fresh.subject = "pushed".into();
+            rest.deliver(fresh);
+            server.add(FakeImapMessage {
+                uid: 3,
+                msgid: 0x1a0000000000003,
+                thrid: 0x1a0000000000003,
+                labels: vec!["\\Inbox".into()],
+                flags: vec![],
+                raw: b"From: s@example.com\r\nSubject: pushed\r\n\r\nNew\r\n".to_vec(),
+            });
+            let pushed = std::time::Instant::now();
+            while pushed.elapsed() < Duration::from_secs(10) {
+                let rows = core.list_threads("INBOX".into(), None, 10).await.map(|p| p.rows).unwrap_or_default();
+                if rows.len() == 3 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            assert_eq!(core.list_threads("INBOX".into(), None, 10).await.unwrap().rows.len(), 3, "pushed over IDLE");
+            assert!(server.idles() >= 1);
+            let diag = core.sync_diagnostics("acct".into()).await;
+            let push = diag.latest_by_job.iter().find(|op| op.job == "push").expect("push recorded");
+            assert_eq!(push.via, "imap");
+
+            // The Sync Debugger: capabilities from the login, and each job
+            // timed both ways without storing anything.
+            let diag = core.sync_diagnostics("acct".into()).await;
+            assert!(diag.imap_capabilities.iter().any(|c| c == "X-GM-EXT-1"), "{:?}", diag.imap_capabilities);
+            assert!(diag.imap_budget_bytes > 0);
+            let stored = core.backfill_status("acct".into()).await.stored_messages;
+            let rows = core.compare_transports("acct".into()).await.unwrap();
+            let find = |job: &str, via: &str| {
+                rows.iter().find(|r| r.job == job && r.via == via).unwrap_or_else(|| panic!("{job} {via}: {rows:?}"))
+            };
+            assert_eq!((find("list", "imap").items, find("list", "imap").error.as_deref()), (3, None));
+            assert_eq!(find("list", "api").items, 3);
+            assert_eq!(find("headers", "imap").items, 3);
+            assert!(find("headers", "api").error.is_some(), "the API has no cheaper headers");
+            assert_eq!((find("bodies", "imap").items, find("bodies", "api").items), (3, 3));
+            assert!(find("changes", "api").error.is_none());
+            assert!(find("changes", "imap").note.as_deref().is_some_and(|n| n.contains("no change log")));
+            assert_eq!(core.backfill_status("acct".into()).await.stored_messages, stored, "nothing stored");
+            assert!(core.compare_transports("other".into()).await.is_err());
+
+            // Tiered download: the body window is per account.
+            assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::Month, "default");
+            core.set_body_window_for("acct".into(), BodyWindow::HalfYear).await.unwrap();
+            assert_eq!(core.body_window_for("acct".into()).await.unwrap(), BodyWindow::HalfYear);
+        });
+        core.stop_sync();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_sync_service_bootstraps_backfills_and_picks_up_new_mail() {
+        let dir = std::env::temp_dir().join(format!("kaluta-core-sync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let recorder = Arc::new(Recorder::default());
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            recorder.clone(),
+        )
+        .unwrap();
+        block_on(core.clone().open_account("acct".into())).unwrap();
+
+        let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        fake.seed(message("m1", &["INBOX", "UNREAD"]));
+        fake.seed(message("m2", &["INBOX"]));
+        core.start_sync_with(fake.clone()).unwrap();
+
+        wait_for("bootstrap to fill the inbox", || {
+            block_on(core.list_threads("INBOX".into(), None, 10)).map(|p| p.rows.len() == 2).unwrap_or(false)
+        });
+        fake.deliver(message("m3", &["INBOX", "UNREAD"]));
+        core.sync_now();
+        wait_for("new mail after sync_now", || {
+            block_on(core.list_threads("INBOX".into(), None, 10)).map(|p| p.rows.len() == 3).unwrap_or(false)
+        });
+
+        // Change events are coalesced for up to 50 ms, so wait for them
+        // rather than asserting the moment the data is visible.
+        wait_for("an inbox change event", || {
+            recorder
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, CoreEvent::ThreadsChanged { mailbox_id, .. } if mailbox_id == "INBOX"))
+        });
+        assert!(
+            recorder
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, CoreEvent::SyncStatus { state: SyncState::Bootstrapping, .. }))
+        );
+        // Only the message that arrived after the first sync is announced.
+        wait_for("a new-mail event", || {
+            recorder.0.lock().unwrap().iter().any(|e| matches!(e, CoreEvent::NewMail { .. }))
+        });
+        let announced: Vec<String> = recorder
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|e| match e {
+                CoreEvent::NewMail { messages } => {
+                    Some(messages.iter().map(|m| m.message_id.clone()).collect::<Vec<_>>())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(announced, vec!["m3"]);
+        core.stop_sync();
+    }
+
+    struct TempRoot(std::path::PathBuf);
+    impl TempRoot {
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+    impl Drop for TempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn signing_in_again_reuses_the_account_that_holds_that_mailbox() {
+        let root = std::env::temp_dir().join(format!("kaluta-reuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = TempRoot(root);
+        for (id, email) in [("aaaa", "old@example.com"), ("bbbb", "Me@Example.com")] {
+            let path = dir.path().join("accounts").join(id).join("mail.sqlite");
+            let db = Db::open(&path).unwrap();
+            db.write_blocking(move |tx| mail_store::read::set_sync_state(tx, "account_email", email)).unwrap();
+        }
+        std::fs::create_dir_all(dir.path().join("accounts").join("cccc")).unwrap(); // no store yet
+        assert_eq!(existing_account_id(dir.path(), " me@example.com ").as_deref(), Some("bbbb"));
+        assert_eq!(existing_account_id(dir.path(), "old@example.com").as_deref(), Some("aaaa"));
+        assert_eq!(existing_account_id(dir.path(), "new@example.com"), None);
+        assert_eq!(existing_account_id(&dir.path().join("missing"), "me@example.com"), None);
+    }
+
+    #[test]
+    fn cancelling_a_sign_in_ends_the_wait_at_once() {
+        let dir = std::env::temp_dir().join(format!("kaluta-core-cancel-{}", std::process::id()));
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            Arc::new(Recorder::default()),
+        )
+        .unwrap();
+        // Only a loopback listener is opened; nothing contacts Google.
+        let start = block_on(core.begin_gmail_sign_in(
+            OAuthClientConfig { client_id: "id.apps.googleusercontent.com".into(), client_secret: None },
+            None,
+            false,
+        ))
+        .unwrap();
+        let waiting = {
+            let core = core.clone();
+            let session = start.session_id.clone();
+            std::thread::spawn(move || block_on(core.complete_gmail_sign_in(session)))
+        };
+        std::thread::sleep(Duration::from_millis(100));
+        let began = std::time::Instant::now();
+        core.cancel_gmail_sign_in(start.session_id);
+        let err = waiting.join().unwrap().unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Cancelled);
+        assert!(began.elapsed() < Duration::from_secs(2), "not the 5-minute timeout");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sign_in_requires_a_client_id_and_unknown_sessions_fail() {
+        let dir = std::env::temp_dir().join(format!("kaluta-core-signin-{}", std::process::id()));
+        let core = Core::new(
+            CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            Arc::new(Recorder::default()),
+        )
+        .unwrap();
+        let err = block_on(core.begin_gmail_sign_in(
+            OAuthClientConfig { client_id: " ".into(), client_secret: None },
+            None,
+            false,
+        ))
+        .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        let start = block_on(core.begin_gmail_sign_in(
+            OAuthClientConfig { client_id: "id.apps.googleusercontent.com".into(), client_secret: Some("s".into()) },
+            None,
+            false,
+        ))
+        .unwrap();
+        assert!(start.authorization_url.starts_with("https://accounts.google.com/"));
+        core.cancel_gmail_sign_in(start.session_id.clone());
+        let err = block_on(core.clone().complete_gmail_sign_in(start.session_id)).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::NotFound);
+        assert!(!core.account_has_credentials("nobody".into()).unwrap());
+    }
+}

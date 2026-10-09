@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn opening_an_old_store_moves_its_f3_entries_into_facts() {
-        let dir = std::env::temp_dir().join(format!("openagc-facts-move-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-facts-move-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("mail.sqlite");
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn a_change_is_undone_exactly_and_ids_are_not_reused() {
-        let dir = std::env::temp_dir().join(format!("openagc-facts-undo-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-facts-undo-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = crate::Db::open(&dir.join("mail.sqlite")).unwrap();
         let row = FactRow {
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn the_share_switch_is_kept_and_unset_by_default() {
-        let dir = std::env::temp_dir().join(format!("openagc-facts-share-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-facts-share-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = crate::Db::open(&dir.join("mail.sqlite")).unwrap();
         let row = FactRow {

@@ -30,7 +30,7 @@ use crate::answers::{self, CheckArgs, FactsArgs, GuideArgs};
 use crate::reports::ReportArgs;
 use crate::{AgentAuth, AppState, TokenSlot, agent_auth};
 
-const INSTRUCTIONS: &str = "The writing guide and shared facts of one agent mailbox, published from OpenAGC. Read \
+const INSTRUCTIONS: &str = "The writing guide and shared facts of one agent mailbox, published from Kaluta. Read \
                             guide_rules before writing, and use only the facts facts_lookup gives. Check each draft \
                             with check_draft and fix what it reports before sending; after sending, call \
                             report_send. Answers are as of the version and time they name. Mail is read and sent \
@@ -119,7 +119,7 @@ fn tools() -> Vec<Tool> {
                 }
                 REPORT_SEND => {
                     "After sending a message through the mailbox's service, report it: the Message-ID the service \
-                     gave it, the recipients, subject, when it was sent and the body as sent. OpenAGC records it \
+                     gave it, the recipients, subject, when it was sent and the body as sent. Kaluta records it \
                      as written by this agent and links it to the sent mail. guide_check says what the sent body \
                      broke, if anything."
                 }
@@ -127,7 +127,7 @@ fn tools() -> Vec<Tool> {
                     "The mailbox's writing guide: how mail from it is written (tone, length, phrases to use and \
                      avoid) and the facts drafts may use, for the given recipients and message type. Read it before \
                      writing. Also says whose mailbox this is, the name mail goes out as, and the service's sending \
-                     limits. It was published from OpenAGC: version and published_at say how current it is."
+                     limits. It was published from Kaluta: version and published_at say how current it is."
                 }
                 _ => {
                     "Look up facts about the user that drafts may use (their role, time zone, calendar link, the \
@@ -202,7 +202,7 @@ impl RulesMcp {
 impl ServerHandler for RulesMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("openagc-rules", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("kaluta-rules", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 

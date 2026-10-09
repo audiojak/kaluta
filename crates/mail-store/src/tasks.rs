@@ -253,7 +253,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!("openagc-store-tasks-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-store-tasks-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         Scratch(dir, db)

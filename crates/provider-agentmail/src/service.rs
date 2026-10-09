@@ -64,7 +64,7 @@ impl AgentMailService {
 
     pub fn with_base(base: &str) -> ProviderResult<Self> {
         let client = reqwest::Client::builder()
-            .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Kaluta/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))
             .https_only(false) // tests talk to a local mock
@@ -131,7 +131,7 @@ impl MailboxService for AgentMailService {
         human_email: Option<&str>,
     ) -> ProviderResult<SignedUp> {
         let username = username_of(device_name);
-        let mut body = json!({ "username": username, "source": "openagc" });
+        let mut body = json!({ "username": username, "source": "kaluta" });
         if let Some(email) = human_email.map(str::trim).filter(|e| !e.is_empty()) {
             body["human_email"] = json!(email);
         }

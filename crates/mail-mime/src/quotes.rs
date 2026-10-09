@@ -9,7 +9,7 @@
 //! enough. Mail with replies between quotes (answering inline) is left alone.
 
 /// The wrapper the reader styles; a `<details>` so it works without script.
-const OPEN: &str = "<details class=\"openagc-quote\"><summary title=\"Show the quoted text\">•••</summary>";
+const OPEN: &str = "<details class=\"kaluta-quote\"><summary title=\"Show the quoted text\">•••</summary>";
 const CLOSE: &str = "</details>";
 
 /// Text of a reply between or after quotes beyond which the message is
@@ -452,7 +452,7 @@ mod tests {
         let out = fold_quoted_html(html);
         assert!(
             out.starts_with(
-                r#"<div dir="ltr">Sounds good, see you then.</div><br><div><details class="openagc-quote">"#
+                r#"<div dir="ltr">Sounds good, see you then.</div><br><div><details class="kaluta-quote">"#
             ),
             "{out}"
         );
@@ -490,7 +490,7 @@ mod tests {
     fn an_outlook_reply_folds_from_the_rule() {
         let html = r#"<div>Thanks, done.</div><hr style="display:inline-block"><div><b>From:</b> Ann<br><b>Sent:</b> Tuesday<br><b>To:</b> Me<br><b>Subject:</b> Plan</div><div>Earlier text</div>"#;
         let out = fold_quoted_html(html);
-        assert!(out.starts_with(r#"<div>Thanks, done.</div><details class="openagc-quote">"#), "{out}");
+        assert!(out.starts_with(r#"<div>Thanks, done.</div><details class="kaluta-quote">"#), "{out}");
         assert!(out.ends_with("<div>Earlier text</div></details>"), "{out}");
     }
 

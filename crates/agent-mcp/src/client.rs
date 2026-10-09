@@ -18,9 +18,9 @@ type Pending = Arc<std::sync::Mutex<Option<HashMap<u64, oneshot::Sender<Outcome>
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("cannot reach OpenAGC: {0}")]
+    #[error("cannot reach Kaluta: {0}")]
     Connect(#[from] WireError),
-    #[error("OpenAGC refused the session: {0}")]
+    #[error("Kaluta refused the session: {0}")]
     Refused(String),
     /// The socket (or the directory it is in) could have been put there by
     /// someone else: nothing is sent to it.
@@ -39,7 +39,7 @@ fn current_uid() -> u32 {
 /// put it there or swap it), whose own parent, if others can write to it,
 /// is sticky (like `/tmp`, where they cannot rename our directory away).
 /// Mailbox mode reads the socket's path from a file (spec §10.1), and the
-/// app may use `/tmp/openagc-<uid>` when its own folder's path is too long,
+/// app may use `/tmp/kaluta-<uid>` when its own folder's path is too long,
 /// which another user could create first after a restart.
 pub fn check_socket(socket: &Path, uid: u32) -> Result<(), String> {
     let shown = socket.display();
@@ -142,7 +142,7 @@ impl ShimClient {
     }
 
     pub async fn call(&self, tool: &str, arguments: serde_json::Value) -> Outcome {
-        let unavailable = || Outcome::error("app_unavailable", "OpenAGC is not running or closed this session");
+        let unavailable = || Outcome::error("app_unavailable", "Kaluta is not running or closed this session");
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         {

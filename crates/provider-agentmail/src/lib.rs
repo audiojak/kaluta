@@ -16,7 +16,7 @@
 //! - Label changes made in the app go out as `PATCH` (or `batch-update`)
 //!   through the outbox. Trash and delete stay on this Mac.
 //! - Sends turn the composer's MIME into AgentMail's JSON, with an
-//!   `Idempotency-Key` and an `X-OpenAGC-Outbox-Id` header. After an answer
+//!   `Idempotency-Key` and an `X-Kaluta-Outbox-Id` header. After an answer
 //!   that leaves it unknown whether the mail went (a timeout, a 5xx), the
 //!   next attempt first looks for that header among the inbox's recent
 //!   messages and takes a match as sent ([`AgentMailProvider::send`]).
@@ -63,7 +63,10 @@ pub const CODE_SENDER_DOMAIN: &str = "agentmail.to";
 /// The domain inboxes take addresses on unless the organisation has its own.
 pub const MANAGED_DOMAIN: &str = "agentmail.to";
 /// The header naming the outbox entry a send came from.
-pub const OUTBOX_HEADER: &str = "X-OpenAGC-Outbox-Id";
+pub const OUTBOX_HEADER: &str = "X-Kaluta-Outbox-Id";
+/// The same header as sends made before the project was named Kaluta
+/// carry it: a send queued then is still found, never sent twice.
+const LEGACY_OUTBOX_HEADER: &str = "X-OpenAGC-Outbox-Id";
 /// AgentMail's limit on a send request, body and attachments included.
 pub const MAX_REQUEST_BYTES: usize = 6 * 1024 * 1024;
 
@@ -124,7 +127,7 @@ impl AgentMailProvider {
         let http = HttpClient::new(tokens, limiter, retry)?.with_error_hook(hook);
         let send_http = http.clone().with_retry(RetryPolicy { max_attempts: 1, ..retry });
         let download = reqwest::Client::builder()
-            .user_agent(concat!("OpenAGC/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Kaluta/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(120))
             .build()
@@ -304,8 +307,8 @@ impl AgentMailProvider {
             let got = self.list(&[("after", rfc3339(after))], page, Priority::Interactive).await?;
             for m in got.messages {
                 match &m.headers {
-                    Some(h) if header(h, OUTBOX_HEADER).is_some() => {
-                        if header(h, OUTBOX_HEADER) == Some(outbox_id) {
+                    Some(h) if outbox_header(h).is_some() => {
+                        if outbox_header(h) == Some(outbox_id) {
                             return Ok(Some(m.message_id));
                         }
                     }
@@ -330,7 +333,7 @@ impl AgentMailProvider {
                 Err(ProviderError::NotFound(_)) => continue,
                 Err(e) => return Err(e),
             };
-            if full.headers.as_ref().and_then(|h| header(h, OUTBOX_HEADER)) == Some(outbox_id) {
+            if full.headers.as_ref().and_then(outbox_header) == Some(outbox_id) {
                 return Ok(Some(full.message_id));
             }
         }
@@ -357,6 +360,11 @@ fn escape(s: &str) -> String {
         }
     }
     out
+}
+
+/// The outbox entry a sent message came from, under either name.
+fn outbox_header(headers: &HashMap<String, String>) -> Option<&str> {
+    header(headers, OUTBOX_HEADER).or_else(|| header(headers, LEGACY_OUTBOX_HEADER))
 }
 
 fn header<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {

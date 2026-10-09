@@ -1,6 +1,6 @@
 [package]
 name = "uniffi-bindgen-swift"
-description = "Generates the Swift bindings for openagc-core."
+description = "Generates the Swift bindings for kaluta-core."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

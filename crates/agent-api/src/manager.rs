@@ -12,7 +12,7 @@ use crate::{
     SessionConfig, TurnInput,
 };
 
-/// OpenAGC's id for a session (not the provider's).
+/// Kaluta's id for a session (not the provider's).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(pub String);
@@ -161,7 +161,7 @@ mod tests {
     fn config(id: SessionId) -> SessionConfig {
         SessionConfig {
             session_id: id,
-            mcp: McpEndpoint { shim_path: PathBuf::from("/x/openagc-mcp"), socket_path: PathBuf::from("/x/sock") },
+            mcp: McpEndpoint { shim_path: PathBuf::from("/x/kaluta-mcp"), socket_path: PathBuf::from("/x/sock") },
             system_prompt_file: PathBuf::from("/x/prompt.md"),
             working_dir: std::env::temp_dir(),
             model: None,

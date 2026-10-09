@@ -257,7 +257,7 @@ async fn resource_metadata(State(state): State<AppState>) -> Response {
         "authorization_servers": [o.issuer],
         "scopes_supported": [SCOPE],
         "bearer_methods_supported": ["header"],
-        "resource_name": "OpenAGC rules server",
+        "resource_name": "Kaluta rules server",
     }))
 }
 
@@ -506,12 +506,12 @@ fn consent_page(o: &OAuth, request: &str, p: &Pending, error: Option<&str>) -> R
          <p>When you continue, you go back to <strong>{host}</strong>.</p>{loopback}\
          <form method=\"post\" action=\"/oauth/authorize\">\
          <input type=\"hidden\" name=\"request\" value=\"{request}\">\
-         <p><label for=\"code\">Connect code from OpenAGC</label></p>\
+         <p><label for=\"code\">Connect code from Kaluta</label></p>\
          <input id=\"code\" name=\"connect_code\" autocomplete=\"one-time-code\" autocapitalize=\"characters\" \
          spellcheck=\"false\" maxlength=\"20\" placeholder=\"ABCDE-FGHJK\" autofocus>{error}\
          <button class=\"go\" name=\"action\" value=\"allow\">Connect</button>\
          <button name=\"action\" value=\"deny\">Cancel</button></form>\
-         <p class=\"note\">In OpenAGC, open the agent mailbox's settings and choose Connect a Cloud Agent… to get \
+         <p class=\"note\">In Kaluta, open the agent mailbox's settings and choose Connect a Cloud Agent… to get \
          a code. It works once, for 10 minutes.</p>",
         name = escape(&p.client_name),
         issuer = escape(&o.issuer),
@@ -777,7 +777,7 @@ async fn consent(
         }
         let left = TRIES_PER_CONSENT - p.tries;
         let message = format!(
-            "That code is wrong, used or expired. Check it in OpenAGC, or make a new one. {left} {} left.",
+            "That code is wrong, used or expired. Check it in Kaluta, or make a new one. {left} {} left.",
             if left == 1 { "try" } else { "tries" }
         );
         let r = consent_page(o, &request, &p, Some(&message));
@@ -796,7 +796,7 @@ fn token_error(status: StatusCode, code: &'static str, description: &str) -> Res
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     h.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
     if status == StatusCode::UNAUTHORIZED {
-        h.insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"openagc-rules\""));
+        h.insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"kaluta-rules\""));
     }
     r
 }

@@ -422,9 +422,21 @@ pub fn get_body(conn: &Connection, id: &MessageId) -> StoreResult<Option<Body>> 
              FROM bodies b JOIN messages m ON m.id = b.message_id WHERE m.gmail_id = ?1",
         )?
         .query_row([id.as_str()], |r| {
-            Ok(Body { text_plain: r.get(0)?, html_sanitized: r.get(1)?, has_remote_images: r.get(2)? })
+            let html: Option<String> = r.get(1)?;
+            Ok(Body { text_plain: r.get(0)?, html_sanitized: html.map(current_names), has_remote_images: r.get(2)? })
         })
         .optional()?)
+}
+
+/// Bodies sanitized before the project was named Kaluta carry its old
+/// image schemes and quote class; readers know only the new ones.
+fn current_names(html: String) -> String {
+    if !html.contains("openagc-") {
+        return html;
+    }
+    html.replace("\"openagc-cid:", "\"kaluta-cid:")
+        .replace("\"openagc-remote:", "\"kaluta-remote:")
+        .replace("class=\"openagc-quote\"", "class=\"kaluta-quote\"")
 }
 
 /// Recipient suggestions for the composer: people the user writes to most

@@ -37,7 +37,7 @@ pub async fn start(rate_limit_per_minute: u32, registration_token: Option<&str>)
 
 /// With `oauth`, the server's public URL is its loopback address.
 pub async fn start_with(rate_limit_per_minute: u32, registration_token: Option<&str>, oauth: bool) -> Server {
-    let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-rules-test-{}", rules_server::tokens::new_id()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
     let base = format!("http://{}", listener.local_addr().unwrap());
     let config = Config {
@@ -162,7 +162,7 @@ pub async fn call(client: &RunningService<rmcp::RoleClient, ()>, tool: &'static 
 /// With OAuth on, behind the proxies `trusted` (whose `X-Forwarded-For`
 /// then names the client).
 pub async fn start_trusting(rate_limit_per_minute: u32, trusted: &[&str]) -> Server {
-    let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-rules-test-{}", rules_server::tokens::new_id()));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
     let base = format!("http://{}", listener.local_addr().unwrap());
     let config = Config {
@@ -182,7 +182,7 @@ pub async fn start_trusting(rate_limit_per_minute: u32, trusted: &[&str]) -> Ser
 
 /// With `require_encryption` set as given (and no OAuth).
 pub async fn start_requiring(require_encryption: bool) -> Server {
-    let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-rules-test-{}", rules_server::tokens::new_id()));
     start_in(dir, require_encryption).await
 }
 

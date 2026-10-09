@@ -10,7 +10,7 @@ use crate::{
     Usage,
 };
 
-/// Replies "You said: <prompt>" to every turn, except OpenAGC's task
+/// Replies "You said: <prompt>" to every turn, except Kaluta's task
 /// prompts, which get [`task_answer`]'s fixed JSON.
 pub struct FakeAgent {
     id: ProviderId,
@@ -54,12 +54,12 @@ impl AgentProvider for FakeAgent {
     }
 }
 
-/// The fake's answer to an OpenAGC task prompt (spec §14.8), or `None`
+/// The fake's answer to a Kaluta task prompt (spec §14.8), or `None`
 /// for any other prompt: one suggestion per `<email thread_id="…">` block,
 /// titled after its subject, alternating between a reply due today and a
 /// review with no date, so tests and snapshots see both.
 pub fn task_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC task suggestions") {
+    if !prompt.starts_with("Kaluta task suggestions") {
         return None;
     }
     let today = prompt
@@ -86,13 +86,13 @@ pub fn task_answer(prompt: &str) -> Option<String> {
     Some(format!("[{}]", items.join(", ")))
 }
 
-/// The fake's answer to an OpenAGC writing-guide analysis prompt (spec
+/// The fake's answer to a Kaluta writing-guide analysis prompt (spec
 /// §14.9), or `None` for any other prompt. For every message it proposes
 /// the same few entries, quoting the message's own first words and last
 /// line, so the quotes pass the core's check and the proposals merge
 /// across batches; and one audience from the first recipient's domain.
 pub fn guide_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC writing guide analysis") {
+    if !prompt.starts_with("Kaluta writing guide analysis") {
         return None;
     }
     let esc = |s: &str| s.replace(['\\', '"'], "");
@@ -145,11 +145,11 @@ pub fn guide_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"proposals": [{}], "audiences": [{audiences}]}}"#, proposals.join(", ")))
 }
 
-/// The fake's answer to an OpenAGC writing-guide change prompt: one
+/// The fake's answer to a Kaluta writing-guide change prompt: one
 /// question adding the request as a guideline, and one removing the first
 /// entry in the guide, if there is one.
 pub fn change_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC writing guide change") {
+    if !prompt.starts_with("Kaluta writing guide change") {
         return None;
     }
     let request = prompt.split("<<<\n").nth(1)?.split("\n>>>").next()?.trim().replace(['"', '\\'], "");
@@ -165,10 +165,10 @@ pub fn change_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"questions": [{}]}}"#, questions.join(", ")))
 }
 
-/// The fake's answer to an OpenAGC writing-guide merge prompt: one
+/// The fake's answer to a Kaluta writing-guide merge prompt: one
 /// decision per category listed, covering its entries.
 pub fn merge_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC writing guide merge") {
+    if !prompt.starts_with("Kaluta writing guide merge") {
         return None;
     }
     let mut decisions: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
@@ -198,14 +198,14 @@ pub fn merge_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"decisions": [{}]}}"#, items.join(", ")))
 }
 
-/// The fake's answer to an OpenAGC analysis comparison prompt: for each
+/// The fake's answer to a Kaluta analysis comparison prompt: for each
 /// pair whose sent text ends on a shorter line than the AI's (fewer
 /// characters), "Sign off
 /// with the first name only" (a guideline); for each pair whose AI text
 /// says "I hope this finds you well" and whose sent text does not, a rule
 /// banning it.
 pub fn compare_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC analysis compare") {
+    if !prompt.starts_with("Kaluta analysis compare") {
         return None;
     }
     let esc = |s: &str| s.replace(['\\', '"'], "");
@@ -247,12 +247,12 @@ pub fn compare_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"proposals": [{}]}}"#, proposals.join(", ")))
 }
 
-/// The fake's answer to an OpenAGC fact-gleaning prompt: for each message
+/// The fake's answer to a Kaluta fact-gleaning prompt: for each message
 /// with a line "I'm <role> at <organisation>.", that role as Work ›
 /// Occupation or role, quoting the line; and any line naming a password,
 /// so tests see it dropped.
 pub fn glean_answer(prompt: &str) -> Option<String> {
-    if !prompt.starts_with("OpenAGC facts glean") {
+    if !prompt.starts_with("Kaluta facts glean") {
         return None;
     }
     let esc = |s: &str| s.replace(['\\', '"'], "");
@@ -287,8 +287,7 @@ pub fn glean_answer(prompt: &str) -> Option<String> {
 /// first turn only; the answers come in a turn of their own).
 pub fn writing_help_answer(prompt: &str) -> Option<String> {
     let first = prompt.lines().next()?;
-    if !first.starts_with("You are helping write an email in OpenAGC's composer.") || !first.contains("facts about me")
-    {
+    if !first.starts_with("You are helping write an email in Kaluta's composer.") || !first.contains("facts about me") {
         return None;
     }
     Some(

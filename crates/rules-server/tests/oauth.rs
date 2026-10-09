@@ -566,7 +566,7 @@ async fn without_a_public_url_oauth_is_off_and_tokens_work_as_before() {
     let body: Value = r.json().await.unwrap();
     assert_eq!(body["error"], "oauth_off");
     let r = s.http.post(s.url("/mcp")).json(&json!({})).send().await.unwrap();
-    assert_eq!(r.headers()["www-authenticate"], "Bearer realm=\"openagc-rules\"");
+    assert_eq!(r.headers()["www-authenticate"], "Bearer realm=\"kaluta-rules\"");
     let (_, agent) = s.mint(&publisher, "Script").await;
     assert!(s.mcp(&agent).await.is_ok());
 }

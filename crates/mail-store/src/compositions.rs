@@ -509,7 +509,7 @@ mod tests {
     use crate::drafts::{self, DraftRecord};
 
     fn db(name: &str) -> (Db, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("openagc-compositions-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-compositions-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (Db::open(&dir.join("mail.sqlite")).unwrap(), dir)
     }
@@ -560,14 +560,14 @@ mod tests {
         assert_eq!((c.created_at, c.updated_at), (10, 20));
 
         db.write_blocking(move |tx| {
-            drafts::set_rfc822_id(tx, id, "abc.openagc@example.com")?;
+            drafts::set_rfc822_id(tx, id, "abc.kaluta@example.com")?;
             drafts::set_state(tx, id, drafts::DraftState::Sending, None)?;
             drafts::discard(tx, id, 30)
         })
         .unwrap();
         let sent = db.read_blocking(move |c| get(c, first)).unwrap().unwrap();
         assert_eq!(sent.status, Status::Waiting, "a sent draft waits for its copy");
-        assert_eq!(sent.rfc822_message_id.as_deref(), Some("abc.openagc@example.com"));
+        assert_eq!(sent.rfc822_message_id.as_deref(), Some("abc.kaluta@example.com"));
         assert_eq!(sent.draft_id, None);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -610,13 +610,13 @@ mod tests {
             })
             .unwrap();
         db.write_blocking(move |tx| {
-            drafts::set_rfc822_id(tx, id, "y.openagc@example.com")?;
+            drafts::set_rfc822_id(tx, id, "y.kaluta@example.com")?;
             drafts::set_state(tx, id, drafts::DraftState::Failed, Some("timed out"))?;
             drafts::discard(tx, id, 20)
         })
         .unwrap();
         let r = db.read_blocking(move |c| get(c, record_id)).unwrap().unwrap();
-        assert_eq!((r.status, r.rfc822_message_id.as_deref()), (Status::Waiting, Some("y.openagc@example.com")));
+        assert_eq!((r.status, r.rfc822_message_id.as_deref()), (Status::Waiting, Some("y.kaluta@example.com")));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -631,7 +631,7 @@ mod tests {
             })
             .unwrap();
         db.write_blocking(move |tx| {
-            drafts::set_rfc822_id(tx, id, "x.openagc@example.com")?;
+            drafts::set_rfc822_id(tx, id, "x.kaluta@example.com")?;
             draft_unsent(tx, id)
         })
         .unwrap();

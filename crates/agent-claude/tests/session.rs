@@ -30,7 +30,7 @@ fn config(dir: &Path) -> SessionConfig {
     SessionConfig {
         session_id: SessionId("agent-7".into()),
         mcp: McpEndpoint {
-            shim_path: "/Apps/OpenAGC.app/Contents/MacOS/openagc-mcp".into(),
+            shim_path: "/Apps/Kaluta.app/Contents/MacOS/kaluta-mcp".into(),
             socket_path: "/tmp/s.sock".into(),
         },
         system_prompt_file: prompt,
@@ -70,7 +70,7 @@ async fn turns_run_the_cli_with_locked_down_flags_and_resume() {
             r#"for a in "$@"; do printf '%s\n' "$a"; done > "{log}.$$"
 echo "KEY=$ANTHROPIC_API_KEY TIMEOUT=$MCP_TOOL_TIMEOUT NESTED=$CLAUDECODE" >> "{log}.$$"
 mv "{log}.$$" "{log}.$(ls {dir} | grep -c args.log)"
-echo '{{"type":"system","subtype":"init","session_id":"sess-42","mcp_servers":[{{"name":"openagc","status":"connected"}}]}}'
+echo '{{"type":"system","subtype":"init","session_id":"sess-42","mcp_servers":[{{"name":"kaluta","status":"connected"}}]}}'
 echo '{{"type":"stream_event","event":{{"type":"content_block_delta","delta":{{"type":"text_delta","text":"Hi"}}}}}}'
 echo '{{"type":"result","subtype":"success","is_error":false,"session_id":"sess-42","usage":{{"input_tokens":3,"output_tokens":1}}}}'"#,
             log = log.display(),
@@ -100,12 +100,12 @@ echo '{{"type":"result","subtype":"success","is_error":false,"session_id":"sess-
     assert_eq!(after("-p"), Some("first"));
     assert_eq!(after("--output-format"), Some("stream-json"));
     assert_eq!(after("--tools"), Some(""), "no built-in tools");
-    assert_eq!(after("--allowedTools"), Some("mcp__openagc__*"));
+    assert_eq!(after("--allowedTools"), Some("mcp__kaluta__*"));
     assert_eq!(after("--permission-mode"), Some("dontAsk"));
     assert!(args.contains(&"--strict-mcp-config"));
     let mcp: serde_json::Value = serde_json::from_str(after("--mcp-config").unwrap()).unwrap();
     assert_eq!(
-        mcp["mcpServers"]["openagc"]["args"],
+        mcp["mcpServers"]["kaluta"]["args"],
         serde_json::json!(["--socket", "/tmp/s.sock", "--session", "agent-7"])
     );
     assert!(after("--append-system-prompt-file").unwrap().ends_with("prompt.md"));
@@ -131,7 +131,7 @@ async fn cancel_interrupts_and_a_busy_session_refuses_a_second_prompt() {
         r#"sleep 600 </dev/null >/dev/null 2>&1 &
 sleeper=$!
 trap 'kill $sleeper; echo "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"Interrupted by user\",\"session_id\":\"s\"}"; exit 130' INT
-echo '{"type":"system","subtype":"init","session_id":"s","mcp_servers":[{"name":"openagc","status":"connected"}]}'
+echo '{"type":"system","subtype":"init","session_id":"s","mcp_servers":[{"name":"kaluta","status":"connected"}]}'
 wait $sleeper"#,
     );
     let (tx, mut rx) = mpsc::unbounded_channel();

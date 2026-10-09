@@ -138,9 +138,15 @@ fn open(key: &SecretKey, sealed: &[u8], ad: &[u8]) -> Result<Zeroizing<Vec<u8>>,
         .map_err(|_| SealError::Open)
 }
 
+/// The prefix of every domain-separation label. It keeps the project's
+/// name from before it was Kaluta: it is a protocol constant, bound into
+/// every sealed snapshot, report and wrapped key on a server, and changing
+/// it would make all of them unreadable.
+const LABEL_PREFIX: &str = "openagc-rules/v1/";
+
 /// Associated data: a label and fields, each ended by a zero byte.
 fn context(label: &str, fields: &[&str]) -> Vec<u8> {
-    let mut out = format!("openagc-rules/v1/{label}").into_bytes();
+    let mut out = format!("{LABEL_PREFIX}{label}").into_bytes();
     for f in fields {
         out.push(0);
         out.extend_from_slice(f.as_bytes());
@@ -189,6 +195,7 @@ pub fn open_snapshot(
 /// of the credential's secret (a whole static token, or an OAuth grant's
 /// secret), for that agent.
 pub fn credential_key(secret: &str, agent_id: &str) -> SecretKey {
+    // The salt is LABEL_PREFIX + "credential": a protocol constant too.
     let hk = Hkdf::<Sha256>::new(Some(b"openagc-rules/v1/credential"), secret.as_bytes());
     let mut okm = Zeroizing::new([0u8; KEY_LEN]);
     // 32 bytes is far below HKDF-SHA256's limit.
@@ -362,6 +369,17 @@ pub struct SealedSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_labels_keep_their_bytes_from_before_the_rename() {
+        // Sealed data on every server is bound to these; see LABEL_PREFIX.
+        assert_eq!(context("snapshot", &["a"]), b"openagc-rules/v1/snapshot\0a");
+        // HKDF-SHA256, salt "openagc-rules/v1/credential", computed outside Rust.
+        assert_eq!(
+            &*credential_key("oagc_agt_pin_secret", "agent-1").to_base64(),
+            "ctEvayjhxEj6sGeQVYlwusEfgxZ5/AXJeB9fEDZRRFY="
+        );
+    }
 
     #[test]
     fn a_snapshot_opens_only_with_its_key_address_version_and_key_id() {

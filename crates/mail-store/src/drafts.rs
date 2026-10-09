@@ -248,7 +248,7 @@ mod tests {
     use crate::Db;
 
     fn db() -> Db {
-        let dir = std::env::temp_dir().join(format!("openagc-drafts-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-drafts-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         Db::open(&dir.join("mail.sqlite")).unwrap()
     }

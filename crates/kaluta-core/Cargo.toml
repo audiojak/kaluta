@@ -1,0 +1,55 @@
+[package]
+name = "kaluta-core"
+description = "The Rust core behind the Kaluta app: UniFFI exports, runtime and event bus."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["lib", "staticlib"]
+name = "kaluta_core"
+
+[dependencies]
+mail-domain.workspace = true
+mail-store.workspace = true
+mail-mime.workspace = true
+mail-sync.workspace = true
+provider-api.workspace = true
+provider-gmail.workspace = true
+provider-primitive.workspace = true
+provider-agentmail.workspace = true
+agent-api.workspace = true
+agent-claude.workspace = true
+agent-codex.workspace = true
+agent-mcp.workspace = true
+permissions.workspace = true
+writing-guide.workspace = true
+rules-crypto.workspace = true
+zeroize.workspace = true
+uniffi.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+getrandom.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+# The rules server, in process, for publishing's tests (spec §10.6).
+rules-server.workspace = true
+axum.workspace = true
+provider-gmail = { workspace = true, features = ["fake-imap"] }
+provider-agentmail = { workspace = true, features = ["fake-ws"] }
+futures = "0.3"
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

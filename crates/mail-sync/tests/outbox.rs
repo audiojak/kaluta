@@ -32,7 +32,7 @@ fn message(id: &str, thread: &str, labels: &[&str]) -> FetchedMessage {
 }
 
 async fn setup(name: &str) -> (Arc<FakeProvider>, Db, Arc<Recorder>, SyncEngine) {
-    let dir = std::env::temp_dir().join(format!("openagc-outbox-{name}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("kaluta-outbox-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let db = Db::open(&dir.join("mail.sqlite")).unwrap();
     let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 50));

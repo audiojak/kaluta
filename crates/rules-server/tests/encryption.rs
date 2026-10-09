@@ -378,7 +378,7 @@ async fn a_server_that_comes_to_require_encryption_serves_nothing_stored_in_plai
     let (_, agent) = optional.mint(&publisher, "Routine").await;
     assert_eq!(optional.publish(&publisher, None, marked(1).to_json().unwrap()).await.0, StatusCode::OK);
     assert_eq!(guide(&optional, &agent).await.0, StatusCode::OK);
-    // The operator turns OPENAGC_RULES_REQUIRE_ENCRYPTION on.
+    // The operator turns KALUTA_RULES_REQUIRE_ENCRYPTION on.
     let required = common::start_in(optional.dir.clone(), true).await;
     let (status, body) = guide(&required, &agent).await;
     assert_eq!((status, body["error"].as_str()), (StatusCode::CONFLICT, Some("not_readable")), "{body}");

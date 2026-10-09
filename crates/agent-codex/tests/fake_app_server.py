@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# A fake `codex app-server` for OpenAGC's adapter tests. Newline-delimited
+# A fake `codex app-server` for Kaluta's adapter tests. Newline-delimited
 # JSON-RPC without "jsonrpc", like the real one. Records what it receives.
 import json, os, sys
 
@@ -37,10 +37,10 @@ for line in sys.stdin:
         answer = sys.stdin.readline()
         received.write(answer); received.flush()
         send({"method": "item/started", "params": {"threadId": thread, "turnId": turn, "startedAtMs": 0, "item": {
-            "type": "mcpToolCall", "id": "call_1", "server": "openagc", "tool": "mail_search",
+            "type": "mcpToolCall", "id": "call_1", "server": "kaluta", "tool": "mail_search",
             "arguments": {"query": "is:unread"}, "status": "inProgress"}}})
         send({"method": "item/completed", "params": {"threadId": thread, "turnId": turn, "completedAtMs": 0, "item": {
-            "type": "mcpToolCall", "id": "call_1", "server": "openagc", "tool": "mail_search",
+            "type": "mcpToolCall", "id": "call_1", "server": "kaluta", "tool": "mail_search",
             "arguments": {"query": "is:unread"}, "status": "completed",
             "result": {"content": [{"type": "text", "text": "{\"threads\":[]}"}]}}}})
         send({"method": "item/reasoning/summaryTextDelta", "params": {"threadId": thread, "turnId": turn, "itemId": "r", "summaryIndex": 0, "delta": "Checking."}})

@@ -545,7 +545,7 @@ mod tests {
     use crate::Db;
 
     fn store(name: &str) -> (Db, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("openagc-outbox-claims-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("kaluta-outbox-claims-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let path = dir.join("mail.sqlite");
         (Db::open(&path).unwrap(), path)
