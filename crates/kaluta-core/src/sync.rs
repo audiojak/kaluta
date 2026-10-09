@@ -24,6 +24,8 @@ pub const ACTIVE_POLL: Duration = Duration::from_secs(30);
 pub const BACKGROUND_POLL: Duration = Duration::from_secs(300);
 pub const DRAFT_MIRROR_INTERVAL: Duration = Duration::from_secs(30);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
+/// How often sync looks whether the provider has paused it.
+const PAUSE_CHECK: Duration = Duration::from_secs(1);
 /// IDLE is re-issued this often: Gmail ends idle sessions at about 29 min.
 pub const IDLE_RENEW: Duration = Duration::from_secs(25 * 60);
 /// Inbox categories are listed again this often, and whenever the
@@ -131,8 +133,35 @@ impl SyncService {
             inbox_day: std::sync::Mutex::new(String::new()),
         });
         let main = handle.spawn(service.clone().run());
-        service.tasks.lock().unwrap_or_else(|e| e.into_inner()).push(main);
+        let pauses = handle.spawn(service.clone().watch_pauses());
+        service.tasks.lock().unwrap_or_else(|e| e.into_inner()).extend([main, pauses]);
         service
+    }
+
+    /// Tell the app when the provider pauses every request (a rate limit)
+    /// and when it resumes: sync is waiting inside the provider then, and
+    /// says nothing itself.
+    async fn watch_pauses(self: Arc<Self>) {
+        let mut told: Option<i64> = None;
+        loop {
+            let until = self
+                .engine
+                .provider()
+                .paused_for()
+                .await
+                .map(|left| mail_sync::now_millis() + i64::try_from(left.as_millis()).unwrap_or(i64::MAX / 2));
+            // A pause made longer is told again; one counting down is not.
+            let changed = match (told, until) {
+                (None, None) => false,
+                (Some(a), Some(b)) => (b - a).abs() > 2_000,
+                _ => true,
+            };
+            if changed {
+                self.events.emit(CoreEvent::SyncPaused { until });
+                told = until;
+            }
+            tokio::time::sleep(PAUSE_CHECK).await;
+        }
     }
 
     pub fn set_active(&self, active: bool) {
@@ -377,6 +406,7 @@ impl SyncService {
     async fn poll_loop(self: Arc<Self>) {
         let mut backoff = Duration::from_secs(5);
         loop {
+            self.status(SyncState::Checking, 0);
             match self.engine.sync_incremental().await {
                 Ok(report) => {
                     backoff = Duration::from_secs(5);

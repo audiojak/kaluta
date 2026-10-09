@@ -637,6 +637,10 @@ pub fn labels() -> Vec<Label> {
 
 #[async_trait]
 impl MailProvider for PrimitiveProvider {
+    async fn paused_for(&self) -> Option<std::time::Duration> {
+        self.http.limiter().paused_for().await
+    }
+
     async fn profile(&self) -> ProviderResult<Profile> {
         // The baseline cursor first, so nothing arriving while the first
         // listing runs is missed (spec §7.4).

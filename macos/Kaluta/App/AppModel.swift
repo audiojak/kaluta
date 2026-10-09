@@ -50,9 +50,20 @@ final class AppModel {
     enum SyncDisplay: Equatable {
         /// `headers`: messages waiting for headers only (tiered download).
         /// `message`: why, in the provider's words, for the footer.
-        case idle, syncing(pending: UInt32, headers: UInt32 = 0), offline(message: String? = nil),
+        /// `checking`: a round for new mail that has taken a while (a
+        /// catch-up after the app was closed), with nothing yet to download.
+        case idle, checking, syncing(pending: UInt32, headers: UInt32 = 0), offline(message: String? = nil),
              error(message: String? = nil)
     }
+
+    /// A round for new mail shows only once it has taken this long, so the
+    /// footer does not flash at every quick check.
+    static let checkingDelay: Duration = .seconds(2)
+    @ObservationIgnored private var checkingTask: Task<Void, Never>?
+
+    /// Until when the provider asked that nothing be sent (a rate limit),
+    /// for the footer's countdown; nil when it has not.
+    private(set) var syncPausedUntil: Date?
 
     static let demoAccountID = "demo"
     static let demoThreadCount: UInt32 = 2_000
@@ -281,6 +292,28 @@ final class AppModel {
     /// failed, or was refused); nil otherwise. A quiet line in the sync
     /// footer (maintainer decision 3, docs/plans/imap-first-sync.md).
     private(set) var transportNote: String?
+
+    /// Show `.checking` if the round is still going after `checkingDelay`.
+    private func showCheckingSoon() {
+        guard checkingTask == nil else { return }
+        checkingTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.checkingDelay)
+            guard !Task.isCancelled, let self else { return }
+            self.checkingTask = nil
+            if self.syncDisplay == .idle { self.syncDisplay = .checking }
+        }
+    }
+
+    /// Who asked sync to wait, for the footer.
+    var pausingService: String {
+        guard let id = openAccountID, let core, core.isAgent(id) else { return "Gmail" }
+        return "the mail service"
+    }
+
+    private func cancelChecking() {
+        checkingTask?.cancel()
+        checkingTask = nil
+    }
 
     static func transportNote(_ d: SyncDiagnostics) -> String? {
         guard d.syncing else { return nil }
@@ -610,6 +643,8 @@ final class AppModel {
             needsReauthentication = false
             reauthenticationReason = nil
             backfillTransport = nil
+            syncPausedUntil = nil
+            cancelChecking()
             if core.isAgent(accountID) { Task { await refreshAgentPlan(accountID) } }
             await refreshFailedSends()
             // An imported mailbox has no server and no sign-in (spec §7.8).
@@ -1472,7 +1507,8 @@ final class AppModel {
     /// composer's writing help), by session id.
     @ObservationIgnored var agentSinks: [String: @MainActor ([AgentEventInfo]) async -> Void] = [:]
 
-    private func handle(_ tagged: CoreClientEvent.Tagged) async {
+    /// One core event (internal so tests can feed events).
+    func handle(_ tagged: CoreClientEvent.Tagged) async {
         if case let .agent(sessionID, events) = tagged.event, let sink = agentSinks[sessionID] {
             await sink(events)
             return
@@ -1548,17 +1584,26 @@ final class AppModel {
             }
         case let .syncStatus(state, pending, headers, message):
             refreshTransport()
+            if state == .checking {
+                // A download already showing stays; otherwise say so if the
+                // round takes a while.
+                if syncDisplay == .idle { showCheckingSoon() }
+                break
+            }
             cleanUp.syncChanged(pending: pending, headers: headers, accountID: tagged.accountID)
+            cancelChecking()
             switch state {
             case .idle:
                 syncDisplay = .idle
                 await checkGuideInvite()
-            case .bootstrapping, .syncing:
+            case .bootstrapping, .syncing, .checking:
                 syncDisplay = pending + headers > 0 || state == .bootstrapping
                     ? .syncing(pending: pending, headers: headers) : .idle
             case .offline: syncDisplay = .offline(message: message)
             case .error: syncDisplay = .error(message: message)
             }
+        case let .syncPaused(until):
+            syncPausedUntil = until
         case let .outboxStatus(pending, failed):
             failedChanges = failed
             cleanUp.outboxChanged(pending: pending, accountID: tagged.accountID)

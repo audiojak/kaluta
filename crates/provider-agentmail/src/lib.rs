@@ -673,6 +673,11 @@ fn seen_near(messages: &[wire::Message], at: Millis) -> Vec<String> {
 
 #[async_trait]
 impl MailProvider for AgentMailProvider {
+    async fn paused_for(&self) -> Option<std::time::Duration> {
+        // Sends have their own client; either pausing holds sync up.
+        self.http.limiter().paused_for().await.max(self.send_http.limiter().paused_for().await)
+    }
+
     async fn profile(&self) -> ProviderResult<Profile> {
         // The positions first, so nothing arriving while the first listing
         // runs is missed (spec §7.4).

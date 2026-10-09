@@ -100,6 +100,13 @@ impl RateLimiter {
         tracing::info!(units_per_minute = (s.refill_per_sec * 60.0) as u32, "rate limiter slowed down");
     }
 
+    /// How much longer every request waits because the provider said stop;
+    /// `None` when it has not, or the pause is over.
+    pub async fn paused_for(&self) -> Option<Duration> {
+        let s = self.state.lock().await;
+        s.cooldown_until.map(|c| c.saturating_duration_since(Instant::now())).filter(|d| !d.is_zero())
+    }
+
     /// Current budget in units per minute (tests and diagnostics).
     pub async fn units_per_minute(&self) -> u32 {
         (self.state.lock().await.refill_per_sec * 60.0).round() as u32
@@ -192,13 +199,16 @@ mod tests {
     async fn a_provider_rate_limit_pauses_everyone_and_slows_the_refill() {
         let limiter = RateLimiter::new(600, 0);
         assert_eq!(limiter.units_per_minute().await, 600);
+        assert_eq!(limiter.paused_for().await, None);
         limiter.report_rate_limited(Some(Duration::from_secs(30))).await;
         assert_eq!(limiter.units_per_minute().await, 420, "30% slower");
+        assert_eq!(limiter.paused_for().await, Some(Duration::from_secs(30)), "the pause can be told");
         let start = Instant::now();
         limiter.acquire(20, Priority::Interactive).await;
         let waited = start.elapsed();
         // The cooldown; tokens refilled meanwhile, so no further wait.
         assert!(waited >= Duration::from_secs(30) && waited < Duration::from_secs(31), "{waited:?}");
+        assert_eq!(limiter.paused_for().await, None, "over");
 
         // A burst refused together counts once.
         limiter.report_rate_limited(Some(Duration::from_secs(5))).await;

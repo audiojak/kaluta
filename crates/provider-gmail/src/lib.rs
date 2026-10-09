@@ -98,6 +98,10 @@ impl GmailProvider {
 
 #[async_trait]
 impl MailProvider for GmailProvider {
+    async fn paused_for(&self) -> Option<std::time::Duration> {
+        self.http.limiter().paused_for().await
+    }
+
     async fn profile(&self) -> ProviderResult<Profile> {
         let url = self.url("profile");
         let p: wire::Profile = self.http.json(cost::PROFILE, Priority::Interactive, |c| c.get(&url)).await?;
