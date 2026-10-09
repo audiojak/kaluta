@@ -1,6 +1,7 @@
 # Plan: a rules server for cloud agents
 
-Status: decided (2026-10-08); nothing built. The maintainer took every
+Status: decided (2026-10-08); steps 1 to 3 done, the server built
+(2026-10-09). The maintainer took every
 recommendation below (*Decisions, 2026-10-08*). Step 1 is done:
 [ADR 0016](../adr/0016-rules-server.md) and spec §10.6 and its
 amendments are written. OAuth now comes before *Connect a Cloud Agent…*
@@ -279,7 +280,12 @@ the headers beta use them.
    `schema_version` 1, and the audience-address hash.)*
 3. `rules-server`: SQLite, publish API with a publisher token, versioned
    snapshots, `guide_rules` and `facts_lookup` over MCP with bearer
-   tokens. Tests with an in-process client. Dockerfile.
+   tokens. Tests with an in-process client. Dockerfile. *(Done
+   2026-10-09, oagc-gmn7.2: `crates/rules-server`, operators' guide
+   `docs/rules-server.md`. The people entries are scoped to are now
+   hashed in the snapshot too. Registration: the first wins, an optional
+   registration token closes it; the publisher's API also mints, lists and
+   revokes agent tokens for the app's *Connect a Cloud Agent…*.)*
 4. App: *Publish to a Rules Server…* in an agent mailbox's settings: the
    URL, the list of what is shared, push on change, a status line
    ("Version 12, published 3 minutes ago").

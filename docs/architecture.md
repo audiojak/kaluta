@@ -43,6 +43,7 @@ in [SPECIFICATION.md](SPECIFICATION.md); this page is the map.
 | `writing-guide` | The guide's deterministic check, the guide and facts renderers, the rules server's snapshot format and audience-address hash; pure, shared with the rules server (§10.6) | — (serde, serde_json, sha2, thiserror only) |
 | `openagc-mcp` | The stdio MCP shim binary agents spawn | agent-mcp |
 | `openagc-core` | The UniFFI surface; ties everything together | all of the above |
+| `rules-server` | `openagc-rules`, the rules server for cloud agents: SQLite, a publish API and MCP over Streamable HTTP (§10.6, `docs/rules-server.md`); runs apart from the app | writing-guide (never the core or a store) |
 
 `cargo xtask check-deps` enforces the right-hand column.
 

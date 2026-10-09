@@ -2007,7 +2007,12 @@ that process keeps the store read-only; its sends are, §10.1.)
 
 ### 10.6 Rules server **(Amendment 2026-10-08, ADR 0016)**
 
-*(Decided 2026-10-08; not built.)* Plan `docs/plans/rules-server.md`.
+*(Decided 2026-10-08.)* Plan `docs/plans/rules-server.md`; operators'
+guide `docs/rules-server.md`. *(Implemented 2026-10-09, oagc-gmn7.2: the
+server with bearer tokens, the publish API, versioned snapshots and
+`guide_rules` and `facts_lookup` over MCP and REST. Not yet: the app's
+publishing, OAuth, `check_draft`, `report_send`, reports and encryption at
+rest.)*
 
 Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
 machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
@@ -2039,6 +2044,40 @@ agent reads and sends through the service with its key.
 REST: `PUT` a snapshot (publisher token), `GET` and `DELETE` reports
 (publisher token), and read-only `GET`s of the guide and facts (agent
 token).
+
+*(Implemented 2026-10-09, oagc-gmn7.2.)* MCP is stateless Streamable
+HTTP at `/mcp` (rmcp); every request carries the agent token, which alone
+names the mailbox. `guide_rules` answers mailbox mode's `mailbox`,
+`sends_as`, `about`, `writing_guide` and `guide_version`, and
+`facts_lookup` its `facts`, each plus the snapshot's `version` and
+`published_at` (RFC 3339); there is no `send_mode`, as the server never
+sends. Their input schemas are mailbox mode's, held equal by a test. The
+REST surface, `Authorization: Bearer` throughout:
+- Publisher: `POST /v1/mailboxes` `{"address"}` registers and answers the
+  publisher token once; `PUT /v1/mailboxes/{address}/snapshot` (412 with
+  `current_version` when `If-Match` is not the current version, 428 when
+  it is missing after the first push, 409 when the version does not go
+  up, 422 for a snapshot `writing_guide::Snapshot::from_json` refuses or
+  one for another mailbox); `GET …/snapshot/version`; `POST` and `GET
+  …/agent-tokens` (minted tokens are shown once) and `DELETE
+  …/agent-tokens/{id}`; `DELETE /v1/mailboxes/{address}`.
+- Agents and scripts: `GET /v1/m/{address}/guide?to=&message_type=` and
+  `GET /v1/m/{address}/facts?category=&query=`, answered as over MCP.
+An unknown or revoked token gets 401 with `WWW-Authenticate: Bearer
+realm="openagc-rules", error="invalid_token"`; each token has its own
+rate limit (a token bucket, 120 a minute by default; 429 with
+`Retry-After`). `GET /healthz` is unauthenticated.
+
+**Registration** *(implemented 2026-10-09)*. The first registration of an
+address wins: registering it again is refused (409), so nobody can take
+over a mailbox the app has registered, and only its publisher token can
+publish to it, mint or revoke its agent tokens, or forget it. On a server
+strangers can reach, someone could register an address first and keep the
+app from publishing there; they gain nothing (agents get their tokens from
+the app), and the operator closes registration with
+`OPENAGC_RULES_REGISTRATION_TOKEN` (registering then needs that bearer
+token) and clears an address with `openagc-rules forget-mailbox`, which is
+also how a lost publisher token is recovered.
 
 **Tokens.** Every request carries a token as `Authorization: Bearer`.
 - *Publisher token:* one per mailbox per server, made when the app
@@ -2084,6 +2123,15 @@ cloud agents will use the same queue later.
   matching. The hash is lower-case hex SHA-256 of the salt, a zero byte
   and the trimmed, lower-cased member (an address, or `@domain` for a
   domain); a recipient matches by its address or its `@domain`.
+- *(Amendment 2026-10-09, oagc-gmn7.2.)* The people a rule or guideline is
+  for (its scope's addresses and `@domain`s) are hashed alike, with the
+  same salt (`Snapshot::hashed`). Published, such an entry appears only
+  in a guide for a message to one of them, with its scope naming the
+  recipients it matched ("to ann@acme.com", given by the agent); a guide
+  with no recipients leaves them out and says that some entries are for
+  particular people. The server refuses a snapshot with any plain
+  address (`Snapshot::from_json`). The app, with the real store, renders
+  as before.
 - Facts, by a *Share with cloud agents* switch on each fact (§14.11). On
   by default for the mailbox's own *Use freely* facts; off by default
   for *Ask before using* (an unattended agent cannot ask) and for global
@@ -3848,8 +3896,8 @@ them.)
 | Log leakage | `Redacted` newtypes; email bodies never logged above `trace`, which is compiled out in release |
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
 | The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
-| Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)* |
-| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses as salted hashes; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)* |
+| Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)*. Revoking takes effect at the next request; each token is rate limited; logs name the token's id, never the token *(implemented 2026-10-09, oagc-gmn7.2)* |
+| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses and the people entries are for as salted hashes, plain ones refused; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)* |
 
 ### 15.4 What the MVP does *not* protect against
 
