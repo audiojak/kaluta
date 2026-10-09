@@ -24,7 +24,7 @@ threads (39,503 archived). p95 over 40–60 runs after a warm-up.
 | Operation | p95 | Budget |
 |---|---|---|
 | Open store + first inbox page (cold launch share) | 2.35 ms | 60 ms |
-| Sidebar mailboxes with counts | 0.01 ms | 3 ms |
+| Sidebar mailboxes with counts | 0.01 ms (0.02 ms 2026-10-08, below) | 3 ms |
 | Inbox first page, 150 rows | 0.14 ms | 8 ms |
 | Archive page at any depth, 150 rows | 0.12 ms | 8 ms |
 | Open thread: detail + all bodies | 0.03 ms | 5 ms |
@@ -65,6 +65,19 @@ The same run found two older measures over budget, unchanged with or
 without Clean Up's indexes: sidebar mailboxes with counts, 24.6 ms
 (budget 3 ms; the Inbox categories' unread count added since 2026-09-24),
 and the structured search `is:unread in:inbox`, 18–20 ms (budget 20 ms).
+
+**Sidebar counts (2026-10-08, release, same fixture).** The Inbox's
+count with categories is Primary's unread, and the tab counts came from
+grouping every Inbox thread (17,472) by its first category: two
+correlated subqueries per thread, p50 24.0 ms, p95 24.7 ms. No index
+helps a count over the whole Inbox, so migration 0020 keeps
+`inbox_category_stats`, per-tab thread and unread counts updated by
+deltas when a thread is recomputed, as `label_stats` is (exact; the
+consistency check compares them with the count). Sidebar mailboxes with
+counts: p50 0.01 ms, p95 0.02 ms (budget 3 ms). Tab counts narrowed by
+Important-only or by leaving out emails with tasks still count. The
+structured search `is:unread in:inbox` stays at p50 20.3 ms, p95
+20.6–25.1 ms (budget 20 ms), tracked separately.
 
 **Through the FFI (Swift, debug build):**
 

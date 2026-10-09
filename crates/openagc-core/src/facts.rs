@@ -451,13 +451,27 @@ impl Core {
             return Ok(db.clone());
         }
         let dir = self.data_path().join("global");
-        std::fs::create_dir_all(&dir).map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))?;
-        let db = mail_store::Db::open(&dir.join("facts.sqlite"))?;
+        let db = if self.headless {
+            // Never created or migrated here (spec §10.1).
+            mail_store::Db::open_existing(&dir.join("facts.sqlite"))?
+        } else {
+            std::fs::create_dir_all(&dir).map_err(|e| CoreError::new(ErrorKind::Storage, e.to_string()))?;
+            mail_store::Db::open(&dir.join("facts.sqlite"))?
+        };
         let _ = self.global_facts.set(db.clone());
         Ok(db)
     }
 
+    /// The headless MCP on a Mac where the app never made the global facts
+    /// store: there are no global facts to read.
+    fn no_global_facts(&self, scope: FactScope) -> bool {
+        self.headless && scope == FactScope::Global && !self.data_path().join("global/facts.sqlite").is_file()
+    }
+
     async fn facts_in(&self, scope: FactScope, statuses: &[FactStatus]) -> Result<Vec<FactInfo>, CoreError> {
+        if self.no_global_facts(scope) {
+            return Ok(vec![]);
+        }
         let wanted: Vec<&'static str> = statuses.iter().map(|s| s.as_str()).collect();
         let db = self.facts_db(scope)?;
         runtime::run(async move {
@@ -476,6 +490,9 @@ impl Core {
     }
 
     async fn category_rows(&self, scope: FactScope) -> Result<Vec<CategoryRow>, CoreError> {
+        if self.no_global_facts(scope) {
+            return Ok(vec![]);
+        }
         let db = self.facts_db(scope)?;
         runtime::run(async move { Ok(db.read(store::categories).await?) }).await
     }

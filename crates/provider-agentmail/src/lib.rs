@@ -128,7 +128,7 @@ impl AgentMailProvider {
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(120))
             .build()
-            .map_err(|e| ProviderError::Network(e.to_string()))?;
+            .map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         Ok(Self {
             http,
             send_http,
@@ -168,7 +168,8 @@ impl AgentMailProvider {
 
     /// Bytes behind a signed download URL.
     async fn download(&self, url: &str) -> ProviderResult<Vec<u8>> {
-        let response = self.download.get(url).send().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let response =
+            self.download.get(url).send().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         let status = response.status().as_u16();
         if !response.status().is_success() {
             return Err(match status {
@@ -177,7 +178,7 @@ impl AgentMailProvider {
                 s => ProviderError::Invalid(format!("download answered {s}")),
             });
         }
-        Ok(response.bytes().await.map_err(|e| ProviderError::Network(e.to_string()))?.to_vec())
+        Ok(response.bytes().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?.to_vec())
     }
 
     /// The raw MIME of a message; `None` when AgentMail has none to give.
@@ -858,6 +859,21 @@ impl MailProvider for AgentMailProvider {
                 Err(e)
             }
         }
+    }
+
+    /// The message an earlier attempt left, by its [`OUTBOX_HEADER`]
+    /// (asked by the outbox when a send was tried before, or left in
+    /// flight by a process that died, which this one's memory of unsure
+    /// sends cannot know about).
+    async fn already_sent(&self, raw: &[u8]) -> ProviderResult<Option<MessageId>> {
+        let parsed = mail_mime::parse(raw).map_err(|e| ProviderError::Invalid(e.to_string()))?;
+        let outbox = outbox_id(&parsed, raw);
+        let queued = parsed.headers.date.unwrap_or_else(now_millis);
+        let found = self.find_sent(&outbox, &parsed.headers.subject, queued).await?;
+        if found.is_some() {
+            self.unsure().remove(&outbox);
+        }
+        Ok(found.map(MessageId))
     }
 
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>> {

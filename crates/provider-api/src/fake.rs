@@ -168,6 +168,17 @@ impl FakeProvider {
     }
 }
 
+/// Just enough header reading to behave like Gmail for tests.
+fn header_value(text: &str, name: &str) -> Option<String> {
+    text.lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .take_while(|l| !l.is_empty())
+        .find(|l| {
+            l.len() > name.len() && l[..name.len()].eq_ignore_ascii_case(name) && l[name.len()..].starts_with(':')
+        })
+        .map(|l| l[name.len() + 1..].trim().to_owned())
+}
+
 fn record(s: &mut State, change: Change) {
     s.next_history += 1;
     let id = s.next_history;
@@ -297,17 +308,7 @@ impl MailProvider for FakeProvider {
         let id = MessageId(format!("sent{}", s.sent_counter));
         let thread_id = thread.cloned().unwrap_or_else(|| ThreadId(id.0.clone()));
         let text = String::from_utf8_lossy(raw).into_owned();
-        // Just enough header reading to behave like Gmail for tests.
-        let header = |name: &str| {
-            text.lines()
-                .take_while(|l| !l.is_empty())
-                .find(|l| {
-                    l.len() > name.len()
-                        && l[..name.len()].eq_ignore_ascii_case(name)
-                        && l[name.len()..].starts_with(':')
-                })
-                .map(|l| l[name.len() + 1..].trim().to_owned())
-        };
+        let header = |name: &str| header_value(&text, name);
         let m = FetchedMessage {
             id: id.clone(),
             thread_id: thread_id.clone(),
@@ -324,6 +325,19 @@ impl MailProvider for FakeProvider {
         s.messages.insert(id.0.clone(), m);
         record(&mut s, change);
         Ok(id)
+    }
+
+    /// A message in Sent with the send's Message-ID.
+    async fn already_sent(&self, raw: &[u8]) -> ProviderResult<Option<MessageId>> {
+        let Some(wanted) = header_value(&String::from_utf8_lossy(raw), "Message-ID") else { return Ok(None) };
+        let wanted = wanted.trim_matches(['<', '>']);
+        let s = self.state();
+        Ok(s.messages
+            .values()
+            .find(|m| {
+                m.label_ids.iter().any(|l| l.as_str() == "SENT") && m.message_id_header.as_deref() == Some(wanted)
+            })
+            .map(|m| m.id.clone()))
     }
 
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>> {

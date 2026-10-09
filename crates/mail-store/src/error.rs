@@ -14,6 +14,10 @@ pub enum StoreError {
     Io(String),
     #[error("store is closed")]
     Closed,
+    /// The store's schema is not the one this build reads, and this opener
+    /// may not migrate it (another process's view, spec §7.4).
+    #[error("{0}")]
+    Version(String),
 }
 
 impl From<serde_json::Error> for StoreError {

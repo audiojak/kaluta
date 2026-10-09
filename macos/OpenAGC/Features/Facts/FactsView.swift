@@ -10,6 +10,26 @@ struct FactsList: View {
     @FocusState private var focused: Bool
 
     var body: some View {
+        Group {
+            // The List is built only once it has rows. Rows that arrive in a
+            // List shown empty keep the table's one-line height (24 pt) and
+            // lose their value line (oagc-9hf); a List built with its rows
+            // measures each one, and so do rows added later.
+            if store.sections.isEmpty {
+                if store.loaded {
+                    ContentUnavailableView("No Facts Yet", systemImage: "person.text.rectangle",
+                                           description: Text("Facts about you that AI drafts may use: your role, time zone, calendar link, the people you mention."))
+                }
+            } else {
+                list
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onChange(of: model.threadListFocusRequests) { focused = true }
+        .task(id: model.factsRevision) { await store.load() }
+    }
+
+    private var list: some View {
         List(selection: $store.selection) {
             ForEach(store.sections, id: \.category.key) { section in
                 Section {
@@ -24,19 +44,11 @@ struct FactsList: View {
             }
         }
         .listStyle(.inset)
-        .overlay {
-            if store.loaded, store.sections.isEmpty {
-                ContentUnavailableView("No Facts Yet", systemImage: "person.text.rectangle",
-                                       description: Text("Facts about you that AI drafts may use: your role, time zone, calendar link, the people you mention."))
-            }
-        }
         .onDeleteCommand {
             if let fact = store.selected { Task { await model.deleteFact(fact) } }
         }
         // Tab from the sidebar (the main window's loop, spec §14.3).
         .focused($focused)
-        .onChange(of: model.threadListFocusRequests) { focused = true }
-        .task(id: model.factsRevision) { await store.load() }
     }
 }
 

@@ -86,6 +86,28 @@ pub fn check(conn: &Connection) -> StoreResult<Vec<String>> {
         "label_stats",
     )?;
 
+    // inbox_category_stats match the Inbox's threads.
+    let (stored, counted) =
+        (crate::read::stored_inbox_categories(conn)?, crate::read::count_inbox_categories(conn, &[])?);
+    for (s, c) in stored.iter().zip(&counted) {
+        if (s.total, s.unread) != (c.total, c.unread) {
+            problems.push(format!(
+                "inbox_category_stats: {} stored {}/{} actual {}/{}",
+                s.id, s.total, s.unread, c.total, c.unread
+            ));
+        }
+    }
+    let strays: Vec<String> = conn
+        .prepare("SELECT category FROM inbox_category_stats WHERE thread_count != 0 OR unread_thread_count != 0")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .filter(|c| c != crate::read::PRIMARY && !crate::read::CATEGORIES.contains(&c.as_str()))
+        .collect();
+    for c in strays {
+        problems.push(format!("inbox_category_stats: unknown category {c}"));
+    }
+
     // Search index covers exactly the messages.
     let (indexed, messages): (i64, i64) =
         conn.query_row("SELECT (SELECT COUNT(*) FROM messages_fts), (SELECT COUNT(*) FROM messages)", [], |r| {

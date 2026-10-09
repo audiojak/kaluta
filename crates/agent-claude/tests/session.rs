@@ -121,11 +121,18 @@ echo '{{"type":"result","subtype":"success","is_error":false,"session_id":"sess-
 #[tokio::test]
 async fn cancel_interrupts_and_a_busy_session_refuses_a_second_prompt() {
     let d = dir("cancel");
+    // The fake waits with the `wait` builtin, which a trapped SIGINT ends at
+    // once. A foreground `sleep` loop would hold the trap until the current
+    // `sleep` exits, and launching a process can stall for seconds under
+    // load: longer than the cancel's grace, so the turn was killed instead.
+    // The sleeper writes nowhere, so the turn's pipes close with the shell.
     install(
         &d,
-        r#"trap 'echo "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"Interrupted by user\",\"session_id\":\"s\"}"; exit 130' INT
+        r#"sleep 600 </dev/null >/dev/null 2>&1 &
+sleeper=$!
+trap 'kill $sleeper; echo "{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"result\":\"Interrupted by user\",\"session_id\":\"s\"}"; exit 130' INT
 echo '{"type":"system","subtype":"init","session_id":"s","mcp_servers":[{"name":"openagc","status":"connected"}]}'
-while true; do sleep 0.05; done"#,
+wait $sleeper"#,
     );
     let (tx, mut rx) = mpsc::unbounded_channel();
     let provider = ClaudeProvider::new(Locator::only(vec![d.clone()]));

@@ -36,6 +36,7 @@ async-trait.workspace = true
 getrandom.workspace = true
 chrono.workspace = true
 reqwest.workspace = true
+toml.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true

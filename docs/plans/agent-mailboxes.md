@@ -12,7 +12,8 @@ read that mailbox, send as the agent, and give the agent a writing guide
 and facts, exactly as they do for their own account. Agents that send
 without this app (Claude Code, Codex, scripts) reach the guide and facts
 through the local MCP ([headless-mcp.md](headless-mcp.md)). Later, a
-rules server lets cloud agents do the same.
+rules server ([rules-server.md](rules-server.md)) lets cloud agents do
+the same.
 
 ## Decisions (maintainer, 2026-10-06)
 
@@ -47,7 +48,7 @@ rules server lets cloud agents do the same.
   speaking MCP. The user can deploy it themselves, or use one the project
   runs. The project may charge for running trusted infrastructure, never
   for features: the hosted and self-hosted servers are the same code. Own
-  plan; amends §1.1.6.
+  plan, [rules-server.md](rules-server.md) (draft); amends §1.1.6.
 - **Vendor terms:** not a concern. The app only makes it easier for users
   to create their own accounts for their agents.
 - **Own domains:** users can put agent mailboxes on their own domain with
@@ -180,9 +181,9 @@ own account by hand:
 7. AgentMail: likely a generic IMAP/SMTP provider plus its sign-up, which
    also opens the door to Fastmail and generic IMAP.
 
-Separate plans: [headless-mcp.md](headless-mcp.md); the rules server
-(guide, guidelines and facts for cloud agents; self-hosted or
-project-hosted).
+Separate plans: [headless-mcp.md](headless-mcp.md); the rules server,
+[rules-server.md](rules-server.md) (guide, guidelines and facts for cloud
+agents; self-hosted or project-hosted).
 
 ## AgentMail: findings before building (2026-10-06, overnight)
 

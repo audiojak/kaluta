@@ -1,7 +1,7 @@
 //! The mail write API. Every change to messages or labels goes through a
 //! [`MailWriter`], which records the threads it touched and, in
 //! [`MailWriter::finish`], recomputes their aggregates, `thread_labels`
-//! rows and `label_stats` in the same transaction. The returned
+//! rows, `label_stats` and `inbox_category_stats` in the same transaction. The returned
 //! [`ThreadChanges`] says, per mailbox, which threads appeared, changed or
 //! disappeared, which is exactly what the UI's change events need.
 
@@ -14,6 +14,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
 
 use crate::error::{StoreError, StoreResult};
+use crate::read;
 
 /// Local id of the virtual Archive label (see the migration).
 pub const ARCHIVE_LABEL: &str = "@archive";
@@ -581,11 +582,16 @@ fn recompute_thread(
         )?
         .query_map([thread_rowid], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
-    let old_unread: bool = tx
-        .prepare_cached("SELECT unread_count > 0 FROM threads WHERE id = ?1")?
-        .query_row([thread_rowid], |r| r.get(0))
+    // The labels as last recomputed, not `old_labels`: a deleted label's
+    // rows are already gone from `thread_labels`, but the thread still
+    // counts in the Inbox category those labels gave it.
+    let (old_unread, old_label_ids): (bool, String) = tx
+        .prepare_cached("SELECT unread_count > 0, label_ids_json FROM threads WHERE id = ?1")?
+        .query_row([thread_rowid], |r| Ok((r.get(0)?, r.get(1)?)))
         .optional()?
-        .unwrap_or(false);
+        .unwrap_or_else(|| (false, "[]".into()));
+    let old_label_ids: Vec<String> = serde_json::from_str(&old_label_ids).unwrap_or_default();
+    let old_category = inbox_category(old_label_ids.iter().map(String::as_str));
 
     let messages: Vec<MessageRow> = tx
         .prepare_cached(
@@ -610,6 +616,9 @@ fn recompute_thread(
 
     for label_rowid in old_labels.keys() {
         remove_thread_label(tx, *label_rowid, thread_rowid, old_unread)?;
+    }
+    if let Some(category) = old_category {
+        count_inbox_category(tx, category, -1, -i64::from(old_unread))?;
     }
 
     if messages.is_empty() {
@@ -681,6 +690,9 @@ fn recompute_thread(
     for label_rowid in new_labels.keys() {
         add_thread_label(tx, *label_rowid, last.internal_date, thread_rowid, new_unread)?;
     }
+    if let Some(category) = inbox_category(label_ids.iter().copied()) {
+        count_inbox_category(tx, category, 1, i64::from(new_unread))?;
+    }
 
     for (rowid, label) in &old_labels {
         let entry = changes.mailboxes.entry(label.clone()).or_default();
@@ -707,6 +719,26 @@ fn wholly_spam_or_trash(tx: &Transaction<'_>, thread_rowid: i64) -> StoreResult<
         )?
         .query_row([thread_rowid], |r| r.get(0))?;
     Ok(outside == 0)
+}
+
+/// The Inbox category tab a thread with these labels counts in, or `None`
+/// outside the Inbox: the first of `read::CATEGORIES` it carries, else
+/// Primary (as `read::inbox_categories` counts).
+fn inbox_category<'a>(labels: impl Iterator<Item = &'a str> + Clone) -> Option<&'static str> {
+    if !labels.clone().any(|l| l == system_labels::INBOX) {
+        return None;
+    }
+    Some(read::CATEGORIES.iter().copied().find(|c| labels.clone().any(|l| l == *c)).unwrap_or(read::PRIMARY))
+}
+
+fn count_inbox_category(tx: &Transaction<'_>, category: &str, threads: i64, unread: i64) -> StoreResult<()> {
+    tx.prepare_cached(
+        "INSERT INTO inbox_category_stats (category, thread_count, unread_thread_count) VALUES (?1, ?2, ?3)
+         ON CONFLICT (category) DO UPDATE SET thread_count = thread_count + excluded.thread_count,
+           unread_thread_count = unread_thread_count + excluded.unread_thread_count",
+    )?
+    .execute(params![category, threads, unread])?;
+    Ok(())
 }
 
 fn add_thread_label(tx: &Transaction<'_>, label: i64, at: Millis, thread: i64, unread: bool) -> StoreResult<()> {

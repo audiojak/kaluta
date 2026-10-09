@@ -336,8 +336,12 @@ pub struct SyncEngine {
     backfill: std::sync::RwLock<Arc<dyn BackfillSource>>,
     db: Db,
     pub(crate) observer: Arc<dyn SyncObserver>,
-    /// Serializes outbox drains so one op is never sent twice.
+    /// Serializes this engine's outbox drains. Across engines and
+    /// processes, ops are claimed in the store ([`Self::claimant`]).
     pub(crate) drain_lock: tokio::sync::Mutex<()>,
+    /// This engine as an outbox drainer: its claims name it, and its lock
+    /// file tells other drainers it is alive (spec §7.4, outbox claims).
+    pub(crate) claimant: Arc<mail_store::outbox::Claimant>,
     /// Label changes OpenAGC itself pushed recently, so history sync can
     /// tell them from changes made elsewhere (spec §11.6).
     pub(crate) own_changes: std::sync::Mutex<Vec<OwnChange>>,
@@ -377,12 +381,14 @@ const OWN_CHANGE_WINDOW: Millis = 2 * 60 * 60 * 1000;
 
 impl SyncEngine {
     pub fn new(provider: Arc<dyn MailProvider>, db: Db, observer: Arc<dyn SyncObserver>) -> Self {
+        let claimant = Arc::new(mail_store::outbox::Claimant::register(db.path()));
         Self {
             backfill: std::sync::RwLock::new(Arc::new(RestBackfill(provider.clone()))),
             provider,
             db,
             observer,
             drain_lock: tokio::sync::Mutex::new(()),
+            claimant,
             own_changes: std::sync::Mutex::new(Vec::new()),
             headers_missed: Default::default(),
             headers_waiting: Default::default(),

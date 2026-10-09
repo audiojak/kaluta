@@ -40,6 +40,7 @@ The short version. Everything below elaborates on these.
 | Secrets | macOS Keychain, written and read from Swift; Rust receives tokens (and agent-mail service accounts' API keys, one per service account) through a foreign trait |
 | Agents | Claude Code via `claude -p` stream-json subprocess; Codex via `codex app-server` JSON-RPC subprocess |
 | Agent↔mail | OpenAGC's own MCP server (`rmcp`, stdio), spawned per agent session |
+| Rules server | *(Amendment 2026-10-08, ADR 0016; decided, not built.)* Cloud agents read an agent mailbox's published guide and shared facts, check drafts and report sends through `openagc-rules`, a separate server in this repository (MCP over HTTP plus a small REST API, SQLite), self-hosted or run by the project; it never holds mail or a key that sends (§10.6) |
 | Approvals | Enforced inside the Rust permission engine, inside the MCP tool call; agent-native permission systems are not relied on |
 | Routines | Structured routine model → generated prompt; runs locally (OpenAGC agent stack) or as a Claude cloud routine created/updated/run through the user's own `claude` CLI (`RemoteTrigger`, verified), with paste hand-off as fallback; ChatGPT by hand-off only; OpenAGC never holds claude.ai/ChatGPT credentials |
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
@@ -65,6 +66,9 @@ The short version. Everything below elaborates on these.
    into cadence labels — runnable locally or handed off to the user's
    Claude/ChatGPT cloud (§11).
 6. No project-operated backend of any kind.
+   *(Amended 2026-10-08, ADR 0016: the project runs nothing that sees
+   mail. It may run a rules server (§10.6), the same code users can run
+   themselves, holding only what a user publishes to it.)*
 
 ### 1.2 Non-Goals (MVP)
 
@@ -73,6 +77,9 @@ no calendar, no autonomous background sending, no
 embeddings, no shell access for agents, no App Store build.
 *(Amended 2026-10-06: an agent mailbox (§7.9) may let its agents send
 without approval; the user's own accounts never do.)*
+*(Amended 2026-10-08, ADR 0016: "no cloud" means no mail in the cloud.
+An agent mailbox's guide and chosen facts may be published to a rules
+server for cloud agents (§10.6); mail never is.)*
 
 ### 1.3 The performance goal
 
@@ -377,7 +384,7 @@ Body           message_id, text_plain?, html_sanitized?, html_original?, has_rem
 Participant    message_id, role (From|To|Cc|Bcc|ReplyTo), name?, email
 Attachment     id, message_id, gmail_attachment_id, filename, mime_type, size, content_id?, is_inline, local_path?
 Draft          id, account_id, gmail_draft_id?, thread_id?, in_reply_to_message_id?, to, cc, bcc, subject, body_html, body_text, attachments, updated_at, dirty
-OutboxOp       id, account_id, kind, payload (json), created_at, attempts, last_error?, state (Pending|InFlight|Failed)
+OutboxOp       id, account_id, kind, payload (json), created_at, attempts, last_error?, state (Pending|InFlight|Failed), claimed_by?, lease_until? (§7.4 outbox claims)
 AgentSession   id, provider, external_session_id?, started_at, ended_at?, state, prompt_count, cost_usd?
 AgentAction    id, session_id, tool, args (json), risk (ReadOnly|Reversible|External), state (Executed|Pending|Approved|Rejected|Failed), result_summary?, created_at, resolved_at?
 ```
@@ -493,7 +500,8 @@ CREATE TABLE outbox (
   id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, kind TEXT NOT NULL,
   payload_json TEXT NOT NULL, created_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER,
-  state TEXT NOT NULL DEFAULT 'pending', last_error TEXT);
+  state TEXT NOT NULL DEFAULT 'pending', last_error TEXT,
+  claimed_by TEXT, lease_until INTEGER);  -- migration 0021, §7.4 outbox claims
 
 CREATE TABLE sync_state (account_id INTEGER PRIMARY KEY, key TEXT, value TEXT);
 CREATE TABLE backfill_queue (
@@ -593,6 +601,10 @@ subject and sender, tie-broken by date.
   is fine here since readers never hold locks across awaits).
 - WAL mode makes readers never block on the writer.
 - Prepared statements are cached per connection (`prepare_cached`).
+- Write transactions begin `IMMEDIATE`, so a writer in another process on
+  the same store (the headless MCP) is waited for, up to a 30 s busy
+  timeout, rather than failing a transaction that read before it wrote
+  (§7.4 outbox claims).
 
 ---
 
@@ -749,6 +761,60 @@ a successful outbox op will see our own change in history and no-op.
 Conflict rule: server wins for labels/read state on the next history sync;
 the outbox is drained *before* history is applied so local intent is not
 overwritten while in flight.
+
+**Amendment (2026-10-08): outbox claims, several drainers.** *Implemented
+(oagc-uys.3).* The app and a second process (the headless MCP,
+[headless-mcp.md](plans/headless-mcp.md)) may both drain one account's
+outbox. No op is sent twice, none out of order, and neither process waits
+forever on the other.
+- *Claims in the store, not a file lock on the whole outbox.* A drainer
+  takes an op in one `BEGIN IMMEDIATE` transaction that picks the oldest
+  ready op (as before: one waiting on a retry holds back the rest; held
+  sends step aside) and marks it `in_flight` with `claimed_by` (the
+  drainer's id) and `lease_until` (now + 60 s), and only when **no** op
+  is in flight. So across processes, too, one op is in flight at a time
+  and ops go strictly in order (an unarchive never passes its archive). A
+  drainer that finds another's op in flight stops (`DrainReport.busy`)
+  and looks again within 2 s (`next_outbox_retry`). A coarse `flock` on
+  the whole drain was not needed: single flight in the claim gives the
+  same ordering, and a held per-op claim says exactly which op a dead
+  process left.
+- *Who is alive.* Each drainer (one per sync engine) holds an exclusive
+  `flock` on `outbox-claims/<id>.lock` beside the store for its life; the
+  kernel drops it when the process dies, however it dies, and a reused pid
+  cannot fool it. A drainer renews its lease every 15 s while the
+  provider call runs, and records the call's outcome only if it still
+  holds the claim. Lock files of dead drainers are cleared at
+  registration, but only by whoever holds the file locked itself and only
+  while the name still refers to that file (same inode); a new drainer,
+  after locking its file, checks the name still refers to it and starts
+  again with a fresh file if a sweep took it in the instant between
+  creating and locking it *(amendment 2026-10-08, oagc-cp3.5)*.
+- *Recovery,* at the start of each drain: an op in flight goes back to
+  pending if it is the drainer's own (an interrupted drain), unnamed (left
+  by a build from before claims: the old single-process recovery at
+  launch), or its claimant is gone (lock file free) or its lease ran out
+  (a hung process). A crash is recovered at once at the next drain, by the
+  app at its next launch or by the other process within 2 s.
+- *Sends are never blindly retried.* A send returned to pending counts an
+  attempt, and any send tried before (`attempts > 0`: left in flight, or
+  an error that may have come after the provider took it) is first looked
+  for: `MailProvider::already_sent`. Gmail searches `rfc822msgid:` (its
+  `messages.send` has no idempotency key; it keeps the composer's
+  Message-ID, §7.5); AgentMail looks for its `X-OpenAGC-Outbox-Id` header
+  (and its `Idempotency-Key` holds 24 h); Primitive cannot look and relies
+  on its Message-ID `Idempotency-Key`. Found, the send is taken as sent
+  (the draft is done with, the optimistic copy adopted) and not sent again.
+  Label changes are idempotent and go again as they are.
+- *Busy store.* Every store write takes the write lock at `BEGIN`
+  (`IMMEDIATE`), so a second process's write is waited for (busy timeout
+  30 s on the writer) instead of failing a deferred transaction at its
+  first write; no busy error reaches the user.
+- Tests: two engines on one store file, and a second OS process racing
+  this one over 1,000 queued changes against a counting fake: each op
+  reaches the provider exactly once and in queue order; a process killed
+  inside a send is recovered at once, and the send is found rather than
+  sent again (or sent once, if it never reached the provider).
 
 **Amendment (2026-09-26): bulk backfill over IMAP.** *Superseded by the
 2026-09-28 amendment, IMAP-first sync, at the end of this section; kept for
@@ -1479,7 +1545,10 @@ in its account settings, *When Agents Send*:
 - *Ask before each send*: the §10.4 approval flow, as on the user's own
   accounts.
 `mail.delete` stays approval-gated either way. The user's own accounts
-are unchanged. The setting lives in the mailbox's `agent.json`
+are unchanged. *(Amended 2026-10-08, oagc-uys.10:* a send from an agent
+mailbox always goes through its outbox, even when its sync is not running,
+so it reaches the service when sync next runs instead of being kept on
+this Mac only. Agents outside the app get the same setting, §10.1.) The setting lives in the mailbox's `agent.json`
 (`send_mode`). An agent working in the mailbox is told in its system
 prompt whose mailbox it is, the name it sends as, and the service's
 limits (one recipient per message).
@@ -1554,8 +1623,9 @@ the agent on a domain the user owns:
 Nothing in automation calls a real service: each sign-up creates a real
 account.
 
-**Not in scope.** Agents outside the app sending through a local MCP
-without the app open (`docs/plans/headless-mcp.md`), sending to several
+**Not in scope.** Agents outside the app sending at once while the app is
+closed (they queue until it opens, §10.1; the helper in
+`docs/plans/headless-mcp.md` would send), sending to several
 recipients by splitting a message, deleting mail at the service, a
 combined inbox of all agents, and services other than Primitive and
 AgentMail.
@@ -1780,6 +1850,74 @@ shim and app always ship together.
 `rmcp`'s `#[tool]` macros with `schemars` 1.0 generate the JSON schemas; the
 same definitions are rendered to `docs/mcp.md` by a `cargo xtask`.
 
+**Mailbox mode (Amendment 2026-10-08, oagc-uys.10; plan
+`docs/plans/headless-mcp.md`).** Agents outside the app (Claude Code,
+Codex, scripts) use one agent mailbox (§7.9) through
+`openagc-mcp --mailbox <address> [--data-dir <dir>]` (stdio; the data
+directory defaults to `~/Library/Application Support/OpenAGC`), whether or
+not the app is open.
+- **Agent mailboxes only.** The address is looked up in the agents'
+  `agent.json` files (address or managed address, any case) and must be
+  listed in `accounts/index.json`. The user's own accounts, imported
+  mailboxes and unknown addresses are refused before anything is served
+  (stderr, exit status 2), and again by the core.
+- **Tools** (`docs/mcp.md`, *Mailbox mode*): `guide_rules` (the writing
+  guide for the given recipients and type, whose mailbox it is, the name
+  it sends as, the service's limits and its send mode), `facts_lookup`,
+  `mail_search` and `mail_get_thread` (the in-app tools), and `mail_send`
+  / `mail_reply`, which write and send in one call: the core's
+  `mail_create_draft` then `mail_send`, so the permission engine, the
+  session's rate limit, the draft-ownership rule, the guide check
+  (`guide_check` in the answer, and `writing_guide_breaches` when sent
+  freely) and the ADR 0013 record (source agent, agent
+  `outside:<client>`) are the in-app ones. A send that is declined, times
+  out or fails leaves no draft behind.
+- **The app running.** At launch the app binds the agent socket
+  (`serve_outside_agents`) and writes its path to `<data dir>/run/mcp-socket`.
+  The shim connects with a hello that names the mailbox and its MCP
+  client's name (from `initialize`); the core opens an *outside session*,
+  `outside-<client>-<random>`, bound to the mailbox's account, and runs
+  each call through it. *When Agents Send* applies: sent freely, or the
+  §10.4 approval, shown in the open window's agent panel (whichever
+  account it shows) with who asks and from which mailbox ("Claude Code
+  outside OpenAGC, as scout@…: Send …"). The activity log (§10.5) records
+  every call under the outside session; its *Agent* column names it.
+- **The app closed.** The shim runs the core headless in its own process
+  (`Core::headless`): no secrets (its secret store refuses every read; the
+  Keychain is the app's, §12), no events, no log file, no sync and no
+  outbox drain. Stores are opened with `Db::open_existing`: never created
+  or migrated, refused in words unless their schema is exactly this
+  build's ("from an older OpenAGC … open OpenAGC once to update it", or a
+  newer one, "update OpenAGC"); reads use read-only connections and only
+  a send opens the writer. Reads are not written to the activity log (the
+  store stays read-only); sends are, under the outside session. A send is
+  checked and recorded as above, then queued in the outbox
+  (`mail_sync::send_draft`, one write transaction beside a running app,
+  §7.4 outbox claims; no Undo Send hold) and answered
+  `{"queued": true, "message": "Queued. It goes out when OpenAGC next
+  opens."}`. The app's sync sends it, once, when it next runs. *Ask before
+  each send* is refused (`needs_openagc`): approvals are parked in the
+  app's memory and cannot outlive or cross processes. The user's *Ask
+  Before* choices for reversible tools live in the app's preferences and
+  do not apply here; the defaults do (a draft is allowed).
+- **Switching.** Each call goes to the app when its socket answers, else
+  to the headless core: an app opened later is used from the next call.
+  If the app quits during a call, a read is answered headless; a send is
+  not tried again (it may have been queued) and answers `app_unavailable`.
+- **Connect an Agent…** in an agent's row of Settings › Accounts writes the
+  MCP entry for Claude Code (the user-scope entry `claude mcp add --scope
+  user` makes: `mcpServers.openagc-<local part>` in `~/.claude.json`,
+  `{"type": "stdio", "command": <app>/Contents/MacOS/openagc-mcp, "args":
+  ["--mailbox", <address>]}`) or Codex (`[mcp_servers.openagc-<local
+  part>]` in `~/.codex/config.toml`, or `$CODEX_HOME/config.toml`, with
+  `command`, `args` and `tool_timeout_sec = 900`). The sheet shows the
+  exact entry and file first; writing copies the file to
+  `<file>.openagc-backup-<time>`, replaces an entry of the same name
+  (never a second one), keeps the rest of the file and its permissions,
+  and refuses a file it cannot edit safely (not JSON, or TOML that would
+  not read back with the entry). The command to paste instead (`claude mcp
+  add …` / `codex mcp add …`) is always shown.
+
 ### 10.2 Tool set (MVP)
 
 *(Amended in M3: tool names use underscores, `mail_search` rather than
@@ -1862,7 +2000,111 @@ are configured to 15 minutes for the `openagc` server).
 Every tool call, its decision, and a one-line result summary is an
 `agent_actions` row. Settings › Agents › Activity lists them and can export
 JSONL. Read tools record which thread/message IDs were returned, so "what
-did the agent see?" is always answerable.
+did the agent see?" is always answerable. *(Amended 2026-10-08:* reads by
+an agent outside the app while the app is closed are not recorded, since
+that process keeps the store read-only; its sends are, §10.1.)
+
+### 10.6 Rules server **(Amendment 2026-10-08, ADR 0016)**
+
+*(Decided 2026-10-08; not built.)* Plan `docs/plans/rules-server.md`.
+
+Cloud agents (a Claude cloud routine, a ChatGPT task, an agent on another
+machine) cannot reach the app or run `openagc-mcp` on the Mac. A rules
+server gives them an agent mailbox's guide and facts, checks their
+drafts and takes their reports. It serves agent mailboxes only (§7.9);
+the user's own accounts are never published.
+
+**Topology.** `openagc-rules` (crate `rules-server`) is one binary with
+one SQLite file, separate from the app. It speaks MCP over Streamable
+HTTP to agents and a small REST API to the app and scripts, from one
+handler set. It runs plain HTTP behind the user's TLS proxy (the docs
+show Caddy). It depends on a pure crate holding the guide's
+deterministic check and the guide and facts renderers, which
+`openagc-core` uses too, so both answer alike. It never depends on
+`openagc-core`. The app is the source of truth; the server holds copies.
+One server may hold several mailboxes, each apart from the others.
+
+**Tools.** The names and answers are mailbox mode's (§10.1), so an
+agent's instructions work with either. There are no mail tools: a cloud
+agent reads and sends through the service with its key.
+
+| Tool | Input | Answer |
+|---|---|---|
+| `guide_rules` | `to`, `message_type` | The guide for those recipients and that type, whose mailbox it is, the name it sends as and the service's limits, from the snapshot, with its version and when it was published |
+| `facts_lookup` | `category`, `query` | The matching facts shared with cloud agents, with the version |
+| `check_draft` | `to`, `message_type`, `subject`, `body_markdown` | `guide_check`: what the draft breaks (banned and required phrases, patterns, length). Deterministic; no model calls |
+| `report_send` | `message_id` or `to`, `subject`, `sent_at`, body, and the snapshot version it was checked against | `{"queued": true}`; the report waits for the app |
+
+REST: `PUT` a snapshot (publisher token), `GET` and `DELETE` reports
+(publisher token), and read-only `GET`s of the guide and facts (agent
+token).
+
+**Tokens.** Every request carries a token as `Authorization: Bearer`.
+- *Publisher token:* one per mailbox per server, made when the app
+  first publishes and kept in the Keychain (§12). Only it can push a
+  snapshot or pull reports.
+- *Agent tokens:* minted in the app (*Connect a Cloud Agent…*), named by
+  the user ("Weekly outreach routine"), scoped to one mailbox, shown
+  once, revocable. The server stores only a hash; the app keeps the id
+  and name. A report names its token, so the activity log says which
+  agent sent.
+- *OAuth* for clients that take only a URL: the server is its own
+  minimal authorization server; its consent page asks for a one-time
+  connect code shown in the app, never a password. There are no user
+  accounts on the server. A claude.ai custom connector, which a cloud
+  routine uses, can send a fixed `Authorization` header only where the
+  *Request headers* beta is offered (checked 2026-10-08), so OAuth comes
+  before *Connect a Cloud Agent…* in the build.
+- A secret URL (`/m/<token>/mcp`) is the fallback for connectors with no
+  sign-in; URLs end up in logs, and the sheet says so.
+
+**Snapshot and versions.** The app pushes a full snapshot on change,
+debounced, with a version that only goes up and `If-Match` on the
+previous one. The app is the only writer: a refused push re-reads the
+server's version and pushes again. Every answer carries the version and
+its age; with the app closed nothing changes, and agents see the guide
+"as of" a time. The server keeps the last few versions, so a report can
+name the one it was checked against. Settings shows "Version 12,
+published 3 minutes ago".
+
+**Reports and retention.** Reports carry what the agent wrote, never
+mail it read. The app pulls them at sync, matches them to sent mail by
+Message-ID and records them as AI compositions (§14.10, agent
+`cloud:<token name>`), so the daily review sees them. A send with no
+report is still reviewed. The server deletes a report once the app has
+pulled it, and every report after 30 days regardless. Proposals from
+cloud agents will use the same queue later.
+
+**What is shared.**
+- Accepted rules and guidelines, with their scope and checks; never
+  evidence quotes, which come from sent mail.
+- Audience groups, with each address as a salted hash: the salt goes
+  with the snapshot, and the server hashes the `to` it is given before
+  matching.
+- Facts, by a *Share with cloud agents* switch on each fact (§14.11). On
+  by default for the mailbox's own *Use freely* facts; off by default
+  for *Ask before using* (an unattended agent cannot ask) and for global
+  facts (ADR 0012); never for *Never share*.
+- Never mail, keys or tokens of any service.
+The publish sheet lists exactly what goes before the first push.
+
+**Encryption at rest.** The snapshot is encrypted with a key
+(`rules.snapshot_key.<account>`, §12) wrapped for each agent token; the
+server unwraps it in memory for a request and never stores it. A leaked
+database or backup shows nothing. Required on the project-hosted server,
+optional when self-hosted. It does not protect against an operator who
+changes the code, and the docs say so.
+
+**Sending.** The server never sends and never holds a service key, an
+OAuth token or mail. An agent calls `check_draft`, fixes what breaks,
+sends through the service with its key, then calls `report_send`.
+
+**Hosting.** A static binary, and a Docker image on GitHub's registry
+built from this repository's releases. The project-hosted server is the
+same image, versions and settings; it comes only after self-hosting
+works, is priced at cost, and charges for running it (machine, domain
+and TLS, backups, uptime, abuse handling), never for features. No
+feature and no build flag exists only there.
 
 ---
 
@@ -2215,6 +2457,11 @@ Keys: `oauth.refresh_token.<account>`, `oauth.access_token.<account>`,
 shared by its agents, §7.9; for mailboxes created before 2026-10-08 the
 service account's id is the agent's account id, so the name is
 unchanged).
+*(Amended 2026-10-08, ADR 0016; not built.)* `rules.publish_token.<server>.<account>`
+(the publisher token for one agent mailbox on one rules server, §10.6) and,
+with encryption at rest, `rules.snapshot_key.<account>`. Agent tokens for
+the rules server are shown once and never stored by the app, which keeps
+only their ids and names.
 Routines need no secret of their own: the CLI holds the claude.ai login.
 The shipped OAuth client ID/secret is compiled in. Secrets are never written
 to logs, the database, or crash reports; `tracing` fields carrying tokens
@@ -2222,6 +2469,16 @@ are wrapped in a `Redacted` newtype whose `Debug` prints `***`.
 
 The MCP shim and the agent subprocesses receive **no** secrets in their
 environment; the agent CLIs manage their own credentials.
+
+*(Amendment 2026-10-08, oagc-uys.10.)* In mailbox mode (§10.1) with the
+app closed, `openagc-mcp` runs the core headless with a secret store that
+refuses every read, write and delete: it holds no secrets and never
+reaches the Keychain, which only the app's Swift side can read. It
+therefore cannot send; it queues, and the app sends when it next opens.
+Sending from the shim with the app closed needs the service account's key:
+the plan is a helper embedded in the app bundle, signed with the app's
+team and Keychain access group, which will be the one exception to this
+rule (`docs/plans/headless-mcp.md`, oagc-uys.7).
 
 ---
 
@@ -3491,6 +3748,19 @@ the other tips, until put away or until Clean Up is opened.)*
   `List-Id`'s or the sender's. Otherwise the list's mailto is offered, or,
   without one, the group counts as having no link Clean Up can use. A
   link the user would open in the browser is not offered.
+- *Never to the local network* *(amendment 2026-10-08, oagc-cp3.1)*.
+  `List-Id` and `From` are the sender's to write, so the one-click
+  address must also be https on port 443 at a host name (not an IP
+  literal), with at least two labels and not under `.local`,
+  `.localhost`, `.internal`, `.lan`, `.home.arpa`, `.intranet` or
+  `.corp`. When posting, the name is looked up once and refused if any
+  answer is loopback, unspecified, private (RFC 1918), shared (CGNAT
+  100.64/10), link-local, multicast, reserved, unique-local (fc00::/7)
+  or an IPv6 form of one of those; the POST then connects to exactly the
+  addresses checked (no second lookup, no proxy), so a name cannot
+  rebind between the check and the connection. Unit tests' local
+  servers are allowed by port through a `cfg(test)`-only list that the
+  app does not compile.
 - *Only a 2xx is done.* A redirect is not followed and not recorded: the
   line says "the list wants you to open a page at *host* to finish".
 - *Archive Them Too* archives only the groups whose one-click succeeded or
@@ -3536,6 +3806,9 @@ the other tips, until put away or until Clean Up is opened.)*
 
 Mailbox content, OAuth tokens, the ability to send as the user, the agent
 CLI's credentials (not ours, but in our process tree), the user's files.
+*(Amended 2026-10-08, ADR 0016:* an agent mailbox's guide and shared
+facts once published to a rules server (§10.6), and the tokens that reach
+them.)
 
 ### 15.2 Adversaries
 
@@ -3546,6 +3819,14 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 3. **Local malware** with the same UID (out of scope beyond not making
    things worse; we cannot defend against it).
 4. **The project itself** — must be *unable* to see mail (no backend).
+   *(Amended 2026-10-08, ADR 0016: it may run a rules server, which
+   still never holds mail.)*
+5. **A leaked rules-server agent token** *(amendment 2026-10-08)* — reads
+   one mailbox's published rules and shared facts and can file reports,
+   until revoked.
+6. **The rules server's operator** *(amendment 2026-10-08)* — the user,
+   or the project for the hosted server; can read what was published
+   during requests.
 
 ### 15.3 Controls
 
@@ -3554,19 +3835,35 @@ CLI's credentials (not ours, but in our process tree), the user's files.
 | HTML/JS exploitation | Rust sanitization + JS-off WKWebView + CSP + no navigation (§14.4) |
 | Tracking pixels | Remote images blocked by default |
 | Phishing links | Host mismatch confirmation; links open in system browser only |
-| Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web) |
+| Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web). Exception: an agent mailbox set to *Send freely* (§7.9) sends without asking, by the user's choice |
 | Prompt injection → destructive bulk actions | `delete` gated; bulk caps; reversible ops are actually reversible (archive not delete; trash not purge) |
 | Prompt injection → credential theft | Tokens never reach the agent process; Keychain only touched from Swift; MCP tools cannot read settings |
 | Agent escapes tool boundary | Claude: `--tools ""` + `dontAsk` + `--strict-mcp-config`; Codex: shell/exec/web tools disabled, read-only sandbox, `--ignore-user-config`; both are belt-and-braces — the real boundary is that OpenAGC only ever *offers* mail tools |
-| Rogue MCP client on the socket | Per-launch random socket path, 0600, peer UID check, per-session token in the shim args |
+| Rogue MCP client on the socket | Per-launch random socket path, 0600, peer UID check, per-session token in the shim args. Mailbox mode (§10.1) has no per-session token: any same-user process can open a session on any agent mailbox (accepted, §15.4) |
+| Rogue socket for the shim | In mailbox mode the shim connects only to a socket owned by the user, in a folder only the user can write (sticky parent allowed), served by a same-user peer *(amendment 2026-10-08, oagc-cp3.4)* |
 | Attachments | Never auto-opened; saved with quarantine xattr (`com.apple.quarantine`) so Gatekeeper applies; agent gets extracted text only |
 | Log leakage | `Redacted` newtypes; email bodies never logged above `trace`, which is compiled out in release |
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
+| The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
+| Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)* |
+| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses as salted hashes; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)* |
 
 ### 15.4 What the MVP does *not* protect against
 
 Malware running as the user; a compromised agent CLI binary; the user
 approving a bad send. These are documented in `docs/security.md`.
+
+*(Amendment 2026-10-08, oagc-cp3.6.)* Mailbox mode trusts the user's own
+processes: `openagc-mcp --mailbox` carries no per-session token, so any
+process running as the user can drive any agent mailbox (read its mail,
+guide and the user's facts; send from it). Under *Ask before each send*
+every send still waits for the user in the app (and is refused with the
+app closed); under *Send freely* it goes. This is accepted, like the
+user's other CLI tools: the boundary is the user account, a token readable
+by the same user would not stop such a process, and the shim holds no
+secrets. Own accounts are never served, only the six mailbox tools exist,
+and every call is logged under the outside agent's name. The injection
+suite covers the six tools.
 
 ---
 

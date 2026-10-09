@@ -25,7 +25,7 @@ use crate::registry::{AccountKind, IndexEntry, accounts_dir};
 use crate::secrets::keys;
 use crate::{Core, CoreError, ErrorKind, runtime};
 
-mod service_account;
+pub(crate) mod service_account;
 
 pub use service_account::{AgentAdded, ServiceAccountSummary};
 
@@ -1083,6 +1083,12 @@ impl Core {
     /// accepts the code `123456`.
     pub fn debug_use_fake_agent_mail(&self, enabled: bool) {
         self.agent_mail.fake.store(enabled, Ordering::SeqCst);
+    }
+
+    /// Development and tests: how many messages a fake agent mailbox holds
+    /// (received and sent), so tests can count sends.
+    pub fn debug_agent_mailbox_message_count(&self, account_id: String) -> u32 {
+        self.fake_agent_mailbox(&account_id).map_or(0, |f| f.message_count() as u32)
     }
 
     /// Development and tests: deliver a message into a fake agent mailbox

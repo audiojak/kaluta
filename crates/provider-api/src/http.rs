@@ -66,7 +66,7 @@ fn build_client(timeout: Duration) -> ProviderResult<Client> {
         .gzip(true)
         .https_only(false) // tests talk to a local mock; providers pass https URLs
         .build()
-        .map_err(|e| ProviderError::Network(e.to_string()))
+        .map_err(|e| ProviderError::Network(e.without_url().to_string()))
 }
 
 impl HttpClient {
@@ -106,7 +106,7 @@ impl HttpClient {
         build: impl Fn(&Client) -> RequestBuilder,
     ) -> ProviderResult<T> {
         let response = self.execute(cost, priority, build).await?;
-        response.json::<T>().await.map_err(|e| ProviderError::Decode(e.to_string()))
+        response.json::<T>().await.map_err(|e| ProviderError::Decode(e.without_url().to_string()))
     }
 
     /// Send and return the raw body with its content type.
@@ -119,7 +119,7 @@ impl HttpClient {
         let response = self.execute(cost, priority, build).await?;
         let content_type =
             response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_owned);
-        let body = response.bytes().await.map_err(|e| ProviderError::Network(e.to_string()))?;
+        let body = response.bytes().await.map_err(|e| ProviderError::Network(e.without_url().to_string()))?;
         Ok((body.to_vec(), content_type))
     }
 
@@ -149,7 +149,7 @@ impl HttpClient {
             let result = request.send().await;
             tracing::debug!(ok = result.is_ok(), "provider response");
             let error = match result {
-                Err(e) => ProviderError::Network(e.to_string()),
+                Err(e) => ProviderError::Network(e.without_url().to_string()),
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) if response.status() == StatusCode::UNAUTHORIZED => {
                     if refreshed {
@@ -337,6 +337,23 @@ mod tests {
         let p: Profile = http.json(1, Priority::Background, |c| c.get(server.uri())).await.unwrap();
         assert_eq!(p.email, "ok@example.com");
         assert_eq!(server.received_requests().await.unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_signed_url_that_fails_is_not_quoted_in_the_error() {
+        // A presigned storage URL (as a provider's raw download may be)
+        // that cannot be reached: port 1 on the loopback address refuses
+        // locally. reqwest's error names the URL it was asked for.
+        let signed = "http://127.0.0.1:1/bucket/raw.eml?X-Amz-Signature=deadbeef1234&token=s3cr3t";
+        let err = client(Arc::new(StaticToken("t".into())))
+            .bytes(1, Priority::Background, |c| c.get(signed))
+            .await
+            .unwrap_err();
+        let text = format!("{err} {err:?}");
+        assert!(matches!(err, ProviderError::Network(_)), "{err:?}");
+        for leak in ["deadbeef1234", "s3cr3t", "/bucket/raw.eml"] {
+            assert!(!text.contains(leak), "{leak} in {text}");
+        }
     }
 
     #[tokio::test]

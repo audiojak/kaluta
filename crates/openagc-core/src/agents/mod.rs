@@ -6,6 +6,7 @@ mod sessions;
 pub(crate) mod tools;
 
 pub use approvals::AgentActionInfo;
+pub(crate) use approvals::outcome_summary;
 
 pub use sessions::{
     AgentEventInfo, AgentProviderInfo, AgentSessionInfo, AgentStatusInfo, AgentTranscriptItem, PromptContextInfo,
@@ -194,6 +195,24 @@ impl ToolHandler for ToolRouter {
                 crate::registry::scoped(account, tools::call(&core, session, tool, arguments)).await
             }
             None => Outcome::error("app_unavailable", "OpenAGC is shutting down"),
+        }
+    }
+
+    async fn open_outside(&self, mailbox: &str, client: &str) -> Result<String, String> {
+        let core = self.core.upgrade().ok_or_else(|| "OpenAGC is shutting down".to_owned())?;
+        core.open_outside_session(mailbox, client).await.map_err(|e| e.to_string())
+    }
+
+    async fn call_outside(&self, session: &str, tool: agent_mcp::MailboxTool, arguments: serde_json::Value) -> Outcome {
+        match self.core.upgrade() {
+            Some(core) => core.call_outside(session, tool, arguments).await,
+            None => Outcome::error("app_unavailable", "OpenAGC is shutting down"),
+        }
+    }
+
+    async fn close_outside(&self, session: &str) {
+        if let Some(core) = self.core.upgrade() {
+            core.close_outside_session(session).await;
         }
     }
 }

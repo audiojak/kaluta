@@ -118,10 +118,34 @@ impl Visit for MessageVisitor {
     }
 }
 
+/// Query parameters that carry a signature or credential in a presigned
+/// URL (S3, CloudFront, GCS, generic `token`/`sig`): their values become
+/// `<redacted>`.
+const SIGNED_QUERY: &[&str] = &[
+    "x-amz-signature",
+    "x-amz-credential",
+    "x-amz-security-token",
+    "x-goog-signature",
+    "x-goog-credential",
+    "signature",
+    "sig",
+    "token",
+    "access_token",
+    "key-pair-id",
+    "policy",
+];
+
+/// API key prefixes of the agent-mail services (spec §7.9): AgentMail's
+/// `am_…` and Primitive's `prim_…`, at the start of a word and with at
+/// least five more characters.
+const KEY_PREFIXES: &[&str] = &["am_", "prim_"];
+
 /// Last line of defense for diagnostics (spec §17): error text can quote
 /// an address or, in the worst case, a token. Email addresses become
-/// `<email>`; Google access (`ya29.…`) and refresh (`1//…`) tokens become
-/// `<token>`. Secrets are also kept out by `Redacted` at the source.
+/// `<email>`; Google access (`ya29.…`) and refresh (`1//…`) tokens and
+/// AgentMail (`am_…`) and Primitive (`prim_…`) keys become `<token>`;
+/// presigned URLs' signature and credential parameters become
+/// `<redacted>`. Secrets are also kept out by `Redacted` at the source.
 pub(crate) fn scrub(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let local = |c: char| c.is_ascii_alphanumeric() || "._%+-".contains(c);
@@ -140,6 +164,36 @@ pub(crate) fn scrub(text: &str) -> String {
             out.push_str("<token>");
             i = j;
             continue;
+        }
+        if starts_word
+            && let Some(prefix) = KEY_PREFIXES.iter().find(|p| chars[i..].iter().take(p.len()).copied().eq(p.chars()))
+        {
+            let mut j = i + prefix.len();
+            while j < chars.len() && token(chars[j]) {
+                j += 1;
+            }
+            if j - i >= prefix.len() + 5 {
+                out.push_str("<token>");
+                i = j;
+                continue;
+            }
+        }
+        if chars[i] == '?' || chars[i] == '&' {
+            let mut j = i + 1;
+            while j < chars.len() && (chars[j].is_ascii_alphanumeric() || "_-".contains(chars[j])) {
+                j += 1;
+            }
+            let name: String = chars[i + 1..j].iter().collect::<String>().to_ascii_lowercase();
+            if j < chars.len() && chars[j] == '=' && SIGNED_QUERY.contains(&name.as_str()) {
+                out.extend(&chars[i..=j]);
+                out.push_str("<redacted>");
+                let mut k = j + 1;
+                while k < chars.len() && !(chars[k].is_whitespace() || "&#)\"'>],".contains(chars[k])) {
+                    k += 1;
+                }
+                i = k;
+                continue;
+            }
         }
         if starts_word && rest.starts_with("1//") {
             let mut j = i + 3;
@@ -270,6 +324,25 @@ mod tests {
         assert_eq!(scrub("refresh 1//0gAbcdefghijklmnopqrstuvwx rejected"), "refresh <token> rejected");
         assert_eq!(scrub("retry 1//2 in 3s; me@localhost; 5 @ noon"), "retry 1//2 in 3s; me@localhost; 5 @ noon");
         assert_eq!(scrub("résumé for ünïcode@exämple.com"), "résumé for ünïcode@exämple.com", "non-ASCII left alone");
+    }
+
+    #[test]
+    fn agent_mail_keys_and_signed_urls_are_scrubbed() {
+        assert_eq!(scrub("key am_us_8f3kQ_x-9Zz rejected"), "key <token> rejected");
+        assert_eq!(scrub("Bearer prim_AbC123xyz789"), "Bearer <token>");
+        assert_eq!(scrub("stream_ended; program_x; am_ok"), "stream_ended; program_x; am_ok", "words left alone");
+        assert_eq!(
+            scrub(
+                "error sending request for url (https://b.s3.amazonaws.com/m1.eml?X-Amz-Algorithm=AWS4&X-Amz-Credential=AKIA%2F1&X-Amz-Signature=deadbeef&X-Amz-Security-Token=FQo)"
+            ),
+            "error sending request for url (https://b.s3.amazonaws.com/m1.eml?X-Amz-Algorithm=AWS4&X-Amz-Credential=<redacted>&X-Amz-Signature=<redacted>&X-Amz-Security-Token=<redacted>)"
+        );
+        assert_eq!(
+            scrub("GET https://cdn.example/a1?Expires=1&Signature=abc~def&Key-Pair-Id=K2 failed"),
+            "GET https://cdn.example/a1?Expires=1&Signature=<redacted>&Key-Pair-Id=<redacted> failed"
+        );
+        assert_eq!(scrub("https://x.example/raw?token=s3cr3t#f"), "https://x.example/raw?token=<redacted>#f");
+        assert_eq!(scrub("https://x.example/raw?sig=x&page=2"), "https://x.example/raw?sig=<redacted>&page=2");
     }
 
     #[test]

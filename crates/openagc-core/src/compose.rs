@@ -364,9 +364,15 @@ impl Core {
         let from = EmailAddress::new(agent.as_deref(), &self.own_address().await?);
         let service = self.sync_service();
         let events = self.account_events();
-        let hold = self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed) as mail_domain::Millis;
+        // The headless MCP queues for the app, which sends it when it next
+        // opens (spec §10.1); there is no one to undo it meanwhile. An agent
+        // mailbox always goes through its outbox, so its mail reaches the
+        // service whenever its sync next runs, never only this Mac.
+        let always_queue = self.headless || agent.is_some();
+        let hold = if self.headless { 0 } else { self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed) };
+        let hold = hold as mail_domain::Millis;
         runtime::run(async move {
-            let queue = service.is_some();
+            let queue = service.is_some() || always_queue;
             let changes = mail_sync::send_draft(&db, id, from, queue, hold).await.map_err(|e| match e {
                 mail_sync::SyncError::Store(mail_store::StoreError::Invalid(m)) => {
                     CoreError::new(ErrorKind::InvalidInput, m)

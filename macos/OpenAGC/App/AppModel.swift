@@ -1471,6 +1471,11 @@ final class AppModel {
             await sink(events)
             return
         }
+        // An agent outside the app asks here, wherever the user is (spec §10.1).
+        if case let .agent(sessionID, events) = tagged.event, AgentStore.isOutside(sessionID) {
+            await agent.applyOutside(events)
+            return
+        }
         // An agent session reports to its own account's panel, shown or not.
         if case let .agent(sessionID, events) = tagged.event, let account = tagged.accountID,
            let store = agentStores[account] {

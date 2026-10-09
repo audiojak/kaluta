@@ -36,6 +36,8 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0017_facts.sql"),
     include_str!("../migrations/0018_cleanup.sql"),
     include_str!("../migrations/0019_cleanup_progress.sql"),
+    include_str!("../migrations/0020_inbox_category_stats.sql"),
+    include_str!("../migrations/0021_outbox_claims.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -61,6 +63,9 @@ pub struct Db {
 struct Inner {
     path: PathBuf,
     writer: Mutex<Option<mpsc::Sender<WriteJob>>>,
+    /// [`Db::open_existing`]: the writer is opened by the first write, so a
+    /// process that only reads never opens the store for writing.
+    lazy_writer: Mutex<bool>,
     readers: Mutex<Vec<Connection>>,
     permits: Semaphore,
 }
@@ -72,7 +77,30 @@ impl Db {
             std::fs::create_dir_all(dir).map_err(|e| StoreError::Io(e.to_string()))?;
         }
         let writer = open_writer(path)?;
+        let db = Self::with_readers(path, false)?;
+        db.start_writer(writer)?;
+        Ok(db)
+    }
 
+    /// Open a store another process owns, without creating or migrating it
+    /// (the headless MCP, spec §10.1): refused unless its schema is exactly
+    /// this build's. Reads use read-only connections; the first write opens
+    /// the writer (no migration), so a reader never opens it for writing.
+    pub fn open_existing(path: &Path) -> StoreResult<Self> {
+        if !path.is_file() {
+            return Err(StoreError::NotFound(format!("no store at {}", path.display())));
+        }
+        let db = Self::with_readers(path, true)?;
+        db.read_blocking(check_version)?;
+        Ok(db)
+    }
+
+    /// Whether this handle has opened the store for writing.
+    pub fn writer_opened(&self) -> bool {
+        self.inner.writer.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    fn with_readers(path: &Path, lazy_writer: bool) -> StoreResult<Self> {
         let mut readers = Vec::with_capacity(READER_COUNT);
         for _ in 0..READER_COUNT {
             let conn = Connection::open_with_flags(
@@ -82,7 +110,19 @@ impl Db {
             configure(&conn, false)?;
             readers.push(conn);
         }
+        Ok(Self {
+            inner: Arc::new(Inner {
+                path: path.to_owned(),
+                writer: Mutex::new(None),
+                lazy_writer: Mutex::new(lazy_writer),
+                readers: Mutex::new(readers),
+                permits: Semaphore::new(READER_COUNT),
+            }),
+        })
+    }
 
+    /// Run the writer connection on its own thread.
+    fn start_writer(&self, writer: Connection) -> StoreResult<()> {
         let (tx, rx) = mpsc::channel::<WriteJob>();
         thread::Builder::new()
             .name("openagc-store-writer".into())
@@ -93,15 +133,8 @@ impl Db {
                 }
             })
             .map_err(|e| StoreError::Io(e.to_string()))?;
-
-        Ok(Self {
-            inner: Arc::new(Inner {
-                path: path.to_owned(),
-                writer: Mutex::new(Some(tx)),
-                readers: Mutex::new(readers),
-                permits: Semaphore::new(READER_COUNT),
-            }),
-        })
+        *self.inner.writer.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        Ok(())
     }
 
     /// Whether both handles are the same open store.
@@ -143,13 +176,29 @@ impl Db {
         let (tx, rx) = oneshot::channel();
         let job: WriteJob = Box::new(move |conn| {
             let result = (|| {
-                let txn = conn.transaction()?;
+                // The write lock up front: another process writing the same
+                // store (the headless MCP, spec §7.4) makes a deferred
+                // transaction that read first fail at its first write with
+                // SQLITE_BUSY at once, past the busy timeout. Taken at BEGIN,
+                // the lock is waited for.
+                let txn = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
                 let value = f(&txn)?;
                 txn.commit()?;
                 Ok(value)
             })();
             let _ = tx.send(result);
         });
+        let mut lazy = self.inner.lazy_writer.lock().unwrap_or_else(|e| e.into_inner());
+        if *lazy {
+            // The first write of an `open_existing` store: the writer, with
+            // the schema checked again (it may have changed since opening).
+            let conn = Connection::open_with_flags(&self.inner.path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+            configure(&conn, true)?;
+            check_version(&conn)?;
+            self.start_writer(conn)?;
+            *lazy = false;
+        }
+        drop(lazy);
         let guard = self.inner.writer.lock().unwrap_or_else(|e| e.into_inner());
         guard.as_ref().ok_or(StoreError::Closed)?.send(job).map_err(|_| StoreError::Closed)?;
         Ok(rx)
@@ -178,6 +227,7 @@ impl Db {
 
     /// Stop accepting writes. Queued writes still run.
     pub fn close(&self) {
+        *self.inner.lazy_writer.lock().unwrap_or_else(|e| e.into_inner()) = false;
         self.inner.writer.lock().unwrap_or_else(|e| e.into_inner()).take();
     }
 }
@@ -224,8 +274,14 @@ fn open_writer(path: &Path) -> StoreResult<Connection> {
     }
 }
 
+/// How long a write waits for another process's write to finish before
+/// failing. Writes are short (a sync batch is well under a second); this
+/// is far past any of them, so a second writer is waited for, never
+/// reported to the user.
+const WRITER_BUSY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn configure(conn: &Connection, writer: bool) -> StoreResult<()> {
-    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.busy_timeout(if writer { WRITER_BUSY_TIMEOUT } else { std::time::Duration::from_secs(5) })?;
     if writer {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
@@ -238,6 +294,24 @@ fn configure(conn: &Connection, writer: bool) -> StoreResult<()> {
     conn.pragma_update(None, "mmap_size", 256 * 1024 * 1024)?;
     conn.set_prepared_statement_cache_capacity(128);
     Ok(())
+}
+
+/// Refuse a store whose schema is not this build's: an opener that may not
+/// migrate cannot read an older one correctly, nor a newer one at all.
+fn check_version(conn: &Connection) -> StoreResult<()> {
+    let current: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    let target = schema_version();
+    match current.cmp(&target) {
+        std::cmp::Ordering::Equal => Ok(()),
+        std::cmp::Ordering::Less => Err(StoreError::Version(format!(
+            "this mailbox's store is from an older OpenAGC (schema v{current}; this build reads v{target}); \
+             open OpenAGC once to update it"
+        ))),
+        std::cmp::Ordering::Greater => Err(StoreError::Version(format!(
+            "this mailbox's store is from a newer OpenAGC (schema v{current}; this build reads v{target}); \
+             update OpenAGC"
+        ))),
+    }
 }
 
 fn migrate(conn: &mut Connection) -> StoreResult<()> {
@@ -328,6 +402,55 @@ mod tests {
     }
 
     #[test]
+    fn upgrading_counts_the_inbox_tabs_of_the_mail_already_stored() {
+        use mail_domain::{LabelId, MessageId, ThreadId};
+        let path = temp_db_path("tab-counts");
+        let db = Db::open(&path).unwrap();
+        db.write_blocking(|tx| {
+            let mut w = crate::MailWriter::new(tx);
+            for (id, labels) in [
+                ("a", &["INBOX", "UNREAD"][..]),
+                ("b", &["INBOX", "CATEGORY_FORUMS", "CATEGORY_SOCIAL", "UNREAD"]),
+                ("c", &["INBOX", "CATEGORY_SOCIAL"]),
+                ("d", &["CATEGORY_SOCIAL", "UNREAD"]),
+            ] {
+                w.upsert_message(&crate::IncomingMessage {
+                    id: MessageId::new(id),
+                    thread_id: ThreadId::new(id),
+                    label_ids: labels.iter().map(|l| LabelId::new(*l)).collect(),
+                    ..Default::default()
+                })?;
+            }
+            w.finish()
+        })
+        .unwrap();
+        db.close();
+        // The store as it was before the counts were kept.
+        let c = Connection::open(&path).unwrap();
+        c.execute_batch(
+            "DROP TABLE inbox_category_stats;
+             ALTER TABLE outbox DROP COLUMN claimed_by; ALTER TABLE outbox DROP COLUMN lease_until;
+             PRAGMA user_version = 19",
+        )
+        .unwrap();
+        drop(c);
+        let db = Db::open(&path).unwrap();
+        let tabs = db.read_blocking(crate::read::stored_inbox_categories).unwrap();
+        let tabs: Vec<_> = tabs.iter().map(|t| (t.id.as_str(), t.total, t.unread)).collect();
+        assert_eq!(
+            tabs,
+            [
+                ("CATEGORY_PERSONAL", 1, 1),
+                ("CATEGORY_PROMOTIONS", 0, 0),
+                ("CATEGORY_SOCIAL", 2, 1),
+                ("CATEGORY_UPDATES", 0, 0),
+                ("CATEGORY_FORUMS", 0, 0),
+            ]
+        );
+        assert_eq!(db.read_blocking(crate::consistency::check).unwrap(), Vec::<String>::new());
+    }
+
+    #[test]
     fn newer_schema_is_refused() {
         let path = temp_db_path("newer");
         Db::open(&path).unwrap().close();
@@ -336,6 +459,50 @@ mod tests {
         drop(c);
         let err = Db::open(&path).err().unwrap();
         assert!(matches!(err, StoreError::Migration(_)), "{err}");
+    }
+
+    #[test]
+    fn an_existing_store_opens_without_migrating_and_reads_never_open_the_writer() {
+        let path = temp_db_path("existing");
+        assert!(matches!(Db::open_existing(&path), Err(StoreError::NotFound(_))), "never created");
+        assert!(!path.exists());
+        let owner = Db::open(&path).unwrap();
+        owner.write_blocking(|t| Ok(t.execute("INSERT INTO sync_state (key, value) VALUES ('k', 'v')", [])?)).unwrap();
+        owner.close();
+        drop(owner);
+
+        let other = Db::open_existing(&path).unwrap();
+        let read = |db: &Db| -> String {
+            db.read_blocking(|c| Ok(c.query_row("SELECT value FROM sync_state WHERE key = 'k'", [], |r| r.get(0))?))
+                .unwrap()
+        };
+        assert_eq!(read(&other), "v");
+        assert!(!other.writer_opened(), "reading never opens the store for writing");
+        other.write_blocking(|t| Ok(t.execute("UPDATE sync_state SET value = 'w' WHERE key = 'k'", [])?)).unwrap();
+        assert!(other.writer_opened());
+        assert_eq!(read(&other), "w");
+        other.close();
+        assert!(matches!(
+            other.write_blocking(|t| Ok(t.execute("DELETE FROM sync_state", [])?)),
+            Err(StoreError::Closed)
+        ));
+    }
+
+    #[test]
+    fn an_existing_store_of_another_schema_is_refused_in_words() {
+        for (version, says) in [(3, "older OpenAGC"), (999, "newer OpenAGC")] {
+            let path = temp_db_path(&format!("existing-v{version}"));
+            Db::open(&path).unwrap().close();
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(&format!("PRAGMA user_version = {version}")).unwrap();
+            drop(c);
+            let err = Db::open_existing(&path).err().unwrap();
+            assert!(matches!(err, StoreError::Version(_)), "{err}");
+            assert!(err.to_string().contains(says), "{err}");
+            let still: u32 =
+                Connection::open(&path).unwrap().pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
+            assert_eq!(still, version, "nothing was migrated");
+        }
     }
 
     #[test]

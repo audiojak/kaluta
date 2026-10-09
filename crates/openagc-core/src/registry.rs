@@ -350,8 +350,10 @@ impl Core {
             return found;
         }
         let path = self.account_db_path(account_id);
+        // The headless MCP never creates or migrates a store (spec §10.1).
+        let open = if self.headless { Db::open_existing } else { Db::open };
         let db = runtime::run(async move {
-            tokio::task::spawn_blocking(move || Db::open(&path))
+            tokio::task::spawn_blocking(move || open(&path))
                 .await
                 .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?
                 .map_err(CoreError::from)

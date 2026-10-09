@@ -16,7 +16,7 @@ pub mod client;
 pub mod server;
 pub mod wire;
 
-pub use catalog::{ToolSpec, catalog};
+pub use catalog::{MailboxTool, MailboxToolSpec, ToolSpec, catalog, mailbox_catalog};
 pub use client::ShimClient;
 pub use server::{McpSocket, ToolHandler};
 pub use wire::{Outcome, PROTOCOL_VERSION};

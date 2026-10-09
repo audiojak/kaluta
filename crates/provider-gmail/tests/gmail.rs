@@ -274,6 +274,35 @@ async fn send_posts_base64url_raw_with_the_thread() {
 }
 
 #[tokio::test]
+async fn an_earlier_attempt_of_a_send_is_found_by_its_message_id() {
+    let (server, gmail) = setup().await;
+    let raw = b"From: me@example.com\r\nTo: a@example.com\r\nMessage-ID: <k3.openagc@example.com>\r\nSubject: Hi\r\n\r\nHello";
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages"))
+        .and(query_param("q", "rfc822msgid:k3.openagc@example.com"))
+        .and(query_param("includeSpamTrash", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"messages": [{"id": "sent7", "threadId": "t7"}], "resultSizeEstimate": 1})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert_eq!(gmail.already_sent(raw).await.unwrap(), Some(MessageId::new("sent7")));
+
+    let (server, gmail) = setup().await;
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"resultSizeEstimate": 0})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert_eq!(gmail.already_sent(raw).await.unwrap(), None, "not found: the send goes");
+    let no_id = b"From: me@example.com\r\nSubject: Hi\r\n\r\nHello";
+    assert_eq!(gmail.already_sent(no_id).await.unwrap(), None, "nothing to look for, no call");
+}
+
+#[tokio::test]
 async fn drafts_are_created_replaced_and_deleted() {
     let (server, gmail) = setup().await;
     let raw = b"From: me@example.com\r\nSubject: Draft\r\n\r\nWIP";
