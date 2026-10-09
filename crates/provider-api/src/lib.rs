@@ -261,4 +261,10 @@ pub trait MailProvider: Send + Sync {
     fn adopts_sent_copies(&self) -> bool {
         false
     }
+    /// How much longer the provider has asked that nothing be sent (a rate
+    /// limit), so the app can say why sync is waiting; `None` when it has
+    /// not.
+    async fn paused_for(&self) -> Option<std::time::Duration> {
+        None
+    }
 }

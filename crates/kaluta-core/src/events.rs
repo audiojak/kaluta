@@ -105,6 +105,10 @@ impl From<mail_sync::NewMail> for NewMailInfo {
 pub enum SyncState {
     Idle,
     Bootstrapping,
+    /// A round has started that looks for new mail and changes since the
+    /// last one; a `Syncing` (with what is left to download), `Offline` or
+    /// `Error` status follows when it ends.
+    Checking,
     Syncing,
     Offline,
     Error,
@@ -131,6 +135,12 @@ pub enum CoreEvent {
         /// Why sync paused or stopped (`Error`, `Offline`), in the
         /// provider's words, so the footer can say.
         message: Option<String>,
+    },
+    /// The provider asked that nothing be sent for a while (a rate limit),
+    /// so sync waits: when it resumes, in Unix milliseconds; `None` once
+    /// the pause is over.
+    SyncPaused {
+        until: Option<i64>,
     },
     OutboxStatus {
         pending: u32,

@@ -1699,7 +1699,7 @@ enum CoreClientEvent: Sendable, Equatable {
         let event: CoreClientEvent
     }
 
-    enum SyncState: Sendable, Equatable { case idle, bootstrapping, syncing, offline, error }
+    enum SyncState: Sendable, Equatable { case idle, bootstrapping, checking, syncing, offline, error }
 
     /// A message that just arrived, unread in the Inbox.
     struct NewMail: Sendable, Equatable {
@@ -1713,6 +1713,9 @@ enum CoreClientEvent: Sendable, Equatable {
     case threadsChanged(mailboxID: String, hint: ThreadChangeHint)
     /// `message`: why sync paused or stopped, in the provider's words.
     case syncStatus(SyncState, pending: UInt32, headers: UInt32, message: String?)
+    /// The provider asked that nothing be sent until `until` (a rate
+    /// limit); `nil` once the pause is over.
+    case syncPaused(until: Date?)
     case outboxStatus(pending: UInt32, failed: UInt32)
     case newMail([NewMail])
     case agent(sessionID: String, events: [AgentEventInfo])
@@ -1798,6 +1801,8 @@ private extension CoreClientEvent {
                 removed: hint.removed, invalidate: hint.invalidate))
         case let .syncStatus(state, pending, pendingHeaders, message):
             self = .syncStatus(SyncState(state), pending: pending, headers: pendingHeaders, message: message)
+        case let .syncPaused(until):
+            self = .syncPaused(until: until.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
         case let .outboxStatus(pending, failed):
             self = .outboxStatus(pending: pending, failed: failed)
         case let .error(kind, message):
@@ -1839,6 +1844,7 @@ private extension CoreClientEvent.SyncState {
         switch state {
         case .idle: self = .idle
         case .bootstrapping: self = .bootstrapping
+        case .checking: self = .checking
         case .syncing: self = .syncing
         case .offline: self = .offline
         case .error: self = .error

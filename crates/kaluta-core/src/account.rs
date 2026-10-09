@@ -1324,6 +1324,26 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e, CoreEvent::SyncStatus { state: SyncState::Bootstrapping, .. }))
         );
+        // Each round says it is checking for new mail.
+        assert!(
+            recorder
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, CoreEvent::SyncStatus { state: SyncState::Checking, .. }))
+        );
+
+        // A provider's rate-limit pause is told, and so is its end.
+        fake.set_paused(Some(Duration::from_secs(60)));
+        wait_for("a pause event", || {
+            recorder.0.lock().unwrap().iter().any(|e| matches!(e, CoreEvent::SyncPaused { until: Some(_) }))
+        });
+        fake.set_paused(None);
+        wait_for("the pause's end", || {
+            recorder.0.lock().unwrap().iter().any(|e| matches!(e, CoreEvent::SyncPaused { until: None }))
+        });
+
         // Only the message that arrived after the first sync is announced.
         wait_for("a new-mail event", || {
             recorder.0.lock().unwrap().iter().any(|e| matches!(e, CoreEvent::NewMail { .. }))

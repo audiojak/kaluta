@@ -29,6 +29,8 @@ pub struct FakeProvider {
     label_ops: Mutex<Vec<LabelOp>>,
     /// Writes naming a message the server does not have answer `NotFound`.
     reject_missing: std::sync::atomic::AtomicBool,
+    /// A rate-limit pause to report, as a real provider's limiter would.
+    paused: Mutex<Option<std::time::Duration>>,
 }
 
 #[derive(Default)]
@@ -61,6 +63,7 @@ impl FakeProvider {
             write_failures: Mutex::new(Vec::new()),
             label_ops: Mutex::new(Vec::new()),
             reject_missing: std::sync::atomic::AtomicBool::new(false),
+            paused: Mutex::new(None),
         }
     }
 
@@ -88,6 +91,11 @@ impl FakeProvider {
     }
 
     /// Make the next `errors.len()` write calls fail, in order.
+    /// Report this much of a rate-limit pause (`None`: no pause).
+    pub fn set_paused(&self, left: Option<std::time::Duration>) {
+        *self.paused.lock().unwrap_or_else(|e| e.into_inner()) = left;
+    }
+
     pub fn fail_next_writes(&self, errors: Vec<ProviderError>) {
         let mut f = self.write_failures.lock().unwrap_or_else(|e| e.into_inner());
         *f = errors.into_iter().rev().collect();
@@ -232,6 +240,10 @@ fn matches(m: &FetchedMessage, filter: &ListFilter, now: Millis) -> bool {
 
 #[async_trait]
 impl MailProvider for FakeProvider {
+    async fn paused_for(&self) -> Option<std::time::Duration> {
+        *self.paused.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     async fn profile(&self) -> ProviderResult<Profile> {
         let s = self.state();
         Ok(Profile {

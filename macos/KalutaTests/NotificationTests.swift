@@ -160,4 +160,47 @@ struct SyncStatusTextTests {
         #expect(lines(.idle, "imap-refused", note: "IMAP was refused for this account")
             == ["Using the Gmail API", "IMAP was refused for this account"])
     }
+
+    @Test func aSlowRoundForNewMailAndAProvidersPauseAreSaid() {
+        #expect(lines(.checking) == ["Checking for New Mail", nil])
+        let paused = { (d: AppModel.SyncDisplay, left: TimeInterval, service: String) in
+            SyncStatusView.footer(d, transport: nil, needsSignIn: false, pausedFor: left, service: service)
+                .map { [$0.title, $0.detail] } ?? []
+        }
+        #expect(paused(.checking, 41.2, "Gmail") == ["Checking for New Mail", "Gmail asked to wait · resuming in 0:42"])
+        #expect(paused(.syncing(pending: 300), 65, "Gmail")
+            == ["Downloading Messages", "Gmail asked to wait · resuming in 1:05"])
+        #expect(paused(.idle, 5, "the mail service")
+            == ["Waiting for the mail service", "The mail service asked to wait · resuming in 0:05"])
+        #expect(paused(.idle, 0, "Gmail").isEmpty, "a pause that is over says nothing")
+        #expect(SyncStatusView.pauseLine(-1) == nil)
+    }
+
+    @Test func onlyARoundThatTakesAWhileShows() async throws {
+        let model = AppModel(core: nil, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
+        let status = { (state: CoreClientEvent.SyncState, pending: UInt32) in
+            CoreClientEvent.Tagged(accountID: nil, event: .syncStatus(state, pending: pending, headers: 0, message: nil))
+        }
+        await model.handle(status(.checking, 0))
+        #expect(model.syncDisplay == .idle, "not at once")
+        await model.handle(status(.syncing, 0)) // a quick round ended
+        try await Task.sleep(for: AppModel.checkingDelay + .milliseconds(400))
+        #expect(model.syncDisplay == .idle, "a quick round never shows")
+
+        await model.handle(status(.checking, 0))
+        try await Task.sleep(for: AppModel.checkingDelay + .milliseconds(400))
+        #expect(model.syncDisplay == .checking, "a slow one does")
+        await model.handle(status(.syncing, 12))
+        #expect(model.syncDisplay == .syncing(pending: 12))
+        // A round starting while mail downloads leaves the download showing.
+        await model.handle(status(.checking, 0))
+        try await Task.sleep(for: AppModel.checkingDelay + .milliseconds(400))
+        #expect(model.syncDisplay == .syncing(pending: 12))
+
+        let until = Date.now.addingTimeInterval(60)
+        await model.handle(.init(accountID: nil, event: .syncPaused(until: until)))
+        #expect(model.syncPausedUntil == until)
+        await model.handle(.init(accountID: nil, event: .syncPaused(until: nil)))
+        #expect(model.syncPausedUntil == nil)
+    }
 }

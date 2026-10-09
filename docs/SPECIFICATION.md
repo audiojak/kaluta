@@ -2992,7 +2992,12 @@ Every target in §1.3 traces to one of these rules.
 sidebar reads Favorites (Inbox, Starred, Sent), then the account's other
 mailboxes with its labels under the account's name, then Routines; sync
 status is its footer (a thin progress bar, "Downloading Messages", what is
-left). The list column is titled with the mailbox and its unread count.
+left). *(Amended 2026-10-09.)* A round for new mail that takes over two
+seconds (a catch-up after the app was closed) shows "Checking for New
+Mail" with an indeterminate bar; the core says `Checking` when each round
+starts. When the provider asks that nothing be sent (a rate limit), the
+core says until when (`SyncPaused`) and the footer counts it down: "Gmail
+asked to wait · resuming in 0:42". The list column is titled with the mailbox and its unread count.
 New Message sits at the list column's trailing edge, where it meets the
 reader, as in Mail (implemented 2026-09-28: the list column's own
 toolbar; SwiftUI right-aligns a detail column's items, and `.navigation`
