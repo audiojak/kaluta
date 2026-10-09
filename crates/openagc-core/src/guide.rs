@@ -522,6 +522,9 @@ impl Core {
 
     pub(crate) fn guide_changed(&self) {
         self.account_events().emit(CoreEvent::GuideChanged);
+        if let Some(account) = self.effective_account_id() {
+            self.rules_changed(Some(account));
+        }
     }
 
     /// Apply edits as one change in one transaction: recorded for exact

@@ -746,6 +746,7 @@ mod tests {
             scope: FactScope::Account,
             overridden: false,
             stale: false,
+            share_with_cloud: true,
         }
     }
 

@@ -41,6 +41,9 @@ toml.workspace = true
 
 [dev-dependencies]
 wiremock.workspace = true
+# The rules server, in process, for publishing's tests (spec §10.6).
+rules-server.workspace = true
+axum.workspace = true
 provider-gmail = { workspace = true, features = ["fake-imap"] }
 provider-agentmail = { workspace = true, features = ["fake-ws"] }
 futures = "0.3"

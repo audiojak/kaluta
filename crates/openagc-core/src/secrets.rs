@@ -24,6 +24,12 @@ pub mod keys {
     pub fn mailbox_api_key(service_account_id: &str) -> String {
         format!("mailbox.api_key.{service_account_id}")
     }
+    /// The publisher token for one agent mailbox on one rules server (spec
+    /// §10.6, §12). `server` is the server's host, port and path
+    /// (`rules.example.com`, `127.0.0.1:8787`).
+    pub fn rules_publish_token(server: &str, account_id: &str) -> String {
+        format!("rules.publish_token.{server}.{account_id}")
+    }
     pub const CUSTOM_CLIENT_SECRET: &str = "oauth.client_secret.custom";
     pub const ANTHROPIC_API_KEY: &str = "anthropic.api_key";
 }
