@@ -197,6 +197,62 @@ fn wait_for(what: &str, mut condition: impl FnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
+/// Every string in `v`, keys included.
+fn strings(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::String(s) => out.push(s.clone()),
+        Value::Array(a) => a.iter().for_each(|x| strings(x, out)),
+        Value::Object(o) => o.iter().for_each(|(k, x)| {
+            out.push(k.clone());
+            strings(x, out);
+        }),
+        _ => {}
+    }
+}
+
+#[test]
+fn the_published_about_names_no_address_but_the_mailboxs_own() {
+    // An unverified AgentMail mailbox: mailbox mode tells the agent it may
+    // write only to the user's own email, naming it. A cloud agent is told
+    // that without the address.
+    let dir = scratch("about");
+    let secrets = Arc::new(MemorySecrets::default());
+    let core = open_core(&dir, &secrets);
+    let created = block_on(core.clone().create_agent_mailbox(
+        AgentService::AgentMail,
+        "Scout".into(),
+        Some("me@personal.example".into()),
+        "req-about".into(),
+    ))
+    .unwrap();
+    let id = created.account_id;
+    in_account(&core, &id, guide_and_facts(&core));
+    let meta = core.agent_meta(&id).unwrap();
+    assert!(core.agent_limits_text(&meta).contains("me@personal.example"), "mailbox mode names it");
+
+    let v = published_json(&core, &id);
+    let about = v["mailbox"]["about"].as_str().unwrap();
+    assert!(about.contains(&format!("Scout <{}>", meta.address)) && about.contains("AgentMail"), "{about}");
+    assert!(about.contains("only to the user's own email"), "{about}");
+    assert!(!about.contains("this Mac"), "a cloud agent's drafts are not here: {about}");
+    let mut all = Vec::new();
+    strings(&v, &mut all);
+    for s in &all {
+        for word in s.split(|c: char| c.is_whitespace() || "<>(),;:'\"[]".contains(c)) {
+            let word = word.trim_end_matches('.');
+            if word.contains('@') {
+                assert_eq!(word, meta.address, "an address other than the mailbox's own in {s:?}");
+            }
+        }
+    }
+    assert!(!v.to_string().contains("personal.example"));
+
+    // Primitive says its own limits, and nothing of the user either.
+    let (_t, core, _, id) = setup("about-primitive");
+    let about = published_json(&core, &id)["mailbox"]["about"].as_str().unwrap().to_owned();
+    assert!(about.contains("exactly one recipient") && about.contains("Primitive"), "{about}");
+}
+
 #[test]
 fn facts_are_shared_by_their_use_and_store_unless_switched() {
     use crate::facts::FactScope::{Account, Global};

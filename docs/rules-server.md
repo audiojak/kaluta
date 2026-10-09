@@ -19,7 +19,9 @@ at rest come next.
 It holds, per registered agent mailbox:
 
 - the **last five snapshots** the app published: the mailbox's address,
-  the name it sends as and what an agent is told about it; its accepted
+  the name it sends as and what an agent is told about it (the service it
+  sends through and its limits, never your own email or any address but
+  the mailbox's); its accepted
   rules and guidelines with their scope and checks (never the evidence
   quotes, which come from sent mail); its audience groups; and the facts
   you shared with cloud agents;

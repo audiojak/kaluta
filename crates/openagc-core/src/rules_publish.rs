@@ -39,7 +39,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use writing_guide::Snapshot;
 
-use crate::agent_mailbox::agent_prompt;
+use crate::agent_mailbox::{AgentMeta, AgentService, service_limits};
 use crate::facts::{FactStatus, shared};
 use crate::guide::{GuideKind, GuideStatus};
 use crate::registry::{accounts_dir, scoped};
@@ -352,6 +352,44 @@ fn new_salt() -> Result<String, CoreError> {
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
+/// What a cloud agent is told about the mailbox (the snapshot's
+/// `mailbox.about`): whose it is, the name and address it sends as, the
+/// service it sends through and that service's limits. Unlike mailbox
+/// mode's text it never names the user's own email (an unverified
+/// AgentMail mailbox writes only there) or any address but the mailbox's
+/// own, and says nothing of drafts on this Mac. `others` are the names of
+/// the agents sharing its service account.
+pub(crate) fn published_about(meta: &AgentMeta, others: &[String], verified: bool) -> String {
+    let (service, site) = match meta.service {
+        AgentService::Primitive => ("Primitive", "primitive.dev"),
+        AgentService::AgentMail => ("AgentMail", "agentmail.to"),
+    };
+    let unverified = if meta.service == AgentService::AgentMail && !verified {
+        " Until its service account is verified, it can write only to the user's own email, the one it was \
+         created with; AgentMail refuses anyone else."
+    } else {
+        ""
+    };
+    let shared = match others {
+        [] => String::new(),
+        [one] => format!(" Another agent's mailbox, {one}'s, shares these limits: its sends count against them too."),
+        many => format!(
+            " The mailboxes of {} other agents ({}) share these limits: their sends count against them too.",
+            many.len(),
+            many.join(", ")
+        ),
+    };
+    format!(
+        "## This is an agent's mailbox\n\nThis mailbox, {address}, belongs to an agent called {name}, not to the \
+         user. Mail sent from it goes out as {name} <{address}>. Write as {name}, on the user's behalf. It sends \
+         through {service} ({site}) with the mailbox's own key; this server only serves its writing guide and \
+         facts.{unverified} {limits}{shared}",
+        address = meta.address,
+        name = meta.name,
+        limits = service_limits(meta.service),
+    )
+}
+
 /// A digest of what a snapshot says, its version and time aside.
 fn digest(snapshot: &Snapshot) -> String {
     let plain = Snapshot { version: 0, published_at: 0, ..snapshot.clone() };
@@ -524,8 +562,8 @@ impl Core {
             let facts: Vec<writing_guide::Fact> =
                 used.iter().filter(|f| f.share_with_cloud).filter_map(|f| shared(f, &name(&f.category))).collect();
             let kept = u32::try_from(used.len() - facts.len()).unwrap_or(u32::MAX);
-            let limits = self.agent_limits_text(&meta);
-            let about = agent_prompt(&meta, &self.fellow_agents(account_id, &meta), &limits);
+            let verified = self.service_meta(&meta.service_account).is_ok_and(|s| s.verified);
+            let about = published_about(&meta, &self.fellow_agents(account_id, &meta), verified);
             let snapshot = Snapshot {
                 schema_version: writing_guide::SCHEMA_VERSION,
                 version: 0,

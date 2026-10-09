@@ -2129,7 +2129,12 @@ or remove the mailbox there (its snapshots and agent tokens). The core
 the server, whether it publishes, the salt (new at each registration),
 the last version, when, and the last error. The snapshot is built as
 mailbox mode builds the guide (accepted entries without F3 leftovers,
-confirmed groups, facts as drafting sees them), hashed with the salt. A
+confirmed groups, facts as drafting sees them), hashed with the salt.
+Its `mailbox.about` is written for a cloud agent, not mailbox mode's
+text: whose mailbox it is, the name and address it sends as, the service
+it sends through and that service's limits, never the user's own email
+(which an unverified AgentMail mailbox's limits would name) or any address
+but the mailbox's own *(amendment 2026-10-09)*. A
 change to the guide or facts pushes 5 s after the last change (at most
 30 s after the first), and not at all when what would go is unchanged;
 at launch the app pushes what changed while it was closed. Each push is
