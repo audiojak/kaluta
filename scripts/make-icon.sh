@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Render macos/Icon/openagc-icon.svg into the app's AppIcon asset catalog.
+# Render macos/Icon/kaluta-icon.svg into the app's AppIcon asset catalog.
 # Needs rsvg-convert (brew install librsvg). Run after editing the SVG.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SVG="$ROOT/macos/Icon/openagc-icon.svg"
+SVG="$ROOT/macos/Icon/kaluta-icon.svg"
 SET="$ROOT/macos/OpenAGC/Resources/Assets.xcassets/AppIcon.appiconset"
 mkdir -p "$SET"
 images=()

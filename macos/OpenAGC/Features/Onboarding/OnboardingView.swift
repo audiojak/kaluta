@@ -12,6 +12,12 @@ struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
                 VStack(alignment: .leading, spacing: Space.s) {
+                    Image("KalutaMark")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(height: 56)
+                        .foregroundStyle(.primary)
+                        .accessibilityHidden(true)
                     Text("Welcome to OpenAGC").font(TypeRole.welcome)
                     Text("A Mac email client that works with the AI agents you already use.")
                         .foregroundStyle(.secondary)
