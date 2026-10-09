@@ -5,7 +5,8 @@
 //!
 //! - **Snapshots.** Each push is sealed (XChaCha20-Poly1305) with a fresh
 //!   random *snapshot key* under a random key id; the mailbox's address,
-//!   the version and the key id are bound in as associated data.
+//!   the version, the key id and the snapshot's `schema_version` are bound
+//!   in as associated data.
 //! - **Agent keys.** Each agent has a random 256-bit *agent key*, made by
 //!   the server while it holds the agent's credential and kept only
 //!   wrapped twice: under a key derived from the credential (HKDF-SHA256
@@ -35,8 +36,9 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use zeroize::Zeroizing;
 
-/// The envelope's version.
-pub const ENCRYPTION_VERSION: u32 = 1;
+/// The envelope's version: 2 binds the snapshot's `schema_version` to the
+/// box (1, from before, did not; such boxes still open, with no schema).
+pub const ENCRYPTION_VERSION: u32 = 2;
 const NONCE_LEN: usize = 24;
 const KEY_LEN: usize = 32;
 const TAG_LEN: usize = 16;
@@ -146,25 +148,39 @@ fn context(label: &str, fields: &[&str]) -> Vec<u8> {
     out
 }
 
-fn snapshot_ad(address: &str, version: i64, key_id: &str) -> Vec<u8> {
-    context("snapshot", &[&address.trim().to_lowercase(), &version.to_string(), key_id])
+fn snapshot_ad(address: &str, version: i64, key_id: &str, schema_version: Option<u32>) -> Vec<u8> {
+    let address = address.trim().to_lowercase();
+    match schema_version {
+        Some(schema) => context("snapshot/2", &[&address, &version.to_string(), key_id, &schema.to_string()]),
+        // Envelope 1, from before the schema was bound.
+        None => context("snapshot", &[&address, &version.to_string(), key_id]),
+    }
 }
 
-/// A snapshot's JSON sealed under `key` for `address` at `version`.
-pub fn seal_snapshot(key: &SecretKey, key_id: &str, address: &str, version: i64, json: &str) -> Vec<u8> {
-    seal(key, json.as_bytes(), &snapshot_ad(address, version, key_id))
+/// A snapshot's JSON sealed under `key` for `address` at `version`, with
+/// its `schema_version` bound to it.
+pub fn seal_snapshot(
+    key: &SecretKey,
+    key_id: &str,
+    address: &str,
+    version: i64,
+    schema_version: u32,
+    json: &str,
+) -> Vec<u8> {
+    seal(key, json.as_bytes(), &snapshot_ad(address, version, key_id, Some(schema_version)))
 }
 
-/// A sealed snapshot's JSON, if `key` opens it for this address, version
-/// and key id.
+/// A sealed snapshot's JSON, if `key` opens it for this address, version,
+/// key id and schema (`None` for an envelope 1 box, which bound none).
 pub fn open_snapshot(
     key: &SecretKey,
     key_id: &str,
     address: &str,
     version: i64,
+    schema_version: Option<u32>,
     sealed: &[u8],
 ) -> Result<Zeroizing<String>, SealError> {
-    let bytes = open(key, sealed, &snapshot_ad(address, version, key_id))?;
+    let bytes = open(key, sealed, &snapshot_ad(address, version, key_id, schema_version))?;
     let text = std::str::from_utf8(&bytes).map_err(|_| SealError::Utf8)?;
     Ok(Zeroizing::new(text.to_owned()))
 }
@@ -328,6 +344,11 @@ pub struct SealedSnapshot {
     pub key_id: String,
     pub version: i64,
     pub published_at: i64,
+    /// The sealed snapshot's `schema_version`, bound to the box: the server
+    /// refuses one it cannot read before storing anything (0 when absent,
+    /// as in envelope 1).
+    #[serde(default)]
+    pub schema_version: u32,
     /// The mailbox's address.
     pub address: String,
     /// [`seal_snapshot`], base64.
@@ -345,17 +366,26 @@ mod tests {
     #[test]
     fn a_snapshot_opens_only_with_its_key_address_version_and_key_id() {
         let key = SecretKey::random();
-        let sealed = seal_snapshot(&key, "k1", "Scout@Agents.example", 3, "{\"marker\":\"zebra\"}");
+        let sealed = seal_snapshot(&key, "k1", "Scout@Agents.example", 3, 1, "{\"marker\":\"zebra\"}");
         assert!(!sealed.windows(5).any(|w| w == b"zebra"));
-        assert_eq!(&*open_snapshot(&key, "k1", "scout@agents.example", 3, &sealed).unwrap(), "{\"marker\":\"zebra\"}");
-        assert_eq!(open_snapshot(&SecretKey::random(), "k1", "scout@agents.example", 3, &sealed), Err(SealError::Open));
-        assert_eq!(open_snapshot(&key, "k1", "scout@agents.example", 4, &sealed), Err(SealError::Open));
-        assert_eq!(open_snapshot(&key, "k2", "scout@agents.example", 3, &sealed), Err(SealError::Open));
-        assert_eq!(open_snapshot(&key, "k1", "writer@agents.example", 3, &sealed), Err(SealError::Open));
+        let open = |key: &SecretKey, key_id, address, version, schema, sealed: &[u8]| {
+            open_snapshot(key, key_id, address, version, schema, sealed)
+        };
+        assert_eq!(&*open(&key, "k1", "scout@agents.example", 3, Some(1), &sealed).unwrap(), "{\"marker\":\"zebra\"}");
+        assert_eq!(open(&SecretKey::random(), "k1", "scout@agents.example", 3, Some(1), &sealed), Err(SealError::Open));
+        assert_eq!(open(&key, "k1", "scout@agents.example", 4, Some(1), &sealed), Err(SealError::Open));
+        assert_eq!(open(&key, "k2", "scout@agents.example", 3, Some(1), &sealed), Err(SealError::Open));
+        assert_eq!(open(&key, "k1", "writer@agents.example", 3, Some(1), &sealed), Err(SealError::Open));
+        // The schema is bound: a box declared as another schema does not open.
+        assert_eq!(open(&key, "k1", "scout@agents.example", 3, Some(2), &sealed), Err(SealError::Open));
+        assert_eq!(open(&key, "k1", "scout@agents.example", 3, None, &sealed), Err(SealError::Open));
         let mut changed = sealed.clone();
         *changed.last_mut().unwrap() ^= 1;
-        assert_eq!(open_snapshot(&key, "k1", "scout@agents.example", 3, &changed), Err(SealError::Open));
-        assert_eq!(open_snapshot(&key, "k1", "scout@agents.example", 3, &sealed[..10]), Err(SealError::Short));
+        assert_eq!(open(&key, "k1", "scout@agents.example", 3, Some(1), &changed), Err(SealError::Open));
+        assert_eq!(open(&key, "k1", "scout@agents.example", 3, Some(1), &sealed[..10]), Err(SealError::Short));
+        // An envelope 1 box, sealed before the schema was bound, still opens.
+        let old = seal(&key, b"{}", &snapshot_ad("scout@agents.example", 3, "k1", None));
+        assert_eq!(&*open(&key, "k1", "scout@agents.example", 3, None, &old).unwrap(), "{}");
     }
 
     #[test]

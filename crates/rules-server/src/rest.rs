@@ -165,7 +165,13 @@ async fn forget(
     headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
-    state.db.run(move |c| db::delete_mailbox(c, m.id)).await?;
+    state
+        .db
+        .run(move |c| {
+            db::delete_mailbox(c, m.id)?;
+            db::scrub(c)
+        })
+        .await?;
     tracing::info!(mailbox = m.id, "mailbox forgotten");
     Ok(StatusCode::NO_CONTENT)
 }
@@ -194,9 +200,10 @@ fn version_body(latest: Option<&SnapshotRow>, kept: &[i64]) -> Value {
 
 /// What a push came to, decided in one transaction.
 enum Pushed {
-    /// The versions kept, and how many plaintext ones an encrypted push
-    /// replaced.
-    Stored(Vec<i64>, usize),
+    /// The versions kept.
+    Stored(Vec<i64>),
+    /// A plaintext push for a mailbox that publishes encrypted.
+    Downgrade,
     Mismatch(Option<i64>),
     NeedsIfMatch(i64),
     NotNewer(i64),
@@ -240,45 +247,61 @@ async fn publish(
         return Err(invalid("invalid_snapshot", "a snapshot's version starts at 1".into()));
     }
     let (version, published_at) = (row.version, row.published_at);
+    let address = m.address.clone();
     let pushed = state
         .db
         .run(move |c| {
             let tx = c.transaction()?;
             let current = db::latest_snapshot(&tx, m.id)?.map(|s| s.version);
+            let was_encrypted = db::app_key(&tx, m.id)?.is_some();
+            let mut compact = false;
             let outcome = match (current, expected) {
+                // Once encrypted, a mailbox stays so: the app never goes
+                // back, and a stray plaintext push must not land beside
+                // sealed versions (forgetting the mailbox starts over).
+                _ if sealed.is_none() && was_encrypted => Pushed::Downgrade,
                 (None, Some(v)) if v != 0 => Pushed::Mismatch(None),
                 (Some(c), None) => Pushed::NeedsIfMatch(c),
                 (Some(c), Some(v)) if v != c => Pushed::Mismatch(Some(c)),
                 (Some(c), _) if row.version <= c => Pushed::NotNewer(c),
                 _ => {
                     db::insert_snapshot(&tx, m.id, &row, db::now_ms())?;
-                    let mut plain_dropped = 0;
                     if let Some(s) = &sealed {
                         db::set_app_key(&tx, m.id, &s.app_key)?;
                         db::insert_snapshot_keys(&tx, m.id, row.key_id.as_deref().unwrap_or_default(), &s.wraps)?;
-                        plain_dropped = db::delete_plain_snapshots(&tx, m.id)?;
+                        let plain_dropped = db::delete_plain_snapshots(&tx, m.id)?;
+                        // Reports filed while it was plaintext are sealed to
+                        // the app now, as later ones are when they come.
+                        let sealed_reports = seal_plain_reports(&tx, m.id, &address, &s.app_key)?;
+                        compact = !was_encrypted || plain_dropped > 0 || sealed_reports > 0;
                     }
-                    Pushed::Stored(db::versions(&tx, m.id)?, plain_dropped)
+                    Pushed::Stored(db::versions(&tx, m.id)?)
                 }
             };
             tx.commit()?;
-            if matches!(outcome, Pushed::Stored(_, n) if n > 0) {
-                // The deleted plaintext pages are zeroed (secure_delete);
-                // their copies in the write-ahead log go too.
-                c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+            if compact {
+                // What went in plaintext leaves the file's free pages and
+                // the write-ahead log, not only the tables.
+                db::compact(c)?;
             }
             Ok(outcome)
         })
         .await?;
     let current = |v: Option<i64>| json!({ "current_version": v });
     match pushed {
-        Pushed::Stored(kept, _) => {
+        Pushed::Stored(kept) => {
             tracing::info!(mailbox = m.id, version, encrypted = is_sealed, "snapshot published");
             let latest = SnapshotRow { version, published_at, ..Default::default() };
             let mut response = Json(version_body(Some(&latest), &kept)).into_response();
             response.headers_mut().insert(header::ETAG, etag(version));
             Ok(response)
         }
+        Pushed::Downgrade => Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "encryption_required",
+            "this mailbox publishes encrypted on this server and does not go back to plaintext; turn encryption on \
+             in OpenAGC (or have the operator forget the mailbox to start over)",
+        )),
         Pushed::Mismatch(v) => Err(ApiError::new(
             StatusCode::PRECONDITION_FAILED,
             "version_mismatch",
@@ -296,6 +319,27 @@ async fn publish(
                 .with(current(Some(v))))
         }
     }
+}
+
+/// Seal the mailbox's plaintext reports to the app's public key. How many.
+fn seal_plain_reports(
+    c: &rusqlite::Connection,
+    mailbox_id: i64,
+    address: &str,
+    app_key: &str,
+) -> rusqlite::Result<usize> {
+    let Ok(public) = rules_crypto::app_public_key(app_key) else { return Ok(0) };
+    let plain = db::plain_reports(c, mailbox_id)?;
+    for r in &plain {
+        match crate::reports::seal_for_app(&public, address, r) {
+            Ok(sealed) => db::seal_report(c, r.id, &sealed)?,
+            // Nothing to seal it to: it goes rather than stay readable.
+            Err(_) => {
+                c.execute("DELETE FROM reports WHERE id = ?1", [r.id])?;
+            }
+        }
+    }
+    Ok(plain.len())
 }
 
 /// An encrypted push's wraps and public key, checked.
@@ -337,6 +381,14 @@ fn sealed_push(body: &str, address: &str) -> Result<(SnapshotRow, SealedPush), S
     if s.encryption != rules_crypto::ENCRYPTION_VERSION {
         return Err(format!("encryption {} is not one this server knows", s.encryption));
     }
+    // Bound to the box: refused now rather than found unreadable later.
+    if s.schema_version != writing_guide::SCHEMA_VERSION {
+        return Err(format!(
+            "snapshot schema_version {} is not one this server knows (it knows {})",
+            s.schema_version,
+            writing_guide::SCHEMA_VERSION
+        ));
+    }
     if normalize_address(&s.address).as_deref() != Some(address) {
         return Err("the snapshot is for another mailbox".into());
     }
@@ -357,6 +409,7 @@ fn sealed_push(body: &str, address: &str) -> Result<(SnapshotRow, SealedPush), S
         published_at: s.published_at,
         key_id: Some(s.key_id),
         sealed: Some(sealed),
+        schema_version: Some(s.schema_version),
     };
     Ok((row, SealedPush { app_key: s.app_key, wraps }))
 }
@@ -500,7 +553,7 @@ async fn mint(
             db::insert_agent_token(&tx, &stored)?;
             // Its key now, while the server holds the token, so the app can
             // wrap the newest snapshot key for it at once.
-            crate::crypto::agent_key(&tx, &stored.id, stored.mailbox_id, &secret)?;
+            crate::crypto::agent_key(&tx, &stored.id, stored.mailbox_id, &secret, crate::crypto::Unopened::Replace)?;
             tx.commit()
         })
         .await?;
@@ -541,7 +594,17 @@ async fn revoke(
 ) -> Result<StatusCode, ApiError> {
     let m = publisher(&state, &headers, &address, &slot).await?;
     let token = id.clone();
-    let found = state.db.run(move |c| db::revoke_agent_token(c, m.id, &token, db::now_ms())).await?;
+    let found = state
+        .db
+        .run(move |c| {
+            let found = db::revoke_agent_token(c, m.id, &token, db::now_ms())?;
+            if found {
+                // Its key and wraps, zeroed in the file, leave the log too.
+                db::scrub(c)?;
+            }
+            Ok(found)
+        })
+        .await?;
     if !found {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not_found", "no such agent for this mailbox"));
     }
@@ -689,6 +752,7 @@ async fn report(
     headers: HeaderMap,
     body: String,
 ) -> Result<Response, ApiError> {
+    let body = zeroize::Zeroizing::new(body);
     let auth = agent_in_path(&state, &headers, &address, &slot).await?;
     let args: ReportArgs = parse_json(&body)?;
     let answer = crate::reports::file(&state, &auth, args).await?;

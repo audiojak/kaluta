@@ -46,11 +46,17 @@ It holds, per registered agent mailbox:
 Every address a snapshot names (audience-group members, and the people a
 rule or guideline is for) is a **salted hash**: lower-case hex SHA-256 of
 the salt, a zero byte and the trimmed, lower-cased address or `@domain`.
-The salt travels with the snapshot. When an agent gives recipients, the
-server hashes them the same way to find their audiences and the entries
-for them; an entry for particular people is shown only for a message to
-one of them, naming the recipient it matched. The server refuses a
-snapshot with a plain address in it.
+The salt travels with the snapshot, because the server needs it: when an
+agent gives recipients, the server hashes them the same way to find their
+audiences and the entries for them; an entry for particular people is
+shown only for a message to one of them, naming the recipient it matched.
+The server refuses a snapshot with a plain address in it. So the hashes
+keep addresses out of sight, not out of reach: whoever reads a snapshot
+(the operator, or anyone with a plaintext publication's file or backup)
+can hash a list of candidate addresses with its salt and confirm which are
+in it. A key the app kept would not help, since the server must hash the
+`to` it is given the same way. Encryption at rest (below) is what keeps a
+leaked file or backup from being read at all.
 
 It never holds mail (only what agents say they sent, in their reports, until
 the app pulls them), a mail service's key, an OAuth token or a token in the
@@ -61,43 +67,67 @@ time and the token's id (`agent:3f9c…`, `publisher:1`).
 
 ### Encryption at rest
 
-The app publishes encrypted by default (spec §10.6). Then the file and its
-backups hold no guide, fact or report in the clear, and no key that opens
-them:
+The app publishes encrypted by default (spec §10.6). Then the file, its
+write-ahead log and its backups hold no guide, fact or report in the
+clear, and no key that opens them:
 
-- Each published version is sealed (XChaCha20-Poly1305) under a fresh key.
+- Each published version is sealed (XChaCha20-Poly1305) under a fresh key,
+  with the mailbox's address, the version, the key id and the snapshot's
+  `schema_version` bound to it; the server refuses a schema it cannot read
+  before storing anything.
 - Each agent has its own key, made by the server while it holds that
   agent's credential and stored only wrapped under a key derived from the
   credential (HKDF-SHA256 of the whole agent token, or of a secret an OAuth
   grant's tokens carry after a dot, which the server never stores) and
-  sealed to the app's public key. The app wraps each version's key for
-  each live agent. An agent's request unwraps its key, the version's key
-  and the version in memory, and nothing unwrapped is written.
+  sealed to the app's public key. A grant's secret changes at every
+  refresh: its key is wrapped again under the new one and its older access
+  tokens stop working, so a token that leaks after it expired opens
+  nothing in a copy of the file made after that refresh. The app wraps
+  each version's key for each live agent. An agent's request unwraps its
+  key, the version's key and the version in memory, and nothing unwrapped
+  is written.
+- Agents read only the newest version: one the app has not wrapped for
+  them (connected between pushes, or after the app's key changed) is told
+  `not_readable` until the app gives it the key, never served an older
+  version. The app gives it when it next sees the agent (in *Connect a
+  Cloud Agent…*, Settings, or after a sync).
 - Reports are sealed by the server to the app's public key when they come
   (X25519, HKDF-SHA256, XChaCha20-Poly1305): once stored, the server
   cannot read them; the app opens them when it pulls.
 - Revoking an agent deletes its keys and wraps, and every later version
   has a key never wrapped for it: its token opens nothing published after
   its revocation, whatever copy of the file it is joined with.
-- An agent connected between two pushes is given the newest key when the
-  app next sees it (in *Connect a Cloud Agent…*, Settings, or after a
-  sync); until then it is told `not_readable`.
-- A mailbox's first encrypted push deletes its plaintext versions
-  (SQLite's `secure_delete` is on, and the write-ahead log is
-  checkpointed). Connect codes never wrap a key: about 49 bits are too few
-  to protect one at rest.
+- A mailbox's first encrypted push deletes its plaintext versions, seals
+  the reports it kept in plaintext to the app, and then rebuilds the file
+  (`VACUUM`) and empties the write-ahead log, so nothing of them is left in
+  free pages either. From then on the mailbox stays encrypted: a plaintext
+  push for it is refused (422 `encryption_required`) even where plaintext
+  is allowed; `forget-mailbox` starts over.
+- Deleting is overwriting: `secure_delete` is on, and forgetting a
+  mailbox, revoking an agent, acknowledging reports and rotating a grant's
+  secret each empty the write-ahead log afterwards. A database from before
+  these rules is rebuilt once when this version first opens it.
+- Connect codes never wrap a key: about 49 bits are too few to protect one
+  at rest.
 
 What it does **not** do: protect against whoever runs the server and
 changes its code. The server must see the guide to answer `guide_rules`,
 and the draft or report body to check it, so while it answers it holds
-them in the clear, and a changed build could keep them, or the tokens.
-Encryption at rest covers a leaked file or backup, not a hostile operator.
+them in the clear in memory (the keys and snapshot text it holds are wiped
+afterwards, but copies made on the way, by the HTTP and JSON layers, are
+not), and a changed build could keep them, or the tokens. Encryption at
+rest covers a leaked file or backup, not a hostile operator. Backups made
+before a mailbox went encrypted, or before a revocation or a refresh, hold
+what the file held then.
 
 Set `OPENAGC_RULES_REQUIRE_ENCRYPTION=1` to refuse plaintext snapshots
-(the project-hosted server does). Without it, a publication can be
-plaintext (*Advanced* › *Encrypt on the server* off in the app's publish
-sheet), and then whoever can read the file or a backup can read what was
-published (rules, guidelines, shared facts), though not the addresses.
+(the project-hosted server does). A server that turns it on after storing
+plaintext publications serves none of them (`not_readable`) until the app
+publishes again, encrypted. Without it, a publication can be plaintext
+(*Advanced* › *Encrypt on the server* off in the app's publish sheet), and
+then whoever can read the file or a backup can read what was published
+(rules, guidelines, shared facts) and confirm guessed addresses against
+its hashes (above).
 
 ## Run it
 
@@ -185,7 +215,9 @@ docker exec openagc-rules /openagc-rules backup /tmp/backup.sqlite3
 docker cp openagc-rules:/tmp/backup.sqlite3 ./rules-$(date +%F).sqlite3
 ```
 
-A backup holds what the live file holds (above): with encryption at rest,
+`openagc-rules backup` makes its copy readable by its owner only (0600), as
+the database is; with `sqlite3`, set the mode yourself (`umask 077`). A
+backup holds what the live file holds (above): with encryption at rest,
 sealed versions and reports, wrapped keys and hashes; keep it as private
 all the same. To
 restore, stop the server and put the copy in place as `rules.sqlite3`. Losing
@@ -291,8 +323,9 @@ Limits: a connect code is ten characters from 31 without look-alikes (no
 sign-in page closes after 5 wrong codes; an app (OAuth client) that sends
 5 wrong codes is locked out for an hour; the whole server checks at most
 30 codes a minute. Access tokens last an hour; refresh tokens 30 days and
-change at every refresh, and a refresh token or authorization code used
-twice revokes the agent (someone else has a copy). Clients that never
+change at every refresh, with the grant's secret (the access tokens from
+before stop), and a refresh token or authorization code used twice revokes
+the agent (someone else has a copy). Clients that never
 connect an agent are forgotten after a week.
 
 ## The trust model
@@ -343,7 +376,7 @@ a 429 carries `Retry-After`. Times are RFC 3339 in UTC.
 | Call | Body | Answer |
 |---|---|---|
 | `POST /v1/mailboxes` | `{"address"}` | 201 `{"address", "publisher_token"}`, once; 409 `already_registered`. Needs the registration token when one is set |
-| `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1), or encrypted: `{"encryption": 1, "key_id", "version", "published_at", "address", "ciphertext", "app_key", "wraps": [{"agent_id", "wrap"}]}` (`rules_crypto::SealedSnapshot`, byte strings in base64) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
+| `PUT /v1/mailboxes/{address}/snapshot` | The snapshot (`writing_guide::Snapshot`, `schema_version` 1), or encrypted: `{"encryption": 2, "key_id", "version", "published_at", "schema_version", "address", "ciphertext", "app_key", "wraps": [{"agent_id", "wrap"}]}` (`rules_crypto::SealedSnapshot`, byte strings in base64; `schema_version` is the sealed snapshot's, bound to the box) | 200 `{"version", "published_at", "versions_kept"}` and `ETag: "<version>"` |
 | `POST /v1/mailboxes/{address}/snapshot/keys` | `{"key_id", "wraps": [{"agent_id", "wrap"}]}` | `{"stored"}`: the app's wraps of a kept version's key for agents that connected after it; 404 `unknown_key` |
 | `GET /v1/mailboxes/{address}/snapshot/version` | | The same, `version` null before the first push |
 | `POST /v1/mailboxes/{address}/agent-tokens` | `{"name"}` | 201 `{"id", "name", "created_at", "revoked_at", "token"}`; the token is shown only here |
@@ -359,9 +392,11 @@ later one sends `If-Match` with the current version (`5` or `"5"`) and a
 higher `version` in the body. Answers: 428 `if_match_required` and 412
 `version_mismatch` carry `current_version` (read it and push again), 409
 `version_not_newer`, 422 `invalid_snapshot` (unknown `schema_version`, a
-plain address, not JSON; for an encrypted push, a bad key id, box, public
-key or wrap, or another mailbox) or `mailbox_mismatch` (the snapshot's
-`mailbox.address` is not the path's), or `encryption_required`. The newest
+plain address, not JSON; for an encrypted push, an unknown envelope or
+`schema_version`, a bad key id, box, public key or wrap, or another
+mailbox) or `mailbox_mismatch` (the snapshot's `mailbox.address` is not the
+path's), or `encryption_required` (a plaintext push where encryption is
+required, or for a mailbox that already publishes encrypted). The newest
 five versions are kept.
 
 ### For agents (agent token)
@@ -395,7 +430,8 @@ recipients and that type; no model is asked. Before anything is published
 the reading tools and `check_draft` answer `not_published`; `report_send`
 still queues (with an empty check). An agent that does not have the
 newest encrypted version's key yet gets `not_readable` (409 over REST)
-until the app gives it. Every call takes one request from the
+until the app gives it, never an older version; so does every agent while
+the newest version is plaintext on a server that requires encryption. Every call takes one request from the
 agent's rate limit.
 
 `GET /healthz` answers `ok` when the database answers. `GET /v1/server`,

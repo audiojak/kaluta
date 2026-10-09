@@ -25,8 +25,9 @@
 //!   this server's.
 //! - `POST /oauth/token`: the code for an access token (an hour) and a
 //!   refresh token (30 days), with the PKCE verifier; refresh tokens rotate,
-//!   and one used twice revokes the grant, as does an authorization code
-//!   used twice.
+//!   with the grant's secret (its key rewrapped, its older access tokens
+//!   ended), and one used twice revokes the grant, as does an authorization
+//!   code used twice.
 //!
 //! Every code and token is random, kept only as its SHA-256 and compared
 //! in constant time. Nothing here logs a code, token or verifier.
@@ -808,7 +809,8 @@ fn issue(
     let access = tokens::access_token(secret);
     let refresh = tokens::refresh_token(secret);
     if let Some((grant, _)) = db::agent_token(c, grant_id)? {
-        crate::crypto::agent_key(c, grant_id, grant.mailbox_id, &crate::crypto::CredentialSecret::new(secret))?;
+        let secret = crate::crypto::CredentialSecret::new(secret);
+        crate::crypto::agent_key(c, grant_id, grant.mailbox_id, &secret, crate::crypto::Unopened::Replace)?;
     }
     let row = |kind: &str, ttl| OAuthTokenRow {
         kind: kind.to_owned(),
@@ -914,11 +916,13 @@ async fn token(
                 return token_error(StatusCode::BAD_REQUEST, "invalid_request", "send refresh_token");
             };
             let token_hash = tokens::hash(refresh);
-            // Refreshing keeps the grant's secret; a token from before grant
-            // secrets gets one now (and the grant a new key).
-            let secret = zeroize::Zeroizing::new(
-                tokens::grant_secret_of(refresh).map_or_else(crate::crypto::grant_secret, str::to_owned),
-            );
+            // Each refresh rotates the grant's secret: its key is wrapped
+            // under the new one and its older access tokens end, so a token
+            // that leaks after it expired opens nothing in a later copy of
+            // the database. A token from before grant secrets has none: the
+            // new tokens make the grant a key.
+            let old = tokens::grant_secret_of(refresh).map(crate::crypto::CredentialSecret::new);
+            let secret = zeroize::Zeroizing::new(crate::crypto::grant_secret());
             state
                 .db
                 .run(move |c| {
@@ -938,10 +942,19 @@ async fn token(
                         Exchange::Refused("the grant was revoked or is another client's")
                     } else {
                         db::use_oauth_token(&tx, &token_hash, now)?;
+                        db::delete_access_tokens(&tx, &row.grant_id)?;
+                        if let Some(old) = &old {
+                            let new = crate::crypto::CredentialSecret::new(&secret);
+                            crate::crypto::rewrap_agent_key(&tx, &row.grant_id, old, &new)?;
+                        }
                         let (access, refresh) = issue(&tx, &row.grant_id, &resource, now, &secret)?;
                         Exchange::Issued { grant_id: row.grant_id, access, refresh }
                     };
                     tx.commit()?;
+                    if matches!(outcome, Exchange::Issued { .. }) {
+                        // The wrap under the old secret leaves the log too.
+                        db::scrub(c)?;
+                    }
                     Ok(outcome)
                 })
                 .await

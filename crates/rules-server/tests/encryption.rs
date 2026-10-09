@@ -189,7 +189,7 @@ async fn only_an_agents_own_token_opens_its_key_and_a_revoked_one_opens_nothing_
         }
     }
     assert_eq!(tried, 1, "version 2's key is wrapped for the one agent left");
-    assert!(seal::open_snapshot(&seal::SecretKey::random(), &key_id, MAILBOX, 2, &sealed).is_err());
+    assert!(seal::open_snapshot(&seal::SecretKey::random(), &key_id, MAILBOX, 2, Some(1), &sealed).is_err());
     // What the revoked agent could read while connected stays what it was.
     let old_wrap: Vec<u8> = before
         .query_row(
@@ -203,7 +203,9 @@ async fn only_an_agents_own_token_opens_its_key_and_a_revoked_one_opens_nothing_
         .query_row("SELECT key_id, sealed FROM snapshots WHERE version = 1", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
     let old_key = seal::unwrap_snapshot_key(&gone_key, &old_wrap, &gone_id, &old_key_id).unwrap();
-    assert!(seal::open_snapshot(&old_key, &old_key_id, MAILBOX, 1, &old_sealed).unwrap().contains(GUIDE_MARKER));
+    assert!(
+        seal::open_snapshot(&old_key, &old_key_id, MAILBOX, 1, Some(1), &old_sealed).unwrap().contains(GUIDE_MARKER)
+    );
     let _ = kept_id;
 }
 
@@ -258,17 +260,23 @@ async fn sealed_pushes_are_checked_as_far_as_the_server_can() {
     let app = SealingApp::new();
     let key = seal::SecretKey::random();
     let good = seal::SealedSnapshot {
-        encryption: 1,
+        encryption: seal::ENCRYPTION_VERSION,
         key_id: "k1".into(),
         version: 1,
         published_at: 1,
+        schema_version: 1,
         address: MAILBOX.into(),
-        ciphertext: seal::b64(&seal::seal_snapshot(&key, "k1", MAILBOX, 1, "{}")),
+        ciphertext: seal::b64(&seal::seal_snapshot(&key, "k1", MAILBOX, 1, 1, "{}")),
         app_key: app.key.public_base64(),
         wraps: vec![],
     };
     for (bad, why) in [
-        (seal::SealedSnapshot { encryption: 2, ..good.clone() }, "encryption 2"),
+        (seal::SealedSnapshot { encryption: 1, ..good.clone() }, "encryption 1"),
+        (seal::SealedSnapshot { encryption: 3, ..good.clone() }, "encryption 3"),
+        // The schema is bound to the box, so the server refuses one it
+        // cannot read before storing anything.
+        (seal::SealedSnapshot { schema_version: 99, ..good.clone() }, "schema_version 99"),
+        (seal::SealedSnapshot { schema_version: 0, ..good.clone() }, "schema_version 0"),
         (seal::SealedSnapshot { address: "other@agents.example".into(), ..good.clone() }, "another mailbox"),
         (seal::SealedSnapshot { key_id: "a b".into(), ..good.clone() }, "key_id"),
         (seal::SealedSnapshot { ciphertext: "!!".into(), ..good.clone() }, "ciphertext"),
@@ -296,4 +304,134 @@ async fn sealed_pushes_are_checked_as_far_as_the_server_can() {
         .await
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn after_the_apps_key_changes_agents_are_told_not_readable_never_an_older_version() {
+    let s = start(0, None).await;
+    let publisher = s.registered().await;
+    let (_, agent) = s.mint(&publisher, "Routine").await;
+    let mut app = SealingApp::new();
+    assert_eq!(s.push_sealed(&publisher, &mut app, &marked(1), None).await.0, StatusCode::OK);
+    let _ = guide(&s, &agent).await;
+    assert_eq!(s.rewrap(&publisher, &app).await, 1);
+    assert_eq!(guide(&s, &agent).await.1["version"], 1);
+    // The Mac lost its key pair (a new Mac, a Keychain reset): its next
+    // push cannot open the agent's key, so version 2 is wrapped for nobody.
+    let mut reset = SealingApp::new();
+    let (status, body) = s.push_sealed(&publisher, &mut reset, &marked(2), Some("1")).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = guide(&s, &agent).await;
+    assert_eq!(
+        (status, body["error"].as_str()),
+        (StatusCode::CONFLICT, Some("not_readable")),
+        "never version 1: {body}"
+    );
+    let client = s.mcp(&agent).await.expect("connect");
+    let refused = client
+        .call_tool(rmcp::model::CallToolRequestParams::new("guide_rules").with_arguments(serde_json::Map::new()))
+        .await
+        .unwrap();
+    assert_eq!(refused.is_error, Some(true), "{refused:?}");
+    // Its key is sealed to the new app key at that request; the app wraps.
+    assert_eq!(s.rewrap(&publisher, &reset).await, 1);
+    assert_eq!(guide(&s, &agent).await.1["version"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_filed_in_plaintext_are_sealed_at_the_first_encrypted_push_which_is_never_undone() {
+    let s = start(0, None).await;
+    let publisher = s.registered().await;
+    let (agent_id, agent) = s.mint(&publisher, "Routine").await;
+    assert_eq!(s.publish(&publisher, None, marked(1).to_json().unwrap()).await.0, StatusCode::OK);
+    let report = json!({ "to": ["ann@acme.com"], "subject": "Plan", "body_markdown": format!("Hi, {REPORT_MARKER}") });
+    assert_eq!(post(&s, &agent, &format!("/v1/m/{MAILBOX}/reports"), report).await.0, StatusCode::ACCEPTED);
+    assert!(contains(&s.stored_bytes(), REPORT_MARKER), "kept in plaintext while the mailbox is");
+
+    let mut app = SealingApp::new();
+    assert_eq!(s.push_sealed(&publisher, &mut app, &marked(2), Some("1")).await.0, StatusCode::OK);
+    let stored = s.stored_bytes();
+    for plain in [REPORT_MARKER, GUIDE_MARKER] {
+        assert!(!contains(&stored, plain), "{plain} is left in the file or its log");
+    }
+    // The app opens the report it would have read in plaintext.
+    let pulled: Value =
+        s.get(Some(&publisher), &format!("/v1/mailboxes/{MAILBOX}/reports")).await.json().await.unwrap();
+    let r = &pulled["reports"][0];
+    assert_eq!(r["body_markdown"], "");
+    let sealed = seal::unb64(r["sealed"].as_str().unwrap()).unwrap();
+    let opened = seal::open_for_app(&app.key, &sealed, &seal::report_context(MAILBOX, &agent_id)).unwrap();
+    let opened: Value = serde_json::from_slice(&opened).unwrap();
+    assert!(opened["body_markdown"].as_str().unwrap().contains(REPORT_MARKER));
+    assert_eq!(opened["to"], json!(["ann@acme.com"]));
+
+    // A plaintext push now is refused, on a server that allows plaintext.
+    let (status, body) = s.publish(&publisher, Some("2"), marked(3).to_json().unwrap()).await;
+    assert_eq!((status, body["error"].as_str()), (StatusCode::UNPROCESSABLE_ENTITY, Some("encryption_required")));
+    assert!(!contains(&s.stored_bytes(), GUIDE_MARKER));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_comes_to_require_encryption_serves_nothing_stored_in_plaintext() {
+    let optional = start(0, None).await;
+    let publisher = optional.registered().await;
+    let (_, agent) = optional.mint(&publisher, "Routine").await;
+    assert_eq!(optional.publish(&publisher, None, marked(1).to_json().unwrap()).await.0, StatusCode::OK);
+    assert_eq!(guide(&optional, &agent).await.0, StatusCode::OK);
+    // The operator turns OPENAGC_RULES_REQUIRE_ENCRYPTION on.
+    let required = common::start_in(optional.dir.clone(), true).await;
+    let (status, body) = guide(&required, &agent).await;
+    assert_eq!((status, body["error"].as_str()), (StatusCode::CONFLICT, Some("not_readable")), "{body}");
+    assert!(body["message"].as_str().unwrap().contains("required encryption"), "{body}");
+    let (status, body) = post(
+        &required,
+        &agent,
+        &format!("/v1/m/{MAILBOX}/check"),
+        json!({ "to": ["ann@acme.com"], "body_markdown": "Hi" }),
+    )
+    .await;
+    assert_eq!((status, body["error"].as_str()), (StatusCode::CONFLICT, Some("not_readable")));
+    // The app's next push is encrypted; agents read again once wrapped.
+    let mut app = SealingApp::new();
+    assert_eq!(required.push_sealed(&publisher, &mut app, &marked(2), Some("1")).await.0, StatusCode::OK);
+    let _ = guide(&required, &agent).await;
+    assert_eq!(required.rewrap(&publisher, &app).await, 1);
+    assert_eq!(guide(&required, &agent).await.1["version"], 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn forgetting_revoking_and_acknowledging_leave_nothing_in_the_file_or_its_log() {
+    let s = start(0, None).await;
+    let publisher = s.registered().await;
+    let (agent_id, agent) = s.mint(&publisher, "Routine").await;
+    assert_eq!(s.publish(&publisher, None, marked(1).to_json().unwrap()).await.0, StatusCode::OK);
+    let report = json!({ "to": ["ann@acme.com"], "subject": "Plan", "body_markdown": format!("Hi, {REPORT_MARKER}") });
+    assert_eq!(post(&s, &agent, &format!("/v1/m/{MAILBOX}/reports"), report).await.0, StatusCode::ACCEPTED);
+    assert!(contains(&s.stored_bytes(), REPORT_MARKER));
+    let (status, _) =
+        post(&s, &publisher, &format!("/v1/mailboxes/{MAILBOX}/reports/ack"), json!({ "up_to_id": 1 })).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!contains(&s.stored_bytes(), REPORT_MARKER), "an acknowledged report is gone from file and log");
+
+    // A revoked agent's key wrap is gone from both.
+    let mut app = SealingApp::new();
+    assert_eq!(s.push_sealed(&publisher, &mut app, &marked(2), Some("1")).await.0, StatusCode::OK);
+    let _ = guide(&s, &agent).await;
+    let wrap: Vec<u8> =
+        s.backup().query_row("SELECT key_wrap FROM agent_tokens WHERE id = ?1", [&agent_id], |r| r.get(0)).unwrap();
+    let r = s
+        .http
+        .delete(s.url(&format!("/v1/mailboxes/{MAILBOX}/agent-tokens/{agent_id}")))
+        .bearer_auth(&publisher)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    let stored = s.stored_bytes();
+    assert!(!stored.windows(wrap.len()).any(|w| w == wrap.as_slice()), "the revoked key wrap is left");
+
+    // Forgotten: the mailbox's rows are gone from both.
+    let r = s.http.delete(s.url(&format!("/v1/mailboxes/{MAILBOX}"))).bearer_auth(&publisher).send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    assert!(!contains(&s.stored_bytes(), MAILBOX), "the forgotten address is left");
 }

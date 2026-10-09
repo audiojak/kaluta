@@ -27,12 +27,14 @@ impl Sealing {
     pub fn body(&self, snapshot: &Snapshot) -> Result<String, Failure> {
         let json = zeroize::Zeroizing::new(snapshot.to_json().map_err(|e| Failure::Final(e.to_string()))?);
         let address = &snapshot.mailbox.address;
-        let sealed = seal::seal_snapshot(&self.key, &self.key_id, address, snapshot.version, &json);
+        let schema = snapshot.schema_version;
+        let sealed = seal::seal_snapshot(&self.key, &self.key_id, address, snapshot.version, schema, &json);
         serde_json::to_string(&seal::SealedSnapshot {
             encryption: seal::ENCRYPTION_VERSION,
             key_id: self.key_id.clone(),
             version: snapshot.version,
             published_at: snapshot.published_at,
+            schema_version: schema,
             address: address.clone(),
             ciphertext: seal::b64(&sealed),
             app_key: self.app.public_base64(),

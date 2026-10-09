@@ -1,7 +1,10 @@
 //! Audience groups (spec §14.9) and who belongs to them. In the app a
 //! group lists addresses and `@domain`s; in a published snapshot (spec
 //! §10.6) each member is a salted hash, and a recipient is hashed the same
-//! way before matching, so the server never holds the addresses.
+//! way before matching, so the server never holds the addresses in the
+//! clear. The salt travels with the snapshot (the server needs it to hash
+//! the `to` it is given), so whoever reads a snapshot can confirm guessed
+//! addresses against it; encryption at rest keeps a leaked file unread.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

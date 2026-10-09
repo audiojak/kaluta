@@ -2303,6 +2303,12 @@ cloud agents will use the same queue later.
   matching. The hash is lower-case hex SHA-256 of the salt, a zero byte
   and the trimmed, lower-cased member (an address, or `@domain` for a
   domain); a recipient matches by its address or its `@domain`.
+  *(Amendment 2026-10-09, oagc-gmn7.18.)* A single salted SHA-256 with
+  the salt in the snapshot hides addresses from a glance, not from a
+  guess: whoever reads a snapshot can hash candidate addresses and confirm
+  which are in it. A key kept in the app would not change that, since the
+  server must hash the `to` it is given the same way; encryption at rest
+  is what keeps a leaked file from being read.
 - *(Amendment 2026-10-09, oagc-gmn7.2.)* The people a rule or guideline is
   for (its scope's addresses and `@domain`s) are hashed alike, with the
   same salt (`Snapshot::hashed`). Published, such an entry appears only
@@ -2350,20 +2356,38 @@ RustCrypto and dalek.)*
   to the app's public key. A static token's secret is the token itself; a
   grant's is 256 random bits made with its first tokens and carried in
   every access and refresh token after a dot (`oagc_oat_<random>.<grant
-  secret>`), so refreshing keeps it. The server stores the tokens' hashes,
-  never a token or a grant secret.
+  secret>`). The server stores the tokens' hashes, never a token or a
+  grant secret. *(Amendment 2026-10-09, oagc-gmn7.11.)* Each refresh
+  makes a new grant secret: the server opens the agent key with the old
+  one (from the refresh token), wraps it under the new one (the same key,
+  so the app's wraps stay), deletes the grant's older access tokens and
+  issues the new pair under the new secret. A token that leaks after it
+  expired opens nothing in a copy of the database made after the refresh.
+  A credential that does not open its key at a request reads nothing and
+  never replaces the key.
 - *Wraps.* At each push the app lists the agents, opens each live agent's
   key with its private key and wraps the push's snapshot key under it. The
-  push is `{"encryption": 1, "key_id", "version", "published_at",
-  "address", "ciphertext", "app_key", "wraps": [{"agent_id", "wrap"}]}`
-  (byte strings in base64). An agent that connects between pushes gets a
+  push is `{"encryption": 2, "key_id", "version", "published_at",
+  "schema_version", "address", "ciphertext", "app_key", "wraps":
+  [{"agent_id", "wrap"}]}` (byte strings in base64). *(Amendment
+  2026-10-09, oagc-gmn7.15: envelope 2 binds the sealed snapshot's
+  `schema_version` as associated data, and the server refuses an envelope
+  or schema it does not know before storing anything; boxes stored under
+  envelope 1 still open.)* An agent that connects between pushes gets a
   wrap of the newest key (`POST …/snapshot/keys`) when the app next sees it
   in the list: in *Connect a Cloud Agent…*, in Settings, and at each pull
-  of reports (after a sync). Until then it reads the newest version wrapped
-  for it, or is told the guide is not readable yet (409 `not_readable`).
+  of reports (after a sync). Until then it is told the guide is not
+  readable yet (409 `not_readable`). *(Amendment 2026-10-09, oagc-gmn7.14:
+  only the newest version is ever served; an agent it is not wrapped for,
+  as after the app's key pair changed, is never served an older one.)*
 - *A request* unwraps credential → agent key → snapshot key → snapshot in
-  memory, answers and drops them; keys and plaintext the code holds are
-  wiped on drop (`zeroize`). Nothing unwrapped is written.
+  memory, answers and drops them. Nothing unwrapped is written. The keys,
+  credential secrets and snapshot JSON the server's code holds are wiped
+  on drop (`zeroize`); copies made by the HTTP, JSON and MCP layers and the
+  parsed snapshot are not, so a memory dump during or soon after a request
+  can hold plaintext *(amended 2026-10-09, oagc-gmn7.20)*. A snapshot that
+  does not read is logged by the kind of error only, never serde's message,
+  which can quote it.
 - *Reports.* For a mailbox with a public key the server seals each
   report's Message-ID, recipients, subject, body and check to the app
   (an ephemeral X25519 key, HKDF-SHA256, XChaCha20-Poly1305) and keeps
@@ -2390,6 +2414,17 @@ RustCrypto and dalek.)*
   optional and plaintext snapshots work as before. A mailbox's first
   encrypted push deletes its plaintext versions, with SQLite's
   `secure_delete` on and the write-ahead log checkpointed.
+  *(Amendment 2026-10-09, oagc-gmn7.12.)* That push also seals the
+  mailbox's plaintext reports to the app and rebuilds the file (`VACUUM`,
+  then `wal_checkpoint(TRUNCATE)`), and a database from before is rebuilt
+  once when first opened (migration 6), so nothing deleted earlier lingers
+  in free pages. Forgetting a mailbox, revoking an agent, acknowledging
+  reports and a grant's secret rotation each empty the write-ahead log. A
+  mailbox that has pushed encrypted stays so: a plaintext push for it is
+  refused (422 `encryption_required`) even on a server that allows
+  plaintext; only forgetting the mailbox starts over. With encryption
+  required, a version stored in plaintext before is served to no agent
+  (`not_readable`) until the app pushes again.
 - *The app* encrypts every publication by default. The publish sheet has
   *Encrypt on the server* under *Advanced* only when the server does not
   require it (and says when a server is too old to encrypt);
@@ -4169,7 +4204,7 @@ them.)
 | The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
 | Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)*. Revoking takes effect at the next request; each token is rate limited; logs name the token's id, never the token *(implemented 2026-10-09, oagc-gmn7.2)* |
 | Rules server OAuth: phishing, code theft, replay *(amendment 2026-10-09, oagc-gmn7.4)* | No accounts or passwords: a grant needs a one-time connect code from the app (10 minutes, single use, hashed, attempts limited per page, client and server); PKCE S256 required; exact redirect URI match (loopback port aside), errors before that never redirect; `state` passed through and `iss` returned; the consent page shows the client's self-chosen name and the real return host, cannot be framed and checks a CSRF cookie and Origin; tokens bound to `/mcp`; refresh tokens rotate and a reused one, or a reused authorization code, revokes the grant; grants are revoked in the app like tokens |
-| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses and the people entries are for as salted hashes, plain ones refused; facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)*. *(Implemented 2026-10-09, oagc-gmn7.7:)* each version sealed under a fresh key wrapped per agent key; agent keys stored only wrapped under the agent's credential (never stored) and sealed to the app; reports sealed to the app's X25519 key; plaintext versions wiped at the first encrypted push; `OPENAGC_RULES_REQUIRE_ENCRYPTION` refuses plaintext; the server sees plaintext only while it answers (§10.6) |
+| Rules server's operator or a leaked database | Only what the publish sheet listed leaves the Mac; no evidence quotes; audience addresses and the people entries are for as salted hashes, plain ones refused (with the salt in the snapshot, a reader can confirm guessed addresses; encryption at rest keeps a leaked file unread); facts shared one by one; snapshot encrypted at rest with the key wrapped per agent token (required when project-hosted). Does not stop an operator who changes the code *(amendment 2026-10-08)*. *(Implemented 2026-10-09, oagc-gmn7.7:)* each version sealed under a fresh key wrapped per agent key; agent keys stored only wrapped under the agent's credential (never stored) and sealed to the app; reports sealed to the app's X25519 key; plaintext versions wiped and plaintext reports sealed at the first encrypted push, the file then rebuilt so free pages keep nothing, and the mailbox never goes back to plaintext; `OPENAGC_RULES_REQUIRE_ENCRYPTION` refuses plaintext and serves none stored before; a grant's secret rotates at each refresh; agents read only the newest version; the server sees plaintext only while it answers (§10.6) |
 | A revoked agent with a copy of the database *(amendment 2026-10-09, oagc-gmn7.7)* | Revoking deletes its keys and wraps, and every later version's key is wrapped only for agents live then: it opens nothing published after its revocation, whatever copy it holds; a copy from before opens only the versions it could read while connected |
 
 ### 15.4 What the MVP does *not* protect against

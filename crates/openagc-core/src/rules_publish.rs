@@ -879,8 +879,9 @@ impl Core {
                     self.update_rules_record(account_id, |r| r.encrypt = Some(true))?;
                 }
                 // A server from before encryption reads the push as a
-                // plaintext snapshot without its schema.
-                422 if encrypt && a.says().contains("schema_version") => {
+                // plaintext snapshot: without its schema, or (the envelope
+                // now naming one) without a snapshot's fields.
+                422 if encrypt && (a.says().contains("schema_version") || a.says().contains("not a snapshot")) => {
                     return Err(Failure::Final(format!(
                         "{host} runs an older openagc-rules that cannot keep the guide encrypted. Its operator can \
                          update it; or stop publishing and publish again with encryption off."

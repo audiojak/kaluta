@@ -100,7 +100,7 @@ pub(crate) fn invalid(message: String) -> ApiError {
 /// `report_send`: check the body against the newest snapshot, keep the
 /// report for the app, and answer `{"queued": true, …}` with what the check
 /// found.
-pub(crate) async fn file(state: &AppState, auth: &AgentAuth, a: ReportArgs) -> Result<Value, ApiError> {
+pub(crate) async fn file(state: &AppState, auth: &AgentAuth, mut a: ReportArgs) -> Result<Value, ApiError> {
     let (message_id, to, sent_at) = validate(&a).map_err(invalid)?;
     let mailbox_id = auth.mailbox_id;
     let app_key = state.db.run(move |c| db::app_key(c, mailbox_id)).await?;
@@ -138,27 +138,12 @@ pub(crate) async fn file(state: &AppState, auth: &AgentAuth, a: ReportArgs) -> R
     // With encryption at rest, what the agent wrote is sealed to the app:
     // once stored, the server cannot read it.
     if let Some(key) = app_key.as_deref().and_then(|k| rules_crypto::app_public_key(k).ok()) {
-        let content = zeroize::Zeroizing::new(
-            serde_json::to_vec(&json!({
-                "message_id": row.message_id,
-                "to": row.recipients,
-                "subject": row.subject,
-                "body_markdown": row.body_markdown,
-                "guide_check": row.guide_check,
-            }))
-            .map_err(ApiError::internal)?,
-        );
-        let ctx = rules_crypto::report_context(&auth.address, &auth.token_id);
-        let sealed = rules_crypto::seal_for_app(&key, &content, &ctx).map_err(ApiError::internal)?;
-        row = ReportRow {
-            message_id: None,
-            recipients: vec![],
-            subject: String::new(),
-            body_markdown: String::new(),
-            guide_check: vec![],
-            sealed: Some(sealed),
-            ..row
-        };
+        let sealed = seal_for_app(&key, &auth.address, &row).map_err(ApiError::internal)?;
+        wipe(&mut row);
+        row.sealed = Some(sealed);
+        use zeroize::Zeroize;
+        a.subject.zeroize();
+        a.to.iter_mut().for_each(Zeroize::zeroize);
     }
     let id = state
         .db
@@ -179,6 +164,37 @@ pub(crate) async fn file(state: &AppState, auth: &AgentAuth, a: ReportArgs) -> R
         "version": check_version,
         "message": "Queued for OpenAGC, which records it the next time it syncs this mailbox.",
     }))
+}
+
+/// A report's Message-ID, recipients, subject, body and check, sealed to
+/// the app's public key (spec §10.6): what the app opens when it pulls.
+pub(crate) fn seal_for_app(app_public: &[u8; 32], address: &str, r: &ReportRow) -> Result<Vec<u8>, String> {
+    let content = zeroize::Zeroizing::new(
+        serde_json::to_vec(&json!({
+            "message_id": r.message_id,
+            "to": r.recipients,
+            "subject": r.subject,
+            "body_markdown": r.body_markdown,
+            "guide_check": r.guide_check,
+        }))
+        .map_err(|e| e.to_string())?,
+    );
+    rules_crypto::seal_for_app(app_public, &content, &rules_crypto::report_context(address, &r.agent_id))
+        .map_err(|e| e.to_string())
+}
+
+/// Wipe a report's sealed fields where this code holds them.
+fn wipe(r: &mut ReportRow) {
+    use zeroize::Zeroize;
+    r.body_markdown.zeroize();
+    r.subject.zeroize();
+    r.recipients.iter_mut().for_each(Zeroize::zeroize);
+    r.recipients.clear();
+    if let Some(m) = r.message_id.as_mut() {
+        m.zeroize();
+    }
+    r.message_id = None;
+    r.guide_check.clear();
 }
 
 /// One report as the app pulls it.
@@ -222,7 +238,17 @@ pub(crate) async fn list(state: &AppState, mailbox_id: i64, after: i64, limit: i
 
 /// The app has recorded the reports up to `up_to_id`: they go.
 pub(crate) async fn ack(state: &AppState, mailbox_id: i64, up_to_id: i64) -> Result<Value, ApiError> {
-    let deleted = state.db.run(move |c| db::ack_reports(c, mailbox_id, up_to_id)).await?;
+    let deleted = state
+        .db
+        .run(move |c| {
+            let n = db::ack_reports(c, mailbox_id, up_to_id)?;
+            if n > 0 {
+                // Their pages, zeroed in the file, leave the log too.
+                db::scrub(c)?;
+            }
+            Ok(n)
+        })
+        .await?;
     tracing::info!(mailbox = mailbox_id, deleted, "reports acknowledged");
     Ok(json!({ "deleted": deleted }))
 }

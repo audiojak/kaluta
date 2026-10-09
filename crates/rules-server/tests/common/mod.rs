@@ -159,6 +159,12 @@ pub async fn call(client: &RunningService<rmcp::RoleClient, ()>, tool: &'static 
 /// With `require_encryption` set as given (and no OAuth).
 pub async fn start_requiring(require_encryption: bool) -> Server {
     let dir = std::env::temp_dir().join(format!("openagc-rules-test-{}", rules_server::tokens::new_id()));
+    start_in(dir, require_encryption).await
+}
+
+/// Another server on `dir`, as when the operator restarts it with other
+/// settings: keep the first alive while this one is used.
+pub async fn start_in(dir: PathBuf, require_encryption: bool) -> Server {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
     let base = format!("http://{}", listener.local_addr().unwrap());
     let config = Config {
@@ -188,7 +194,7 @@ impl SealingApp {
     /// Wraps of `key` for each live agent whose key the server sealed to
     /// this app, as the app makes them: `only_unreadable` leaves out agents
     /// that can read the newest version already.
-    fn wraps(
+    pub fn wraps(
         &self,
         agents: &[Value],
         key: &rules_crypto::SecretKey,
@@ -238,8 +244,16 @@ impl Server {
             key_id: key_id.clone(),
             version: snapshot.version,
             published_at: snapshot.published_at,
+            schema_version: snapshot.schema_version,
             address: MAILBOX.into(),
-            ciphertext: seal::b64(&seal::seal_snapshot(&key, &key_id, MAILBOX, snapshot.version, &json)),
+            ciphertext: seal::b64(&seal::seal_snapshot(
+                &key,
+                &key_id,
+                MAILBOX,
+                snapshot.version,
+                snapshot.schema_version,
+                &json,
+            )),
             app_key: app.key.public_base64(),
             wraps: app.wraps(agents["agent_tokens"].as_array().unwrap(), &key, &key_id, false),
         };

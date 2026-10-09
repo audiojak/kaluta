@@ -222,7 +222,11 @@ fn forget(args: &Args, address: &str) -> ExitCode {
     let address = address.trim().to_lowercase();
     let result = Db::open(&args.data_dir).and_then(|db| {
         db.run_now(|c| match db::mailbox_by_address(c, &address)? {
-            Some(m) => db::delete_mailbox(c, m.id),
+            Some(m) => {
+                db::delete_mailbox(c, m.id)?;
+                db::scrub(c)?;
+                Ok(true)
+            }
             None => Ok(false),
         })
     });
@@ -243,14 +247,34 @@ fn forget(args: &Args, address: &str) -> ExitCode {
 }
 
 /// A consistent copy of the database while the server runs (SQLite's
-/// `VACUUM INTO`), for when there is no `sqlite3` at hand (the image).
+/// `VACUUM INTO`), for when there is no `sqlite3` at hand (the image). The
+/// copy is made readable by its owner only, as the database is.
 fn backup(args: &Args, file: &std::path::Path) -> ExitCode {
-    if file.exists() {
-        eprintln!("openagc-rules: {} exists; give a new file", file.display());
+    // Made empty first, with its mode, whatever the umask: `VACUUM INTO`
+    // fills an empty file and refuses one with anything in it.
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    if let Err(e) = options.open(file) {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            eprintln!("openagc-rules: {} exists; give a new file", file.display());
+        } else {
+            eprintln!("openagc-rules: {}: {e}", file.display());
+        }
         return ExitCode::FAILURE;
     }
     let target = file.to_string_lossy().into_owned();
-    match Db::open(&args.data_dir).and_then(|db| db.run_now(|c| c.execute("VACUUM INTO ?1", [&target]))) {
+    let copied = Db::open(&args.data_dir).and_then(|db| db.run_now(|c| c.execute("VACUUM INTO ?1", [&target])));
+    #[cfg(unix)]
+    if copied.is_ok() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600));
+    }
+    if copied.is_err() {
+        let _ = std::fs::remove_file(file);
+    }
+    match copied {
         Ok(_) => {
             println!("backed up to {}", file.display());
             ExitCode::SUCCESS

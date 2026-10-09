@@ -132,7 +132,22 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX snapshot_keys_by_mailbox ON snapshot_keys(mailbox_id);
     ALTER TABLE reports ADD COLUMN sealed BLOB;
 ",
+    // A sealed snapshot's schema, bound to its box (envelope 2); and the
+    // database's epoch, a random id made with it, which the app keys the
+    // reports it pulled by: a database restored or made again reuses
+    // report ids, never its epoch. Upgrading to this compacts the file
+    // once (`migrate`).
+    "
+    ALTER TABLE snapshots ADD COLUMN schema_version INTEGER;
+    CREATE TABLE server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO server_meta (key, value) VALUES ('epoch', lower(hex(randomblob(16))));
+",
 ];
+
+/// The first schema with everything deleted before overwritten: a database
+/// upgraded from before it is compacted once, so what earlier versions
+/// deleted (plaintext snapshots, reports, keys) leaves its free pages.
+const COMPACTED_FROM: u32 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -215,7 +230,28 @@ fn migrate(conn: &mut Connection) -> Result<(), DbError> {
         tx.pragma_update(None, "user_version", i64::try_from(i + 1).unwrap_or(i64::MAX))?;
         tx.commit()?;
     }
+    if done > 0 && done < COMPACTED_FROM {
+        compact(conn)?;
+    }
     Ok(())
+}
+
+/// Copy the write-ahead log into the file and empty it: deleted pages,
+/// zeroed in the file (`secure_delete`), leave the log too.
+pub fn scrub(c: &Connection) -> rusqlite::Result<()> {
+    c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+}
+
+/// Rebuild the file without its free pages, then [`scrub`]: nothing
+/// deleted before (even without `secure_delete`) is left in it.
+pub fn compact(c: &Connection) -> rusqlite::Result<()> {
+    c.execute_batch("VACUUM")?;
+    scrub(c)
+}
+
+/// The database's epoch (migration 6): a random id made with it.
+pub fn epoch(c: &Connection) -> rusqlite::Result<String> {
+    c.query_row("SELECT value FROM server_meta WHERE key = 'epoch'", [], |r| r.get(0))
 }
 
 /// Milliseconds since the Unix epoch.
@@ -264,9 +300,12 @@ pub struct SnapshotRow {
     /// A sealed snapshot's key id and box (`rules_crypto`).
     pub key_id: Option<String>,
     pub sealed: Option<Vec<u8>>,
+    /// A sealed snapshot's schema, bound to its box; `None` for an envelope
+    /// 1 box (and plaintext, whose JSON says).
+    pub schema_version: Option<u32>,
 }
 
-const SNAPSHOT_COLUMNS: &str = "version, json, published_at, key_id, sealed";
+const SNAPSHOT_COLUMNS: &str = "version, json, published_at, key_id, sealed, schema_version";
 
 fn snapshot_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotRow> {
     Ok(SnapshotRow {
@@ -275,6 +314,7 @@ fn snapshot_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SnapshotRow> {
         published_at: r.get(2)?,
         key_id: r.get(3)?,
         sealed: r.get(4)?,
+        schema_version: r.get(5)?,
     })
 }
 
@@ -287,20 +327,20 @@ pub fn latest_snapshot(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Opti
     .optional()
 }
 
-/// The newest snapshot `agent` can read: a plaintext one, or a sealed one
-/// whose key is wrapped for it (with that wrap). With no agent, plaintext
-/// ones only.
-pub fn readable_snapshot(
+/// The newest snapshot, with its key's wrap for `agent` if it is sealed
+/// and wrapped for it. Only ever the newest: an agent the app has not
+/// wrapped it for is told so, never served an older version.
+pub fn newest_snapshot_for(
     c: &Connection,
     mailbox_id: i64,
     agent: Option<&str>,
 ) -> rusqlite::Result<Option<(SnapshotRow, Option<Vec<u8>>)>> {
     c.query_row(
-        "SELECT s.version, s.json, s.published_at, s.key_id, s.sealed, k.wrap FROM snapshots s \
+        "SELECT s.version, s.json, s.published_at, s.key_id, s.sealed, s.schema_version, k.wrap FROM snapshots s \
          LEFT JOIN snapshot_keys k ON k.key_id = s.key_id AND k.agent_id = ?2 \
-         WHERE s.mailbox_id = ?1 AND (s.sealed IS NULL OR k.wrap IS NOT NULL) ORDER BY s.version DESC LIMIT 1",
+         WHERE s.mailbox_id = ?1 ORDER BY s.version DESC LIMIT 1",
         params![mailbox_id, agent.unwrap_or_default()],
-        |r| Ok((snapshot_row(r)?, r.get(5)?)),
+        |r| Ok((snapshot_row(r)?, r.get(6)?)),
     )
     .optional()
 }
@@ -347,6 +387,17 @@ pub fn set_agent_keys(
         params![agent_id, key_wrap, app_seal],
     )?;
     c.execute("DELETE FROM snapshot_keys WHERE agent_id = ?1", [agent_id])?;
+    Ok(())
+}
+
+/// An agent's key wrapped under a new credential (a grant's rotated
+/// secret): the same key, so its snapshot key wraps and its seal for the
+/// app stay.
+pub fn set_key_wrap(c: &Connection, agent_id: &str, key_wrap: &[u8]) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE agent_tokens SET key_wrap = ?2 WHERE id = ?1 AND revoked_at IS NULL",
+        params![agent_id, key_wrap],
+    )?;
     Ok(())
 }
 
@@ -414,9 +465,9 @@ pub fn versions(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<i64>> {
 /// Store a snapshot and drop all but the newest [`KEEP_VERSIONS`].
 pub fn insert_snapshot(c: &Connection, mailbox_id: i64, row: &SnapshotRow, now: i64) -> rusqlite::Result<()> {
     c.execute(
-        "INSERT INTO snapshots (mailbox_id, version, json, published_at, received_at, key_id, sealed) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![mailbox_id, row.version, row.json, row.published_at, now, row.key_id, row.sealed],
+        "INSERT INTO snapshots (mailbox_id, version, json, published_at, received_at, key_id, sealed, \
+         schema_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![mailbox_id, row.version, row.json, row.published_at, now, row.key_id, row.sealed, row.schema_version],
     )?;
     c.execute(
         "DELETE FROM snapshots WHERE mailbox_id = ?1 AND version NOT IN \
@@ -741,6 +792,12 @@ pub fn oauth_token(c: &Connection, token_hash: &str) -> rusqlite::Result<Option<
     .optional()
 }
 
+/// A grant's access tokens end: its refresh made new ones, under a new
+/// secret.
+pub fn delete_access_tokens(c: &Connection, grant_id: &str) -> rusqlite::Result<usize> {
+    c.execute("DELETE FROM oauth_tokens WHERE grant_id = ?1 AND kind = ?2", params![grant_id, TOKEN_ACCESS])
+}
+
 /// A refresh token was exchanged: it may not be again.
 pub fn use_oauth_token(c: &Connection, token_hash: &str, now: i64) -> rusqlite::Result<()> {
     c.execute("UPDATE oauth_tokens SET used_at = ?2 WHERE token_hash = ?1", params![token_hash, now])?;
@@ -813,6 +870,22 @@ pub fn insert_report(c: &Connection, r: &ReportRow, max_pending: i64) -> rusqlit
         )?;
     }
     Ok(id)
+}
+
+/// The mailbox's reports kept in plaintext (filed before it published
+/// encrypted), oldest first.
+pub fn plain_reports(c: &Connection, mailbox_id: i64) -> rusqlite::Result<Vec<ReportRow>> {
+    Ok(reports(c, mailbox_id, 0, i64::MAX)?.into_iter().map(|(r, _, _)| r).filter(|r| r.sealed.is_none()).collect())
+}
+
+/// A report's fields replaced by their box sealed to the app.
+pub fn seal_report(c: &Connection, id: i64, sealed: &[u8]) -> rusqlite::Result<()> {
+    c.execute(
+        "UPDATE reports SET message_id = NULL, recipients = '[]', subject = '', body_markdown = '', \
+         guide_check = '[]', sealed = ?2 WHERE id = ?1",
+        params![id, sealed],
+    )?;
+    Ok(())
 }
 
 /// A report as listed, with its agent's name and kind.
@@ -941,6 +1014,50 @@ mod tests {
         assert_eq!(db.run_now(|c| agent_tokens(c, 1)).unwrap()[0].2, Some(100_000), "once a minute at most");
         db.run_now(|c| touch_agent(c, "0123456789abcdef", 160_000)).unwrap();
         assert_eq!(db.run_now(|c| agent_tokens(c, 1)).unwrap()[0].2, Some(160_000));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_database_from_before_secure_delete_is_compacted_once_on_upgrade() {
+        let dir = scratch();
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = "plain-snapshot-marker-5e1a";
+        let bytes = |dir: &Path| -> Vec<u8> {
+            let mut all = std::fs::read(dir.join(FILE_NAME)).unwrap();
+            all.extend(std::fs::read(dir.join(format!("{FILE_NAME}-wal"))).unwrap_or_default());
+            all
+        };
+        let holds = |b: &[u8]| b.windows(marker.len()).any(|w| w == marker.as_bytes());
+        {
+            // Schema 5, as a server from before this fix left it: a
+            // plaintext snapshot deleted without secure_delete.
+            let mut c = Connection::open(dir.join(FILE_NAME)).unwrap();
+            c.pragma_update(None, "secure_delete", false).unwrap();
+            let tx = c.transaction().unwrap();
+            for sql in &MIGRATIONS[..5] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.pragma_update(None, "user_version", 5).unwrap();
+            tx.commit().unwrap();
+            c.execute(
+                "INSERT INTO mailboxes (address, publisher_token_hash, created_at) VALUES ('a@x.com', 'h', 1)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO snapshots (mailbox_id, version, json, published_at, received_at) VALUES (1, 1, ?1, 1, 1)",
+                [format!("{{\"fact\":\"{marker}\"}}").repeat(50)],
+            )
+            .unwrap();
+            c.execute("DELETE FROM snapshots", []).unwrap();
+        }
+        assert!(holds(&bytes(&dir)), "the deleted plaintext lingers in a free page");
+        let db = Db::open(&dir).unwrap();
+        assert!(!holds(&bytes(&dir)), "compacted on upgrade");
+        let made = db.run_now(|c| epoch(c)).unwrap();
+        assert_eq!(made.len(), 32);
+        drop(db);
+        assert_eq!(Db::open(&dir).unwrap().run_now(|c| epoch(c)).unwrap(), made, "made once");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

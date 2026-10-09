@@ -22,6 +22,12 @@ async fn backup_forget_and_healthcheck() {
     let copy = s.dir.join("copy.sqlite3");
     let out = rules(&["backup", copy.to_str().unwrap(), "--data-dir", dir]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&copy).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the copy is its owner's only, as the database is");
+    }
     let backup = rusqlite::Connection::open(&copy).unwrap();
     let n: i64 = backup.query_row("SELECT count(*) FROM snapshots", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 1, "the copy holds what was published");

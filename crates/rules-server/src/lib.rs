@@ -18,8 +18,9 @@
 //!
 //! - **Encryption at rest** (`crypto`, `rules_crypto`): sealed
 //!   snapshots whose key the app wraps per agent, agent keys wrapped under
-//!   each agent's credential, reports sealed to the app. Plaintext only in
-//!   memory, during a request.
+//!   each agent's credential, reports sealed to the app. Plaintext is never
+//!   written; in memory it lives for a request (see `crypto` for what is
+//!   wiped and what is not).
 //!
 //! The app is the source of truth and the only writer: it registers a
 //! mailbox, pushes full snapshots whose version only goes up, and mints
@@ -336,7 +337,7 @@ pub(crate) async fn agent_auth(
     let key = match secret {
         Some(secret) => {
             let agent = id.clone();
-            state.db.run(move |c| crypto::agent_key(c, &agent, mailbox_id, &secret)).await?
+            state.db.run(move |c| crypto::agent_key(c, &agent, mailbox_id, &secret, crypto::Unopened::Keep)).await?
         }
         None => None,
     };

@@ -592,21 +592,41 @@ async fn a_connectors_tokens_carry_its_grant_secret_and_read_encrypted_snapshots
     assert_eq!(t.s.rewrap(&t.publisher, &app).await, 1);
     assert_eq!(call(&client, "guide_rules", json!({})).await["version"], 2);
 
-    // Refreshed: new tokens, the same secret, still reading.
+    // Refreshed: new tokens under a new secret, reading at once (the same
+    // key, rewrapped: the app's wrap for it stays).
+    let wrap_before: Vec<u8> =
+        t.s.backup().query_row("SELECT key_wrap FROM agent_tokens WHERE id = ?1", [&grant_id], |r| r.get(0)).unwrap();
     let (status, tokens) = t.refresh(&c, &refresh).await;
     assert_eq!(status, StatusCode::OK, "{tokens}");
     let access2 = tokens["access_token"].as_str().unwrap();
-    assert_eq!(rules_server::tokens::grant_secret_of(access2), Some(secret.as_str()));
+    let refresh2 = tokens["refresh_token"].as_str().unwrap();
+    let secret2 = rules_server::tokens::grant_secret_of(access2).expect("a grant secret").to_owned();
+    assert_ne!(secret2, secret, "rotated at the refresh");
+    assert_eq!(rules_server::tokens::grant_secret_of(refresh2), Some(secret2.as_str()));
     assert_eq!(call(&connect(&t.s, access2).await, "guide_rules", json!({})).await["version"], 2);
-    // The server keeps no grant secret and no token.
+    // The access token from before ends; a leaked copy of it opens nothing
+    // in the database from now on.
+    assert_eq!(t.mcp_status(&access).await, StatusCode::UNAUTHORIZED);
     let stored = t.s.stored_bytes();
-    for kept in [secret.as_str(), access2, &access, &refresh] {
+    for kept in [secret.as_str(), secret2.as_str(), access2, &access, &refresh] {
         assert!(!common::contains(&stored, kept), "the database holds a secret");
     }
+    assert!(
+        !stored.windows(wrap_before.len()).any(|w| w == wrap_before.as_slice()),
+        "the wrap under the old secret is gone from the file and its log"
+    );
     let key_wrap: Vec<u8> =
         t.s.backup().query_row("SELECT key_wrap FROM agent_tokens WHERE id = ?1", [&grant_id], |r| r.get(0)).unwrap();
-    assert!(seal::unwrap_agent_key(&seal::credential_key(&secret, &grant_id), &key_wrap, &grant_id).is_ok());
-    assert!(seal::unwrap_agent_key(&seal::credential_key(access2, &grant_id), &key_wrap, &grant_id).is_err());
+    let key = seal::unwrap_agent_key(&seal::credential_key(&secret2, &grant_id), &key_wrap, &grant_id).unwrap();
+    assert!(seal::unwrap_agent_key(&seal::credential_key(&secret, &grant_id), &key_wrap, &grant_id).is_err());
+    let old_key = seal::unwrap_agent_key(&seal::credential_key(&secret, &grant_id), &wrap_before, &grant_id).unwrap();
+    assert_eq!(key, old_key, "the same agent key");
+    // Reuse detection still holds: the spent refresh token revokes later.
+    let (status, again) = t.refresh(&c, refresh2).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    let (status, _) = t.refresh(&c, refresh2).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(t.mcp_status(again["access_token"].as_str().unwrap()).await, StatusCode::UNAUTHORIZED);
 
     // A connector that signs in after the mailbox is encrypted has its key
     // from its first tokens, before it makes any request.

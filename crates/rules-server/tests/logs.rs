@@ -45,6 +45,7 @@ async fn logs_name_token_ids_and_nothing_secret() {
     call(&client, "guide_rules", json!({ "to": ["ann@acme.com"] })).await;
     let _ = s.get(Some("oagc_agt_0123456789abcdef_guess"), "/v1/m/x@y.z/facts").await;
     let oauth_secrets = oauth_flow(&s, &publisher).await;
+    let leaked = unreadable_sealed_snapshot(&s, &publisher, &agent).await;
 
     let log = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
     assert!(log.contains("route=\"/oauth/token\"") && log.contains("agent connected with a connect code"), "{log}");
@@ -58,9 +59,43 @@ async fn logs_name_token_ids_and_nothing_secret() {
     for secret in [publisher.as_str(), agent.as_str(), "oagc_agt_0123456789abcdef_guess"] {
         assert!(!log.contains(secret), "a token was logged: {log}");
     }
-    for content in ["bea@globex.com", "ann@acme.com", "circle back", "cal.com/scout", "Scout", MAILBOX] {
+    assert!(log.contains("a published snapshot did not read"), "{log}");
+    for content in ["bea@globex.com", "ann@acme.com", "circle back", "cal.com/scout", "Scout", MAILBOX, leaked] {
         assert!(!log.contains(content), "{content:?} was logged: {log}");
     }
+}
+
+/// A sealed snapshot that opens but does not read (a broken app build):
+/// what serde would say about it quotes the value it choked on. The value.
+async fn unreadable_sealed_snapshot(s: &common::Server, publisher: &str, agent: &str) -> &'static str {
+    use rules_crypto as seal;
+    const LEAKY: &str = "leaky-value-7781";
+    let mut app = common::SealingApp::new();
+    let (status, _) = s.push_sealed(publisher, &mut app, &snapshot(2), Some("1")).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    // The agent's key is made at its request; the app can then wrap for it.
+    let _ = s.get(Some(agent), &format!("/v1/m/{MAILBOX}/guide")).await;
+    let agents = s.agents(publisher).await;
+    let key = seal::SecretKey::random();
+    let key_id = seal::new_key_id();
+    let json = format!("{{\"schema_version\":1,\"version\":\"{LEAKY}\"}}");
+    let body = seal::SealedSnapshot {
+        encryption: seal::ENCRYPTION_VERSION,
+        key_id: key_id.clone(),
+        version: 3,
+        published_at: 3,
+        schema_version: 1,
+        address: MAILBOX.into(),
+        ciphertext: seal::b64(&seal::seal_snapshot(&key, &key_id, MAILBOX, 3, 1, &json)),
+        app_key: app.key.public_base64(),
+        wraps: app.wraps(agents["agent_tokens"].as_array().unwrap(), &key, &key_id, false),
+    };
+    assert!(!body.wraps.is_empty());
+    let (status, _) = s.publish(publisher, Some("2"), serde_json::to_string(&body).unwrap()).await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    let r = s.get(Some(agent), &format!("/v1/m/{MAILBOX}/guide")).await;
+    assert_eq!(r.status(), reqwest::StatusCode::INTERNAL_SERVER_ERROR);
+    LEAKY
 }
 
 /// A connector's whole flow, with one wrong code: every secret it saw
