@@ -550,6 +550,11 @@ fn writing_help(prompt: &str) -> String {
     let instruction = between(prompt, "The user asks: ", "\n").unwrap_or_default();
     let to = prompt.lines().find_map(|l| l.strip_prefix("To: ")).unwrap_or_default();
     let to = if to.starts_with('(') { String::new() } else { name(to.split(',').next().unwrap_or_default()) };
+    // The composer may give only an address: the name is its first part.
+    let to = match to.split_once('@') {
+        Some((local, _)) => capitalise(local.split(['.', '_', '-']).next().unwrap_or(local)),
+        None => to,
+    };
     let original = between(prompt, "The message being answered or forwarded:\n<<<\n", "\n>>>").unwrap_or_default();
     if original.is_empty() {
         let hello = if to.is_empty() { "Hi,".to_owned() } else { format!("Hi {},", first_name(&to)) };
@@ -756,6 +761,12 @@ mod tests {
     fn writing_help_answers_the_message() {
         let prompt = "You are helping write an email in Kaluta's composer. The user asks: Reply\n\nAnswer with only the text.\n\nFrom: Me <me@example.com>\nTo: Sam Rivera <sam.rivera@example.com>\nSubject: Re: Board prep\n\nThe message so far:\n<<<\n\n>>>\n\nThe message being answered or forwarded:\n<<<\nHi Jo,\n\nCan you do Thursday at 2pm for the board prep?\n\nSam\n>>>";
         assert_eq!(writing_help(prompt), "Hi Sam,\n\nThursday works for me. Please send the invite.\n\nJo");
+    }
+
+    #[test]
+    fn writing_help_greets_by_name_when_given_only_an_address() {
+        let prompt = "You are helping write an email in Kaluta's composer. The user asks: Reply\n\nTo: sam.rivera@example.com\n\nThe message being answered or forwarded:\n<<<\nCan you do Thursday?\n>>>";
+        assert!(writing_help(prompt).starts_with("Hi Sam,\n"), "{}", writing_help(prompt));
     }
 
     #[test]

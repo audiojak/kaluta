@@ -24,20 +24,38 @@ impl Core {
     /// dated from now. Returns the number of messages written.
     pub async fn debug_seed_workflow_demo(&self, threads: u32) -> Result<u32, CoreError> {
         let db = self.db()?;
-        runtime::run(async move {
+        let account =
+            self.current_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
+        let written = runtime::run(async move {
             let now = mail_sync::now_millis();
             let spec =
                 mail_store::demo::DemoSpec { threads, newest_at: now - BULK_ENDS_BEFORE_NOW, ..Default::default() };
             let stats = tokio::task::spawn_blocking(move || -> mail_store::StoreResult<u32> {
                 let bulk = mail_store::demo::generate(&db, &spec)?;
                 let written = mail_store::demo_workflows::generate(&db, now)?;
+                db.write_blocking(|tx| mail_store::read::set_sync_state(tx, "account_email", mail_store::demo::ME))?;
                 Ok(bulk.messages + written.messages)
             })
             .await
             .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))??;
             Ok(stats)
         })
-        .await
+        .await?;
+        // Listed like any account (with no sign-in, so it never syncs), so
+        // the account menu can come back to it from an agent mailbox.
+        self.register_account(crate::registry::IndexEntry {
+            id: account,
+            kind: crate::registry::AccountKind::Gmail,
+            email: mail_store::demo::ME.to_owned(),
+            display_name: Some("Demo Mailbox".to_owned()),
+            avatar_file: None,
+            added_at: mail_sync::now_millis(),
+            imap: None,
+            named_by_user: false,
+            service: None,
+        })
+        .await?;
+        Ok(written)
     }
 
     /// Deliver the workflow demo's arrivals to the open account, one every
@@ -146,6 +164,8 @@ mod tests {
         block_on(core.clone().open_account("demo".into())).unwrap();
         let written = block_on(core.debug_seed_workflow_demo(50)).unwrap();
         assert!(written > 50);
+        let accounts = block_on(core.list_accounts()).unwrap();
+        assert!(accounts.iter().any(|a| a.id == "demo"), "listed, so the account menu can return to it");
 
         let inbox = block_on(core.search_threads("in:inbox".into(), None, 1)).unwrap();
         let newest = inbox.rows.first().unwrap();

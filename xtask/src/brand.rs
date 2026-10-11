@@ -38,6 +38,7 @@ const ALLOWED: &[(&str, &str)] = &[
     ("macos/KalutaTests/OutsideAgentTests.swift", "its test"),
     ("scripts/test-macos.sh", "isolation watches OpenAGC's preferences too"),
     ("scripts/snapshot.sh", "isolation watches OpenAGC's preferences too"),
+    ("scripts/demo.sh", "isolation watches OpenAGC's preferences too"),
     ("scripts/clean-test-scratch.sh", "sweeps scratch the old name left"),
     ("xtask/src/brand.rs", "this check"),
 ];
