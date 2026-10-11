@@ -153,8 +153,12 @@ quick reply, a task, the set's end, replies):
   shown, and the reply is written in place and sent with "Send and
   archive". Anything longer becomes a task, filled in on the same screen
   (no sheet); the user is encouraged to make tasks of the rest.
-- **Replies is for replies that need more thought**: the reply tasks
-  triage makes.
+- **Replies is for emails waiting on an answer that have no task;
+  Tasks is for emails that have one.** Triage hands over to Tasks.
+- **Sending to a conversation with an open task** offers *Send and
+  finish the task* or *Send, keep the task open*, wherever the reply is
+  written (triage, Replies, Tasks); no "Mark the task done?" dialog.
+- **Tasks from an earlier day are "carried over"**, not overdue.
 - **Drafts follow the human.** Most replies need the user's view before
   Claude writes. Where Claude writes ahead (quick replies in triage), it
   writes two or three different answers (yes; yes with a condition; not
