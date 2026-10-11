@@ -381,7 +381,10 @@ final class AppModel {
     /// screen (home) or the mail view.
     var home: WorkflowHome = .start
     /// The workflow being worked through, over the whole window.
-    var workflowSession: WorkflowSession?
+    var workflowSession: WorkflowSession? {
+        // Kaluta's background jobs wait while a workflow is on screen.
+        didSet { core?.setWorkflowOpen(workflowSession != nil) }
+    }
     /// The start screen's counts, estimates and Done today.
     var workflowOverview: WorkflowOverview?
     /// What the mode opened on, decided ones included, until Done.

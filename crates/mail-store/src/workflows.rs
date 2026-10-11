@@ -327,6 +327,55 @@ pub fn teach_items(conn: &Connection) -> StoreResult<Vec<String>> {
     Ok(out)
 }
 
+/// What a background job did on one day (spec §14.13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobDay {
+    pub job: String,
+    pub day: String,
+    pub items: u32,
+    pub last_run_at: Millis,
+    pub last_error: Option<String>,
+}
+
+/// Items `job` has done on `day`.
+pub fn job_items(conn: &Connection, job: &str, day: &str) -> StoreResult<u32> {
+    Ok(conn
+        .query_row("SELECT items FROM workflow_job_days WHERE job = ?1 AND day = ?2", params![job, day], |r| {
+            r.get::<_, u32>(0)
+        })
+        .optional()?
+        .unwrap_or(0))
+}
+
+/// Count `items` more for `job` on `day`, with how the attempt ended.
+pub fn record_job(
+    tx: &Transaction,
+    job: &str,
+    day: &str,
+    items: u32,
+    error: Option<&str>,
+    now: Millis,
+) -> StoreResult<()> {
+    tx.execute(
+        "INSERT INTO workflow_job_days (job, day, items, last_run_at, last_error) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (job, day) DO UPDATE SET items = items + excluded.items,
+           last_run_at = excluded.last_run_at, last_error = excluded.last_error",
+        params![job, day, items, now, error],
+    )?;
+    Ok(())
+}
+
+/// Every job's record for `day`.
+pub fn job_days(conn: &Connection, day: &str) -> StoreResult<Vec<JobDay>> {
+    let mut stmt = conn.prepare(
+        "SELECT job, day, items, last_run_at, last_error FROM workflow_job_days WHERE day = ?1 ORDER BY job",
+    )?;
+    let rows = stmt.query_map(params![day], |r| {
+        Ok(JobDay { job: r.get(0)?, day: r.get(1)?, items: r.get(2)?, last_run_at: r.get(3)?, last_error: r.get(4)? })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +512,23 @@ mod tests {
             db.read_blocking(move |c| tasks_due(c, "2026-10-11")).unwrap().into_iter().map(|t| t.thread_id).collect();
         assert_eq!(due, keys(&["b", "a"]));
         assert_eq!(db.read_blocking(move |c| tasks_due_later(c, "2026-10-11", "2026-10-17")).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_jobs_items_add_up_per_day() {
+        let s = store("jobs");
+        let db = &s.1;
+        db.write_blocking(|tx| {
+            record_job(tx, "triage", "2026-10-11", 3, None, 1)?;
+            record_job(tx, "triage", "2026-10-11", 2, Some("The agent stopped"), 2)?;
+            record_job(tx, "triage", "2026-10-12", 1, None, 3)
+        })
+        .unwrap();
+        assert_eq!(db.read_blocking(|c| job_items(c, "triage", "2026-10-11")).unwrap(), 5);
+        assert_eq!(db.read_blocking(|c| job_items(c, "waiting", "2026-10-11")).unwrap(), 0);
+        let days = db.read_blocking(|c| job_days(c, "2026-10-11")).unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!((days[0].items, days[0].last_run_at), (5, 2));
+        assert_eq!(days[0].last_error.as_deref(), Some("The agent stopped"));
     }
 }

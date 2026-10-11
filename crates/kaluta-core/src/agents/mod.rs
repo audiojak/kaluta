@@ -82,6 +82,12 @@ pub(crate) struct AgentHub {
     pub(crate) glean_until: Mutex<HashMap<String, i64>>,
     /// When each account's old AI drafts were last purged.
     pub(crate) analysis_purged: Mutex<HashMap<String, i64>>,
+    /// Workflow background jobs (spec §14.13): the runner per account, when
+    /// to try again after the agent could not work, and whether a workflow
+    /// is on screen (jobs wait while one is).
+    pub(crate) workflow_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    pub(crate) workflow_job_retry: Mutex<HashMap<String, i64>>,
+    pub(crate) workflow_open: std::sync::atomic::AtomicBool,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript

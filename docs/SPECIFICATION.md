@@ -4492,8 +4492,12 @@ Guide's and Facts' bands open it on their kind.
 
 Run while the app is open, after sync has settled, when no workflow is
 open, in hidden read-only agent sessions (ADR 0007) with the user's
-chosen agent, capped per account per day, surviving a quit like the
-daily review:
+chosen agent (the one the daily review uses, §14.10), capped per
+account per day, surviving a quit like the daily review: each job finds
+its own work in the store, batch by batch, and what it did each day is
+counted in `workflow_job_days` against its cap. When the agent cannot
+work, the jobs wait an hour and try again; opening a workflow stops them
+between batches until it is closed.
 
 | Job | When | Makes |
 |---|---|---|
@@ -4512,7 +4516,8 @@ Per account (§6.2): `triage_suggestions`, `waiting_checks`, `waiting`
 (thread, since, due, until, state), `reading_summaries`,
 `routine_proposals` (or proposals of kind *routine* beside the guide's),
 `workflow_progress` (the day, the workflow, the set, the position, the
-decisions; for resume, the scores and *Done today*). Nothing here is
+decisions; for resume, the scores and *Done today*), `workflow_job_days`
+(each job's items per day, its last attempt and why it stopped). Nothing here is
 synced; the labels are.
 
 ---

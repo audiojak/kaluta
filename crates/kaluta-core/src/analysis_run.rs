@@ -125,9 +125,9 @@ impl Core {
         runtime::run(async move { Ok(db.read(mail_store::compositions::recording).await?) }).await
     }
 
-    /// The agent reviews use: the one chosen for Analysis, else the one the
-    /// guide last learned with.
-    async fn analysis_agent(&self) -> Result<String, CoreError> {
+    /// The agent reviews (and workflow jobs) use: the one chosen for
+    /// Analysis, else the one the guide last learned with.
+    pub(crate) async fn analysis_agent(&self) -> Result<String, CoreError> {
         let db = self.db()?;
         runtime::run(async move {
             Ok(db

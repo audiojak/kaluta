@@ -38,6 +38,7 @@ mod logging;
 mod mail;
 mod mutations;
 mod outside;
+mod prompt_mail;
 mod registry;
 mod routines;
 mod rules_publish;
@@ -46,6 +47,7 @@ pub mod secrets;
 mod sync;
 mod tasks;
 mod tasks_ai;
+mod workflow_jobs;
 mod workflows;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};

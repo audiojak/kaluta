@@ -743,6 +743,9 @@ final class CoreClient: Sendable {
         try await call { try await core.finishWorkflow(setId: set) }
     }
 
+    /// Background jobs wait while a workflow is on screen (spec §14.13).
+    func setWorkflowOpen(_ open: Bool) { core.setWorkflowOpen(open: open) }
+
     /// Adds the tasks and labels their threads `Task`.
     func createTasks(_ tasks: [NewTask]) async throws(CoreClientError) -> [TaskItem] {
         try await call { try await core.createTasks(new: tasks) }

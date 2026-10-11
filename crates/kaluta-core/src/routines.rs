@@ -319,7 +319,9 @@ impl Core {
                     )
                     .await;
                     // The daily review (spec §14.10).
-                    crate::registry::scoped(Some(account), core.analysis_tick(mail_sync::now_millis())).await;
+                    crate::registry::scoped(Some(account.clone()), core.analysis_tick(mail_sync::now_millis())).await;
+                    // Workflow background jobs (spec §14.13).
+                    crate::registry::scoped(Some(account), core.workflow_jobs_tick(mail_sync::now_millis())).await;
                 }
                 drop(core);
                 tokio::time::sleep(TICK).await;
