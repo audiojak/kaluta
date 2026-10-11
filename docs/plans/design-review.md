@@ -172,6 +172,14 @@ quick reply, a task, the set's end, replies):
 - **Nudges are written ahead**, as up to three different follow-ups to
   pick from, ending on the editable email: the exception to "drafts
   follow the human", since a nudge is short and predictable.
+- **Weekly reading** opens on the sorting routine's report, then each
+  due group (the routine's labels) one line per item, summarised by
+  Claude when the routine sorts. Weekly groups are due on **Friday** by
+  default; each group can have its own day. Reading and clearing mark
+  mail read and **keep the routine's label**.
+- **Sending sorted mail back to the Inbox (I) proposes a change to the
+  routine**, decided like a proposed writing-guide rule (in Teach
+  Claude); nothing changes until the user accepts it.
 - **Drafts follow the human.** Most replies need the user's view before
   Claude writes. Where Claude writes ahead (quick replies in triage), it
   writes two or three different answers (yes; yes with a condition; not
