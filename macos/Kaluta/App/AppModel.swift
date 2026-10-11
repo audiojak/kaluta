@@ -377,6 +377,13 @@ final class AppModel {
     var agentMailboxSheet: AgentMailboxRequest?
     /// Review mode (spec §14.10, §14.11): deciding in the whole window.
     var reviewMode: ReviewMode?
+    /// What the window shows when no review is open (spec §14.13): the start
+    /// screen (home) or the mail view.
+    var home: WorkflowHome = .start
+    /// The workflow being worked through, over the whole window.
+    var workflowSession: WorkflowSession?
+    /// The start screen's counts, estimates and Done today.
+    var workflowOverview: WorkflowOverview?
     /// What the mode opened on, decided ones included, until Done.
     var reviewItems: [ReviewItem] = []
     /// How each decided item went, by tag; an item back in the stores
@@ -463,6 +470,7 @@ final class AppModel {
     /// Open the remembered account, or the demo when asked for on launch.
     func start(openDemo: Bool? = nil) async {
         let openDemo = openDemo ?? (defaults.bool(forKey: "KalutaDemo") || CoreClient.demoWorkflows)
+        restoreHome()
         guard let core else {
             accountState = .failed("The core failed to start. See ~/Library/Logs/Kaluta/core.log.")
             return
@@ -718,6 +726,8 @@ final class AppModel {
     private(set) var tasksRevision = 0
     /// Bumped when a workflow set starts, changes or finishes (spec §14.13).
     private(set) var workflowsRevision = 0
+    /// Bumped when the Inbox changes, so the start screen recounts.
+    private(set) var inboxRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
     private(set) var guideRevision = 0
     /// The learning run's progress and the decisions waiting (spec §14.9).
@@ -1422,7 +1432,7 @@ final class AppModel {
 
     /// Run an action; if it changed anything, put it on the undo stack and
     /// acknowledge it.
-    private func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
+    func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
         do {
             if let token = try await body() { undo.record(token, action) }
         } catch {
@@ -1563,6 +1573,7 @@ final class AppModel {
         let event = tagged.event
         switch event {
         case let .threadsChanged(mailboxID, hint):
+            if mailboxID == "INBOX" { inboxRevision &+= 1 }
             await mailboxes.reload()
             updateBadge()
             cleanUp.mailChanged()

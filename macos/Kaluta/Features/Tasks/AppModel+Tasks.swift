@@ -95,8 +95,8 @@ extension AppModel {
 
     /// `t` and Message › New Task from Email: open the dialog and ask
     /// Claude, or open it empty when no agent is ready.
-    func openTaskDialog(now: Date = .now) async {
-        guard taskDraft == nil, let row = taskTarget, let core else { return }
+    func openTaskDialog(for target: ThreadRow? = nil, now: Date = .now) async {
+        guard taskDraft == nil, let row = target ?? taskTarget, let core else { return }
         // The agents are found when the agent bar is first used; `t` may
         // come first.
         if agent.providers.isEmpty { await agent.loadProviders() }
@@ -186,6 +186,8 @@ extension AppModel {
             draft.suggester.cancel()
             if taskDraft === draft { taskDraft = nil }
             recordTaskUndo(made, accountID: accountID)
+            // A task made for a workflow's current conversation decides it.
+            await workflowTaskMade(threadID: draft.threadID)
         } catch let error as CoreClientError {
             draft.error = error.message
         } catch {

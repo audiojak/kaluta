@@ -184,6 +184,16 @@ struct MailCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }
         CommandGroup(before: .sidebar) {
+            if model.workflowsEnabled {
+                // The start screen and the mail view (spec §14.13).
+                Button("What's Next") { model.workflowSession = nil; model.showStart() }
+                    .keyboardShortcut("0")
+                    .disabled(!mailKey || model.showsWorkflows && model.workflowSession == nil)
+                Button("Mail") { model.showMail() }
+                    .keyboardShortcut("0", modifiers: [.command, .option])
+                    .disabled(!mailKey || !model.showsWorkflows)
+                Divider() // menu
+            }
             ForEach(Array(Self.mailboxShortcuts.enumerated()), id: \.offset) { index, item in
                 Button(item.title) { model.selectedMailboxID = item.id }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))

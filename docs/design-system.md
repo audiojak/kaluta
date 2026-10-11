@@ -501,6 +501,38 @@ plain text, thinking and tool calls are disclosure groups, and a proposal
 is a `.card(.attention)` while it waits and `.neutral` after. An agent
 error is a `Tone.failure` line.
 
+### Workflows
+
+The start screen and the workflows (spec §14.13) are built from
+`Design/Workflow.swift` and `Features/Workflows/`. Each workflow may look
+like its own place; the vocabulary stays the same.
+
+- **Type**: `TypeRole.workflowDisplay` (34 pt semibold: the item's title),
+  `workflowHeadline` (40 pt: the start screen's and an end's one line),
+  `workflowContent` (21 pt: the email, a draft, a summary),
+  `workflowHeading` (20 pt semibold: a card's name), `workflowContext`
+  (15 pt, secondary: who, when, why), `workflowControl` (17 pt semibold:
+  decision buttons), `workflowKey` (13 pt: keycaps, pills, labels),
+  `workflowFigure` (a score's figure).
+- **Colour**: `Tone.workflow(kind)`, one per workflow (Triage indigo,
+  Replies teal, Tasks orange, Waiting purple, Reading sand, Agents
+  graphite, Teach green), white text on it at 4.5:1;
+  `Tone.workflowGround(kind)` its faint ground; `Tone.workflowSurface`
+  for cards and fields on it.
+- **Parts**: `WorkflowHeader` (‹ Mail with Esc, the name and "n of N",
+  one pill), `WorkflowProgress` (a segment per item up to 20, else one
+  bar), `WorkflowButton` (primary filled, plain, quiet; its `Keycap`),
+  `WorkflowRailRow`, `ScoreTile`, `CompletionRing`.
+- **Commands**: every action is a `WorkflowCommand` with one key, one
+  spoken name per workflow and one implementation
+  (`AppModel.performWorkflow`); the decision bar, the keys and
+  VoiceOver's actions all go through it. A button shows its key; its
+  help says it ("Archive (E)").
+- **Focus**: the workflow view holds the keyboard; it takes it back on
+  every new item, so a click on the content never strands the keys.
+- **Notices**: the undo notice shows over a workflow, clear of its
+  decision bar.
+
 ### Data grids
 
 Diagnostics (the Sync Debugger, the Keyboard Shortcuts window) use `Grid`

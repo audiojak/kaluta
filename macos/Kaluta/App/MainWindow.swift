@@ -20,6 +20,14 @@ struct MainWindow: View {
                 // until Done; the split view comes back as it was.
                 if let mode = model.reviewMode {
                     ReviewModeView(mode: mode)
+                } else if model.showsWorkflows {
+                    // The start screen is home (spec §14.13); a workflow
+                    // takes the whole window, as Review mode does.
+                    if let session = model.workflowSession {
+                        WorkflowHostView(session: session)
+                    } else {
+                        StartScreenView()
+                    }
                 } else {
                     mailWindow
                 }

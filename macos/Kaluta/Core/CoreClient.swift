@@ -1737,6 +1737,14 @@ typealias GuideCheckFailure = KalutaCore.GuideCheckFailure
 typealias GuideChangeQuestion = KalutaCore.GuideChangeQuestion
 typealias GuideMergePlan = KalutaCore.GuideMergePlan
 typealias GuideMergeDecision = KalutaCore.GuideMergeDecision
+typealias WorkflowKind = KalutaCore.WorkflowKind
+typealias WorkflowOverview = KalutaCore.WorkflowOverview
+typealias WorkflowSummary = KalutaCore.WorkflowSummary
+typealias WorkflowDay = KalutaCore.WorkflowDay
+typealias WorkflowItem = KalutaCore.WorkflowItem
+typealias WorkflowSet = KalutaCore.WorkflowSet
+typealias WorkflowScore = KalutaCore.WorkflowScore
+typealias DecisionCount = KalutaCore.DecisionCount
 
 // MARK: - Events
 

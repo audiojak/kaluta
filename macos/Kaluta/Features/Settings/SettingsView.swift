@@ -48,6 +48,7 @@ private struct GeneralSettings: View {
     @AppStorage(NewMailNotifier.notifyKey, store: CoreClient.appDefaults()) private var notify = true
     @AppStorage(NewMailNotifier.badgeKey, store: CoreClient.appDefaults()) private var badge = true
     @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
+    @AppStorage(AppModel.workflowsEnabledKey, store: CoreClient.appDefaults()) private var workflows = false
     @Environment(AppModel.self) private var model
     @Environment(Updater.self) private var updater
 
@@ -64,6 +65,10 @@ private struct GeneralSettings: View {
                 Text("Messages wait this long before they go, so you can take one back with Undo (⌘Z). Quitting sends them at once.")
                     .font(TypeRole.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Workflows") {
+                Toggle("Open on the start screen (preview)", isOn: $workflows)
+                    .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (M) away")
             }
             Section("New Mail") {
                 Toggle("Notify me about new mail in the Inbox", isOn: $notify)
