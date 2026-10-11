@@ -101,6 +101,8 @@ struct Keycap: View {
     var body: some View {
         Text(key)
             .font(TypeRole.workflowKey)
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(onFill ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
             .padding(.horizontal, Space.s)
             .padding(.vertical, Space.hair)
@@ -128,9 +130,10 @@ struct WorkflowButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: Space.m) {
-                Text(title)
+                Text(title).lineLimit(1)
                 if let key { Keycap(key: key, onFill: style == .primary) }
             }
+            .fixedSize(horizontal: true, vertical: false)
             .font(TypeRole.workflowControl)
             .foregroundStyle(style == .primary ? AnyShapeStyle(.white)
                              : style == .quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))

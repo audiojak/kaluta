@@ -78,7 +78,6 @@
 		506D02E79AFBCFE906760486 /* ComposerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3023B7D3FA4C3001F558146 /* ComposerStore.swift */; };
 		519D802C41E815D77721A0A2 /* WorkflowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE7C44EEA6FD3968EF36E61D /* WorkflowTests.swift */; };
 		52A56057F9A2B81C597C7594 /* FactProposals.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31570D1A011025F8599EA4E /* FactProposals.swift */; };
-		52D11BB08701887B8E116F68 /* TaskDoneDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77203C113E4254E51159C770 /* TaskDoneDialog.swift */; };
 		534A1CAF328A0B2F7E27F8CD /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB31634BD804486D8D862CA /* AppModel.swift */; };
 		552B126519D939E6B58D5225 /* AppShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C4D0037FD95A32B795A4EB /* AppShellTests.swift */; };
 		570DC21EB5D3E9B9D139DAD1 /* LinkSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD5AD309FC75125E8B5FCB8 /* LinkSafety.swift */; };
@@ -295,7 +294,6 @@
 		759634FB95CC1A5C75045E2C /* RoutinesStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesStore.swift; sourceTree = "<group>"; };
 		75D126D2C44E0F73E4772C3C /* BulkTaskSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BulkTaskSheet.swift; sourceTree = "<group>"; };
 		760415830495CCBC7ECFB8D2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
-		77203C113E4254E51159C770 /* TaskDoneDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDoneDialog.swift; sourceTree = "<group>"; };
 		772167C885FCE55F5D9E22B6 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
 		77B7BD62384AE6891B831AC0 /* DemoWorkflows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkflows.swift; sourceTree = "<group>"; };
 		7863C444DC7E8A65EDAD7053 /* Migration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migration.swift; sourceTree = "<group>"; };
@@ -677,7 +675,6 @@
 				EE8EAC48F6FB6D137485077F /* AppModel+Tasks.swift */,
 				75D126D2C44E0F73E4772C3C /* BulkTaskSheet.swift */,
 				748FC77E34F53AAB7403B251 /* TaskDialog.swift */,
-				77203C113E4254E51159C770 /* TaskDoneDialog.swift */,
 				6CD3FA01672BD6042238B17D /* TaskListStore.swift */,
 				D1365D83AB1AFFB804F6BD23 /* TaskListView.swift */,
 				ED6E6A075039A6E83A0A87B8 /* TaskSuggester.swift */,
@@ -1180,7 +1177,6 @@
 				1E8303DFD1D89BBAF00E8D46 /* SyncDebuggerView.swift in Sources */,
 				C579F24A6C45CA9A64A64FC0 /* SyncStatusView.swift in Sources */,
 				8A3B7D519B6FC9E3E115A32B /* TaskDialog.swift in Sources */,
-				52D11BB08701887B8E116F68 /* TaskDoneDialog.swift in Sources */,
 				22CA174828F5B1B74C862D85 /* TaskListStore.swift in Sources */,
 				896C6E39859548C7CEE6DF06 /* TaskListView.swift in Sources */,
 				A0E331DBB25B7BFB1BE7238F /* TaskSettings.swift in Sources */,

@@ -3398,13 +3398,15 @@ need or made a decision.
   category (a chooser with number keys), `⌫` delete, `j` `k` move; the
   same in the context menu, and Mark as Done and Category in the list
   column's toolbar. Every change goes on the undo stack with a notice.
-  A reply or forward started from the task list answers the task: when it
-  is sent, the app asks "Mark the Task Done?" (Y or Return: done, and the
-  thread's `Task` label goes with its last open task; N or Escape: it
-  stays open). ⌘Z reopens a task marked done; Undo Send takes the message
-  back and reopens the task, and sending it again asks again
-  (amended 2026-09-29 at the maintainer's request: it had completed the
-  task without asking). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
+  A reply or forward to a conversation with an open task answers the
+  task, wherever it is written: the composer names the task and offers
+  **Send and Finish Task** (⌘Return, ⇧⌘D, the toolbar's Send) and
+  **Send, Keep Task Open** (⌥⌘Return). Finishing shows "Task done: …"
+  with Undo, and the thread's `Task` label goes with its last open task.
+  ⌘Z reopens a task finished this way; Undo Send takes the message back
+  and reopens the task, and the reopened draft offers both again
+  (amended 2026-09-29: it had completed the task without asking; amended
+  2026-10-11, §14.13: the choice is made at Send, not asked after it). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
   results as anywhere else.
 - **Many emails: `⇧T`.** In a mail list, `⇧T` (also Message › Create
   Tasks… and the context menu) opens the **bulk sheet** for the

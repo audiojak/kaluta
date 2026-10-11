@@ -410,8 +410,6 @@ final class AppModel {
     var bulkTasks: BulkTaskDraft?
     /// The Settings tab to show when Settings next opens.
     var settingsTab: SettingsTab = .general
-    /// Asked after a task's reply is sent: is the task done?
-    var taskDoneQuestion: TaskDoneQuestion?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.
@@ -1289,29 +1287,19 @@ final class AppModel {
         return store
     }
 
-    /// A message was sent (or is held for Undo Send). A reply a task
-    /// called for asks whether that task is done (spec §14.8): the answer
-    /// is the user's, in `taskDoneQuestion`.
-    func messageSent(heldDraftID: Int64?, taskID: Int64?, accountID: String) async {
-        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: taskID) }
-        guard let taskID, let core, let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }),
-              !task.done
+    /// A message was sent (or is held for Undo Send). Sent with *Send and
+    /// finish the task*, its task is done, with Undo (spec §14.13).
+    func messageSent(heldDraftID: Int64?, taskID: Int64?, finishTask: Bool, accountID: String) async {
+        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: finishTask ? taskID : nil) }
+        guard finishTask, let taskID, let core,
+              let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }), !task.done,
+              (try? await core.setTaskDone(task.id, true)) != nil
         else { return }
-        taskDoneQuestion = TaskDoneQuestion(task: task, accountID: accountID, held: heldDraftID != nil)
-    }
-
-    /// The answer to "Mark the task done?": done (undoable), or kept open.
-    func answerTaskDone(_ done: Bool) async {
-        guard let question = taskDoneQuestion else { return }
-        taskDoneQuestion = nil
-        guard done, let core else { return }
-        let task = question.task
-        guard (try? await core.setTaskDone(task.id, true)) != nil else { return }
         await tasks.load()
         // While a send is held, its Undo Send notice stays on screen; ⌘Z
         // still reopens the task first.
-        undo.record(accountID: question.accountID, actionName: "Complete Task",
-                    noticeText: "Task done: “\(task.title)”", showNotice: !question.held,
+        undo.record(accountID: accountID, actionName: "Complete Task",
+                    noticeText: "Task done: “\(task.title)”", showNotice: heldDraftID == nil,
                     undo: { _ = try? await core.setTaskDone(task.id, false) },
                     redo: { _ = try? await core.setTaskDone(task.id, true) })
     }
@@ -1323,7 +1311,6 @@ final class AppModel {
             if await core.cancelSend(draftID, in: accountID) {
                 // Taken back: its task is not done after all.
                 if let taskID { _ = try? await core.setTaskDone(taskID, false) }
-                if self.taskDoneQuestion?.task.id == taskID { self.taskDoneQuestion = nil }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
                 // Sending it again still answers the task.
                 self.compose(.draft(id: draftID, task: taskID))

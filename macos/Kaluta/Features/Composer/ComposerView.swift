@@ -42,13 +42,22 @@ struct ComposerView: View {
             let store = ComposerStore(core: model.core, account: model.openAccountID)
             self.store = store
             await store.load(request)
+            // The open account's tasks: a composer pinned to another
+            // account answers none of them.
+            if store.accountID == nil || store.accountID == model.openAccountID,
+               let open = try? await model.core?.listTasks() {
+                store.findTask(in: open)
+            }
             if model.agent.providers.isEmpty { await model.agent.loadProviders() }
             await assistant.loadAudiences(model.core)
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
             if let store, store.didSend, let account = store.accountID ?? model.openAccountID {
-                Task { await model.messageSent(heldDraftID: store.heldSend, taskID: store.taskID, accountID: account) }
+                Task {
+                    await model.messageSent(heldDraftID: store.heldSend, taskID: store.taskID,
+                                            finishTask: store.task != nil && !store.keepsTask, accountID: account)
+                }
             }
             dismiss()
         }
@@ -56,6 +65,33 @@ struct ComposerView: View {
             guard let store else { return }
             Task { await store.close() }
         }
+    }
+
+    /// The task this reply answers, and the two ways to send it (spec
+    /// §14.13): finish the task, or keep it open.
+    private func taskBar(_ task: TaskItem, _ store: ComposerStore) -> some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "checklist")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text("Answers the task “\(task.title)”")
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: Space.s)
+            Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } }
+                .disabled(!store.canSend)
+                .hoverHelp("Send the message; the task stays open (⌥⌘Return)")
+            Button("Send and Finish Task") { Task { await store.send() } }
+                .buttonStyle(.borderedProminent)
+                .disabled(!store.canSend)
+                .hoverHelp("Send the message and finish the task; Undo brings it back (⌘Return)")
+        }
+        .controlSize(.small)
+        .padding(.horizontal, Space.m)
+        .padding(.vertical, Space.xs)
+        .background(.bar)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Task")
     }
 
     private func editor(_ store: ComposerStore) -> some View {
@@ -72,14 +108,22 @@ struct ComposerView: View {
             header(store)
                 .background {
                     // ⌘Return sends too, as in Gmail (not while reviewing an
-                    // agent's draft: that send is the approval card's).
+                    // agent's draft: that send is the approval card's); with
+                    // a task, ⌘Return finishes it and ⌥⌘Return keeps it open.
                     if request.agentName == nil {
                         Button("Send") { Task { await store.send() } } // no-help: hidden
                             .keyboardShortcut(.return, modifiers: .command)
                             .disabled(!store.canSend)
                             .hidden()
+                        Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
+                            .keyboardShortcut(.return, modifiers: [.command, .option])
+                            .disabled(!store.canSend || store.task == nil)
+                            .hidden()
                     }
                 }
+            if let task = store.task, request.agentName == nil {
+                taskBar(task, store)
+            }
             if let error = store.saveError {
                 Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
@@ -141,10 +185,12 @@ struct ComposerView: View {
                         if store.hasContent { confirmingDiscard = true } else { Task { await store.discard() } }
                     }
                     .help(ToolbarHelp.composer("Discard")) // toolbar
-                    Button("Send", systemImage: "paperplane.fill") { Task { await store.send() } }
-                        .keyboardShortcut("d", modifiers: [.command, .shift])
-                        .disabled(!store.canSend)
-                        .help(ToolbarHelp.composer("Send")) // toolbar
+                    Button(store.task == nil ? "Send" : "Send and Finish Task", systemImage: "paperplane.fill") {
+                        Task { await store.send() }
+                    }
+                    .keyboardShortcut("d", modifiers: [.command, .shift])
+                    .disabled(!store.canSend)
+                    .help(ToolbarHelp.composer(store.task == nil ? "Send" : "Send and Finish Task")) // toolbar
                 }
             }
         }

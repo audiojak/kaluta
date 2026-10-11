@@ -37,10 +37,6 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
             TaskDialog(draft: draft)
         }
-        .sheet(item: Binding(get: { model.taskDoneQuestion },
-                             set: { if $0 == nil, model.taskDoneQuestion != nil { Task { await model.answerTaskDone(false) } } })) {
-            TaskDoneDialog(question: $0)
-        }
         .sheet(item: Binding(get: { model.guideSheet }, set: { model.guideSheet = $0 })) { sheet in
             switch sheet {
             case .learn: LearnSheet()

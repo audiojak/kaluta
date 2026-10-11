@@ -61,8 +61,13 @@ final class ComposerStore {
     private(set) var heldSend: Int64?
     /// Sent (rather than discarded), for what follows a send.
     private(set) var didSend = false
-    /// The task this message answers (spec §14.8).
+    /// The task this message answers (spec §14.8): the one it was started
+    /// from, else the conversation's open task (§14.13).
     private(set) var taskID: Int64?
+    /// That task, while open: Send offers to finish it or keep it open.
+    private(set) var task: TaskItem?
+    /// Sent with *Send, keep the task open*.
+    private(set) var keepsTask = false
     /// The account the composer sends as.
     var accountID: String? { core?.accountID }
 
@@ -237,8 +242,20 @@ final class ComposerStore {
 
     // MARK: Send and discard
 
-    func send() async {
+    /// The task this message answers, from `open` (the open account's open
+    /// tasks): the one it was started from, else the conversation's.
+    func findTask(in open: [TaskItem]) {
+        let found = taskID.flatMap { id in open.first { $0.id == id } }
+            ?? threadID.flatMap { thread in open.first { $0.threadId == thread } }
+        task = found
+        taskID = found?.id ?? taskID
+    }
+
+    /// Sends the message; with a task, `keepTask` leaves it open, otherwise
+    /// sending finishes it (spec §14.13).
+    func send(keepTask: Bool = false) async {
         guard canSend, let core else { return }
+        keepsTask = keepTask
         isDirty = true
         await save()
         guard saveError == nil, draftID != 0 else { return }
