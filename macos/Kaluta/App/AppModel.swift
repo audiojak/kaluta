@@ -462,7 +462,7 @@ final class AppModel {
 
     /// Open the remembered account, or the demo when asked for on launch.
     func start(openDemo: Bool? = nil) async {
-        let openDemo = openDemo ?? defaults.bool(forKey: "KalutaDemo")
+        let openDemo = openDemo ?? (defaults.bool(forKey: "KalutaDemo") || CoreClient.demoWorkflows)
         guard let core else {
             accountState = .failed("The core failed to start. See ~/Library/Logs/Kaluta/core.log.")
             return
@@ -513,10 +513,16 @@ final class AppModel {
         do {
             try await core.openAccount(Self.demoAccountID)
             let inbox = try await core.mailboxes().first { $0.kind == .inbox }
-            if (inbox?.totalCount ?? 0) == 0 {
+            let fresh = (inbox?.totalCount ?? 0) == 0
+            if fresh, CoreClient.demoWorkflows {
+                try await core.seedWorkflowDemo(threads: Self.demoThreadCount)
+            } else if fresh {
                 try await core.seedDemoMailbox(threads: Self.demoThreadCount)
             }
             await open(accountID: Self.demoAccountID)
+            if CoreClient.demoWorkflows {
+                await prepareDemoWorkflows(fresh: fresh)
+            }
         } catch {
             accountState = .failed(error.message)
         }

@@ -2,6 +2,7 @@
 //! arrive on, the per-session permission state, and the tools themselves.
 
 mod approvals;
+mod demo_agent;
 mod sessions;
 pub(crate) mod tools;
 

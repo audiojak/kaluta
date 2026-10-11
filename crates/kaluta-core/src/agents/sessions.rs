@@ -317,6 +317,22 @@ impl Core {
         }
     }
 
+    /// The workflow demo (docs/plans/design-review.md): like
+    /// [`Self::debug_use_fake_agents`], but Claude Code carries out a few
+    /// requests with the real tools (result lists, drafts, approvals,
+    /// routine runs). Only effective before the first agent call.
+    pub fn debug_use_demo_agents(&self) {
+        let agents: Vec<Arc<dyn AgentProvider>> = vec![
+            Arc::new(super::demo_agent::DemoAgent::ready(ProviderId::ClaudeCode)),
+            Arc::new(agent_api::fake::FakeAgent::with_status(ProviderId::Codex, AgentStatus::NotInstalled)),
+        ];
+        let _ = self.agents.fake_providers.set(agents);
+        let mut cloud = self.agents.cloud_locator.lock().unwrap_or_else(|e| e.into_inner());
+        if cloud.is_none() {
+            *cloud = Some(agent_api::process::Locator::only(vec![]));
+        }
+    }
+
     /// Installed agents and whether they can be used. Cached per launch
     /// unless `refresh`.
     pub async fn list_agent_providers(self: Arc<Self>, refresh: bool) -> Vec<AgentProviderInfo> {

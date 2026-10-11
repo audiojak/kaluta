@@ -21,6 +21,7 @@ mod cleanup;
 mod cloud_routines;
 mod compose;
 mod compositions;
+mod demo;
 mod error;
 mod events;
 mod facts;

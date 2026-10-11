@@ -48,7 +48,10 @@ final class CoreClient: Sendable {
         }
         // Tests never run the user's real agent CLIs (which would use their
         // account); neither do UI runs that ask for fakes.
-        if UserDefaults.standard.bool(forKey: "KalutaFakeAgents") || Self.isRunningTests {
+        if Self.demoWorkflows {
+            // The workflow demo's agent also uses the mail tools.
+            core.debugUseDemoAgents()
+        } else if UserDefaults.standard.bool(forKey: "KalutaFakeAgents") || Self.isRunningTests {
             core.debugUseFakeAgents()
         }
         // Agent mailboxes (spec §7.9): tests and fake-agent runs never
@@ -62,8 +65,21 @@ final class CoreClient: Sendable {
     /// tests, and in scratch runs that ask for fakes. Never on the real data
     /// directory, where a fake mailbox would mix with real ones.
     static var usesFakeAgentMail: Bool {
-        isRunningTests || (isScratchRun && (UserDefaults.standard.bool(forKey: "KalutaFakeAgents")
+        isRunningTests || demoWorkflows || (isScratchRun && (UserDefaults.standard.bool(forKey: "KalutaFakeAgents")
             || UserDefaults.standard.bool(forKey: "KalutaFakeAgentMail")))
+    }
+
+    /// The workflow demo (`-KalutaDemoWorkflows YES`, docs/plans/design-review.md):
+    /// the demo mailbox dated from now, mail arriving, and agents that use
+    /// the mail tools. Only on a scratch data directory, never the real one.
+    static var demoWorkflows: Bool {
+        isScratchRun && UserDefaults.standard.bool(forKey: "KalutaDemoWorkflows")
+    }
+
+    /// How often the workflow demo's mail arrives (`-KalutaDemoArrivalSeconds`).
+    static var demoArrivalSeconds: UInt32 {
+        let seconds = UserDefaults.standard.integer(forKey: "KalutaDemoArrivalSeconds")
+        return seconds > 0 ? UInt32(seconds) : 180
     }
 
     /// The app's Keychain items, or a separate service when hosting tests
@@ -1433,6 +1449,18 @@ final class CoreClient: Sendable {
     @discardableResult
     func seedDemoMailbox(threads: UInt32) async throws(CoreClientError) -> UInt32 {
         try await call { try await core.debugSeedDemoMailbox(threads: threads) }
+    }
+
+    /// The workflow demo: a synthetic mailbox ending two days ago, then
+    /// hand-written conversations dated from now.
+    @discardableResult
+    func seedWorkflowDemo(threads: UInt32) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.debugSeedWorkflowDemo(threads: threads) }
+    }
+
+    /// The workflow demo: new mail every `seconds`, as sync delivers it.
+    func startDemoArrivals(every seconds: UInt32) throws(CoreClientError) {
+        try callSync { try core.debugStartDemoArrivals(intervalSecs: seconds) }
     }
 
     /// Runs a core call, converting generated errors to `CoreClientError`.

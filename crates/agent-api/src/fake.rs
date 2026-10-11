@@ -296,6 +296,18 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
     )
 }
 
+/// The scripted answer to one of Kaluta's own prompts (tasks, the writing
+/// guide, analysis, facts, writing help's questions), or `None`.
+pub fn scripted_answer(prompt: &str) -> Option<String> {
+    task_answer(prompt)
+        .or_else(|| guide_answer(prompt))
+        .or_else(|| change_answer(prompt))
+        .or_else(|| merge_answer(prompt))
+        .or_else(|| compare_answer(prompt))
+        .or_else(|| glean_answer(prompt))
+        .or_else(|| writing_help_answer(prompt))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -305,14 +317,7 @@ struct FakeSession {
 impl AgentSession for FakeSession {
     async fn send(&mut self, turn: TurnInput) -> AgentResult<()> {
         self.sink.emit(AgentEvent::TurnStarted);
-        let text = task_answer(&turn.prompt)
-            .or_else(|| guide_answer(&turn.prompt))
-            .or_else(|| change_answer(&turn.prompt))
-            .or_else(|| merge_answer(&turn.prompt))
-            .or_else(|| compare_answer(&turn.prompt))
-            .or_else(|| glean_answer(&turn.prompt))
-            .or_else(|| writing_help_answer(&turn.prompt))
-            .unwrap_or_else(|| format!("You said: {}", turn.prompt));
+        let text = scripted_answer(&turn.prompt).unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {
             usage: Some(Usage { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0 }),

@@ -79,9 +79,9 @@
 		534A1CAF328A0B2F7E27F8CD /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB31634BD804486D8D862CA /* AppModel.swift */; };
 		552B126519D939E6B58D5225 /* AppShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C4D0037FD95A32B795A4EB /* AppShellTests.swift */; };
 		570DC21EB5D3E9B9D139DAD1 /* LinkSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD5AD309FC75125E8B5FCB8 /* LinkSafety.swift */; };
-		580809477D7E646ED3ACD241 /* kaluta_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4880486EF5BC7659E8C2C453 /* kaluta_core.swift */; };
 		586805488B3F223C5331646D /* AppModel+Analysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4B13FACBE3B0DF5CC79459 /* AppModel+Analysis.swift */; };
 		5A3A666ECC294D212F903253 /* MailUndo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370CF9C5D6F977AE4DE5A278 /* MailUndo.swift */; };
+		5D09644E706B1C82241AD59B /* kaluta_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DC1D6B698530D313EE52643 /* kaluta_core.swift */; };
 		5D70B5EDFC0D868745122677 /* MenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EB18ABFFD524B85E7FCD249 /* MenuTests.swift */; };
 		607C2669A5499024AFBA19EA /* EmailDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CB7C5D00F8E0661C292EF4 /* EmailDocument.swift */; };
 		607D3F2BFF95EAE0F1AFA033 /* KeyboardShortcuts.swift in Sources */ = {isa = PBXBuildFile; fileRef = E86579FCF7E5F1848B9FCF66 /* KeyboardShortcuts.swift */; };
@@ -108,6 +108,7 @@
 		896C6E39859548C7CEE6DF06 /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1365D83AB1AFFB804F6BD23 /* TaskListView.swift */; };
 		89BE029E98C50BD2060A7874 /* TaskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF7A2FFA6107BD9435E13029 /* TaskTests.swift */; };
 		8A3B7D519B6FC9E3E115A32B /* TaskDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 748FC77E34F53AAB7403B251 /* TaskDialog.swift */; };
+		8C82110397521D57DB1A60FD /* DemoWorkflows.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B7BD62384AE6891B831AC0 /* DemoWorkflows.swift */; };
 		8CB6299E6027BECA0AD6BA88 /* ThreadWindowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A076AC98FF43C9FC44C82823 /* ThreadWindowTests.swift */; };
 		8D8908F9FAD5237FA85A6789 /* RulesServerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2FB01F0FCF383129FF78E80 /* RulesServerTests.swift */; };
 		8DB6A347D2DBC0410FC8FFBD /* UndoNoticeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBF724B8C228A5380ED3E0F9 /* UndoNoticeView.swift */; };
@@ -260,10 +261,10 @@
 		4777049647CB7B61DE86A127 /* ComposerThreadPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerThreadPane.swift; sourceTree = "<group>"; };
 		483437108BD1ACAA1991AAF6 /* ServiceAccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceAccountSettings.swift; sourceTree = "<group>"; };
 		4867308667F24D4AB7B9B456 /* FormattingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FormattingTests.swift; sourceTree = "<group>"; };
-		4880486EF5BC7659E8C2C453 /* kaluta_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kaluta_core.swift; sourceTree = "<group>"; };
 		495AB4CE21DE1F03F1E594A9 /* AccountSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSwitchTests.swift; sourceTree = "<group>"; };
 		4BA81684911B5A3A24F963AC /* agent-system-prompt.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "agent-system-prompt.md"; sourceTree = "<group>"; };
 		4D0C1EB59BA594900F9BC756 /* ListFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListFilterTests.swift; sourceTree = "<group>"; };
+		4DC1D6B698530D313EE52643 /* kaluta_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = kaluta_core.swift; sourceTree = "<group>"; };
 		4EC3BF67EB525236314EF6BA /* KalutaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KalutaApp.swift; sourceTree = "<group>"; };
 		4FEF1D8E66F0B61940D6115D /* OnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingTests.swift; sourceTree = "<group>"; };
 		5214CFD66126EF41AD55BA75 /* KalutaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = KalutaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -287,6 +288,7 @@
 		760415830495CCBC7ECFB8D2 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		77203C113E4254E51159C770 /* TaskDoneDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDoneDialog.swift; sourceTree = "<group>"; };
 		772167C885FCE55F5D9E22B6 /* RoutineModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineModel.swift; sourceTree = "<group>"; };
+		77B7BD62384AE6891B831AC0 /* DemoWorkflows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWorkflows.swift; sourceTree = "<group>"; };
 		7863C444DC7E8A65EDAD7053 /* Migration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Migration.swift; sourceTree = "<group>"; };
 		7877C3EC5080742BB0E238AF /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
 		788E53B5A8E5D41E7307DB19 /* CoreEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreEventTests.swift; sourceTree = "<group>"; };
@@ -300,7 +302,6 @@
 		86964E804AD95264DC58853D /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		8B3BF2CC2A9A282EC02642B1 /* ComposerHTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHTML.swift; sourceTree = "<group>"; };
 		8BCD4D57392C74C2D62E1447 /* ComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTests.swift; sourceTree = "<group>"; };
-		8CB78A3AF8120B9101BA4AB2 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		8D366146E28C0759862B596A /* UpdaterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterTests.swift; sourceTree = "<group>"; };
 		8FBA136006AAD53312889305 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		94D009E48E568579CC59D26E /* AppModel+Facts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Facts.swift"; sourceTree = "<group>"; };
@@ -312,6 +313,7 @@
 		A20CF1FD21F167EE4466907F /* MessageToolbar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageToolbar.swift; sourceTree = "<group>"; };
 		A2FB01F0FCF383129FF78E80 /* RulesServerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesServerTests.swift; sourceTree = "<group>"; };
 		AD1732A09E5769BC1BD7F217 /* CleanUpProgressCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanUpProgressCard.swift; sourceTree = "<group>"; };
+		AD1A0C69325BC379926224E9 /* Local.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Local.xcconfig; sourceTree = "<group>"; };
 		AE4141EE00ACAC2429BD55BD /* KalutaCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = KalutaCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AEFE1B6C4527E1757F36A103 /* NewMailNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewMailNotifier.swift; sourceTree = "<group>"; };
 		AFA53C4A53140C353A2452FD /* AttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentTests.swift; sourceTree = "<group>"; };
@@ -390,6 +392,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		012B6DFE16A174ADEC9D0BBB /* macos */ = {
+			isa = PBXGroup;
+			children = (
+				AD1A0C69325BC379926224E9 /* Local.xcconfig */,
+			);
+			path = macos;
+			sourceTree = "<group>";
+		};
+		09A5A2200354D76F37393D3B /* core */ = {
+			isa = PBXGroup;
+			children = (
+				DB907A57C18D253C9900BD23 /* swift */,
+			);
+			path = core;
+			sourceTree = "<group>";
+		};
 		0A3E9A664E26D1A67AFE6862 /* Undo */ = {
 			isa = PBXGroup;
 			children = (
@@ -422,22 +440,6 @@
 			path = Facts;
 			sourceTree = "<group>";
 		};
-		1A9BCDE2545A46120E643D82 /* build */ = {
-			isa = PBXGroup;
-			children = (
-				245F32FE57955789D18A5604 /* core */,
-			);
-			path = build;
-			sourceTree = "<group>";
-		};
-		1D593187778F9BB4110632F8 /* swift */ = {
-			isa = PBXGroup;
-			children = (
-				4880486EF5BC7659E8C2C453 /* kaluta_core.swift */,
-			);
-			path = swift;
-			sourceTree = "<group>";
-		};
 		200884351B364DBA49495890 /* Guide */ = {
 			isa = PBXGroup;
 			children = (
@@ -457,14 +459,6 @@
 				14AD26BB4626038CB7B81A9C /* MergeGuideSheet.swift */,
 			);
 			path = Guide;
-			sourceTree = "<group>";
-		};
-		245F32FE57955789D18A5604 /* core */ = {
-			isa = PBXGroup;
-			children = (
-				1D593187778F9BB4110632F8 /* swift */,
-			);
-			path = core;
 			sourceTree = "<group>";
 		};
 		2C60B5305CA63C9A397EF4E7 /* Analysis */ = {
@@ -675,6 +669,16 @@
 			path = Tasks;
 			sourceTree = "<group>";
 		};
+		77B805F67867F32F716E859F /* kaluta */ = {
+			isa = PBXGroup;
+			children = (
+				8928EF7D6591B6EFBD709D4E /* build */,
+				012B6DFE16A174ADEC9D0BBB /* macos */,
+			);
+			name = kaluta;
+			path = ..;
+			sourceTree = "<group>";
+		};
 		7BF9CE0BD35DAD82ECB245A4 /* SyncDebugger */ = {
 			isa = PBXGroup;
 			children = (
@@ -688,6 +692,7 @@
 			children = (
 				760415830495CCBC7ECFB8D2 /* AppDelegate.swift */,
 				EAB31634BD804486D8D862CA /* AppModel.swift */,
+				77B7BD62384AE6891B831AC0 /* DemoWorkflows.swift */,
 				2ED0997F878E320CD6C19656 /* FocusCycle.swift */,
 				4EC3BF67EB525236314EF6BA /* KalutaApp.swift */,
 				E86579FCF7E5F1848B9FCF66 /* KeyboardShortcuts.swift */,
@@ -697,6 +702,14 @@
 				99C1935B7BD9CC46286E0927 /* Updater.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		8928EF7D6591B6EFBD709D4E /* build */ = {
+			isa = PBXGroup;
+			children = (
+				09A5A2200354D76F37393D3B /* core */,
+			);
+			path = build;
 			sourceTree = "<group>";
 		};
 		8CD355C0D20CCEA37D9BE11D /* Products */ = {
@@ -713,8 +726,8 @@
 			isa = PBXGroup;
 			children = (
 				DD3E50AF63ACD9B6E380F3FF /* Kaluta */,
+				77B805F67867F32F716E859F /* kaluta */,
 				565C803A2BCBFAC750265D4A /* KalutaTests */,
-				DF304AF3C24EF1631FE8D790 /* OpenAGC */,
 				8CD355C0D20CCEA37D9BE11D /* Products */,
 			);
 			sourceTree = "<group>";
@@ -727,14 +740,6 @@
 				64E76F2BD90392EF8250BF87 /* SerialReads.swift */,
 			);
 			path = Core;
-			sourceTree = "<group>";
-		};
-		9AD7AD34F352CB8B11CB160D /* macos */ = {
-			isa = PBXGroup;
-			children = (
-				8CB78A3AF8120B9101BA4AB2 /* Local.xcconfig */,
-			);
-			path = macos;
 			sourceTree = "<group>";
 		};
 		9F90C51F24019549C447B2B5 /* Routines */ = {
@@ -792,6 +797,14 @@
 			path = Features;
 			sourceTree = "<group>";
 		};
+		DB907A57C18D253C9900BD23 /* swift */ = {
+			isa = PBXGroup;
+			children = (
+				4DC1D6B698530D313EE52643 /* kaluta_core.swift */,
+			);
+			path = swift;
+			sourceTree = "<group>";
+		};
 		DD3E50AF63ACD9B6E380F3FF /* Kaluta */ = {
 			isa = PBXGroup;
 			children = (
@@ -802,16 +815,6 @@
 				631A59ACF3897C458CCA969B /* Resources */,
 			);
 			path = Kaluta;
-			sourceTree = "<group>";
-		};
-		DF304AF3C24EF1631FE8D790 /* OpenAGC */ = {
-			isa = PBXGroup;
-			children = (
-				1A9BCDE2545A46120E643D82 /* build */,
-				9AD7AD34F352CB8B11CB160D /* macos */,
-			);
-			name = OpenAGC;
-			path = ..;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1042,7 +1045,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				580809477D7E646ED3ACD241 /* kaluta_core.swift in Sources */,
+				5D09644E706B1C82241AD59B /* kaluta_core.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1086,6 +1089,7 @@
 				E2CDB58391993EA4870D5D48 /* ConnectAgent.swift in Sources */,
 				EE1878BD183A42751B874190 /* CoreClient.swift in Sources */,
 				8E33839BE34F8A1D7BC58FB7 /* DateStyle.swift in Sources */,
+				8C82110397521D57DB1A60FD /* DemoWorkflows.swift in Sources */,
 				1CEFD2FCD113EFE642381D18 /* DraftClient.swift in Sources */,
 				63774F8849375BFDE5C94B14 /* DueDay.swift in Sources */,
 				607C2669A5499024AFBA19EA /* EmailDocument.swift in Sources */,
@@ -1180,7 +1184,7 @@
 /* Begin XCBuildConfiguration section */
 		28C3684981940E113D24DDBD /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 8CB78A3AF8120B9101BA4AB2 /* Local.xcconfig */;
+			baseConfigurationReference = AD1A0C69325BC379926224E9 /* Local.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1370,7 +1374,7 @@
 		};
 		96ED8ADFA39C1C744EDD3F3D /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 8CB78A3AF8120B9101BA4AB2 /* Local.xcconfig */;
+			baseConfigurationReference = AD1A0C69325BC379926224E9 /* Local.xcconfig */;
 			buildSettings = {
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1397,7 +1401,7 @@
 		};
 		BF6E30F01FCE3855E34A3D01 /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 8CB78A3AF8120B9101BA4AB2 /* Local.xcconfig */;
+			baseConfigurationReference = AD1A0C69325BC379926224E9 /* Local.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "$(KALUTA_ENTITLEMENTS)";

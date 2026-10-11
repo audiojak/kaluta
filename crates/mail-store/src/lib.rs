@@ -11,6 +11,7 @@ pub mod compositions;
 pub mod consistency;
 mod db;
 pub mod demo;
+pub mod demo_workflows;
 pub mod drafts;
 mod error;
 pub mod facts;
