@@ -142,6 +142,42 @@ feeds replies, replies feed tasks. No countdowns; an optional time box
 took), then the mail app. After an interruption, re-entry shows where the
 user was with a one-line recap of the item.
 
+## Decisions (maintainer, 2026-10-11)
+
+From the first workflow designs (canvas "Kaluta Workflows",
+https://claude.ai/artifact/RDwYuhs22AcmZWZfg3xYhu: start, triage, a
+quick reply, a task, the set's end, replies):
+
+- **The 30-second rule.** Anything Claude judges can be answered in 30
+  seconds is answered in triage: Reply is the suggestion, with the time
+  shown, and the reply is written in place and sent with "Send and
+  archive". Anything longer becomes a task, filled in on the same screen
+  (no sheet); the user is encouraged to make tasks of the rest.
+- **Replies is for replies that need more thought**: the reply tasks
+  triage makes.
+- **Drafts follow the human.** Most replies need the user's view before
+  Claude writes. Where Claude writes ahead (quick replies in triage), it
+  writes two or three different answers (yes; yes with a condition; not
+  yet) to pick from with 1–3, plus "None of these? Tell Claude what to
+  say". Where it has not, the screen leads with "What do you want to
+  say?": a large field, dictation, and starters drawn from the questions
+  Claude found in the email; Claude writes after that. Up to three
+  answers: as many as are genuinely different.
+- **Directions teach.** What the user tells Claude to say is evidence for
+  the daily review (§14.10), as their edits to drafts are.
+- **Every AI-written email from the user's own accounts ends on an
+  editable screen**: the text that will be sent, at reading size, before
+  Send. Today the composer's writing help does this; the agent's approval
+  card does not (Approve sends what the card summarises in one line;
+  Review… is optional): oagc-px8w makes its action *Review and Send*
+  and leaves sends out of *Approve All*, as spec §10.4 already describes.
+  Agent mailboxes are exempt: agents send as themselves without approval.
+- **The start screen is home.** Kaluta opens on "what's next"; Mail is
+  one key (M) away.
+- **The set's reward sounds**: a short G major chord (G3 B3 D4 G4,
+  strummed, about a second) when a set completes; silent when macOS's
+  interface sound effects are off, and a setting turns it off.
+
 ## Method
 
 Each of tasks 1–7 is walked from start to finish in the running app with
