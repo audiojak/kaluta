@@ -169,7 +169,9 @@ private struct NextWorkflowCard: View {
         .foregroundStyle(.white)
         .padding(Space.xxxl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Tone.workflow(summary.kind), in: RoundedRectangle(cornerRadius: Self.radius))
+        .background {
+            RoundedRectangle(cornerRadius: Self.radius).fill(Tone.workflow(summary.kind)).workflowMorph(summary.kind)
+        }
         .contentShape(RoundedRectangle(cornerRadius: Self.radius))
     }
 
@@ -203,7 +205,9 @@ private struct WorkflowCard: View {
             }
             .padding(Space.xxl)
             .frame(maxWidth: .infinity, minHeight: Self.height, alignment: .topLeading)
-            .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+            .background {
+                RoundedRectangle(cornerRadius: Radius.panel).fill(Tone.workflowSurface).workflowMorph(summary.kind)
+            }
             .opacity(empty ? 0.6 : 1)
             .contentShape(RoundedRectangle(cornerRadius: Radius.panel))
         }

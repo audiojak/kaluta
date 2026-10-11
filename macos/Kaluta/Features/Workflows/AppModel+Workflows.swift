@@ -73,8 +73,10 @@ extension AppModel {
         do {
             let set = try await core.startWorkflow(kind)
             let session = WorkflowSession(set: set)
-            workflowSession = session
             if kind == .tasks { await tasks.load() }
+            // The card grows into the window (spec §14.13); the first
+            // item loads behind it.
+            withAnimation(Self.workflowMotion) { workflowSession = session }
             await prepareCurrentItem()
             if session.current == nil { await finishWorkflow() }
         } catch {
@@ -82,17 +84,29 @@ extension AppModel {
         }
     }
 
+    /// Start → workflow and back (about 350 ms); Reduce Motion cross-fades.
+    static var workflowMotion: Animation {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? .easeInOut(duration: 0.2) : .smooth(duration: 0.35)
+    }
+
+    /// Item → item (about 200 ms).
+    static let itemMotion = Animation.snappy(duration: 0.2)
+
     /// Back to the start screen; the set stays open to resume today.
     func leaveWorkflow() {
-        workflowSession = nil
+        withAnimation(Self.workflowMotion) { workflowSession = nil }
         Task { await refreshWorkflowOverview() }
     }
 
     /// Load what the current item shows: its conversation and the text
     /// of the latest message from someone else.
     func prepareCurrentItem() async {
-        guard let session = workflowSession, let core, let item = session.current,
-              let threadID = threadID(of: item) else { return }
+        guard let session = workflowSession, let item = session.current else { return }
+        await prepare(item, in: session)
+    }
+
+    private func prepare(_ item: WorkflowItem, in session: WorkflowSession) async {
+        guard let core, let threadID = threadID(of: item) else { return }
         if session.threads[threadID] == nil, let detail = try? await core.thread(threadID) {
             session.threads[threadID] = detail
             if let latest = Self.latestReceived(detail), let body = try? await core.renderedBody(latest.id),
@@ -179,9 +193,9 @@ extension AppModel {
         guard let item = session.current, workflowActions().contains(where: { $0.command == command }) else { return }
         switch (session.kind, command) {
         case (_, .skip):
+            session.exit = .up
             if let core, let set = try? await core.skipWorkflowItem(set: session.workflowSet.id, key: item.key) {
-                session.replace(set)
-                await prepareCurrentItem()
+                await show(set, in: session)
             }
         case (.triage, .done), (.replies, .done):
             await archiveCurrent(item, session: session)
@@ -218,6 +232,7 @@ extension AppModel {
         guard let core, let accountID = openAccountID else { return }
         let setID = session.workflowSet.id
         let millis = session.elapsedMillis
+        session.exit = .of(decision)
         do {
             try await core.decideWorkflowItem(set: setID, key: item.key, decision: decision, millis: millis)
         } catch {
@@ -243,13 +258,16 @@ extension AppModel {
     private func reloadWorkflow(_ setID: Int64) async {
         guard let session = workflowSession, session.workflowSet.id == setID, let core,
               let set = try? await core.startWorkflow(session.kind), set.id == setID else { return }
-        session.replace(set)
         session.score = nil
-        if session.current == nil {
-            await finishWorkflow()
-        } else {
-            await prepareCurrentItem()
-        }
+        await show(set, in: session)
+        if session.current == nil { await finishWorkflow() }
+    }
+
+    /// The set after a change: the next item's conversation loaded first,
+    /// then the decided item leaves and the next rises (spec §14.13).
+    private func show(_ set: WorkflowSet, in session: WorkflowSession) async {
+        if let next = set.items.first(where: { $0.decision == nil }) { await prepare(next, in: session) }
+        withAnimation(Self.itemMotion) { session.replace(set) }
     }
 
     private func finishWorkflow() async {
@@ -258,7 +276,8 @@ extension AppModel {
             session.score = WorkflowScore(kind: session.kind, decided: 0, items: 0, millis: 0, counts: [])
             return
         }
-        session.score = try? await core.finishWorkflow(set: session.workflowSet.id)
+        let score = try? await core.finishWorkflow(set: session.workflowSet.id)
+        withAnimation(Self.itemMotion) { session.score = score }
         await refreshWorkflowOverview()
     }
 

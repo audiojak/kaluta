@@ -49,6 +49,7 @@ private struct GeneralSettings: View {
     @AppStorage(NewMailNotifier.badgeKey, store: CoreClient.appDefaults()) private var badge = true
     @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
     @AppStorage(AppModel.workflowsEnabledKey, store: CoreClient.appDefaults()) private var workflows = false
+    @AppStorage(WorkflowSound.playSoundsKey, store: CoreClient.appDefaults()) private var sounds = true
     @Environment(AppModel.self) private var model
     @Environment(Updater.self) private var updater
 
@@ -69,6 +70,8 @@ private struct GeneralSettings: View {
             Section("Workflows") {
                 Toggle("Open on the start screen (preview)", isOn: $workflows)
                     .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (M) away")
+                Toggle("Play sounds", isOn: $sounds)
+                    .hoverHelp("A short chord when a workflow's set is done; silent when macOS's sound effects are off")
             }
             Section("New Mail") {
                 Toggle("Notify me about new mail in the Inbox", isOn: $notify)

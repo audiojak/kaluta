@@ -532,6 +532,17 @@ like its own place; the vocabulary stays the same.
   every new item, so a click on the content never strands the keys.
 - **Notices**: the undo notice shows over a workflow, clear of its
   decision bar.
+- **Motion**: start ↔ workflow is `AppModel.workflowMotion` (about
+  350 ms): the card and the window share a frame (`.workflowMorph(kind)`)
+  while the content cross-fades. Item → item is `AppModel.itemMotion`
+  (about 200 ms): the decided item leaves by `WorkflowExit` (archive
+  and done left, reply right, task down, the rest up) and the next rises.
+  The end's `CompletionRing(animated:)` closes (0.4 s), then bursts
+  (0.6 s spring). Reduce Motion: cross-fades only, the ring drawn closed.
+- **Sound**: `WorkflowSound.playChord` as the ring bursts, only when
+  something was decided: a G major chord rendered in the app and played
+  as a system sound, so macOS's *Play user interface sound effects* and
+  Kaluta's *Play sounds* (Settings › General › Workflows) both silence it.
 
 ### Data grids
 

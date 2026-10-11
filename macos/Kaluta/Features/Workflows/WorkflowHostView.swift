@@ -7,6 +7,7 @@ struct WorkflowHostView: View {
     @Environment(AppModel.self) private var model
     let session: WorkflowSession
     @FocusState private var focused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let actions = model.workflowActions()
@@ -17,13 +18,19 @@ struct WorkflowHostView: View {
                 if session.isFinished {
                     WorkflowEndView(session: session)
                 } else if let item = session.current {
-                    ScrollView {
-                        WorkflowItemView(session: session, item: item)
-                            .padding(.horizontal, Space.page)
-                            .padding(.vertical, Space.xxl)
-                            .frame(maxWidth: Self.readingWidth, alignment: .leading)
-                            .frame(maxWidth: .infinity)
+                    ZStack {
+                        ScrollView {
+                            WorkflowItemView(session: session, item: item)
+                                .padding(.horizontal, Space.page)
+                                .padding(.vertical, Space.xxl)
+                                .frame(maxWidth: Self.readingWidth, alignment: .leading)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .id(item.key)
+                        .transition(itemTransition)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                     .safeAreaInset(edge: .bottom, spacing: 0) { decisionBar(actions) }
                 } else {
                     ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -32,8 +39,14 @@ struct WorkflowHostView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .bottom) { UndoNoticeView().padding(.bottom, session.isFinished ? Space.m : Self.noticeInset) }
-        .background(Tone.workflowGround(session.kind))
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background {
+            // The start screen's card, grown into the window.
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                Rectangle().fill(Tone.workflowGround(session.kind))
+            }
+            .workflowMorph(session.kind)
+        }
         .focusable()
         .focused($focused)
         .defaultFocus($focused, true)
@@ -71,6 +84,14 @@ struct WorkflowHostView: View {
         }
     }
 
+    /// The decided item leaves by its verb's direction and the next rises
+    /// (spec §14.13); Reduce Motion cross-fades.
+    private var itemTransition: AnyTransition {
+        if reduceMotion { return .opacity }
+        return .asymmetric(insertion: .offset(y: Self.rise).combined(with: .opacity),
+                           removal: .offset(session.exit.offset).combined(with: .opacity))
+    }
+
     private func decisionBar(_ actions: [WorkflowAction]) -> some View {
         HStack(spacing: Space.m) {
             ForEach(actions.filter(\.shown)) { action in
@@ -88,6 +109,8 @@ struct WorkflowHostView: View {
     }
 
     static let readingWidth: CGFloat = 900
+    /// How far the next item rises from.
+    static let rise: CGFloat = 36
     /// The undo notice clears the decision bar.
     static let noticeInset: CGFloat = 84
 }
@@ -163,13 +186,15 @@ struct WorkflowItemView: View {
 /// The end of a set: the ring, the score, the next workflow and back.
 struct WorkflowEndView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let session: WorkflowSession
 
     var body: some View {
         let score = session.score
+        let earned = (score?.decided ?? 0) > 0
         ScrollView {
             VStack(spacing: Space.xxxl) {
-                CompletionRing(kind: session.kind, celebrating: (score?.decided ?? 0) > 0)
+                CompletionRing(kind: session.kind, celebrating: earned, animated: earned)
                 VStack(spacing: Space.s) {
                     Text(Self.headline(session)).font(TypeRole.workflowHeadline)
                     if let line = Self.subline(score) {
@@ -198,6 +223,12 @@ struct WorkflowEndView: View {
             .frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .contain)
+        .task {
+            // The chord sounds as the ring closes and bursts.
+            guard earned else { return }
+            if !reduceMotion { try? await Task.sleep(for: .seconds(CompletionRing.closeSeconds)) }
+            WorkflowSound.playChord(defaults: model.defaults)
+        }
     }
 
     static func headline(_ session: WorkflowSession) -> String {

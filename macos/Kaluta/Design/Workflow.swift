@@ -296,11 +296,15 @@ struct ScoreTile: View {
             Text(figure).font(TypeRole.workflowFigure)
             Text(label).font(TypeRole.workflowContext).foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: Self.minWidth, maxWidth: Self.maxWidth, alignment: .leading)
         .padding(Space.xl)
         .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
         .accessibilityElement(children: .combine)
     }
+
+    /// Tiles share a row; one alone stays tile-sized.
+    static let minWidth: CGFloat = 120
+    static let maxWidth: CGFloat = 220
 }
 
 /// The ring a set closes: in the workflow's colour, a check inside, with
@@ -308,29 +312,52 @@ struct ScoreTile: View {
 struct CompletionRing: View {
     let kind: WorkflowKind
     var celebrating = true
+    /// Closes, then bursts, as it appears (spec §14.13); Reduce Motion
+    /// draws it closed.
+    var animated = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var closed = false
+    @State private var burst = false
 
     var body: some View {
+        let still = !animated || reduceMotion
+        let isClosed = still || closed
+        let isBurst = still || burst
         ZStack {
             ForEach(0..<Self.ticks, id: \.self) { i in
                 Capsule()
                     .fill(i % 3 == 0 ? Tone.workflow(kind) : i % 3 == 1 ? Tone.workflow(.replies) : Tone.workflow(.tasks))
                     .frame(width: Self.tickWidth, height: i.isMultiple(of: 2) ? Self.tickLong : Self.tickShort)
-                    .offset(y: -Self.burstRadius)
+                    .offset(y: -(isBurst ? Self.burstRadius : Self.diameter / 2))
                     .rotationEffect(.degrees(Double(i) * 360 / Double(Self.ticks)))
-                    .opacity(celebrating ? 1 : 0)
+                    .opacity(celebrating && isBurst ? 1 : 0)
             }
             Circle()
-                .strokeBorder(Tone.workflow(kind), lineWidth: Self.ringWidth)
-                .background(Circle().fill(Tone.workflowSurface))
+                .fill(Tone.workflowSurface)
                 .frame(width: Self.diameter, height: Self.diameter)
+            Circle()
+                .trim(from: 0, to: isClosed ? 1 : 0)
+                .stroke(Tone.workflow(kind), style: StrokeStyle(lineWidth: Self.ringWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .frame(width: Self.diameter - Self.ringWidth, height: Self.diameter - Self.ringWidth)
             Image(systemName: "checkmark")
                 .font(TypeRole.workflowHeadline)
                 .foregroundStyle(Tone.workflow(kind))
+                .scaleEffect(isClosed ? 1 : 0.6)
+                .opacity(isClosed ? 1 : 0)
         }
         .frame(width: Self.burstRadius * 2 + Self.tickLong, height: Self.burstRadius * 2 + Self.tickLong)
         .accessibilityHidden(true)
+        .task {
+            guard !still else { return }
+            withAnimation(.easeInOut(duration: Self.closeSeconds)) { closed = true }
+            try? await Task.sleep(for: .seconds(Self.closeSeconds))
+            withAnimation(.spring(duration: Self.burstSeconds, bounce: 0.4)) { burst = true }
+        }
     }
 
+    static let closeSeconds = 0.4
+    static let burstSeconds = 0.6
     static let ticks = 12
     static let diameter: CGFloat = 150
     static let ringWidth: CGFloat = 10
@@ -338,4 +365,32 @@ struct CompletionRing: View {
     static let tickWidth: CGFloat = 5
     static let tickLong: CGFloat = 18
     static let tickShort: CGFloat = 12
+}
+
+extension EnvironmentValues {
+    /// Shared by the start screen's cards and a workflow's window, so a
+    /// card grows into its workflow (spec §14.13).
+    @Entry var workflowMorph: Namespace.ID?
+}
+
+extension View {
+    /// This view and the other with the same `kind` share a frame across
+    /// start ↔ workflow; nothing under Reduce Motion.
+    func workflowMorph(_ kind: WorkflowKind) -> some View {
+        modifier(WorkflowMorph(kind: kind))
+    }
+}
+
+private struct WorkflowMorph: ViewModifier {
+    let kind: WorkflowKind
+    @Environment(\.workflowMorph) private var namespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        if let namespace, !reduceMotion {
+            content.matchedGeometryEffect(id: kind, in: namespace)
+        } else {
+            content
+        }
+    }
 }

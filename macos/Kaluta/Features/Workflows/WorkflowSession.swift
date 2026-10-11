@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// What the window shows when no review is open (spec §14.13).
 enum WorkflowHome: String {
@@ -6,6 +6,33 @@ enum WorkflowHome: String {
     case start
     /// The mail view (§14.3), one key away.
     case mail
+}
+
+/// Which way a decided item leaves (spec §14.13): archive left, reply
+/// right, task down; leaving it, putting it off or skipping it, up.
+enum WorkflowExit {
+    case left, right, down, up
+
+    static func of(_ decision: String) -> WorkflowExit {
+        switch decision {
+        case "archive", "done": .left
+        case "reply": .right
+        case "task": .down
+        default: .up
+        }
+    }
+
+    /// How far it travels as it fades.
+    var offset: CGSize {
+        switch self {
+        case .left: CGSize(width: -Self.distance, height: 0)
+        case .right: CGSize(width: Self.distance, height: 0)
+        case .down: CGSize(width: 0, height: Self.distance)
+        case .up: CGSize(width: 0, height: -Self.distance)
+        }
+    }
+
+    static let distance: CGFloat = 140
 }
 
 /// A workflow being worked through: its set, fixed when it started, what is
@@ -21,6 +48,8 @@ final class WorkflowSession {
     /// The end's score, once the set is finished.
     var score: WorkflowScore?
     private(set) var itemShownAt = Date()
+    /// Which way the item on screen leaves when it is decided.
+    var exit = WorkflowExit.left
 
     init(set: WorkflowSet) {
         kind = set.kind

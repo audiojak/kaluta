@@ -69,4 +69,28 @@ struct WorkflowTests {
         let spaced = "Hi Jo,\n\nFirst line\nsecond line.\n\nSam"
         #expect(AppModel.readingText(spaced) == "Hi Jo,\n\nFirst line\nsecond line.\n\nSam")
     }
+
+    @Test func aDecidedItemLeavesByItsVerb() {
+        #expect(WorkflowExit.of("archive") == .left && WorkflowExit.of("done") == .left)
+        #expect(WorkflowExit.of("reply") == .right)
+        #expect(WorkflowExit.of("task") == .down)
+        #expect(WorkflowExit.of("leave") == .up && WorkflowExit.of("later") == .up)
+        #expect(WorkflowExit.left.offset.width < 0 && WorkflowExit.down.offset.height > 0)
+    }
+
+    @Test func theChordIsStrummedAndFades() {
+        let samples = WorkflowSound.chord()
+        let rate = WorkflowSound.sampleRate
+        #expect(samples.count == Int(WorkflowSound.seconds * rate))
+        #expect(abs((samples.map(abs).max() ?? 0) - WorkflowSound.peak) < 0.001, "scaled to its peak")
+        #expect(samples.last == 0, "it ends in silence")
+        // The strum starts at once.
+        let step = Int(WorkflowSound.strum / 3 * rate)
+        let first = samples[0..<step]
+        #expect(first.contains { $0 != 0 })
+        // Loud at the start, quiet after a second.
+        let early = samples[0..<Int(0.2 * rate)].map(abs).max() ?? 0
+        let late = samples[Int(1.0 * rate)..<Int(1.1 * rate)].map(abs).max() ?? 0
+        #expect(late < early / 4)
+    }
 }

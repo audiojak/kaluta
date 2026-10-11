@@ -4340,8 +4340,9 @@ its verb (archive left, reply right, task down) and the next rises
 600 ms), and a **G major chord** sounds (G3 B3 D4 G4, strummed over
 about 0.1 s, fading over about a second). The chord is silent when
 macOS's *Play user interface sound effects* is off or Kaluta's *Play
-sounds* setting is off. Reduce Motion: cross-fades only; the ring is
-drawn closed.
+sounds* setting (Settings › General › Workflows, on by default) is off;
+it plays only when the set decided something. Reduce Motion:
+cross-fades only; the ring is drawn closed.
 
 **Loading and slow actions.** An action is acknowledged at once;
 progress shows only past about a second; the user can keep deciding

@@ -8,6 +8,7 @@ struct MainWindow: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var workflowSpace
 
     var body: some View {
         Group {
@@ -23,11 +24,16 @@ struct MainWindow: View {
                 } else if model.showsWorkflows {
                     // The start screen is home (spec §14.13); a workflow
                     // takes the whole window, as Review mode does.
-                    if let session = model.workflowSession {
-                        WorkflowHostView(session: session)
-                    } else {
-                        StartScreenView()
+                    Group {
+                        if let session = model.workflowSession {
+                            WorkflowHostView(session: session)
+                                .transition(.opacity)
+                        } else {
+                            StartScreenView()
+                                .transition(.opacity)
+                        }
                     }
+                    .environment(\.workflowMorph, workflowSpace)
                 } else {
                     mailWindow
                 }
