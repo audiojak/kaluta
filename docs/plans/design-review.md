@@ -180,6 +180,15 @@ quick reply, a task, the set's end, replies):
 - **Sending sorted mail back to the Inbox (I) proposes a change to the
   routine**, decided like a proposed writing-guide rule (in Teach
   Claude); nothing changes until the user accepts it.
+- **Agents and Teach Claude are two workflows.** Agents is one set of
+  what agents wait on the user for: a send Claude proposes from the
+  user's account (opening on the editable email), a verification code
+  or sign-up an agent mailbox received (codes also notify at once), and
+  the latest routine run to keep or undo; with a line on what agent
+  mailboxes sent on their own. Teach Claude is Review mode widened to
+  one queue of proposed writing rules, facts (including what the user
+  told Claude) and routine changes, grouped by kind; its end closes the
+  day.
 - **Drafts follow the human.** Most replies need the user's view before
   Claude writes. Where Claude writes ahead (quick replies in triage), it
   writes two or three different answers (yes; yes with a condition; not
