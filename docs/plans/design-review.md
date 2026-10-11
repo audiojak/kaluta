@@ -45,7 +45,7 @@ Tasks 1–3 are the core daily loop.
 
 ## Principles
 
-From the maintainer (1–8) and agreed additions (9–16).
+From the maintainer (1–8, 17) and agreed additions (9–16).
 
 1. **Works alongside other Gmail clients.** Using Kaluta must never make
    another client harder to use. What a workflow records is Gmail state
@@ -97,6 +97,18 @@ From the maintainer (1–8) and agreed additions (9–16).
     controls (menus, buttons) smallest and consistent. The thread list's
     12–13 pt roles are for the mail app; workflows get their own, larger
     roles in `TypeRole`.
+17. **Kaluta is the one that learns and acts.** Inference runs on
+    Claude Code or Codex today, and other backends later; what is
+    learned about the user (the writing guide, facts, routines, tasks,
+    the waiting log) lives in Kaluta. So the interface says *Kaluta*
+    wherever it means the AI ("Kaluta suggests", "Written by Kaluta",
+    "Tell Kaluta what to say", *Teach Kaluta*), and names the backend
+    only where the user chooses or audits it: Settings › Agents, the
+    backend picker, the activity log, setup errors ("Claude Code
+    isn't installed"), and notices of where mail goes ("Your sent mail
+    goes to Claude Code on this Mac"), since mail does leave Kaluta for
+    the backend. Agent mailboxes keep their own names: they are the
+    user's agents, not the backend.
 
 Every animation and reward has a still or cross-fade version under Reduce
 Motion, and every workflow works with VoiceOver.
@@ -148,7 +160,7 @@ From the first workflow designs (canvas "Kaluta Workflows",
 https://claude.ai/artifact/RDwYuhs22AcmZWZfg3xYhu: start, triage, a
 quick reply, a task, the set's end, replies):
 
-- **The 30-second rule.** Anything Claude judges can be answered in 30
+- **The 30-second rule.** Anything Kaluta judges can be answered in 30
   seconds is answered in triage: Reply is the suggestion, with the time
   shown, and the reply is written in place and sent with "Send and
   archive". Anything longer becomes a task, filled in on the same screen
@@ -161,7 +173,7 @@ quick reply, a task, the set's end, replies):
 - **Tasks from an earlier day are "carried over"**, not overdue.
 - **Waiting on others is found by a background check.** Once at the
   start of the day, when sync has settled and nothing else is running
-  (as the daily review, §14.10), Claude reads the sent messages not yet
+  (as the daily review, §14.10), Kaluta reads the sent messages not yet
   checked (the user wrote last, to a person, no reply since) and decides
   whether each expects an answer. A running log in the account's store
   keeps every checked message (when, verdict, one line why), so none is
@@ -174,30 +186,30 @@ quick reply, a task, the set's end, replies):
   follow the human", since a nudge is short and predictable.
 - **Weekly reading** opens on the sorting routine's report, then each
   due group (the routine's labels) one line per item, summarised by
-  Claude when the routine sorts. Weekly groups are due on **Friday** by
+  Kaluta when the routine sorts. Weekly groups are due on **Friday** by
   default; each group can have its own day. Reading and clearing mark
   mail read and **keep the routine's label**.
 - **Sending sorted mail back to the Inbox (I) proposes a change to the
   routine**, decided like a proposed writing-guide rule (in Teach
-  Claude); nothing changes until the user accepts it.
-- **Agents and Teach Claude are two workflows.** Agents is one set of
-  what agents wait on the user for: a send Claude proposes from the
+  Kaluta); nothing changes until the user accepts it.
+- **Agents and Teach Kaluta are two workflows.** Agents is one set of
+  what agents wait on the user for: a send Kaluta proposes from the
   user's account (opening on the editable email), a verification code
   or sign-up an agent mailbox received (codes also notify at once), and
   the latest routine run to keep or undo; with a line on what agent
-  mailboxes sent on their own. Teach Claude is Review mode widened to
+  mailboxes sent on their own. Teach Kaluta is Review mode widened to
   one queue of proposed writing rules, facts (including what the user
-  told Claude) and routine changes, grouped by kind; its end closes the
+  told Kaluta) and routine changes, grouped by kind; its end closes the
   day.
 - **Drafts follow the human.** Most replies need the user's view before
-  Claude writes. Where Claude writes ahead (quick replies in triage), it
+  Kaluta writes. Where Kaluta writes ahead (quick replies in triage), it
   writes two or three different answers (yes; yes with a condition; not
-  yet) to pick from with 1–3, plus "None of these? Tell Claude what to
+  yet) to pick from with 1–3, plus "None of these? Tell Kaluta what to
   say". Where it has not, the screen leads with "What do you want to
   say?": a large field, dictation, and starters drawn from the questions
-  Claude found in the email; Claude writes after that. Up to three
+  Kaluta found in the email; Kaluta writes after that. Up to three
   answers: as many as are genuinely different.
-- **Directions teach.** What the user tells Claude to say is evidence for
+- **Directions teach.** What the user tells Kaluta to say is evidence for
   the daily review (§14.10), as their edits to drafts are.
 - **Every AI-written email from the user's own accounts ends on an
   editable screen**: the text that will be sent, at reading size, before
