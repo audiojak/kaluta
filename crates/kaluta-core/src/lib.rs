@@ -46,6 +46,7 @@ pub mod secrets;
 mod sync;
 mod tasks;
 mod tasks_ai;
+mod workflows;
 
 pub use account::{BackfillStatus, ConnectedAccount, OAuthClientConfig, SignInStart};
 pub use agent_connect::{AgentClient, AgentConnection};

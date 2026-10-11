@@ -159,6 +159,9 @@ pub enum CoreEvent {
     RoutinesChanged,
     /// A task was added, changed or removed (spec §14.8); re-read them.
     TasksChanged,
+    /// A workflow set started, changed or finished (spec §14.13); re-read
+    /// the start screen's overview.
+    WorkflowsChanged,
     /// The writing guide changed (entries, groups, examples); re-read it.
     GuideChanged,
     /// A learning run moved on, paused or finished (spec §14.9).

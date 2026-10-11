@@ -23,6 +23,7 @@ pub mod routines;
 pub mod search;
 pub mod tasks;
 pub mod undo;
+pub mod workflows;
 mod write;
 
 pub use db::{Db, READER_COUNT, schema_version};

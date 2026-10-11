@@ -716,6 +716,8 @@ final class AppModel {
     private(set) var routinesRevision = 0
     /// Bumped when a task was added, changed or removed (spec §14.8).
     private(set) var tasksRevision = 0
+    /// Bumped when a workflow set starts, changes or finishes (spec §14.13).
+    private(set) var workflowsRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
     private(set) var guideRevision = 0
     /// The learning run's progress and the decisions waiting (spec §14.9).
@@ -1657,6 +1659,8 @@ final class AppModel {
             await analysisChanged()
         case .rulesPublicationChanged:
             break // above, for every account
+        case .workflowsChanged:
+            workflowsRevision += 1
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

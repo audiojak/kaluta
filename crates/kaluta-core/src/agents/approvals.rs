@@ -48,6 +48,12 @@ impl Approvals {
             .any(|p| p.frozen_draft == Some(draft_id) && p.account.as_deref() == account)
     }
 
+    /// How many proposals wait for the user, across accounts (spec §14.13,
+    /// the Agents workflow).
+    pub(crate) fn pending_count(&self) -> usize {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
     fn ticket(&self) -> i64 {
         self.next_ticket.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
     }

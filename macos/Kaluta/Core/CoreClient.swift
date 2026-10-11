@@ -714,6 +714,35 @@ final class CoreClient: Sendable {
         try await call { try await core.listTasks(includeDone: includeDone) }
     }
 
+    // MARK: Workflows (spec §14.13)
+
+    /// The start screen: each workflow's count, estimate and first names.
+    func workflowOverview() async throws(CoreClientError) -> WorkflowOverview {
+        try await call { try await core.workflowOverview() }
+    }
+
+    /// Today's open set of `kind`, resumed, or a new one fixed from now.
+    func startWorkflow(_ kind: WorkflowKind) async throws(CoreClientError) -> WorkflowSet {
+        try await call { try await core.startWorkflow(kind: kind) }
+    }
+
+    func decideWorkflowItem(set: Int64, key: String, decision: String, millis: Int64) async throws(CoreClientError) {
+        try await call { try await core.decideWorkflowItem(setId: set, key: key, decision: decision, millis: millis) }
+    }
+
+    @discardableResult
+    func undoWorkflowDecision(set: Int64, key: String) async throws(CoreClientError) -> Bool {
+        try await call { try await core.undoWorkflowDecision(setId: set, key: key) }
+    }
+
+    func skipWorkflowItem(set: Int64, key: String) async throws(CoreClientError) -> WorkflowSet {
+        try await call { try await core.skipWorkflowItem(setId: set, key: key) }
+    }
+
+    func finishWorkflow(set: Int64) async throws(CoreClientError) -> WorkflowScore {
+        try await call { try await core.finishWorkflow(setId: set) }
+    }
+
     /// Adds the tasks and labels their threads `Task`.
     func createTasks(_ tasks: [NewTask]) async throws(CoreClientError) -> [TaskItem] {
         try await call { try await core.createTasks(new: tasks) }
@@ -1749,6 +1778,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
     case tasksChanged
+    case workflowsChanged
     case guideChanged
     case guideProgress(GuideProgress)
     case analysisProgress(AnalysisProgress)
@@ -1839,6 +1869,8 @@ private extension CoreClientEvent {
             self = .routinesChanged
         case .tasksChanged:
             self = .tasksChanged
+        case .workflowsChanged:
+            self = .workflowsChanged
         case .guideChanged:
             self = .guideChanged
         case let .guideProgress(progress):
