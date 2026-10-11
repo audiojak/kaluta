@@ -159,6 +159,19 @@ quick reply, a task, the set's end, replies):
   finish the task* or *Send, keep the task open*, wherever the reply is
   written (triage, Replies, Tasks); no "Mark the task done?" dialog.
 - **Tasks from an earlier day are "carried over"**, not overdue.
+- **Waiting on others is found by a background check.** Once at the
+  start of the day, when sync has settled and nothing else is running
+  (as the daily review, §14.10), Claude reads the sent messages not yet
+  checked (the user wrote last, to a person, no reply since) and decides
+  whether each expects an answer. A running log in the account's store
+  keeps every checked message (when, verdict, one line why), so none is
+  checked twice; a new message in the conversation is checked on its
+  own. One that expects an answer gets a `Waiting` label at once (Gmail
+  sees it) and joins the workflow after **3 days** without a reply; an
+  answer takes the label off and the item off the list.
+- **Nudges are written ahead**, as up to three different follow-ups to
+  pick from, ending on the editable email: the exception to "drafts
+  follow the human", since a nudge is short and predictable.
 - **Drafts follow the human.** Most replies need the user's view before
   Claude writes. Where Claude writes ahead (quick replies in triage), it
   writes two or three different answers (yes; yes with a condition; not
