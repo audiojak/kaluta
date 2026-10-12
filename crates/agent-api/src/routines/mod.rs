@@ -111,6 +111,25 @@ pub struct Bucket {
     pub priority_when_ambiguous: Option<String>,
     #[serde(default)]
     pub list_individually_in_report: bool,
+    /// A weekly bucket's reading day, 0 Monday to 6 Sunday (spec §14.13);
+    /// Friday unless set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_weekday: Option<u8>,
+}
+
+impl Bucket {
+    /// Friday.
+    pub const DEFAULT_WEEKDAY: u8 = 4;
+
+    /// Whether the bucket is read on a day: daily ones every day, weekly
+    /// ones on their weekday (0 Monday), monthly ones on the 1st.
+    pub fn due_on(&self, weekday: u8, day_of_month: u32) -> bool {
+        match self.cadence {
+            Cadence::Daily => true,
+            Cadence::Weekly => self.due_weekday.unwrap_or(Self::DEFAULT_WEEKDAY) == weekday,
+            Cadence::Monthly => day_of_month == 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,6 +294,21 @@ mod tests {
             aliases: vec!["me@work.example".into()],
             frequently_cc: vec![],
         }
+    }
+
+    #[test]
+    fn buckets_are_read_on_their_day() {
+        let r = Routine::sort_important("r", me(), Runner::Local);
+        let by = |c: Cadence| r.buckets.iter().find(|b| b.cadence == c).unwrap().clone();
+        let (daily, weekly, monthly) = (by(Cadence::Daily), by(Cadence::Weekly), by(Cadence::Monthly));
+        assert!(daily.due_on(0, 12) && daily.due_on(6, 1));
+        assert!(weekly.due_on(4, 12) && !weekly.due_on(0, 12), "Friday by default");
+        let mut monday = weekly.clone();
+        monday.due_weekday = Some(0);
+        assert!(monday.due_on(0, 12));
+        assert!(monthly.due_on(2, 1) && !monthly.due_on(2, 2));
+        // An unset day is not written, so older routines read the same.
+        assert!(!serde_json::to_string(&weekly).unwrap().contains("due_weekday"));
     }
 
     #[test]

@@ -169,6 +169,29 @@ pub fn nudge_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"nudges": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to a Kaluta reading prompt (spec §14.13), or `None`:
+/// the subject as the line, the first sentence of the body as the summary.
+pub fn reading_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta reading summaries") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"', '\n'], " ");
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let rest = rest.split("</email>").next().unwrap_or(rest);
+        let subject = rest.lines().find_map(|l| l.strip_prefix("Subject: ")).unwrap_or("A filed email");
+        let body = rest.split_once("\n\n").map(|(_, b)| b.trim()).unwrap_or("");
+        let first = body.split_inclusive(['.', '!', '?']).next().unwrap_or(body);
+        items.push(format!(
+            r#"{{"thread_id": "{id}", "line": "{}", "summary": "{}"}}"#,
+            esc(subject),
+            esc(first.trim())
+        ));
+    }
+    Some(format!(r#"{{"summaries": [{}]}}"#, items.join(", ")))
+}
+
 /// The fake's answer to a Kaluta writing-guide analysis prompt (spec
 /// §14.9), or `None` for any other prompt. For every message it proposes
 /// the same few entries, quoting the message's own first words and last
@@ -386,6 +409,7 @@ pub fn scripted_answer(prompt: &str) -> Option<String> {
         .or_else(|| triage_answer(prompt))
         .or_else(|| waiting_answer(prompt))
         .or_else(|| nudge_answer(prompt))
+        .or_else(|| reading_answer(prompt))
         .or_else(|| guide_answer(prompt))
         .or_else(|| change_answer(prompt))
         .or_else(|| merge_answer(prompt))

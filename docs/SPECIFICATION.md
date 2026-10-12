@@ -2557,6 +2557,7 @@ Bucket
   negative_examples [text]  "not this — see bucket X" cross-references
   priority_when_ambiguous   e.g. "alert AND receipt → Daily"
   list_individually_in_report bool
+  due_weekday               Option<0..6>  weekly buckets' reading day, Monday 0; Friday when unset (§14.13)
 ```
 
 Stored in `routines` (JSON payload column) and `routine_runs` in the
@@ -4500,6 +4501,13 @@ own day), monthly ones on the 1st.
   in full* (Return), *Keep for later* (L), *Back to the Inbox* (I),
   *Clear the bucket* (⌘E). Reading and clearing **mark mail read and keep
   the routine's label**.
+- The buckets are the account's enabled routines' (§11.2); with no
+  routine yet, the shipped template's, found by their labels' names. A
+  weekly bucket's day is set in the routine editor (*Read on*). The
+  reading job summarises filed conversations from the last 35 days, ten
+  per prompt and up to 200 a day, for each one's latest message
+  (`reading_summaries`); the set is the unread mail of the buckets due
+  today.
 - **Back to the Inbox** moves the email back and has Kaluta **propose a
   change to the routine** (for example, add the sender to *Leave
   alone*), with the evidence; it waits in Teach Kaluta and nothing

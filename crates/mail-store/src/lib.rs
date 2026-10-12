@@ -19,6 +19,7 @@ pub mod guide;
 pub mod outbox;
 pub mod queue;
 pub mod read;
+pub mod reading;
 pub mod routines;
 pub mod search;
 pub mod tasks;

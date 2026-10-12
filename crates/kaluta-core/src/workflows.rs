@@ -447,8 +447,17 @@ fn fresh_set(conn: &mail_store::Connection, kind: WorkflowKind, now: i64) -> mai
             }
             Fresh { keys: due.iter().map(|w| format!("thread:{}", w.thread_id)).collect(), preview, later: 0 }
         }
-        // Its job comes later (plan phase 5); Agents is the caller's.
-        WorkflowKind::Reading | WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0 },
+        // The buckets due today, their unread mail (spec §14.13).
+        WorkflowKind::Reading => {
+            let due = crate::reading::due_threads(conn, now)?;
+            Fresh {
+                preview: due.iter().take(5).map(|f| f.subject.clone()).collect(),
+                keys: due.iter().map(|f| format!("thread:{}", f.thread_id)).collect(),
+                later: 0,
+            }
+        }
+        // Agents is the caller's.
+        WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0 },
     })
 }
 

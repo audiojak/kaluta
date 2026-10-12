@@ -753,6 +753,16 @@ final class CoreClient: Sendable {
         try await call { try await core.triageSuggestion(threadId: threadID) }
     }
 
+    // MARK: Weekly reading (spec §14.13)
+
+    func readingReport() async throws(CoreClientError) -> ReadingReport {
+        try await call { try await core.readingReport() }
+    }
+
+    func readingSummaries(_ threadIDs: [String]) async throws(CoreClientError) -> [ReadingSummary] {
+        try await call { try await core.readingSummaries(threadIds: threadIDs) }
+    }
+
     // MARK: Waiting on others (spec §14.13)
 
     func waitingInfo(_ threadID: String) async throws(CoreClientError) -> WaitingInfo? {
@@ -1793,6 +1803,9 @@ typealias TriageSuggestion = KalutaCore.TriageSuggestion
 typealias TriageAnswer = KalutaCore.TriageAnswer
 typealias TriageKind = KalutaCore.TriageKind
 typealias WaitingInfo = KalutaCore.WaitingInfo
+typealias ReadingReport = KalutaCore.ReadingReport
+typealias ReadingBucket = KalutaCore.ReadingBucket
+typealias ReadingSummary = KalutaCore.ReadingSummary
 typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo
 typealias DecisionCount = KalutaCore.DecisionCount
 
