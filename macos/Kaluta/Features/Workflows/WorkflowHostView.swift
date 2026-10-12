@@ -28,8 +28,8 @@ struct WorkflowHostView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             // Each writing step comes into view above the bar.
-                            .onChange(of: session.writer?.step) { _, step in
-                                guard step != nil else { return }
+                            .onChange(of: [session.writer.map { "\($0.step)" }, session.taskForm.map { _ in "task" }]) { _, now in
+                                guard now.contains(where: { $0 != nil }) else { return }
                                 withAnimation(AppModel.itemMotion) {
                                     proxy.scrollTo(WorkflowWriteView.scrollID, anchor: .bottom)
                                 }
@@ -154,6 +154,10 @@ struct WorkflowItemView: View {
                     }
                 }
             }
+            if session.kind == .triage, let threadID {
+                TriageSuggestionLine(suggestion: session.suggestions[threadID],
+                                     task: model.openTask(onThread: threadID), kind: session.kind)
+            }
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
                     let latest = AppModel.latestReceived(detail)
@@ -180,6 +184,9 @@ struct WorkflowItemView: View {
                 if let writer = session.writer {
                     WorkflowWriteView(session: session, writer: writer)
                         .transition(.opacity)
+                } else if let form = session.taskForm {
+                    WorkflowTaskFormView(session: session, form: form)
+                        .transition(.opacity)
                 }
             } else if threadID != nil {
                 ProgressView()
@@ -205,6 +212,52 @@ struct WorkflowItemView: View {
         if day < today { return "Carried over" }
         if day == today { return "Due today" }
         return "Due \(day)"
+    }
+}
+
+/// Kaluta's suggestion for a triage item (spec §14.13): what to do, the
+/// time a quick reply takes, and why; and the conversation's task, if it
+/// has one.
+struct TriageSuggestionLine: View {
+    let suggestion: TriageSuggestion?
+    let task: TaskItem?
+    let kind: WorkflowKind
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            if let suggestion {
+                HStack(spacing: Space.m) {
+                    Text(Self.verb(suggestion))
+                        .font(TypeRole.workflowKey).fontWeight(.semibold)
+                        .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                        .background(Tone.workflow(kind).opacity(0.14), in: Capsule())
+                    if !suggestion.reason.isEmpty {
+                        Label(suggestion.reason, systemImage: "sparkle")
+                            .font(TypeRole.workflowContext)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Kaluta suggests: \(Self.verb(suggestion)). \(suggestion.reason)")
+            }
+            if let task {
+                Label("Has a task: “\(task.title)”", systemImage: "checklist")
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// "Quick reply · about 20 seconds", "Make a task", "Archive", "Leave in Inbox".
+    static func verb(_ s: TriageSuggestion) -> String {
+        switch s.kind {
+        case .quickReply:
+            guard let seconds = s.seconds else { return "Quick reply" }
+            return "Quick reply · about \(max(5, (Int(seconds) + 4) / 5 * 5)) seconds"
+        case .task: return "Make a task"
+        case .archive: return "Archive"
+        case .leave: return "Leave in Inbox"
+        }
     }
 }
 
@@ -235,7 +288,8 @@ struct WorkflowEndView: View {
                     }
                 }
                 if let next = model.nextWorkflow(after: session.kind) {
-                    WorkflowButton(title: "Next: \(next.title)", key: "Return", style: .primary, kind: next) {
+                    WorkflowButton(title: model.nextTitle(next, after: session.kind), key: "Return", style: .primary,
+                                   kind: next) {
                         model.continueAfter(session)
                     }
                 }
@@ -288,12 +342,25 @@ struct WorkflowEndView: View {
 }
 
 extension AppModel {
-    /// The workflow after `kind` on the start screen that has anything in it.
+    /// The workflow after `kind` on the start screen that has anything in
+    /// it; after Triage, the mail that arrived meanwhile comes first (spec
+    /// §14.13, arrivals wait for the end).
     func nextWorkflow(after kind: WorkflowKind) -> WorkflowKind? {
         guard let overview = workflowOverview else { return nil }
+        if kind == .triage, arrivals(overview) > 0 { return .triage }
         let order = WorkflowKind.all
         let start = (order.firstIndex(of: kind) ?? 0) + 1
         return order[start...].first { k in overview.workflows.first { $0.kind == k }.map { $0.count > 0 } ?? false }
+    }
+
+    private func arrivals(_ overview: WorkflowOverview) -> Int {
+        Int(overview.workflows.first { $0.kind == .triage }?.count ?? 0)
+    }
+
+    /// The end's Next button: "Next: Replies", or "Triage 3 that arrived".
+    func nextTitle(_ next: WorkflowKind, after kind: WorkflowKind) -> String {
+        guard next == kind, let overview = workflowOverview else { return "Next: \(next.title)" }
+        return "Triage \(arrivals(overview)) that arrived"
     }
 
     /// Return at an end: the next workflow, else the start screen.

@@ -137,4 +137,18 @@ struct WorkflowTests {
         writer.changeWhatISaid()
         #expect(writer.field == "Thursday is fine, see you then.", "Change brings back what was said")
     }
+
+    @Test func theWritingScreenReadsAsTheUserDidIt() {
+        #expect(WorkflowWriteView.preview("Hi Sam,\n\nYes, that works.\n\nJo") == "Hi Sam, Yes, that works. Jo")
+        #expect(WorkflowWriteView.saidLine("Chose: Yes") == "You chose: Yes")
+        #expect(WorkflowWriteView.saidLine("Tuesday works") == "You said: Tuesday works")
+        #expect(WorkflowWriteView.askTitle(.tasks) == "What did you decide?")
+    }
+
+    @Test func triageSaysWhatKalutaSuggests() {
+        let reply = TriageSuggestion(threadId: "t", kind: .quickReply, seconds: 18, reason: "", answers: [], task: nil)
+        #expect(TriageSuggestionLine.verb(reply) == "Quick reply · about 20 seconds")
+        let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], task: nil)
+        #expect(TriageSuggestionLine.verb(task) == "Make a task")
+    }
 }

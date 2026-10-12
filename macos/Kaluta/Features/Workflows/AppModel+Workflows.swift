@@ -80,7 +80,8 @@ extension AppModel {
         do {
             let set = try await core.startWorkflow(kind)
             let session = WorkflowSession(set: set)
-            if kind == .tasks { await tasks.load() }
+            // Tasks shows them; Triage says which conversations have one.
+            if kind == .tasks || kind == .triage { await tasks.load() }
             // The card grows into the window (spec §14.13); the first
             // item loads behind it.
             withAnimation(Self.workflowMotion) { workflowSession = session }
@@ -114,6 +115,10 @@ extension AppModel {
 
     private func prepare(_ item: WorkflowItem, in session: WorkflowSession) async {
         guard let core, let threadID = threadID(of: item) else { return }
+        if session.kind == .triage, session.suggestions[threadID] == nil,
+           let suggestion = try? await core.triageSuggestion(threadID) {
+            session.suggestions[threadID] = suggestion
+        }
         if session.threads[threadID] == nil, let detail = try? await core.thread(threadID) {
             session.threads[threadID] = detail
             if let latest = Self.latestReceived(detail), let body = try? await core.renderedBody(latest.id),
@@ -165,9 +170,12 @@ extension AppModel {
             WorkflowAction(command: c, title: title ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
+        if let form = session.taskForm {
+            return [a(.primary, .primary, form.isExisting ? "Save the task" : "Make the task"), a(.back, .quiet, "Cancel")]
+        }
         switch kind {
         case .triage:
-            return [a(.replyNow, .primary, "Reply"), a(.task), a(.done), a(.later), a(.skip, .quiet)]
+            return triageActions(session, a)
         case .replies:
             return [a(.primary, .primary, "Reply"), a(.task), a(.done), a(.skip, .quiet)]
         case .tasks:
@@ -182,6 +190,31 @@ extension AppModel {
         }
     }
 
+    /// Triage (spec §14.13): Return takes Kaluta's suggestion; R, T, E, L
+    /// and S are always there (the one Return already takes is not shown
+    /// twice, its key still works).
+    private func triageActions(_ session: WorkflowSession,
+                               _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
+        let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
+        let taken: WorkflowCommand? = switch suggested?.kind {
+        case .quickReply: .replyNow
+        case .task: .task
+        case .archive: .done
+        case .leave: .later
+        case nil: nil
+        }
+        let primary = taken.map { a(.primary, .primary, $0 == .replyNow ? "Reply" : $0.title(in: .triage)) }
+        let rest = [a(.replyNow, .plain, "Reply"), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil)]
+            .map { action -> WorkflowAction in
+                var action = action
+                if action.command == taken { action.shown = false }
+                // With no suggestion, Reply leads.
+                if taken == nil, action.command == .replyNow { action.style = .primary }
+                return action
+            }
+        return (primary.map { [$0] } ?? []) + rest + [a(.skip, .quiet, nil)]
+    }
+
     /// While Kaluta writes the item's answer: the step's own actions.
     private func writingActions(_ writer: WorkflowWriter,
                                 _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
@@ -189,7 +222,8 @@ extension AppModel {
         case .choose:
             let picks: [WorkflowCommand] = [.pick1, .pick2, .pick3]
             return picks.prefix(writer.answers.count).map { var x = a($0, .plain, nil); x.shown = false; return x }
-                + [a(.tellKaluta, .plain, nil), a(.back, .quiet, "Cancel")]
+                // The answers' own row says "None of these? Tell Kaluta…".
+                + [{ var x = a(.tellKaluta, .plain, nil); x.shown = false; return x }(), a(.back, .quiet, "Cancel")]
         case .say:
             return [a(.primary, .primary, agent.isProviderReady ? "Write it" : "Write it yourself"), a(.back, .quiet, "Cancel")]
         case .final:
@@ -228,7 +262,7 @@ extension AppModel {
     func performWorkflow(_ command: WorkflowCommand) async {
         guard let session = workflowSession else { return }
         switch command {
-        case .back:
+        case .back where session.writer == nil && session.taskForm == nil:
             leaveWorkflow()
             return
         case .whatsLeft:
@@ -245,7 +279,23 @@ extension AppModel {
             await performWriting(command, writer, item: item, session: session)
             return
         }
+        if let form = session.taskForm {
+            if command == .back { session.taskForm = nil } else { await makeTask(form, item: item, session: session) }
+            return
+        }
         switch (session.kind, command) {
+        case (.triage, .primary):
+            // Kaluta's suggestion, as its own key would.
+            let suggested = threadID(of: item).flatMap { session.suggestions[$0] }
+            switch suggested?.kind {
+            case .quickReply: startWriting(item, session: session)
+            case .task: await openTaskForm(item, session: session)
+            case .archive: await archiveCurrent(item, session: session)
+            case .leave: await decide(item, "leave", session: session, notice: "Left in the Inbox")
+            case nil: startWriting(item, session: session)
+            }
+        case (.triage, .task):
+            await openTaskForm(item, session: session)
         case (_, .skip):
             session.exit = .up
             if let core, let set = try? await core.skipWorkflowItem(set: session.workflowSet.id, key: item.key) {
@@ -257,7 +307,7 @@ extension AppModel {
             await decide(item, "leave", session: session, notice: "Left in the Inbox")
         case (.triage, .replyNow), (.replies, .primary), (.tasks, .primary):
             startWriting(item, session: session)
-        case (.triage, .task), (.replies, .task):
+        case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
             }
@@ -347,11 +397,74 @@ extension AppModel {
     private func startWriting(_ item: WorkflowItem, session: WorkflowSession) {
         guard let id = threadID(of: item), let detail = session.threads[id],
               let message = Self.latestReceived(detail) else { return }
-        let task = self.task(of: item)
+        // The item's task, else the conversation's: Send offers to finish it.
+        let task = self.task(of: item) ?? openTask(onThread: id)
+        // Kaluta's answers when it judged it a quick reply (Triage).
+        let answers = session.suggestions[id]?.answers.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
         session.writer = WorkflowWriter(threadID: id, messageID: task?.messageId ?? message.id,
                                         replyAll: task?.action == .replyAll, taskID: task?.id,
-                                        email: session.bodies[id] ?? message.snippet)
+                                        email: session.bodies[id] ?? message.snippet, answers: answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
+    }
+
+    /// The conversation's open task, if it has one.
+    func openTask(onThread threadID: String) -> TaskItem? {
+        tasks.tasks.first { $0.threadId == threadID && !$0.done }
+    }
+
+    /// T in Triage: the task on the item's screen, filled in from Kaluta's
+    /// suggestion; a conversation that has one shows it rather than making
+    /// a second (spec §14.13).
+    private func openTaskForm(_ item: WorkflowItem, session: WorkflowSession) async {
+        guard let core, let id = threadID(of: item), let detail = session.threads[id] else { return }
+        let categories = (try? await core.taskCategories()) ?? []
+        if let existing = openTask(onThread: id) {
+            session.taskForm = WorkflowTaskForm(draft: TaskDraft(editing: existing, categories: categories))
+            return
+        }
+        let draft = TaskDraft(threadID: id, subject: detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject,
+                              sender: Self.latestReceived(detail)?.from.map { $0.name ?? $0.email } ?? "",
+                              categories: categories)
+        session.taskForm = WorkflowTaskForm(draft: draft)
+        if let suggested = session.suggestions[id]?.task {
+            draft.apply(suggested)
+        } else if TaskSuggester.canAsk(self) {
+            await draft.suggester.run(threadIDs: [id], model: self)
+        }
+    }
+
+    /// Return on the task: make it (or save the conversation's), archive
+    /// the email if ticked, and move on; ⌘Z takes all of it back.
+    private func makeTask(_ form: WorkflowTaskForm, item: WorkflowItem, session: WorkflowSession) async {
+        let draft = form.draft
+        guard draft.canAdd, let core else { return }
+        var made: [TaskItem] = []
+        if let task = draft.editing {
+            if let error = await update(task, to: draft.edit, actionName: "Edit Task", notice: "Changed “\(draft.title)”") {
+                draft.error = error
+                return
+            }
+        } else {
+            do {
+                made = try await core.createTasks([draft.newTask])
+            } catch {
+                draft.error = error.message
+                return
+            }
+        }
+        draft.suggester.cancel()
+        await tasks.load()
+        let token = form.archiveEmail ? try? await core.archive([draft.threadID]) : nil
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        await decide(item, "task", session: session, notice: made.isEmpty ? "Saved “\(title)”" : "Task: “\(title)”",
+                     undoMail: {
+                         if let token { _ = try? await core.undo(token) }
+                         for t in made { _ = try? await core.deleteTask(t.id) }
+                     },
+                     redoMail: {
+                         for t in made { _ = try? await core.restoreTask(t) }
+                         if let token { _ = try? await core.redo(token) }
+                     })
     }
 
     private func finishTask(_ item: WorkflowItem, session: WorkflowSession) async {

@@ -4398,6 +4398,16 @@ one decision with a one-line reason:
   conversation that already has an open task says so, and T shows that
   task instead of making a second.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
+  Above the email: the suggestion ("Quick reply · about 20 seconds",
+  "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
+  "Has a task: …" when the conversation has one. With no suggestion yet,
+  Reply leads. A quick reply sent here offers *Send and finish the task*
+  when the conversation has one.
+- Making the task, Return saves it (or the conversation's task, changed),
+  archives the email if ticked, and moves on; ⌘Z takes all of it back.
+- **Arrivals wait for the end.** The set does not grow; at its end, mail
+  that arrived meanwhile is the next thing offered (*Triage 3 that
+  arrived*, Return) before the next workflow.
 
 #### Replies
 

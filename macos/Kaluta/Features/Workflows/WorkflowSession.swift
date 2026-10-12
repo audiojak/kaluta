@@ -52,6 +52,10 @@ final class WorkflowSession {
     var exit = WorkflowExit.left
     /// Kaluta's writing for the item on screen, once the user answers it.
     var writer: WorkflowWriter?
+    /// A task being made on the item's screen (Triage).
+    var taskForm: WorkflowTaskForm?
+    /// Kaluta's triage suggestions, by thread id, as each item is shown.
+    var suggestions: [String: TriageSuggestion] = [:]
 
     init(set: WorkflowSet) {
         kind = set.kind
@@ -59,7 +63,10 @@ final class WorkflowSession {
     }
 
     func replace(_ set: WorkflowSet) {
-        if set.items.first(where: { $0.decision == nil })?.key != current?.key { writer = nil }
+        if set.items.first(where: { $0.decision == nil })?.key != current?.key {
+            writer = nil
+            taskForm = nil
+        }
         self.workflowSet = set
         itemShownAt = .now
     }

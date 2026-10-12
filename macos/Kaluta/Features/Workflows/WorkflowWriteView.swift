@@ -58,10 +58,10 @@ struct WorkflowWriteView: View {
                         Keycap(key: "\(i + 1)")
                         VStack(alignment: .leading, spacing: Space.xs) {
                             Text(answer.label).font(TypeRole.workflowHeading)
-                            Text(answer.text)
+                            Text(Self.preview(answer.text))
                                 .font(TypeRole.workflowContext)
                                 .foregroundStyle(.secondary)
-                                .lineLimit(3)
+                                .lineLimit(2)
                         }
                         Spacer(minLength: 0)
                     }
@@ -112,7 +112,7 @@ struct WorkflowWriteView: View {
     private var finalEmail: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.m) {
-                Text(writer.said.isEmpty ? "Written by you" : "You said: \(writer.said)")
+                Text(Self.saidLine(writer.said))
                     .font(TypeRole.workflowContext)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -161,6 +161,19 @@ struct WorkflowWriteView: View {
 
     private func revise(_ request: String) {
         Task { await writer.revise(request, model: model) }
+    }
+
+    /// An answer on one line: its lines run together.
+    static func preview(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Above the final email: what the user said, or which answer they chose.
+    static func saidLine(_ said: String) -> String {
+        if said.isEmpty { return "Written by you" }
+        if said.hasPrefix("Chose: ") { return "You chose: " + said.dropFirst("Chose: ".count) }
+        return "You said: \(said)"
     }
 
     /// A task's reply asks what the user decided (spec §14.13).
