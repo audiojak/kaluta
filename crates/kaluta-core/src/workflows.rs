@@ -203,8 +203,7 @@ impl Core {
     pub async fn workflow_overview(&self) -> Result<WorkflowOverview, CoreError> {
         let db = self.db()?;
         let now = mail_sync::now_millis();
-        let pending = self.agents.approvals.pending_count();
-        let core_free = WorkflowFresh { pending_approvals: pending };
+        let core_free = self.workflow_fresh().await;
         runtime::run(async move {
             Ok(db
                 .read(move |c| {
@@ -254,7 +253,7 @@ impl Core {
     pub async fn start_workflow(&self, kind: WorkflowKind) -> Result<WorkflowSet, CoreError> {
         let db = self.db()?;
         let now = mail_sync::now_millis();
-        let fresh_from = WorkflowFresh { pending_approvals: self.agents.approvals.pending_count() };
+        let fresh_from = self.workflow_fresh().await;
         let set = runtime::run(async move {
             Ok(db
                 .write(move |tx| {
@@ -384,21 +383,46 @@ impl Core {
 
 /// What a set query needs from the core, taken before moving onto the
 /// store's thread (the store's closures may not borrow the core).
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct WorkflowFresh {
-    pending_approvals: usize,
+    /// The Agents set (spec §14.13): `action:<ticket>` for each proposal
+    /// waiting, `code:<account>/<message>` for each recent code in an agent
+    /// mailbox, `run:<routine>/<run>` for this morning's sorting run.
+    agent_keys: Vec<String>,
 }
 
 impl WorkflowFresh {
     fn fresh(&self, conn: &mail_store::Connection, kind: WorkflowKind, now: i64) -> mail_store::StoreResult<Fresh> {
         if kind == WorkflowKind::Agents {
-            return Ok(Fresh {
-                keys: (0..self.pending_approvals).map(|i| format!("approval:{i}")).collect(),
-                preview: vec![],
-                later: 0,
-            });
+            return Ok(Fresh { keys: self.agent_keys.clone(), preview: vec![], later: 0 });
         }
         fresh_set(conn, kind, now)
+    }
+}
+
+impl Core {
+    async fn workflow_fresh(&self) -> WorkflowFresh {
+        let mut keys: Vec<String> =
+            self.agents.approvals.pending_tickets().into_iter().map(|t| format!("action:{t}")).collect();
+        if let Ok(work) = self.agents_work().await {
+            keys.extend(work.codes.iter().map(|c| format!("code:{}/{}", c.account_id, c.message_id)));
+        }
+        if let Some((routine, run)) = self.morning_run().await {
+            keys.push(format!("run:{routine}/{run}"));
+        }
+        WorkflowFresh { agent_keys: keys }
+    }
+
+    /// Today's latest successful run of a sorting routine, not undone.
+    async fn morning_run(&self) -> Option<(String, i64)> {
+        let start = crate::waiting::start_of_day(mail_sync::now_millis());
+        for routine in self.list_routines().await.ok()? {
+            let runs = self.list_routine_runs(routine.id.clone(), 5).await.ok()?;
+            if let Some(run) = runs.iter().find(|r| r.started_at >= start && r.status == "succeeded") {
+                return Some((routine.id, run.run_id));
+            }
+        }
+        None
     }
 }
 

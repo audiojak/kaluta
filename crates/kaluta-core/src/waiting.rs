@@ -30,7 +30,7 @@ const BODY_CAP: usize = 2_000;
 const REASON_CAP: usize = 160;
 
 /// The start of `now`'s local day.
-fn start_of_day(now: Millis) -> Millis {
+pub(crate) fn start_of_day(now: Millis) -> Millis {
     use chrono::TimeZone;
     let day = match chrono::Local.timestamp_millis_opt(now) {
         chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) => t.date_naive(),

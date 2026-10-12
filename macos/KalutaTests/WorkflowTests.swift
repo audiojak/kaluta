@@ -203,4 +203,24 @@ struct WorkflowTests {
         model.leaveReview()
         #expect(model.reviewMode == nil && model.teachSelection == nil)
     }
+
+    @Test func agentsItemsAreReadFromTheirKeys() throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        let items = ["action:42", "code:scout/in:fake1", "run:routine-1/9"].map {
+            WorkflowItem(key: $0, threadId: nil, taskId: nil, decision: nil)
+        }
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .agents, items: items, startedAt: 0, resumed: false))
+        session.agentsWork = AgentsWork(codes: [
+            AgentCode(accountId: "scout", mailbox: "scout@agents.example", messageId: "in:fake1",
+                      from: "Example Journals", subject: "Your verification code", code: "482913",
+                      receivedAt: 0, expiresAt: nil),
+        ], sentOnTheirOwn: [AgentSent(accountId: "scout", mailbox: "scout@agents.example", count: 2)], since: 0)
+        if case .elsewhere = model.agentItem(items[0], in: session) {} else { Issue.record("an unknown action is elsewhere") }
+        if case let .code(code) = model.agentItem(items[1], in: session) { #expect(code.code == "482913") }
+        else { Issue.record("the code") }
+        if case let .run(routine, run) = model.agentItem(items[2], in: session) { #expect(routine == "routine-1" && run == 9) }
+        else { Issue.record("the run") }
+        #expect(AgentItemView.spaced("482913") == "482 913")
+        #expect(model.workflowPill(session) == "Agent mailboxes sent 2 on their own")
+    }
 }

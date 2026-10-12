@@ -67,10 +67,7 @@ extension AppModel {
         case .teach:
             await enterTeach()
             return
-        case .agents:
-            showMail()
-            agent.isPresented = true
-            return
+
         default:
             break
         }
@@ -84,6 +81,7 @@ extension AppModel {
             // item loads behind it.
             if kind == .tasks { await loadTaskInfo(session) }
             if kind == .waiting { await loadWaits(session) }
+            if kind == .agents { await loadAgentsWork(session) }
             if kind == .reading {
                 await loadReading(session)
                 // The report first, unless the set was already begun today.
@@ -107,6 +105,7 @@ extension AppModel {
 
     /// Back to the start screen; the set stays open to resume today.
     func leaveWorkflow() {
+        if workflowSession?.kind == .agents { Task { try? await core?.markAgentsLooked() } }
         withAnimation(Self.workflowMotion) { workflowSession = nil }
         Task { await refreshWorkflowOverview() }
     }
@@ -173,6 +172,45 @@ extension AppModel {
         kind == .waiting ? detail.messages.last { !$0.isDraft } : latestReceived(detail)
     }
 
+    /// The Agents set's codes, and the text of each proposed send.
+    func loadAgentsWork(_ session: WorkflowSession) async {
+        guard let core else { return }
+        session.agentsWork = try? await core.agentsWork()
+        for item in session.items where item.key.hasPrefix("action:") && session.agentDrafts[item.key] == nil {
+            guard let id = Int64(item.key.dropFirst("action:".count)),
+                  let info = agent.proposalInfo(id), let draftID = info.draftID,
+                  let draft = try? await core.draft(draftID) else { continue }
+            session.agentDrafts[item.key] = ComposerAssistant.plainText(fromHTML: draft.bodyHtml)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    /// What an Agents item is.
+    enum AgentItem {
+        case action(id: Int64, tool: String, summary: String, draftID: Int64?, request: String?)
+        /// A proposal another account's panel holds.
+        case elsewhere
+        case code(AgentCode)
+        case run(routine: String, run: Int64)
+    }
+
+    func agentItem(_ item: WorkflowItem, in session: WorkflowSession) -> AgentItem? {
+        let key = item.key
+        if key.hasPrefix("action:"), let id = Int64(key.dropFirst("action:".count)) {
+            guard let info = agent.proposalInfo(id) else { return .elsewhere }
+            return .action(id: id, tool: info.tool, summary: info.summary, draftID: info.draftID, request: info.request)
+        }
+        if key.hasPrefix("code:") {
+            let rest = key.dropFirst("code:".count)
+            return session.agentsWork?.codes.first { "\($0.accountId)/\($0.messageId)" == rest }.map { .code($0) }
+        }
+        if key.hasPrefix("run:") {
+            let parts = key.dropFirst("run:".count).split(separator: "/")
+            if parts.count == 2, let run = Int64(parts[1]) { return .run(routine: String(parts[0]), run: run) }
+        }
+        return nil
+    }
+
     /// Weekly reading's report and Kaluta's summaries of the set.
     func loadReading(_ session: WorkflowSession) async {
         guard let core else { return }
@@ -228,6 +266,20 @@ extension AppModel {
                                                                          a(.skip, .quiet)]
         case .waiting:
             return [a(.primary, .primary, "Nudge"), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
+        case .agents:
+            switch session.current.flatMap({ agentItem($0, in: session) }) {
+            case let .action(_, tool, _, draftID, _) where AgentStore.isSend(tool) && draftID != nil:
+                return [a(.send, .primary, "Send"), a(.reject, .plain, "Don't send"), a(.later, .plain, "Save as a draft"),
+                        a(.skip, .quiet)]
+            case .action:
+                return [a(.primary, .primary, "Approve"), a(.reject, .plain, "Don't"), a(.skip, .quiet)]
+            case .code:
+                return [a(.copyCode, .primary), a(.done, .plain, "Done"), a(.skip, .quiet)]
+            case .run:
+                return [a(.done, .primary, "Keep"), a(.reject, .plain, "Undo the run"), a(.skip, .quiet)]
+            case .elsewhere, nil:
+                return [a(.done, .primary, "Done"), a(.skip, .quiet)]
+            }
         case .reading:
             return [a(.done, .primary), a(.primary, .plain, session.showsInFull ? "Show the summary" : "Open in full"),
                     a(.later), a(.backToInbox), a(.task), a(.clearBucket, .quiet), a(.skip, .quiet)]
@@ -389,6 +441,8 @@ extension AppModel {
             await finishTask(item, session: session)
         case (.tasks, .later):
             await moveTaskToTomorrow(item, session: session)
+        case (.agents, _):
+            await performAgents(command, item: item, session: session)
         case (.reading, .primary):
             session.showsInFull.toggle()
         case (.reading, .done):
@@ -503,6 +557,43 @@ extension AppModel {
                                         replyAll: task?.action == .replyAll, taskID: task?.id,
                                         email: session.bodies[id] ?? message.snippet, answers: answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
+    }
+
+    /// An Agents item's command (spec §14.13).
+    private func performAgents(_ command: WorkflowCommand, item: WorkflowItem, session: WorkflowSession) async {
+        guard let core else { return }
+        switch (agentItem(item, in: session), command) {
+        case let (.action(id, _, _, draftID?, _), .send):
+            // The email as edited here is what goes (spec §10.4).
+            if let text = session.agentDrafts[item.key], var draft = try? await core.draft(draftID) {
+                draft.bodyHtml = ComposerHTML.html(from: NSAttributedString(string: text,
+                                                                             attributes: [.font: ComposerHTML.bodyFont]))
+                _ = try? await core.saveDraft(draft)
+            }
+            agent.resolve(id, approve: true)
+            await decide(item, "sent", session: session, notice: nil)
+        case let (.action(id, _, _, _, _), .primary):
+            agent.resolve(id, approve: true)
+            await decide(item, "approved", session: session, notice: nil)
+        case let (.action(id, _, _, _, _), .reject):
+            agent.resolve(id, approve: false)
+            await decide(item, "declined", session: session, notice: "Not sent")
+        case let (.action(id, _, _, _, _), .later):
+            // Declined, the draft stays in Drafts.
+            agent.resolve(id, approve: false)
+            await decide(item, "drafted", session: session, notice: "Kept in Drafts")
+        case let (.code(code), .copyCode):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(code.code, forType: .string)
+            await decide(item, "copied", session: session, notice: "Copied \(code.code)")
+        case let (.run(_, run), .reject):
+            guard (try? await core.undoRoutineRun(run)) != nil else { return }
+            await decide(item, "undone", session: session, notice: "This morning's run is undone")
+        case (.run, .done):
+            await decide(item, "kept", session: session, notice: nil)
+        default:
+            await decide(item, "done", session: session, notice: nil)
+        }
     }
 
     /// Read, next (E) and Clear the bucket (⌘E): the mail is marked read

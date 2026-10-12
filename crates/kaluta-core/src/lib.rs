@@ -9,6 +9,7 @@ mod account;
 mod agent_connect;
 mod agent_mailbox;
 mod agents;
+mod agents_workflow;
 mod analysis_compare;
 mod analysis_glean;
 mod analysis_match;

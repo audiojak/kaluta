@@ -174,6 +174,9 @@ struct WorkflowItemView: View {
                     }
                 }
             }
+            if session.kind == .agents {
+                AgentItemView(session: session, item: item)
+            }
             if session.kind == .reading, let bucket = session.bucket(of: item) {
                 Text("\(bucket.title) · \(bucket.verb)")
                     .font(TypeRole.workflowKey).fontWeight(.semibold)
@@ -351,6 +354,65 @@ struct WorkflowRail: View {
     }
 
     static let width: CGFloat = 280
+}
+
+/// An Agents item (spec §14.13): a proposed send on its editable email
+/// with the request that produced it, another proposed action, a code
+/// from an agent mailbox shown large, or this morning's sorting run.
+struct AgentItemView: View {
+    @Environment(AppModel.self) private var model
+    let session: WorkflowSession
+    let item: WorkflowItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xxl) {
+            switch model.agentItem(item, in: session) {
+            case let .action(_, tool, summary, draftID, request):
+                if let request, !request.isEmpty {
+                    Label("You asked: \(request)", systemImage: "text.bubble")
+                        .font(TypeRole.workflowContext).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Text(summary).font(TypeRole.workflowDisplay).fixedSize(horizontal: false, vertical: true)
+                if AgentStore.isSend(tool), draftID != nil {
+                    TextEditor(text: Binding(get: { session.agentDrafts[item.key] ?? "" },
+                                             set: { session.agentDrafts[item.key] = $0 }))
+                        .font(TypeRole.workflowContent)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: WorkflowWriteView.editorHeight)
+                        .padding(Space.xl)
+                        .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+                        .accessibilityLabel("The email that will be sent")
+                }
+            case .elsewhere:
+                Text("Waiting in another account's agent panel").font(TypeRole.workflowDisplay)
+                Text("Open that account in Mail to decide it.").font(TypeRole.workflowContent).foregroundStyle(.secondary)
+            case let .code(code):
+                Text("\(code.from) · to \(code.mailbox)").font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                Text(code.subject).font(TypeRole.workflowContent)
+                Text(Self.spaced(code.code))
+                    .font(TypeRole.workflowCode)
+                    .textSelection(.enabled)
+                    .accessibilityLabel("Code \(code.code.map(String.init).joined(separator: " "))")
+                if let expires = code.expiresAt {
+                    let at = Date(timeIntervalSince1970: TimeInterval(expires) / 1000)
+                    Text(at < .now ? "Expired" : "Expires at \(at.formatted(date: .omitted, time: .shortened))")
+                        .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                }
+            case .run:
+                Text("This morning's sorting run").font(TypeRole.workflowDisplay)
+                Text("Keep what it filed, or undo the run to put it all back.")
+                    .font(TypeRole.workflowContent).foregroundStyle(.secondary)
+            case nil:
+                Text("This is no longer waiting.").font(TypeRole.workflowContent).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// "482 913".
+    static func spaced(_ code: String) -> String {
+        guard code.count == 6 else { return code }
+        return "\(code.prefix(3)) \(code.suffix(3))"
+    }
 }
 
 /// Weekly reading's report (spec §14.13): what the routine sorted this
@@ -569,7 +631,13 @@ struct WorkflowEndView: View {
         case "let_go": "let go"
         case "answered": "answered meanwhile"
         case "read": "read"
-        case "kept": "kept for later"
+        case "sent": "sent"
+        case "declined": "not sent"
+        case "drafted": "kept in Drafts"
+        case "approved": "approved"
+        case "copied": "codes copied"
+        case "undone": "runs undone"
+        case "kept": kind == .agents ? "runs kept" : "kept for later"
         case "inbox": "back to the Inbox"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
@@ -596,6 +664,11 @@ extension AppModel {
 
     /// The header's one pill: Tasks says what waits for later this week.
     func workflowPill(_ session: WorkflowSession) -> String? {
+        if session.kind == .agents {
+            // What agent mailboxes sent on their own since the last look.
+            let n = session.agentsWork?.sentOnTheirOwn.reduce(0) { $0 + Int($1.count) } ?? 0
+            return n == 0 ? nil : "Agent mailboxes sent \(n) on their own"
+        }
         guard session.kind == .tasks,
               let later = workflowOverview?.workflows.first(where: { $0.kind == .tasks })?.later, later > 0 else { return nil }
         return "\(later) more later this week"

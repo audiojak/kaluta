@@ -4544,7 +4544,15 @@ One set of what agents wait on the user for, across accounts:
 - the latest routine run, to keep or undo.
 
 A line under the rail says what agent mailboxes sent on their own since
-the user last looked, with *See them*.
+the user last looked, with *See them*. The set holds each proposal waiting (a send shows the
+draft's text to edit, and Send saves it and approves; *Save as a draft*
+declines and leaves it in Drafts; another action has *Approve* and
+*Don't*), each code from the last half hour in any agent mailbox (six
+digits, alone or as two groups of three; the expiry from "expires in …"),
+and this morning's successful sorting run (*Keep*, *Undo the run*). What
+agent mailboxes sent on their own is counted since the workflow was last
+left, and shows as the header's pill. A proposal another account's panel
+holds says so.
 
 #### Teach Kaluta
 

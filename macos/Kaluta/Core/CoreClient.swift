@@ -783,6 +783,16 @@ final class CoreClient: Sendable {
         try await call { try await core.reopenRoutineProposal(id: id) }
     }
 
+    // MARK: Agents (spec §14.13)
+
+    func agentsWork() async throws(CoreClientError) -> AgentsWork {
+        try await call { try await core.agentsWork() }
+    }
+
+    func markAgentsLooked() async throws(CoreClientError) {
+        try await call { try await core.markAgentsLooked() }
+    }
+
     // MARK: Waiting on others (spec §14.13)
 
     func waitingInfo(_ threadID: String) async throws(CoreClientError) -> WaitingInfo? {
@@ -1827,6 +1837,9 @@ typealias ReadingReport = KalutaCore.ReadingReport
 typealias ReadingBucket = KalutaCore.ReadingBucket
 typealias ReadingSummary = KalutaCore.ReadingSummary
 typealias BackToInbox = KalutaCore.BackToInbox
+typealias AgentsWork = KalutaCore.AgentsWork
+typealias AgentCode = KalutaCore.AgentCode
+typealias AgentSent = KalutaCore.AgentSent
 typealias RoutineProposalInfo = KalutaCore.RoutineProposalInfo
 typealias RoutineEvidence = KalutaCore.RoutineEvidence
 typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo

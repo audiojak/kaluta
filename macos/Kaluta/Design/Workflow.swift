@@ -22,6 +22,8 @@ extension TypeRole {
     static let workflowKey = Font.system(size: 13)
     /// A score tile's figure.
     static let workflowFigure = Font.system(size: 34, weight: .semibold).monospacedDigit()
+    /// A verification code in the Agents workflow, to read off at a glance.
+    static let workflowCode = Font.system(size: 56, weight: .semibold, design: .monospaced)
 }
 
 extension WorkflowKind {

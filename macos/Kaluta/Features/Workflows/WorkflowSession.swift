@@ -63,6 +63,10 @@ final class WorkflowSession {
     var summaries: [String: ReadingSummary] = [:]
     var showsReport = false
     var showsInFull = false
+    /// Agents: codes and what agent mailboxes sent, and the editable text
+    /// of each proposed send, by item key.
+    var agentsWork: AgentsWork?
+    var agentDrafts: [String: String] = [:]
     /// Each conversation's wait (Waiting on others), by thread id.
     var waits: [String: WaitingInfo] = [:]
     /// *Check again* is choosing its day.
