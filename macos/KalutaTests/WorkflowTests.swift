@@ -108,7 +108,9 @@ struct WorkflowTests {
         let email = "Hi Jo,\n\nQA signed off this morning. Are we go for Tuesday, or do you want to push to Thursday?\n\nAvery"
         let questions = WritingText.questions(in: email)
         #expect(questions == ["Are we go for Tuesday, or do you want to push to Thursday?"])
-        #expect(WritingText.starters(for: questions) == ["Tuesday", "Thursday"], "a choice gives its options")
+        #expect(WritingText.starters(for: questions) == ["Go for Tuesday", "Push to Thursday"], "a choice gives its options")
+        #expect(WritingText.starters(for: ["Do you want to meet them once more, or should I start on the offer?"])
+            == ["Meet them once more", "Start on the offer"])
         #expect(WritingText.starters(for: ["Can you do Thursday at 2pm for the board prep with Avery?"]) == ["Yes", "No"])
         #expect(WritingText.starters(for: ["What time works?"]).isEmpty)
         let marked = WritingText.highlighted(email, questions: questions, tint: .yellow)

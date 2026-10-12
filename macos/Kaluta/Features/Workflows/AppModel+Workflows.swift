@@ -84,6 +84,7 @@ extension AppModel {
             if kind == .tasks || kind == .triage { await tasks.load() }
             // The card grows into the window (spec §14.13); the first
             // item loads behind it.
+            if kind == .tasks { await loadTaskInfo(session) }
             withAnimation(Self.workflowMotion) { workflowSession = session }
             await prepareCurrentItem()
             if session.current == nil { await finishWorkflow() }
@@ -152,7 +153,14 @@ extension AppModel {
     }
 
     func task(of item: WorkflowItem) -> TaskItem? {
-        item.taskId.flatMap { id in tasks.tasks.first { $0.id == id } }
+        item.taskId.flatMap { id in tasks.tasks.first { $0.id == id } ?? workflowSession?.taskInfo[id] }
+    }
+
+    /// The set's tasks, finished ones too, for the rail.
+    func loadTaskInfo(_ session: WorkflowSession) async {
+        guard let core, let all = try? await core.listTasks(includeDone: true) else { return }
+        let ids = Set(session.items.compactMap(\.taskId))
+        session.taskInfo = Dictionary(all.filter { ids.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// The conversation's latest message from someone else.
@@ -252,7 +260,14 @@ extension AppModel {
         case (.final, .send), (.final, .sendKeepTask):
             let keep = command == .sendKeepTask
             guard await writer.send(model: self, keepTask: keep) else { return }
-            await decide(item, writer.taskID != nil && !keep ? "done" : "reply", session: session, notice: nil)
+            let finished = writer.taskID != nil && !keep
+            // Replies: send and archive. Tasks: a finished task's email goes
+            // out of the Inbox with it (spec §14.13).
+            let archives = session.kind == .replies || (session.kind == .tasks && finished)
+            let token = archives ? try? await core?.archive([writer.threadID]) : nil
+            await decide(item, finished ? "done" : "reply", session: session, notice: nil,
+                         undoMail: { [core] in if let token { _ = try? await core?.undo(token) } },
+                         redoMail: { [core] in if let token { _ = try? await core?.redo(token) } })
         default:
             break
         }
@@ -362,6 +377,7 @@ extension AppModel {
         guard let session = workflowSession, session.workflowSet.id == setID, let core,
               let set = try? await core.startWorkflow(session.kind), set.id == setID else { return }
         session.score = nil
+        if session.kind == .tasks { await loadTaskInfo(session) }
         await show(set, in: session)
         if session.current == nil { await finishWorkflow() }
     }

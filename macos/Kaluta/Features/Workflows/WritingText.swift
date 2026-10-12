@@ -61,20 +61,40 @@ enum WritingText {
         return yesNoStarts.contains { $0.contains(" ") ? lower.contains($0) : String(first) == $0 }
     }
 
-    /// "…Tuesday, or do you want to push to Thursday" → the two options,
-    /// each the last few words before and after " or ".
+    /// "Are we go for Tuesday, or do you want to push to Thursday" → "Go for
+    /// Tuesday", "Push to Thursday": each side of " or " as the thing to do,
+    /// the asking words ("do you want to", "should I") left out. A side too
+    /// long to be a starter keeps its last words after "for", "to", "on"…
     private static func choices(in q: String) -> [String]? {
         let parts = q.components(separatedBy: " or ")
         guard parts.count == 2 else { return nil }
-        let before = parts[0].split(separator: " ").suffix(3).joined(separator: " ")
-        let after = parts[1].split(separator: " ").suffix(3).joined(separator: " ")
-        let clean = { (s: String) in
-            s.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        // The first option starts after the last comma or sentence break.
+        let first = parts[0].components(separatedBy: CharacterSet(charactersIn: ",;:."))
+            .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? parts[0]
+        let options = [first, parts[1]].map { side -> String in
+            var s = side.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            var lower = s.lowercased()
+            var stripped = true
+            while stripped {
+                stripped = false
+                for asking in askingWords where lower.hasPrefix(asking + " ") {
+                    s = String(s.dropFirst(asking.count + 1))
+                    lower = s.lowercased()
+                    stripped = true
+                }
+            }
+            if s.split(separator: " ").count > 5 { s = lastPhrase(s) }
+            return s.prefix(1).uppercased() + s.dropFirst()
         }
-        let a = clean(lastPhrase(before)), b = clean(lastPhrase(after))
-        guard !a.isEmpty, !b.isEmpty else { return nil }
-        return [a, b]
+        guard options.allSatisfy({ !$0.isEmpty }) else { return nil }
+        return options
     }
+
+    /// Words that ask rather than say what to do, longest first.
+    private static let askingWords = [
+        "do you want to", "would you like to", "would you rather", "should i", "shall i", "should we", "shall we",
+        "do you", "do we", "can you", "could you", "can we", "are we", "is it", "we", "i", "you", "to", "either",
+    ]
 
     /// From "go for Tuesday" keep "Tuesday"-like words: after "for", "to",
     /// "on" or "at" when there is one.

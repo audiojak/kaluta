@@ -54,6 +54,8 @@ final class WorkflowSession {
     var writer: WorkflowWriter?
     /// A task being made on the item's screen (Triage).
     var taskForm: WorkflowTaskForm?
+    /// Every task in a Tasks set, finished ones too, by id: the rail.
+    var taskInfo: [Int64: TaskItem] = [:]
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
 

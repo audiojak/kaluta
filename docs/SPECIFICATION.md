@@ -4431,6 +4431,18 @@ moves a task to tomorrow without penalty. Tasks finished elsewhere
 (by a reply in Triage) show as done in the rail. Later days stay out of
 the set ("3 more later this week").
 
+The rail lists the set beside the task: the one on screen marked, done
+ones ticked with how ("Done", "Tomorrow", "Done elsewhere"); it steps
+aside while a reply is written. A task finished outside the set is
+decided *elsewhere* when the set resumes, with no time counted, and the
+end's score says "done elsewhere". The due line reads *Due today*,
+*Carried over from yesterday*, *Carried over from Friday* (within the
+week) or *Carried over from 3 Oct*; "3 more later this week" is the
+header's pill. Replies archives the conversation when the reply is sent;
+Tasks does when *Send and finish the task* finishes it; ⌘Z puts it
+back. The starters for a question that offers a choice are the choices
+as things to do ("Go for Tuesday", "Push to Thursday").
+
 #### Waiting on others
 
 Sent mail that expects an answer and has had none for **3 days**

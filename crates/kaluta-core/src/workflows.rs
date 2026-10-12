@@ -260,6 +260,13 @@ impl Core {
                 .write(move |tx| {
                     let today = day_of(now);
                     if let Some(open) = store::open_set(tx, kind.key(), &today)? {
+                        // A task finished meanwhile shows done (spec §14.13).
+                        if kind == WorkflowKind::Tasks && store::decide_done_elsewhere(tx, open.id, now)? > 0 {
+                            let id = open.id;
+                            let open = store::get_set(tx, id)?
+                                .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {id}")))?;
+                            return Core::set_info(tx, open, true);
+                        }
                         return Core::set_info(tx, open, true);
                     }
                     let fresh = fresh_from.fresh(tx, kind, now)?;

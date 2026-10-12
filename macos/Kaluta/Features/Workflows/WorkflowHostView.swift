@@ -12,8 +12,16 @@ struct WorkflowHostView: View {
     var body: some View {
         let actions = model.workflowActions()
         VStack(spacing: 0) {
-            WorkflowHeader(kind: session.kind, progress: session.progress) { model.leaveWorkflow() }
+            WorkflowHeader(kind: session.kind, progress: session.progress, pill: model.workflowPill(session)) {
+                model.leaveWorkflow()
+            }
             WorkflowProgress(kind: session.kind, decided: session.decided, total: session.total)
+            HStack(spacing: 0) {
+            // Tasks: today's set beside the task, done ones ticked.
+            // Writing needs the room: the rail steps aside meanwhile.
+            if session.kind == .tasks, !session.isFinished, session.writer == nil {
+                WorkflowTaskRail(session: session)
+            }
             Group {
                 if session.isFinished {
                     WorkflowEndView(session: session)
@@ -46,8 +54,13 @@ struct WorkflowHostView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .overlay(alignment: .bottom) { UndoNoticeView().padding(.bottom, session.isFinished ? Space.m : Self.noticeInset) }
+        .overlay(alignment: writing ? .top : .bottom) {
+            // While writing, the notice keeps clear of the text: under the header.
+            UndoNoticeView()
+                .padding(writing ? .top : .bottom, writing ? Self.headerInset : session.isFinished ? Space.m : Self.noticeInset)
+        }
         .background {
             // The start screen's card, grown into the window.
             ZStack {
@@ -122,8 +135,11 @@ struct WorkflowHostView: View {
     static let readingWidth: CGFloat = 900
     /// How far the next item rises from.
     static let rise: CGFloat = 36
-    /// The undo notice clears the decision bar.
+    /// The undo notice clears the decision bar, or the header and progress.
     static let noticeInset: CGFloat = 84
+    static let headerInset: CGFloat = 64
+
+    private var writing: Bool { session.writer != nil || session.taskForm != nil }
 }
 
 /// The current item: a conversation (its sender, subject and latest
@@ -206,13 +222,64 @@ struct WorkflowItemView: View {
         return "\(who) · \(when.formatted(date: .abbreviated, time: .shortened))"
     }
 
-    static func due(_ task: TaskItem) -> String {
-        guard let day = task.dueDay else { return "No date" }
-        let today = DueDay.string(.now)
-        if day < today { return "Carried over" }
-        if day == today { return "Due today" }
-        return "Due \(day)"
+    /// "Due today", "Carried over from yesterday", "Carried over from
+    /// Friday" (within the week), "Carried over from 3 Oct".
+    static func due(_ task: TaskItem, now: Date = .now) -> String {
+        guard let day = task.dueDay, let date = DueDay.date(day) else { return "No date" }
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        let days = calendar.dateComponents([.day], from: date, to: today).day ?? 0
+        switch days {
+        case ..<0: return "Due \(date.formatted(.dateTime.weekday(.wide).day().month(.abbreviated)))"
+        case 0: return "Due today"
+        case 1: return "Carried over from yesterday"
+        case 2...6: return "Carried over from \(date.formatted(.dateTime.weekday(.wide)))"
+        default: return "Carried over from \(date.formatted(.dateTime.day().month(.abbreviated)))"
+        }
     }
+}
+
+/// Tasks' rail (spec §14.13): today's set, the task on screen marked,
+/// finished ones ticked (those finished elsewhere too). What is left for
+/// later in the week is the header's pill.
+struct WorkflowTaskRail: View {
+    let session: WorkflowSession
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Today").font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
+                    .padding(.horizontal, Space.l)
+                ForEach(session.items, id: \.key) { item in
+                    if let id = item.taskId, let task = session.taskInfo[id] {
+                        WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
+                                        kind: session.kind)
+                    }
+                }
+            }
+            .padding(.vertical, Space.xl)
+            .padding(.horizontal, Space.m)
+        }
+        .frame(width: Self.width)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Today's tasks")
+    }
+
+    private func state(_ item: WorkflowItem) -> WorkflowRailRow.State {
+        if item.decision != nil { return .done }
+        return item.key == session.current?.key ? .current : .waiting
+    }
+
+    static func detail(_ task: TaskItem, _ item: WorkflowItem) -> String {
+        switch item.decision {
+        case "elsewhere": "Done elsewhere"
+        case "later": "Tomorrow"
+        case .some: "Done"
+        case nil: "\(task.category) · \(WorkflowItemView.due(task))"
+        }
+    }
+
+    static let width: CGFloat = 280
 }
 
 /// Kaluta's suggestion for a triage item (spec §14.13): what to do, the
@@ -330,6 +397,7 @@ struct WorkflowEndView: View {
         switch decision {
         case "archive": "archived"
         case "reply": count == 1 ? "reply" : "replies"
+        case "elsewhere": "done elsewhere"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
         case "done": "done"
@@ -342,6 +410,13 @@ struct WorkflowEndView: View {
 }
 
 extension AppModel {
+    /// The header's one pill: Tasks says what waits for later this week.
+    func workflowPill(_ session: WorkflowSession) -> String? {
+        guard session.kind == .tasks,
+              let later = workflowOverview?.workflows.first(where: { $0.kind == .tasks })?.later, later > 0 else { return nil }
+        return "\(later) more later this week"
+    }
+
     /// The workflow after `kind` on the start screen that has anything in
     /// it; after Triage, the mail that arrived meanwhile comes first (spec
     /// §14.13, arrivals wait for the end).

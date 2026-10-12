@@ -512,8 +512,13 @@ fn reply_text(to: &str, original: &str, instruction: &str) -> String {
         .filter_map(|d| o.find(d).map(|at| (at, d)))
         .min()
         .map(|(_, d)| capitalise(d));
+    // A direction beyond "write a reply" is what the reply says.
+    let generic = i.is_empty() || i == "reply" || i.starts_with("write");
     let line = if i.contains("decline") || i.contains("say no") {
         "Thanks for thinking of me, but I'll have to pass this time.".to_owned()
+    } else if !generic {
+        let said = instruction.trim().trim_end_matches(['.', '!']);
+        format!("{}.", capitalise(said))
     } else if has(&["go or no-go", "go for"]) {
         format!("Let's go for {}. I'll finish the pricing page copy today.", day.as_deref().unwrap_or("it"))
     } else if has(&["per-seat", "pricing", "price"]) && has(&["two years", "commit"]) {
@@ -791,6 +796,14 @@ mod tests {
     fn writing_help_greets_by_name_when_given_only_an_address() {
         let prompt = "You are helping write an email in Kaluta's composer. The user asks: Reply\n\nTo: sam.rivera@example.com\n\nThe message being answered or forwarded:\n<<<\nCan you do Thursday?\n>>>";
         assert!(writing_help(prompt).starts_with("Hi Sam,\n"), "{}", writing_help(prompt));
+    }
+
+    #[test]
+    fn a_reply_says_what_the_user_said() {
+        let text =
+            reply_text("Quinn", "Are you free for dinner next Wednesday or Thursday?", "Thursday works, my place at 7");
+        assert_eq!(text, "Hi Quinn,\n\nThursday works, my place at 7.\n\nJo");
+        assert!(reply_text("Quinn", "Dinner Wednesday?", "Write a reply").contains("Wednesday works"));
     }
 
     #[test]

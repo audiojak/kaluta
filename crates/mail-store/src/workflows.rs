@@ -331,6 +331,25 @@ pub fn teach_items(conn: &Connection) -> StoreResult<Vec<String>> {
     Ok(out)
 }
 
+/// Tasks finished outside the set (a reply sent in Triage, the task list)
+/// are decided `elsewhere`, with no time spent: they show done and the set
+/// moves past them. The number decided.
+pub fn decide_done_elsewhere(tx: &Transaction, set_id: i64, now: Millis) -> StoreResult<usize> {
+    let Some(set) = get_set(tx, set_id)? else { return Ok(0) };
+    let decided: Vec<String> = decisions(tx, set_id)?.into_iter().map(|d| d.item).collect();
+    let mut open = tx.prepare_cached("SELECT status = 'open' FROM tasks WHERE id = ?1")?;
+    let mut n = 0;
+    for key in set.items.iter().filter(|k| !decided.contains(k)) {
+        let Some(id) = key.strip_prefix("task:").and_then(|id| id.parse::<i64>().ok()) else { continue };
+        let still_open = open.query_row([id], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false);
+        if !still_open {
+            decide(tx, set_id, key, "elsewhere", now, 0)?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 /// A triage suggestion as stored (spec §14.13).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuggestionRow {
@@ -658,5 +677,33 @@ mod tests {
         assert!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().is_none());
         let again = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
         assert!(again.iter().any(|c| c.thread_id == first.thread_id && c.message_id == "newer"));
+    }
+
+    #[test]
+    fn tasks_finished_elsewhere_are_decided_with_no_time() {
+        let Store(_, db) = &store("elsewhere");
+        let (a, b) = db
+            .write_blocking(|tx| {
+                for t in ["a", "b"] {
+                    tx.execute(
+                        "INSERT INTO tasks (thread_id, title, category, source, created_at) VALUES (?1, ?1, 'Reply', 'you', 0)",
+                        [t],
+                    )?;
+                }
+                Ok((1i64, 2i64))
+            })
+            .unwrap();
+        let items = vec![format!("task:{a}"), format!("task:{b}"), "task:99".into()];
+        let set = db.write_blocking(move |tx| create_set(tx, "tasks", "2026-10-12", &items, NOW)).unwrap();
+        db.write_blocking(move |tx| {
+            tx.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [b])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(db.write_blocking(move |tx| decide_done_elsewhere(tx, set, NOW)).unwrap(), 2, "done, and deleted");
+        let d = db.read_blocking(move |c| decisions(c, set)).unwrap();
+        assert!(d.iter().all(|d| d.decision == "elsewhere" && d.millis == 0));
+        assert!(!d.iter().any(|d| d.item == format!("task:{a}")), "an open task stays to decide");
+        assert_eq!(db.write_blocking(move |tx| decide_done_elsewhere(tx, set, NOW)).unwrap(), 0, "once");
     }
 }
