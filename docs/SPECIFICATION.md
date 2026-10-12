@@ -1997,7 +1997,11 @@ Additional hard limits, independent of policy:
    `AgentAction` per item.
    *(Amended 2026-10-11, ADR 0018, oagc-px8w: sends and forwards are left
    out of "Approve all"; each ends on the editable email, and the card's
-   action is *Review and Send*, as step 2 says.)*
+   action is *Review and Send*, as step 2 says. In that composer, Send
+   saves the edits and approves the send, which the agent then makes, held
+   for Undo Send on its card; Discard rejects it; closing keeps it
+   pending. A proposal from an agent outside Kaluta whose draft this
+   window cannot open keeps *Approve*.)*
 
 Both agent CLIs tolerate long-running tool calls (their MCP tool timeouts
 are configured to 15 minutes for the `kaluta` server).

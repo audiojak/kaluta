@@ -67,6 +67,25 @@ struct ComposerView: View {
         }
     }
 
+    /// Send: an agent's proposed send is approved with the draft as edited
+    /// here (the agent sends it); anything else sends as usual.
+    private func send(_ store: ComposerStore) {
+        Task {
+            if let action = request.agentAction {
+                await store.handToAgent()
+                if store.phase == .sent { model.agent.resolve(action, approve: true) }
+            } else {
+                await store.send()
+            }
+        }
+    }
+
+    /// Discard: an agent's proposed send is rejected with it.
+    private func discard(_ store: ComposerStore) async {
+        if let action = request.agentAction { model.agent.resolve(action, approve: false) }
+        await store.discard()
+    }
+
     /// The task this reply answers, and the two ways to send it (spec
     /// §14.13): finish the task, or keep it open.
     private func taskBar(_ task: TaskItem, _ store: ComposerStore) -> some View {
@@ -98,7 +117,7 @@ struct ComposerView: View {
         @Bindable var store = store
         return VStack(spacing: 0) {
             if let agent = request.agentName {
-                Banner("Created by \(agent). Edit it if you like, then approve sending in the agent panel.",
+                Banner("Created by \(agent). Edit it if you like, then send it.",
                        systemImage: "sparkles", intent: .info)
             }
             // An agent mailbox: what its service lets it send (spec §7.9).
@@ -107,14 +126,13 @@ struct ComposerView: View {
             }
             header(store)
                 .background {
-                    // ⌘Return sends too, as in Gmail (not while reviewing an
-                    // agent's draft: that send is the approval card's); with
-                    // a task, ⌘Return finishes it and ⌥⌘Return keeps it open.
+                    // ⌘Return sends too, as in Gmail; with a task, ⌘Return
+                    // finishes it and ⌥⌘Return keeps it open.
+                    Button("Send") { send(store) } // no-help: hidden
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(!store.canSend)
+                        .hidden()
                     if request.agentName == nil {
-                        Button("Send") { Task { await store.send() } } // no-help: hidden
-                            .keyboardShortcut(.return, modifiers: .command)
-                            .disabled(!store.canSend)
-                            .hidden()
                         Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
                             .keyboardShortcut(.return, modifiers: [.command, .option])
                             .disabled(!store.canSend || store.task == nil)
@@ -169,7 +187,7 @@ struct ComposerView: View {
         }
         .disabled(store.phase == .sending)
         .confirmationDialog("Discard this draft?", isPresented: $confirmingDiscard) {
-            Button("Discard Draft", role: .destructive) { Task { await store.discard() } } // no-help: dialog
+            Button("Discard Draft", role: .destructive) { Task { await discard(store) } } // no-help: dialog
         } message: {
             Text("It is deleted here and in Gmail's drafts, with its attachments. This cannot be undone.")
         }
@@ -178,20 +196,19 @@ struct ComposerView: View {
                 Button("Attach", systemImage: "paperclip") { importing = true }
                     .keyboardShortcut("a", modifiers: [.command, .shift])
                     .help(ToolbarHelp.composer("Attach")) // toolbar
-                // Reviewing an agent's draft: the decision is the approval
-                // card's, so sending here would go around it.
-                if request.agentName == nil {
-                    Button("Discard", systemImage: "trash") {
-                        if store.hasContent { confirmingDiscard = true } else { Task { await store.discard() } }
-                    }
-                    .help(ToolbarHelp.composer("Discard")) // toolbar
-                    Button(store.task == nil ? "Send" : "Send and Finish Task", systemImage: "paperplane.fill") {
-                        Task { await store.send() }
-                    }
-                    .keyboardShortcut("d", modifiers: [.command, .shift])
-                    .disabled(!store.canSend)
-                    .help(ToolbarHelp.composer(store.task == nil ? "Send" : "Send and Finish Task")) // toolbar
+                // Reviewing an agent's draft: Send approves its proposed
+                // send with the edits; Discard rejects it (spec §10.4).
+                Button("Discard", systemImage: "trash") {
+                    if store.hasContent { confirmingDiscard = true } else { Task { await discard(store) } }
                 }
+                .help(ToolbarHelp.composer("Discard")) // toolbar
+                Button(store.task == nil || request.agentName != nil ? "Send" : "Send and Finish Task",
+                       systemImage: "paperplane.fill") {
+                    send(store)
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(!store.canSend)
+                .help(ToolbarHelp.composer(store.task == nil || request.agentName != nil ? "Send" : "Send and Finish Task")) // toolbar
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in

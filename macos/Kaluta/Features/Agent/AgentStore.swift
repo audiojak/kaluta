@@ -180,8 +180,20 @@ final class AgentStore {
         }
     }
 
+    /// A proposal that sends mail: it is approved from the editable email.
+    static func isSend(_ tool: String) -> Bool { tool == "mail_send" || tool == "mail_forward" }
+
+    /// Pending proposals Approve All may take: everything but sends of
+    /// messages this window can open (spec §10.4).
+    var approvableProposals: [Int64] {
+        pendingProposals.filter { id in
+            guard let (tool, draftID, _) = proposal(id) else { return false }
+            return !(Self.isSend(tool) && draftID != nil)
+        }
+    }
+
     func approveAll() {
-        for id in pendingProposals { resolve(id, approve: true) }
+        for id in approvableProposals { resolve(id, approve: true) }
     }
 
     /// A pending proposal was decided (here or by the core's event, which

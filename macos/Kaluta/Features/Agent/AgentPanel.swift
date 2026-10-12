@@ -274,9 +274,9 @@ struct AgentInspector: View {
         HStack {
             Text(agent.providerName).font(TypeRole.heading)
             Spacer()
-            if agent.pendingProposals.count > 1 {
-                Button("Approve All (\(agent.pendingProposals.count))") { agent.approveAll() }
-                    .hoverHelp("Approve every action the agent is waiting on")
+            if agent.approvableProposals.count > 1 {
+                Button("Approve All (\(agent.approvableProposals.count))") { agent.approveAll() }
+                    .hoverHelp("Approve every action the agent is waiting on except sends, which you read first")
                     .controlSize(.small)
             }
             if agent.isRunning {
@@ -394,18 +394,28 @@ private struct ProposalCard: View {
             switch state {
             case .pending:
                 HStack {
-                    if let draftID {
-                        Button("Review…") {
-                            model.compose(.review(draftID: draftID, agent: model.agent.providerName))
-                        }
-                        .hoverHelp("Open the message in a composer to read or edit it first")
-                    }
                     Spacer()
                     Button("Reject", role: .destructive) { model.agent.resolve(actionID, approve: false) }
                         .hoverHelp("Don't let the agent do this")
-                    Button("Approve") { model.agent.resolve(actionID, approve: true) }
-                        .hoverHelp("Let the agent do this")
+                    // A message from the user's own account ends on the
+                    // editable email before it goes (spec §10.4).
+                    if let draftID, AgentStore.isSend(tool) {
+                        Button("Review and Send") {
+                            model.compose(.review(draftID: draftID, agent: model.agent.providerName, action: actionID))
+                        }
+                        .hoverHelp("Open the message to read, edit and send it")
                         .buttonStyle(.borderedProminent)
+                    } else {
+                        if let draftID {
+                            Button("Review…") {
+                                model.compose(.review(draftID: draftID, agent: model.agent.providerName))
+                            }
+                            .hoverHelp("Open the message in a composer to read or edit it first")
+                        }
+                        Button("Approve") { model.agent.resolve(actionID, approve: true) }
+                            .hoverHelp("Let the agent do this")
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
                 .controlSize(.small)
             case .approved:

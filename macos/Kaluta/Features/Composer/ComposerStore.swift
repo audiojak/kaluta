@@ -15,13 +15,19 @@ enum ComposeRequest: Codable, Hashable, Sendable {
     case reply(messageID: String, all: Bool, task: Int64? = nil)
     case forward(messageID: String, task: Int64? = nil)
     case draft(id: Int64, task: Int64? = nil)
-    /// A draft an agent wrote, opened for the user to check before
-    /// approving the send.
-    case review(draftID: Int64, agent: String)
+    /// A draft an agent wrote, opened for the user to check and send (spec
+    /// §10.4): with `action`, the agent's proposed send, which Send
+    /// approves with the user's edits and Discard rejects.
+    case review(draftID: Int64, agent: String, action: Int64? = nil)
 
     /// Who wrote the draft, for the composer's banner.
     var agentName: String? {
-        if case let .review(_, agent) = self { agent } else { nil }
+        if case let .review(_, agent, _) = self { agent } else { nil }
+    }
+
+    /// The agent's proposed send this composer decides, if any.
+    var agentAction: Int64? {
+        if case let .review(_, _, action) = self { action } else { nil }
     }
 
     /// The task sending this completes.
@@ -124,7 +130,7 @@ final class ComposerStore {
                 try await core.replyDraft(to: messageID, all: all)
             case let .forward(messageID, _):
                 try await core.forwardDraft(of: messageID)
-            case let .draft(id, _), let .review(id, _):
+            case let .draft(id, _), let .review(id, _, _):
                 try await core.draft(id)
             }
             guard let draft else {
@@ -249,6 +255,17 @@ final class ComposerStore {
             ?? threadID.flatMap { thread in open.first { $0.threadId == thread } }
         task = found
         taskID = found?.id ?? taskID
+    }
+
+    /// The agent's proposed send is approved with this draft as it now is:
+    /// the agent sends it (and its card shows the Undo Send hold), so the
+    /// composer closes without sending itself.
+    func handToAgent() async {
+        guard canSend else { return }
+        isDirty = true
+        await save()
+        guard saveError == nil else { return }
+        phase = .sent
     }
 
     /// Sends the message; with a task, `keepTask` leaves it open, otherwise
