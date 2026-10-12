@@ -555,6 +555,11 @@ fn writing_help(prompt: &str) -> String {
         Some((local, _)) => capitalise(local.split(['.', '_', '-']).next().unwrap_or(local)),
         None => to,
     };
+    // A change to a draft already written (a workflow's Shorter, Warmer).
+    let draft = between(prompt, "The message so far:\n<<<\n", "\n>>>").unwrap_or_default();
+    if !draft.trim().is_empty() && instruction.to_lowercase().starts_with("make it") {
+        return changed(draft, instruction);
+    }
     let original = between(prompt, "The message being answered or forwarded:\n<<<\n", "\n>>>").unwrap_or_default();
     if original.is_empty() {
         let hello = if to.is_empty() { "Hi,".to_owned() } else { format!("Hi {},", first_name(&to)) };
@@ -562,6 +567,25 @@ fn writing_help(prompt: &str) -> String {
         return format!("{hello}\n\nI wanted to reach out about this: {ask}. Let me know what you think.\n\nJo");
     }
     reply_text(first_name(&to), original, instruction)
+}
+
+/// A draft changed as asked ("Make it …"): shorter keeps its greeting,
+/// first sentence and sign-off; warmer thanks them first; anything else
+/// adds the request as a line before the sign-off.
+fn changed(draft: &str, instruction: &str) -> String {
+    let lines: Vec<&str> = draft.lines().filter(|l| !l.trim().is_empty()).collect();
+    let (Some(first), Some(last)) = (lines.first(), lines.last()) else { return draft.to_owned() };
+    let middle = if lines.len() > 2 { &lines[1..lines.len() - 1] } else { &[][..] };
+    let ask = instruction.to_lowercase();
+    if ask.contains("shorter") {
+        let body = middle.join(" ");
+        let sentence = body.split_inclusive(['.', '!', '?']).next().unwrap_or(&body).trim().to_owned();
+        return format!("{first}\n\n{sentence}\n\n{last}");
+    }
+    if ask.contains("warmer") {
+        return format!("{first}\n\nThanks so much for this!\n\n{}\n\n{last}", middle.join("\n"));
+    }
+    format!("{first}\n\n{}\n\n({instruction})\n\n{last}", middle.join("\n"))
 }
 
 /// Writing help's rewrite for the guide's checks: the draft, minus the
@@ -767,6 +791,18 @@ mod tests {
     fn writing_help_greets_by_name_when_given_only_an_address() {
         let prompt = "You are helping write an email in Kaluta's composer. The user asks: Reply\n\nTo: sam.rivera@example.com\n\nThe message being answered or forwarded:\n<<<\nCan you do Thursday?\n>>>";
         assert!(writing_help(prompt).starts_with("Hi Sam,\n"), "{}", writing_help(prompt));
+    }
+
+    #[test]
+    fn a_change_to_a_draft_is_made_to_that_draft() {
+        let draft = "Hi Sam,\nThursday works for me. Please send the invite.\nJo";
+        assert_eq!(changed(draft, "Make it shorter"), "Hi Sam,\n\nThursday works for me.\n\nJo");
+        assert!(changed(draft, "Make it warmer").contains("Thanks so much"));
+        let prompt = format!(
+            "You are helping write an email in Kaluta's composer. The user asks: Make it shorter\n\nTo: sam@example.com\n\n\
+             The message so far:\n<<<\n{draft}\n>>>"
+        );
+        assert_eq!(writing_help(&prompt), "Hi Sam,\n\nThursday works for me.\n\nJo");
     }
 
     #[test]

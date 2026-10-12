@@ -157,6 +157,7 @@ extension AppModel {
         func a(_ c: WorkflowCommand, _ style: WorkflowButton.Style = .plain, _ title: String? = nil) -> WorkflowAction {
             WorkflowAction(command: c, title: title ?? c.title(in: kind), style: style)
         }
+        if let writer = session.writer { return writingActions(writer, a) }
         switch kind {
         case .triage:
             return [a(.replyNow, .primary, "Reply"), a(.task), a(.done), a(.later), a(.skip, .quiet)]
@@ -171,6 +172,48 @@ extension AppModel {
                                                                          a(.skip, .quiet)]
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
+        }
+    }
+
+    /// While Kaluta writes the item's answer: the step's own actions.
+    private func writingActions(_ writer: WorkflowWriter,
+                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
+        switch writer.step {
+        case .choose:
+            let picks: [WorkflowCommand] = [.pick1, .pick2, .pick3]
+            return picks.prefix(writer.answers.count).map { var x = a($0, .plain, nil); x.shown = false; return x }
+                + [a(.tellKaluta, .plain, nil), a(.back, .quiet, "Cancel")]
+        case .say:
+            return [a(.primary, .primary, agent.isProviderReady ? "Write it" : "Write it yourself"), a(.back, .quiet, "Cancel")]
+        case .final:
+            let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
+                : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
+            return send + [a(.back, .quiet, "Change what I said")]
+        case .writing, .sending:
+            return []
+        }
+    }
+
+    /// A writing step's command.
+    private func performWriting(_ command: WorkflowCommand, _ writer: WorkflowWriter, item: WorkflowItem,
+                                session: WorkflowSession) async {
+        switch (writer.step, command) {
+        case (.choose, .pick1): writer.pick(0)
+        case (.choose, .pick2): writer.pick(1)
+        case (.choose, .pick3): writer.pick(2)
+        case (.choose, .tellKaluta): writer.tellKaluta()
+        case (.choose, .back), (.say, .back):
+            session.writer = nil
+        case (.say, .primary):
+            await writer.write(model: self)
+        case (.final, .back):
+            writer.changeWhatISaid()
+        case (.final, .send), (.final, .sendKeepTask):
+            let keep = command == .sendKeepTask
+            guard await writer.send(model: self, keepTask: keep) else { return }
+            await decide(item, writer.taskID != nil && !keep ? "done" : "reply", session: session, notice: nil)
+        default:
+            break
         }
     }
 
@@ -191,6 +234,10 @@ extension AppModel {
             break
         }
         guard let item = session.current, workflowActions().contains(where: { $0.command == command }) else { return }
+        if let writer = session.writer {
+            await performWriting(command, writer, item: item, session: session)
+            return
+        }
         switch (session.kind, command) {
         case (_, .skip):
             session.exit = .up
@@ -202,8 +249,7 @@ extension AppModel {
         case (.triage, .later):
             await decide(item, "leave", session: session, notice: "Left in the Inbox")
         case (.triage, .replyNow), (.replies, .primary), (.tasks, .primary):
-            replyToCurrent(item, session: session)
-            await decide(item, "reply", session: session, notice: nil)
+            startWriting(item, session: session)
         case (.triage, .task), (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
@@ -290,11 +336,15 @@ extension AppModel {
                      redoMail: { if let token { _ = try? await core.redo(token) } })
     }
 
-    private func replyToCurrent(_ item: WorkflowItem, session: WorkflowSession) {
+    /// Reply: *What do you want to say?* under the email (spec §14.13).
+    private func startWriting(_ item: WorkflowItem, session: WorkflowSession) {
         guard let id = threadID(of: item), let detail = session.threads[id],
               let message = Self.latestReceived(detail) else { return }
         let task = self.task(of: item)
-        compose(.reply(messageID: task?.messageId ?? message.id, all: task?.action == .replyAll, task: task?.id))
+        session.writer = WorkflowWriter(threadID: id, messageID: task?.messageId ?? message.id,
+                                        replyAll: task?.action == .replyAll, taskID: task?.id,
+                                        email: session.bodies[id] ?? message.snippet)
+        if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
 
     private func finishTask(_ item: WorkflowItem, session: WorkflowSession) async {

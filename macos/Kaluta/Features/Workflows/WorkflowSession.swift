@@ -50,6 +50,8 @@ final class WorkflowSession {
     private(set) var itemShownAt = Date()
     /// Which way the item on screen leaves when it is decided.
     var exit = WorkflowExit.left
+    /// Kaluta's writing for the item on screen, once the user answers it.
+    var writer: WorkflowWriter?
 
     init(set: WorkflowSet) {
         kind = set.kind
@@ -57,6 +59,7 @@ final class WorkflowSession {
     }
 
     func replace(_ set: WorkflowSet) {
+        if set.items.first(where: { $0.decision == nil })?.key != current?.key { writer = nil }
         self.workflowSet = set
         itemShownAt = .now
     }

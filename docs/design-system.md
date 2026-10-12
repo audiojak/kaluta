@@ -532,6 +532,17 @@ like its own place; the vocabulary stays the same.
   every new item, so a click on the content never strands the keys.
 - **Notices**: the undo notice shows over a workflow, clear of its
   decision bar.
+- **Writing**: `WorkflowWriter` and `WorkflowWriteView` under the item's
+  email: up to three answers (1–3, a one-line label each) with *None of
+  these? Tell Kaluta what to say…* (/); *What do you want to say?* (*What
+  did you decide?* for a task) with starters from the email's questions,
+  which are tinted in the email (`WritingText`); then the email that will
+  be sent, editable at content size, with *You said: …* and Change above
+  it, Shorter, Warmer and *Tell Kaluta what to change…* below, and Send
+  (with a task: Send and finish the task, Send, keep the task open).
+  Each step scrolls into view above the decision bar; Kaluta's work shows
+  as "Kaluta is writing…". With no agent ready the user's words are the
+  email (*Write it yourself*).
 - **Motion**: start ↔ workflow is `AppModel.workflowMotion` (about
   350 ms): the card and the window share a frame (`.workflowMorph(kind)`)
   while the content cross-fades. Item → item is `AppModel.itemMotion`

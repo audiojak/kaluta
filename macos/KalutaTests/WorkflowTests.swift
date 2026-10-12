@@ -103,4 +103,38 @@ struct WorkflowTests {
         let marked = told.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }
         #expect(marked.map { String(told[$0.range].characters) } == ["no exclamation marks"])
     }
+
+    @Test func anEmailsQuestionsGiveStartersForTheAnswer() {
+        let email = "Hi Jo,\n\nQA signed off this morning. Are we go for Tuesday, or do you want to push to Thursday?\n\nAvery"
+        let questions = WritingText.questions(in: email)
+        #expect(questions == ["Are we go for Tuesday, or do you want to push to Thursday?"])
+        #expect(WritingText.starters(for: questions) == ["Tuesday", "Thursday"], "a choice gives its options")
+        #expect(WritingText.starters(for: ["Can you do Thursday at 2pm for the board prep with Avery?"]) == ["Yes", "No"])
+        #expect(WritingText.starters(for: ["What time works?"]).isEmpty)
+        let marked = WritingText.highlighted(email, questions: questions, tint: .yellow)
+        #expect(marked.runs.filter { $0.backgroundColor != nil }.count == 1)
+    }
+
+    @Test func theWriterPicksAnAnswerOrTakesWhatTheUserSays() async throws {
+        let answers = [WorkflowWriter.Answer(label: "Yes, Thursday", text: "Thursday works."),
+                       WorkflowWriter.Answer(label: "Friday instead", text: "Could we do Friday?")]
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil,
+                                    email: "Can you do Thursday?", answers: answers)
+        #expect(writer.step == .choose)
+        writer.pick(1)
+        #expect(writer.step == .final && writer.text == "Could we do Friday?" && writer.said == "Chose: Friday instead")
+        writer.changeWhatISaid()
+        #expect(writer.step == .choose && writer.field.isEmpty)
+        writer.tellKaluta()
+        #expect(writer.step == .say)
+
+        // No agent ready: the user's words are the email (Write it yourself).
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        writer.field = "Thursday is fine, see you then."
+        await writer.write(model: model)
+        #expect(writer.step == .final && writer.text == "Thursday is fine, see you then." && writer.aiText == nil)
+        #expect(writer.said == "Thursday is fine, see you then.")
+        writer.changeWhatISaid()
+        #expect(writer.field == "Thursday is fine, see you then.", "Change brings back what was said")
+    }
 }

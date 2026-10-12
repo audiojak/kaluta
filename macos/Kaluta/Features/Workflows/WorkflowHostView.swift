@@ -19,12 +19,21 @@ struct WorkflowHostView: View {
                     WorkflowEndView(session: session)
                 } else if let item = session.current {
                     ZStack {
-                        ScrollView {
-                            WorkflowItemView(session: session, item: item)
-                                .padding(.horizontal, Space.page)
-                                .padding(.vertical, Space.xxl)
-                                .frame(maxWidth: Self.readingWidth, alignment: .leading)
-                                .frame(maxWidth: .infinity)
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                WorkflowItemView(session: session, item: item)
+                                    .padding(.horizontal, Space.page)
+                                    .padding(.vertical, Space.xxl)
+                                    .frame(maxWidth: Self.readingWidth, alignment: .leading)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            // Each writing step comes into view above the bar.
+                            .onChange(of: session.writer?.step) { _, step in
+                                guard step != nil else { return }
+                                withAnimation(AppModel.itemMotion) {
+                                    proxy.scrollTo(WorkflowWriteView.scrollID, anchor: .bottom)
+                                }
+                            }
                         }
                         .id(item.key)
                         .transition(itemTransition)
@@ -54,8 +63,10 @@ struct WorkflowHostView: View {
         // Taken a turn after appearing: focus set while a view appears
         // is lost to the one it replaces.
         .onAppear { Task { @MainActor in focused = true } }
-        // Each item takes the keyboard back, whatever was clicked before.
+        // Each item takes the keyboard back, whatever was clicked before,
+        // and so does the item when its writing closes.
         .onChange(of: session.current?.key) { focused = true }
+        .onChange(of: session.writer == nil) { _, closed in if closed { focused = true } }
         .onKeyPress(phases: .down) { press in
             guard let command = WorkflowCommand.command(key: press.key, characters: press.characters,
                                                         modifiers: press.modifiers) else { return .ignored }
@@ -153,7 +164,12 @@ struct WorkflowItemView: View {
                         Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
                             .font(TypeRole.workflowDisplay)
                     }
-                    Text(session.bodies[detail.thread.id] ?? latest?.snippet ?? "")
+                    let text = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
+                    // What the email asks, marked where an answer is written.
+                    Text(Self.asksAnswer(session.kind)
+                        ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
+                                                  tint: Tone.workflow(session.kind).opacity(0.16))
+                        : AttributedString(text))
                         .font(TypeRole.workflowContent)
                         .lineSpacing(Space.xs)
                         .fixedSize(horizontal: false, vertical: true)
@@ -161,10 +177,19 @@ struct WorkflowItemView: View {
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+                if let writer = session.writer {
+                    WorkflowWriteView(session: session, writer: writer)
+                        .transition(.opacity)
+                }
             } else if threadID != nil {
                 ProgressView()
             }
         }
+    }
+
+    /// Workflows where the user answers the email: its questions are marked.
+    static func asksAnswer(_ kind: WorkflowKind) -> Bool {
+        kind == .replies || kind == .tasks
     }
 
     static func contextLine(_ m: MessageInfo?) -> String {
