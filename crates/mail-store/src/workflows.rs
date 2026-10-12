@@ -186,6 +186,8 @@ pub struct Candidate {
     pub at: Millis,
     /// From a person (Primary, or no category), not a service.
     pub person: bool,
+    /// The latest message's Gmail id.
+    pub message_id: String,
 }
 
 fn label_rowid(conn: &Connection, gmail_id: &str) -> StoreResult<i64> {
@@ -208,6 +210,7 @@ fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) 
                  OR NOT EXISTS (SELECT 1 FROM thread_labels c JOIN labels l ON l.id = c.label_id
                                  WHERE c.thread_id = t.id AND l.gmail_id LIKE 'CATEGORY\\_%' ESCAPE '\\')) AS person,
                 instr(m.snippet, '?') > 0 OR instr(m.subject, '?') > 0 AS asks,
+                m.gmail_id,
                 EXISTS (SELECT 1 FROM tasks k WHERE k.thread_id = t.gmail_id AND k.status = 'open') AS tasked
            FROM thread_labels i
            JOIN threads t ON t.id = i.thread_id
@@ -226,9 +229,10 @@ fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) 
                 from_email: r.get(3)?,
                 at: r.get(4)?,
                 person: r.get(5)?,
+                message_id: r.get(7)?,
             },
             r.get::<_, bool>(6)?,
-            r.get::<_, bool>(7)?,
+            r.get::<_, bool>(8)?,
         ))
     })?;
     let mut out = Vec::new();
@@ -323,6 +327,88 @@ pub fn teach_items(conn: &Connection) -> StoreResult<Vec<String>> {
         let mut stmt = conn.prepare_cached(sql)?;
         let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
         out.extend(ids.into_iter().map(|id| format!("{prefix}:{id}")));
+    }
+    Ok(out)
+}
+
+/// A triage suggestion as stored (spec §14.13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuggestionRow {
+    pub thread_id: String,
+    pub message_id: String,
+    /// `reply`, `task`, `archive` or `leave`.
+    pub kind: String,
+    pub seconds: Option<u32>,
+    pub reason: String,
+    pub answers_json: String,
+    pub task_json: Option<String>,
+    pub agent: Option<String>,
+    pub created_at: Millis,
+}
+
+/// Keep a suggestion, replacing the conversation's last.
+pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
+    tx.execute(
+        "INSERT OR REPLACE INTO triage_suggestions
+           (thread_id, message_id, kind, seconds, reason, answers_json, task_json, agent, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            s.thread_id,
+            s.message_id,
+            s.kind,
+            s.seconds,
+            s.reason,
+            s.answers_json,
+            s.task_json,
+            s.agent,
+            s.created_at
+        ],
+    )?;
+    Ok(())
+}
+
+/// The conversation's suggestion, if it is for the conversation as it is
+/// now: its latest message is still the one suggested for.
+pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<SuggestionRow>> {
+    Ok(conn
+        .query_row(
+            "SELECT s.thread_id, s.message_id, s.kind, s.seconds, s.reason, s.answers_json, s.task_json, s.agent,
+                    s.created_at
+               FROM triage_suggestions s
+               JOIN threads t ON t.gmail_id = s.thread_id
+               JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
+                                           ORDER BY internal_date DESC, id DESC LIMIT 1)
+              WHERE s.thread_id = ?1 AND m.gmail_id = s.message_id",
+            [thread_id],
+            |r| {
+                Ok(SuggestionRow {
+                    thread_id: r.get(0)?,
+                    message_id: r.get(1)?,
+                    kind: r.get(2)?,
+                    seconds: r.get(3)?,
+                    reason: r.get(4)?,
+                    answers_json: r.get(5)?,
+                    task_json: r.get(6)?,
+                    agent: r.get(7)?,
+                    created_at: r.get(8)?,
+                })
+            },
+        )
+        .optional()?)
+}
+
+/// Triage's next conversations to suggest for, in the set's order: new
+/// since `since`, with no suggestion for their latest message.
+pub fn to_suggest(conn: &Connection, since: Millis, limit: usize) -> StoreResult<Vec<Candidate>> {
+    let mut have = conn.prepare_cached("SELECT 1 FROM triage_suggestions WHERE thread_id = ?1 AND message_id = ?2")?;
+    let mut out = Vec::new();
+    for c in triage_candidates(conn, since, 500)? {
+        if out.len() >= limit {
+            break;
+        }
+        if !have.exists(params![c.thread_id, c.message_id])? {
+            out.push(c);
+        }
     }
     Ok(out)
 }
@@ -530,5 +616,47 @@ mod tests {
         assert_eq!(days.len(), 1);
         assert_eq!((days[0].items, days[0].last_run_at), (5, 2));
         assert_eq!(days[0].last_error.as_deref(), Some("The agent stopped"));
+    }
+
+    #[test]
+    fn a_suggestion_counts_until_the_conversation_changes() {
+        let Store(_, db) = &store("suggestions");
+        crate::demo_workflows::generate(db, NOW).unwrap();
+        let since = NOW - DAY_MS;
+        let all = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let first = all[0].clone();
+        let row = SuggestionRow {
+            thread_id: first.thread_id.clone(),
+            message_id: first.message_id.clone(),
+            kind: "reply".into(),
+            seconds: Some(20),
+            reason: "They ask for a time.".into(),
+            answers_json: "[]".into(),
+            task_json: None,
+            agent: Some("claude-code".into()),
+            created_at: NOW,
+        };
+        db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
+        let left = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        assert_eq!(left.len(), all.len() - 1);
+        assert!(!left.iter().any(|c| c.thread_id == first.thread_id));
+        let thread = first.thread_id.clone();
+        assert_eq!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().unwrap().kind, "reply");
+
+        // A newer message: the suggestion no longer counts.
+        let thread = first.thread_id.clone();
+        db.write_blocking(move |tx| {
+            tx.execute(
+                "INSERT INTO messages (thread_id, gmail_id, from_email, subject, date, internal_date)
+                 SELECT id, 'newer', 'ann@example.com', 'Re', ?2, ?2 FROM threads WHERE gmail_id = ?1",
+                params![thread, NOW],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let thread = first.thread_id.clone();
+        assert!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().is_none());
+        let again = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        assert!(again.iter().any(|c| c.thread_id == first.thread_id && c.message_id == "newer"));
     }
 }

@@ -70,6 +70,7 @@ private struct GeneralSettings: View {
             Section("Workflows") {
                 Toggle("Open on the start screen (preview)", isOn: $workflows)
                     .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (M) away")
+                    .onChange(of: workflows) { model.workflowsSettingChanged() }
                 Toggle("Play sounds", isOn: $sounds)
                     .hoverHelp("A short chord when a workflow's set is done; silent when macOS's sound effects are off")
             }

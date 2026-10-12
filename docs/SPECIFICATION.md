@@ -4503,7 +4503,17 @@ account per day, surviving a quit like the daily review: each job finds
 its own work in the store, batch by batch, and what it did each day is
 counted in `workflow_job_days` against its cap. When the agent cannot
 work, the jobs wait an hour and try again; opening a workflow stops them
-between batches until it is closed.
+between batches until it is closed. While workflows are a preview
+(Settings › General), the jobs run only when they are on.
+
+The triage job takes ten new conversations per prompt (up to 200 a day
+per account), the latest message of each as fenced data with today's
+date and the task categories. Its answer is held to the rules whatever
+the agent says: a quick reply over 30 seconds, or with no answers, is a
+task when it describes one, else *leave*; a task with no task described
+is *leave*; at most three answers. A suggestion is stored for the
+conversation's latest message (`triage_suggestions`) and stops counting
+when a newer one arrives, so the job suggests again.
 
 | Job | When | Makes |
 |---|---|---|

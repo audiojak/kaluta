@@ -746,6 +746,13 @@ final class CoreClient: Sendable {
     /// Background jobs wait while a workflow is on screen (spec §14.13).
     func setWorkflowOpen(_ open: Bool) { core.setWorkflowOpen(open: open) }
 
+    /// Background jobs run only while workflows are on.
+    func setWorkflowJobsOn(_ on: Bool) { core.setWorkflowJobsOn(on: on) }
+
+    func triageSuggestion(_ threadID: String) async throws(CoreClientError) -> TriageSuggestion? {
+        try await call { try await core.triageSuggestion(threadId: threadID) }
+    }
+
     /// Adds the tasks and labels their threads `Task`.
     func createTasks(_ tasks: [NewTask]) async throws(CoreClientError) -> [TaskItem] {
         try await call { try await core.createTasks(new: tasks) }
@@ -1747,6 +1754,9 @@ typealias WorkflowDay = KalutaCore.WorkflowDay
 typealias WorkflowItem = KalutaCore.WorkflowItem
 typealias WorkflowSet = KalutaCore.WorkflowSet
 typealias WorkflowScore = KalutaCore.WorkflowScore
+typealias TriageSuggestion = KalutaCore.TriageSuggestion
+typealias TriageAnswer = KalutaCore.TriageAnswer
+typealias TriageKind = KalutaCore.TriageKind
 typealias DecisionCount = KalutaCore.DecisionCount
 
 // MARK: - Events

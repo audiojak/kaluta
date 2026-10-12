@@ -23,6 +23,8 @@ extension AppModel {
     /// At launch: the start screen, unless the user chose Mail earlier
     /// today (spec §14.13: remembered for the rest of the day).
     func restoreHome(now: Date = .now) {
+        // Kaluta's background jobs run only while workflows are on.
+        core?.setWorkflowJobsOn(workflowsEnabled)
         let saved = defaults.string(forKey: Self.workflowHomeKey)?.split(separator: "@").map(String.init) ?? []
         if saved.count == 2, saved[1] == DueDay.string(now), let home = WorkflowHome(rawValue: saved[0]) {
             self.home = home
@@ -33,6 +35,11 @@ extension AppModel {
 
     private func rememberHome() {
         defaults.set("\(home.rawValue)@\(DueDay.string(.now))", forKey: Self.workflowHomeKey)
+    }
+
+    /// Settings › General › Workflows changed.
+    func workflowsSettingChanged() {
+        core?.setWorkflowJobsOn(workflowsEnabled)
     }
 
     /// M, View › Mail: the mail view; any workflow stays where it was.

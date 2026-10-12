@@ -36,7 +36,6 @@ pub(crate) struct Job {
 }
 
 /// What a step is given.
-#[cfg_attr(not(test), expect(dead_code, reason = "read by each workflow's job as it lands (oagc-k6o8.10, .14, .16)"))]
 pub(crate) struct JobStep {
     /// The agent to ask, ready.
     pub agent: String,
@@ -47,7 +46,8 @@ pub(crate) struct JobStep {
 
 /// The jobs, in the order they run; each workflow's lands with it
 /// (`docs/plans/workflows.md`).
-pub(crate) const JOBS: &[Job] = &[];
+pub(crate) const JOBS: &[Job] =
+    &[Job { name: "triage", daily_cap: crate::triage::DAILY_CAP, step: crate::triage::step }];
 
 impl Core {
     /// While a workflow is on screen its items must hold still: jobs wait.
@@ -61,7 +61,7 @@ impl Core {
     }
 
     pub(crate) async fn run_jobs_tick(self: &Arc<Self>, jobs: &'static [Job], now: Millis) {
-        if jobs.is_empty() || self.workflow_open() {
+        if jobs.is_empty() || self.workflow_open() || !self.agents.workflow_jobs_on.load(Ordering::Relaxed) {
             return;
         }
         let Some(account) = self.effective_account_id() else { return };
@@ -161,10 +161,16 @@ impl Core {
     pub fn set_workflow_open(&self, open: bool) {
         self.agents.workflow_open.store(open, Ordering::Relaxed);
     }
+
+    /// Workflows are on in the app (or off again): the background jobs run
+    /// only while they are. Off until the app says.
+    pub fn set_workflow_jobs_on(&self, on: bool) {
+        self.agents.workflow_jobs_on.store(on, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::AtomicU32;
 
@@ -188,7 +194,7 @@ mod tests {
 
     static TEST_JOBS: &[Job] = &[Job { name: "test", daily_cap: 7, step }];
 
-    fn wait(core: &Arc<Core>) {
+    pub(crate) fn wait(core: &Arc<Core>) {
         for _ in 0..500 {
             let done = core.agents.workflow_jobs.lock().unwrap().values().all(|j| j.is_finished());
             if done {
@@ -197,6 +203,21 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("the jobs did not stop");
+    }
+
+    /// Run the app's jobs once sync has settled; the triage items done
+    /// on this look.
+    pub(crate) fn settle_and_run(core: &Arc<Core>) -> u32 {
+        settled(core);
+        let day = day_of(mail_sync::now_millis());
+        let db = core.db().unwrap();
+        let d = day.clone();
+        let before = rt(db.read(move |c| store::job_items(c, "triage", &d))).unwrap();
+        core.agents.workflow_job_retry.lock().unwrap().clear();
+        core.set_workflow_jobs_on(true);
+        rt(core.workflow_jobs_tick(mail_sync::now_millis()));
+        wait(core);
+        rt(db.read(move |c| store::job_items(c, "triage", &day))).unwrap() - before
     }
 
     fn items(core: &Core) -> u32 {
@@ -224,6 +245,12 @@ mod tests {
         learned(core);
         settled(core);
         PENDING.store(10, Ordering::SeqCst);
+
+        // Nothing while workflows are off in the app.
+        rt(core.run_jobs_tick(TEST_JOBS, mail_sync::now_millis()));
+        wait(core);
+        assert_eq!(items(core), 0);
+        core.set_workflow_jobs_on(true);
 
         // Not while a workflow is open.
         core.set_workflow_open(true);

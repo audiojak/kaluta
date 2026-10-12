@@ -88,6 +88,9 @@ pub(crate) struct AgentHub {
     pub(crate) workflow_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) workflow_job_retry: Mutex<HashMap<String, i64>>,
     pub(crate) workflow_open: std::sync::atomic::AtomicBool,
+    /// Workflows are on in the app: until then no job runs (they use the
+    /// agent, and nothing would show what they made).
+    pub(crate) workflow_jobs_on: std::sync::atomic::AtomicBool,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript

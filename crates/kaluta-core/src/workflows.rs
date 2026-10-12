@@ -377,14 +377,18 @@ impl WorkflowFresh {
     }
 }
 
+/// Where "new" starts for Triage: when the last finished set started, else
+/// a day back.
+pub(crate) fn triage_since(conn: &mail_store::Connection, now: i64) -> mail_store::StoreResult<i64> {
+    Ok(store::meta(conn, store::TRIAGE_SINCE_KEY)?.and_then(|v| v.parse().ok()).unwrap_or(now - FIRST_TRIAGE_MS))
+}
+
 /// A set's items from the store (every kind but Agents).
 fn fresh_set(conn: &mail_store::Connection, kind: WorkflowKind, now: i64) -> mail_store::StoreResult<Fresh> {
     let today = day_of(now);
     Ok(match kind {
         WorkflowKind::Triage => {
-            let since = store::meta(conn, store::TRIAGE_SINCE_KEY)?
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(now - FIRST_TRIAGE_MS);
+            let since = triage_since(conn, now)?;
             let found = store::triage_candidates(conn, since, MAX_SET)?;
             Fresh {
                 preview: found.iter().take(5).map(name_of).collect(),

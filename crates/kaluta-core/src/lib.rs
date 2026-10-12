@@ -47,6 +47,7 @@ pub mod secrets;
 mod sync;
 mod tasks;
 mod tasks_ai;
+mod triage;
 mod workflow_jobs;
 mod workflows;
 
