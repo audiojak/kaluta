@@ -776,6 +776,10 @@ final class CoreClient: Sendable {
         try await call { try await core.checkWaitingAgain(threadId: threadID, until: ms) }
     }
 
+    func restartWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.restartWaiting(threadId: threadID) }
+    }
+
     func waitingDays() async throws(CoreClientError) -> UInt32 {
         try await call { try await core.waitingDays() }
     }

@@ -261,6 +261,24 @@ impl Core {
                     let today = day_of(now);
                     if let Some(open) = store::open_set(tx, kind.key(), &today)? {
                         // A task finished meanwhile shows done (spec §14.13).
+                        // Someone answered meanwhile: off the list, and said so.
+                        if kind == WorkflowKind::Waiting {
+                            let decided: Vec<String> =
+                                store::decisions(tx, open.id)?.into_iter().map(|d| d.item).collect();
+                            let threads: Vec<String> = open
+                                .items
+                                .iter()
+                                .filter(|k| !decided.contains(k))
+                                .filter_map(|k| k.strip_prefix("thread:").map(str::to_owned))
+                                .collect();
+                            for t in mail_store::waiting::no_longer_waiting(tx, &threads)? {
+                                store::decide(tx, open.id, &format!("thread:{t}"), "answered", now, 0)?;
+                            }
+                            let id = open.id;
+                            let open = store::get_set(tx, id)?
+                                .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {id}")))?;
+                            return Core::set_info(tx, open, true);
+                        }
                         if kind == WorkflowKind::Tasks && store::decide_done_elsewhere(tx, open.id, now)? > 0 {
                             let id = open.id;
                             let open = store::get_set(tx, id)?

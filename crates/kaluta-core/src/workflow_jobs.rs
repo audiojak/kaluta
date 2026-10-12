@@ -49,6 +49,7 @@ pub(crate) struct JobStep {
 pub(crate) const JOBS: &[Job] = &[
     Job { name: "triage", daily_cap: crate::triage::DAILY_CAP, step: crate::triage::step },
     Job { name: "waiting", daily_cap: crate::waiting::DAILY_CAP, step: crate::waiting::step },
+    Job { name: "nudges", daily_cap: crate::waiting::NUDGE_DAILY_CAP, step: crate::waiting::nudge_step },
 ];
 
 impl Core {

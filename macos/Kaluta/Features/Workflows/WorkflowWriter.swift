@@ -134,7 +134,8 @@ final class WorkflowWriter {
                 throw CoreClientError(kind: .notFound, message: "This conversation is no longer here.")
             }
             let latest = AppModel.latestReceived(detail)
-            let to = latest?.from.map { [$0.email] } ?? []
+            // A follow-up to the user's own message goes to its recipients.
+            let to = latest.map { $0.isSentByMe ? $0.to.map(\.email) : ($0.from.map { [$0.email] } ?? []) } ?? []
             let guide = try? await core.guideForMessage(recipients: to, messageType: "reply", audiences: nil)
             guideVersion = (guide?.text.isEmpty ?? true) ? nil : guide?.version
             let prompt = ComposerAssistant.prompt(

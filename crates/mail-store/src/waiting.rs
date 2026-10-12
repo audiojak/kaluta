@@ -12,8 +12,6 @@ pub const DEFAULT_DAYS: i64 = 3;
 /// `workflow_meta` keys.
 pub const DAYS_KEY: &str = "waiting_days";
 pub const LABEL_KEY: &str = "waiting_label";
-/// The local day the check last finished reading everything.
-pub const CHECKED_DAY_KEY: &str = "waiting_checked_day";
 
 const DAY_MS: i64 = 86_400_000;
 
@@ -28,23 +26,23 @@ pub struct Unchecked {
     pub at: Millis,
 }
 
-/// The conversations whose latest message is the user's, sent since
-/// `since` to at least one person (not a no-reply address), that the check
-/// has not read, oldest first.
-pub fn unchecked(conn: &Connection, since: Millis, limit: usize) -> StoreResult<Vec<Unchecked>> {
+/// The conversations whose latest message is the user's, sent from `since`
+/// up to (not including) `before` to at least one person (not a no-reply
+/// address), that the check has not read, oldest first.
+pub fn unchecked(conn: &Connection, since: Millis, before: Millis, limit: usize) -> StoreResult<Vec<Unchecked>> {
     let mut stmt = conn.prepare_cached(
         "SELECT m.id, m.gmail_id, t.gmail_id, m.internal_date
            FROM threads t
            JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
                                        ORDER BY internal_date DESC, id DESC LIMIT 1)
-          WHERE m.is_sent_by_me = 1 AND m.internal_date >= ?1
+          WHERE m.is_sent_by_me = 1 AND m.internal_date >= ?1 AND m.internal_date < ?2
             AND NOT EXISTS (SELECT 1 FROM waiting_checks w WHERE w.message_id = m.gmail_id)
           ORDER BY m.internal_date, m.id",
     )?;
     let mut people =
         conn.prepare_cached("SELECT email FROM participants WHERE message_id = ?1 AND role IN ('to', 'cc')")?;
     let mut out = Vec::new();
-    let mut rows = stmt.query([since])?;
+    let mut rows = stmt.query(params![since, before])?;
     while let Some(r) = rows.next()? {
         if out.len() >= limit {
             break;
@@ -225,6 +223,37 @@ pub fn needing_nudges(conn: &Connection, limit: u32) -> StoreResult<Vec<WaitingR
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Restart the wait from `now` (a nudge was sent): shown again, its
+/// follow-ups written afresh when it joins again.
+pub fn restart(tx: &Transaction, thread_id: &str, now: Millis) -> StoreResult<()> {
+    tx.execute(
+        "UPDATE waiting SET since = ?2, until = NULL, state = 'waiting', nudges_json = '[]', updated_at = ?2
+          WHERE thread_id = ?1",
+        params![thread_id, now],
+    )?;
+    Ok(())
+}
+
+/// Of the conversations in a set (thread ids), those no longer waiting:
+/// answered (someone wrote since), or ended.
+pub fn no_longer_waiting(conn: &Connection, thread_ids: &[String]) -> StoreResult<Vec<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT w.state = 'waiting' AND NOT EXISTS (
+                  SELECT 1 FROM messages m JOIN threads t ON t.id = m.thread_id
+                   WHERE t.gmail_id = w.thread_id AND m.is_draft = 0 AND m.is_sent_by_me = 0
+                     AND m.internal_date > w.since)
+           FROM waiting w WHERE w.thread_id = ?1",
+    )?;
+    let mut out = Vec::new();
+    for id in thread_ids {
+        let still = stmt.query_row([id], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false);
+        if !still {
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
+}
+
 /// Who a sent message waits on: its first recipient's name, else address.
 pub fn who(conn: &Connection, message_id: &str) -> StoreResult<Option<String>> {
     Ok(conn
@@ -277,7 +306,7 @@ mod tests {
     fn a_checked_message_is_never_read_again_and_a_newer_one_is_read_alone() {
         let Store(_, db) = &store("log");
         crate::demo_workflows::generate(db, NOW).unwrap();
-        let first = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, 50)).unwrap();
+        let first = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, NOW + 1, 50)).unwrap();
         let threads: Vec<&str> = first.iter().map(|u| u.thread_id.as_str()).collect();
         assert!(threads.contains(&"demowf-quote") && threads.contains(&"demowf-ip"), "{threads:?}");
         assert!(!threads.contains(&"demowf-renewal"), "someone else wrote last");
@@ -299,7 +328,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert!(db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, 50)).unwrap().is_empty(), "never twice");
+        assert!(db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, NOW + 1, 50)).unwrap().is_empty(), "never twice");
 
         // The user writes again in one conversation: that message alone.
         db.write_blocking(|tx| {
@@ -316,7 +345,7 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        let again = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, 50)).unwrap();
+        let again = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, NOW + 1, 50)).unwrap();
         assert_eq!(again.iter().map(|u| u.message_id.as_str()).collect::<Vec<_>>(), ["again"]);
         assert_eq!(db.read_blocking(|c| checks(c, 100)).unwrap().len(), first.len());
     }
@@ -325,7 +354,7 @@ mod tests {
     fn a_wait_joins_after_its_days_and_an_answer_ends_it() {
         let Store(_, db) = &store("due");
         crate::demo_workflows::generate(db, NOW).unwrap();
-        let sent = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, 50)).unwrap();
+        let sent = db.read_blocking(|c| unchecked(c, NOW - 14 * DAY_MS, NOW + 1, 50)).unwrap();
         let quote = sent.iter().find(|u| u.thread_id == "demowf-quote").unwrap().clone();
         let refs = sent.iter().find(|u| u.thread_id == "demowf-references").unwrap().clone();
         let (q, r) = (quote.clone(), refs.clone());

@@ -146,6 +146,29 @@ pub fn waiting_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"checks": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to a Kaluta nudges prompt (spec §14.13), or `None`:
+/// three follow-ups for each email, addressed to its recipient.
+pub fn nudge_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta nudges") {
+        return None;
+    }
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let to = rest.lines().find_map(|l| l.strip_prefix("To: ")).unwrap_or_default();
+        let name = to.split([' ', '<', '@']).next().unwrap_or_default().replace(['"', '\\'], "");
+        let name = name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + &name[c.len_utf8()..])
+            .unwrap_or_default();
+        items.push(format!(
+            r#"{{"thread_id": "{id}", "answers": [{{"label": "Gentle nudge", "text": "Hi {name},\n\nJust bringing this back to the top of your inbox. Any news?\n\nJo"}}, {{"label": "Offer a call", "text": "Hi {name},\n\nWould a quick call be easier? I'm free most afternoons this week.\n\nJo"}}, {{"label": "Set a date", "text": "Hi {name},\n\nCould you let me know by Friday? I'd like to settle this before next week.\n\nJo"}}]}}"#
+        ));
+    }
+    Some(format!(r#"{{"nudges": [{}]}}"#, items.join(", ")))
+}
+
 /// The fake's answer to a Kaluta writing-guide analysis prompt (spec
 /// §14.9), or `None` for any other prompt. For every message it proposes
 /// the same few entries, quoting the message's own first words and last
@@ -362,6 +385,7 @@ pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
         .or_else(|| triage_answer(prompt))
         .or_else(|| waiting_answer(prompt))
+        .or_else(|| nudge_answer(prompt))
         .or_else(|| guide_answer(prompt))
         .or_else(|| change_answer(prompt))
         .or_else(|| merge_answer(prompt))

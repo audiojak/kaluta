@@ -56,6 +56,10 @@ final class WorkflowSession {
     var taskForm: WorkflowTaskForm?
     /// Every task in a Tasks set, finished ones too, by id: the rail.
     var taskInfo: [Int64: TaskItem] = [:]
+    /// Each conversation's wait (Waiting on others), by thread id.
+    var waits: [String: WaitingInfo] = [:]
+    /// *Check again* is choosing its day.
+    var choosingCheckAgain = false
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
 
@@ -68,6 +72,7 @@ final class WorkflowSession {
         if set.items.first(where: { $0.decision == nil })?.key != current?.key {
             writer = nil
             taskForm = nil
+            choosingCheckAgain = false
         }
         self.workflowSet = set
         itemShownAt = .now

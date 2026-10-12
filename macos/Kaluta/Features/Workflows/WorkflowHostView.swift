@@ -19,8 +19,8 @@ struct WorkflowHostView: View {
             HStack(spacing: 0) {
             // Tasks: today's set beside the task, done ones ticked.
             // Writing needs the room: the rail steps aside meanwhile.
-            if session.kind == .tasks, !session.isFinished, session.writer == nil {
-                WorkflowTaskRail(session: session)
+            if session.kind == .tasks || session.kind == .waiting, !session.isFinished, session.writer == nil {
+                WorkflowRail(session: session)
             }
             Group {
                 if session.isFinished {
@@ -170,13 +170,16 @@ struct WorkflowItemView: View {
                     }
                 }
             }
+            if session.kind == .waiting, let threadID, let wait = session.waits[threadID] {
+                WaitingLine(wait: wait, kind: session.kind)
+            }
             if session.kind == .triage, let threadID {
                 TriageSuggestionLine(suggestion: session.suggestions[threadID],
                                      task: model.openTask(onThread: threadID), kind: session.kind)
             }
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
-                    let latest = AppModel.latestReceived(detail)
+                    let latest = AppModel.shownMessage(detail, session.kind)
                     Text(Self.contextLine(latest))
                         .font(TypeRole.workflowContext)
                         .foregroundStyle(.secondary)
@@ -197,6 +200,11 @@ struct WorkflowItemView: View {
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+                if session.choosingCheckAgain {
+                    Text("Check again when? 1 tomorrow, 2 in three days, 3 next week")
+                        .font(TypeRole.workflowHeading)
+                        .id(WorkflowWriteView.scrollID)
+                }
                 if let writer = session.writer {
                     WorkflowWriteView(session: session, writer: writer)
                         .transition(.opacity)
@@ -217,7 +225,8 @@ struct WorkflowItemView: View {
 
     static func contextLine(_ m: MessageInfo?) -> String {
         guard let m else { return "" }
-        let who = m.from.map { $0.name?.isEmpty == false ? $0.name! : $0.email } ?? ""
+        // The user's own message (what they asked, in Waiting) is theirs.
+        let who = m.isSentByMe ? "You wrote" : m.from.map { $0.name?.isEmpty == false ? $0.name! : $0.email } ?? ""
         let when = Date(timeIntervalSince1970: TimeInterval(m.date) / 1000)
         return "\(who) · \(when.formatted(date: .abbreviated, time: .shortened))"
     }
@@ -242,18 +251,21 @@ struct WorkflowItemView: View {
 /// Tasks' rail (spec §14.13): today's set, the task on screen marked,
 /// finished ones ticked (those finished elsewhere too). What is left for
 /// later in the week is the header's pill.
-struct WorkflowTaskRail: View {
+struct WorkflowRail: View {
     let session: WorkflowSession
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text("Today").font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
+                Text(session.kind == .waiting ? "Waiting on" : "Today").font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
                     .padding(.horizontal, Space.l)
                 ForEach(session.items, id: \.key) { item in
                     if let id = item.taskId, let task = session.taskInfo[id] {
                         WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
                                         kind: session.kind)
+                    } else if let id = item.threadId, let wait = session.waits[id] {
+                        WorkflowRailRow(title: wait.who.isEmpty ? "Someone" : wait.who, detail: Self.detail(wait, item),
+                                        state: state(item), kind: session.kind)
                     }
                 }
             }
@@ -262,7 +274,7 @@ struct WorkflowTaskRail: View {
         }
         .frame(width: Self.width)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Today's tasks")
+        .accessibilityLabel(session.kind == .waiting ? "Waiting on others" : "Today's tasks")
     }
 
     private func state(_ item: WorkflowItem) -> WorkflowRailRow.State {
@@ -279,7 +291,49 @@ struct WorkflowTaskRail: View {
         }
     }
 
+    /// A wait: how long, or how it ended ("Answered · off the list").
+    static func detail(_ wait: WaitingInfo, _ item: WorkflowItem, now: Date = .now) -> String {
+        switch item.decision {
+        case "answered": "Answered · off the list"
+        case "let_go": "Let go"
+        case "later": "Check again later"
+        case "nudged": "Nudged"
+        case .some: "Done"
+        case nil: WaitingLine.waited(wait, now: now)
+        }
+    }
+
     static let width: CGFloat = 280
+}
+
+/// Who a conversation waits on, for how long, and why Kaluta thinks an
+/// answer is due (spec §14.13).
+struct WaitingLine: View {
+    let wait: WaitingInfo
+    let kind: WorkflowKind
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Text("Waiting on \(wait.who.isEmpty ? "them" : wait.who) · \(Self.waited(wait))")
+                .font(TypeRole.workflowKey).fontWeight(.semibold)
+                .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                .background(Tone.workflow(kind).opacity(0.14), in: Capsule())
+            if !wait.reason.isEmpty {
+                Label(wait.reason, systemImage: "sparkle")
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// "9 days", "1 day", "today".
+    static func waited(_ wait: WaitingInfo, now: Date = .now) -> String {
+        let since = Date(timeIntervalSince1970: TimeInterval(wait.since) / 1000)
+        let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: since),
+                                                   to: Calendar.current.startOfDay(for: now)).day ?? 0
+        return days <= 0 ? "today" : "\(days) day\(days == 1 ? "" : "s")"
+    }
 }
 
 /// Kaluta's suggestion for a triage item (spec §14.13): what to do, the
@@ -350,7 +404,7 @@ struct WorkflowEndView: View {
                 if let score, !score.counts.isEmpty {
                     HStack(spacing: Space.l) {
                         ForEach(score.counts, id: \.decision) { c in
-                            ScoreTile(figure: "\(c.count)", label: Self.words(c.decision, count: Int(c.count)))
+                            ScoreTile(figure: "\(c.count)", label: Self.words(c.decision, count: Int(c.count), kind: session.kind))
                         }
                     }
                 }
@@ -383,6 +437,7 @@ struct WorkflowEndView: View {
         case .triage: return "Everything new is decided."
         case .tasks: return "Today's tasks are done."
         case .replies: return "Everyone has an answer."
+        case .waiting: return "Nobody is left hanging."
         default: return "All done."
         }
     }
@@ -393,15 +448,18 @@ struct WorkflowEndView: View {
         return "\(score.decided) decided in about \(minutes) minute\(minutes == 1 ? "" : "s")."
     }
 
-    static func words(_ decision: String, count: Int) -> String {
+    static func words(_ decision: String, count: Int, kind: WorkflowKind = .tasks) -> String {
         switch decision {
         case "archive": "archived"
         case "reply": count == 1 ? "reply" : "replies"
         case "elsewhere": "done elsewhere"
+        case "nudged": "nudged"
+        case "let_go": "let go"
+        case "answered": "answered meanwhile"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
         case "done": "done"
-        case "later": "moved to tomorrow"
+        case "later": kind == .waiting ? "to check again" : "moved to tomorrow"
         default: decision
         }
     }

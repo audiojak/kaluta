@@ -4464,11 +4464,18 @@ user asked.
   list").
 - The check reads ten messages per prompt (up to 100 a day), looking
   back 14 days the first time; "to a person" means at least one
-  recipient that is not a no-reply address. Once nothing is left to read
-  it is done for the day; answers end waits on every look of the job
-  runner. The wait is kept in `waiting` with whether Kaluta put the label
+  recipient that is not a no-reply address. It reads only what was sent
+  before the day began, so once those are logged it finds nothing more
+  until tomorrow; answers end waits on every look of the job runner. The wait is kept in `waiting` with whether Kaluta put the label
   on (`labelled`): only then does it take it off. The days before an item
   joins are Settings › General › Workflows (1 to 30), kept per account.
+- The nudges job writes the follow-ups for each wait as it joins (five
+  per prompt, up to 60 a day); a wait restarted by a nudge gets new ones
+  when it joins again. A set resumed later the same day takes answered
+  conversations off ("Answered · off the list" in the rail). The item
+  shows "Waiting on Hayden · 9 days" with the check's reason, above what
+  the user wrote; *Check again* offers tomorrow (1), in three days (2)
+  or next week (3).
 - Per item: **Nudge** (Return) with up to three follow-ups written ahead
   to pick from, then the editable email; sending starts the wait again.
   **Let it go** (E) takes the label off. **Check again** (L) hides it

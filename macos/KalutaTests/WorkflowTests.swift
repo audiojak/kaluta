@@ -153,4 +153,17 @@ struct WorkflowTests {
         let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], task: nil)
         #expect(TriageSuggestionLine.verb(task) == "Make a task")
     }
+
+    @Test func aWaitSaysHowLongAndHowItEnded() {
+        let now = Date(timeIntervalSince1970: 1_791_000_000)
+        let since = Calendar.current.date(byAdding: .day, value: -9, to: now)!
+        let wait = WaitingInfo(threadId: "t", who: "Hayden", since: Int64(since.timeIntervalSince1970 * 1000),
+                               reason: "", nudges: [], state: "waiting")
+        #expect(WaitingLine.waited(wait, now: now) == "9 days")
+        let item = { (d: String?) in WorkflowItem(key: "thread:t", threadId: "t", taskId: nil, decision: d) }
+        #expect(WorkflowRail.detail(wait, item(nil), now: now) == "9 days")
+        #expect(WorkflowRail.detail(wait, item("answered"), now: now) == "Answered · off the list")
+        #expect(WorkflowRail.detail(wait, item("nudged"), now: now) == "Nudged")
+        #expect(WorkflowEndView.words("later", count: 2, kind: .waiting) == "to check again")
+    }
 }

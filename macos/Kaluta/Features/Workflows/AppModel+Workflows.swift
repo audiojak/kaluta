@@ -85,6 +85,7 @@ extension AppModel {
             // The card grows into the window (spec §14.13); the first
             // item loads behind it.
             if kind == .tasks { await loadTaskInfo(session) }
+            if kind == .waiting { await loadWaits(session) }
             withAnimation(Self.workflowMotion) { workflowSession = session }
             await prepareCurrentItem()
             if session.current == nil { await finishWorkflow() }
@@ -122,7 +123,7 @@ extension AppModel {
         }
         if session.threads[threadID] == nil, let detail = try? await core.thread(threadID) {
             session.threads[threadID] = detail
-            if let latest = Self.latestReceived(detail), let body = try? await core.renderedBody(latest.id),
+            if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),
                let html = body.html {
                 session.bodies[threadID] = Self.readingText(ComposerAssistant.plainText(fromHTML: html))
             }
@@ -163,6 +164,20 @@ extension AppModel {
         session.taskInfo = Dictionary(all.filter { ids.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
+    /// The message an item shows: in Waiting on others the user's own (what
+    /// they asked), elsewhere the latest from someone else.
+    static func shownMessage(_ detail: ThreadDetail, _ kind: WorkflowKind) -> MessageInfo? {
+        kind == .waiting ? detail.messages.last { !$0.isDraft } : latestReceived(detail)
+    }
+
+    /// Every wait in a Waiting set, for the rail and the items.
+    func loadWaits(_ session: WorkflowSession) async {
+        guard let core else { return }
+        for id in session.items.compactMap(\.threadId) {
+            if let info = try? await core.waitingInfo(id) { session.waits[id] = info }
+        }
+    }
+
     /// The conversation's latest message from someone else.
     static func latestReceived(_ detail: ThreadDetail) -> MessageInfo? {
         detail.messages.last { !$0.isSentByMe && !$0.isDraft } ?? detail.messages.last { !$0.isDraft }
@@ -178,6 +193,10 @@ extension AppModel {
             WorkflowAction(command: c, title: title ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
+        if session.choosingCheckAgain {
+            return [a(.pick1, .plain, "Tomorrow"), a(.pick2, .plain, "In 3 days"), a(.pick3, .plain, "Next week"),
+                    a(.back, .quiet, "Cancel")]
+        }
         if let form = session.taskForm {
             return [a(.primary, .primary, form.isExisting ? "Save the task" : "Make the task"), a(.back, .quiet, "Cancel")]
         }
@@ -193,6 +212,8 @@ extension AppModel {
             }()
             return (replies ? [a(.primary, .primary, "Reply")] : []) + [a(.done, replies ? .plain : .primary), a(.later),
                                                                          a(.skip, .quiet)]
+        case .waiting:
+            return [a(.primary, .primary, "Nudge"), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
@@ -260,6 +281,12 @@ extension AppModel {
         case (.final, .send), (.final, .sendKeepTask):
             let keep = command == .sendKeepTask
             guard await writer.send(model: self, keepTask: keep) else { return }
+            if session.kind == .waiting {
+                // The nudge went: the wait starts again.
+                try? await core?.restartWaiting(writer.threadID)
+                await decide(item, "nudged", session: session, notice: nil)
+                return
+            }
             let finished = writer.taskID != nil && !keep
             // Replies: send and archive. Tasks: a finished task's email goes
             // out of the Inbox with it (spec §14.13).
@@ -277,7 +304,7 @@ extension AppModel {
     func performWorkflow(_ command: WorkflowCommand) async {
         guard let session = workflowSession else { return }
         switch command {
-        case .back where session.writer == nil && session.taskForm == nil:
+        case .back where session.writer == nil && session.taskForm == nil && !session.choosingCheckAgain:
             leaveWorkflow()
             return
         case .whatsLeft:
@@ -292,6 +319,17 @@ extension AppModel {
         guard let item = session.current, workflowActions().contains(where: { $0.command == command }) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)
+            return
+        }
+        if session.choosingCheckAgain {
+            session.choosingCheckAgain = false
+            let days: Int? = switch command {
+            case .pick1: 1
+            case .pick2: 3
+            case .pick3: 7
+            default: nil
+            }
+            if let days { await checkAgain(item, inDays: days, session: session) }
             return
         }
         if let form = session.taskForm {
@@ -330,6 +368,12 @@ extension AppModel {
             await finishTask(item, session: session)
         case (.tasks, .later):
             await moveTaskToTomorrow(item, session: session)
+        case (.waiting, .primary):
+            startWriting(item, session: session)
+        case (.waiting, .done):
+            await letGo(item, session: session)
+        case (.waiting, .later):
+            session.choosingCheckAgain = true
         default:
             await decide(item, "done", session: session, notice: nil)
         }
@@ -378,6 +422,7 @@ extension AppModel {
               let set = try? await core.startWorkflow(session.kind), set.id == setID else { return }
         session.score = nil
         if session.kind == .tasks { await loadTaskInfo(session) }
+        if session.kind == .waiting { await loadWaits(session) }
         await show(set, in: session)
         if session.current == nil { await finishWorkflow() }
     }
@@ -412,15 +457,38 @@ extension AppModel {
     /// Reply: *What do you want to say?* under the email (spec §14.13).
     private func startWriting(_ item: WorkflowItem, session: WorkflowSession) {
         guard let id = threadID(of: item), let detail = session.threads[id],
-              let message = Self.latestReceived(detail) else { return }
+              let message = Self.shownMessage(detail, session.kind) else { return }
         // The item's task, else the conversation's: Send offers to finish it.
-        let task = self.task(of: item) ?? openTask(onThread: id)
-        // Kaluta's answers when it judged it a quick reply (Triage).
-        let answers = session.suggestions[id]?.answers.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
+        let task = session.kind == .waiting ? nil : self.task(of: item) ?? openTask(onThread: id)
+        // Kaluta's answers: a quick reply's (Triage), or the follow-ups
+        // written ahead (Waiting).
+        let written = session.kind == .waiting ? session.waits[id]?.nudges : session.suggestions[id]?.answers
+        let answers = written?.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
         session.writer = WorkflowWriter(threadID: id, messageID: task?.messageId ?? message.id,
                                         replyAll: task?.action == .replyAll, taskID: task?.id,
                                         email: session.bodies[id] ?? message.snippet, answers: answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
+    }
+
+    /// *Let it go* (E): the wait ends and Kaluta's label comes off; ⌘Z
+    /// puts both back.
+    private func letGo(_ item: WorkflowItem, session: WorkflowSession) async {
+        guard let core, let id = threadID(of: item), (try? await core.letGoWaiting(id)) != nil else { return }
+        let who = session.waits[id]?.who ?? ""
+        await decide(item, "let_go", session: session, notice: who.isEmpty ? "Let it go" : "No longer waiting on \(who)",
+                     undoMail: { try? await core.resumeWaiting(id) },
+                     redoMail: { try? await core.letGoWaiting(id) })
+    }
+
+    /// *Check again* (L): hidden until the day chosen.
+    private func checkAgain(_ item: WorkflowItem, inDays days: Int, session: WorkflowSession) async {
+        guard let core, let id = threadID(of: item),
+              let day = Calendar.current.date(byAdding: .day, value: days, to: Calendar.current.startOfDay(for: .now)),
+              (try? await core.checkWaitingAgain(id, until: day)) != nil else { return }
+        let when = days == 1 ? "tomorrow" : day.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+        await decide(item, "later", session: session, notice: "Check again \(when)",
+                     undoMail: { try? await core.checkWaitingAgain(id, until: nil) },
+                     redoMail: { try? await core.checkWaitingAgain(id, until: day) })
     }
 
     /// The conversation's open task, if it has one.
