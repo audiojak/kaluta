@@ -420,10 +420,17 @@ fn fresh_set(conn: &mail_store::Connection, kind: WorkflowKind, now: i64) -> mai
             }
         }
         WorkflowKind::Teach => Fresh { keys: store::teach_items(conn)?, preview: vec![], later: 0 },
-        // Their jobs come later (plan phases 4 and 5); Agents is the caller's.
-        WorkflowKind::Waiting | WorkflowKind::Reading | WorkflowKind::Agents => {
-            Fresh { keys: vec![], preview: vec![], later: 0 }
+        // Waiting a few days, the longest first (spec §14.13).
+        WorkflowKind::Waiting => {
+            let due = mail_store::waiting::due(conn, now, mail_store::waiting::days(conn)?)?;
+            let mut preview = Vec::new();
+            for w in due.iter().take(5) {
+                preview.extend(mail_store::waiting::who(conn, &w.message_id)?);
+            }
+            Fresh { keys: due.iter().map(|w| format!("thread:{}", w.thread_id)).collect(), preview, later: 0 }
         }
+        // Its job comes later (plan phase 5); Agents is the caller's.
+        WorkflowKind::Reading | WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0 },
     })
 }
 

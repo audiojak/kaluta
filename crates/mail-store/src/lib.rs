@@ -23,6 +23,7 @@ pub mod routines;
 pub mod search;
 pub mod tasks;
 pub mod undo;
+pub mod waiting;
 pub mod workflows;
 mod write;
 

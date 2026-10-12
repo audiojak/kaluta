@@ -753,6 +753,37 @@ final class CoreClient: Sendable {
         try await call { try await core.triageSuggestion(threadId: threadID) }
     }
 
+    // MARK: Waiting on others (spec §14.13)
+
+    func waitingInfo(_ threadID: String) async throws(CoreClientError) -> WaitingInfo? {
+        try await call { try await core.waitingInfo(threadId: threadID) }
+    }
+
+    func waitingLog(limit: UInt32 = 200) async throws(CoreClientError) -> [WaitingCheckInfo] {
+        try await call { try await core.waitingLog(limit: limit) }
+    }
+
+    func letGoWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.letGoWaiting(threadId: threadID) }
+    }
+
+    func resumeWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.resumeWaiting(threadId: threadID) }
+    }
+
+    func checkWaitingAgain(_ threadID: String, until: Date?) async throws(CoreClientError) {
+        let ms = until.map { Int64($0.timeIntervalSince1970 * 1000) }
+        try await call { try await core.checkWaitingAgain(threadId: threadID, until: ms) }
+    }
+
+    func waitingDays() async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.waitingDays() }
+    }
+
+    func setWaitingDays(_ days: UInt32) async throws(CoreClientError) {
+        try await call { try await core.setWaitingDays(days: days) }
+    }
+
     /// Adds the tasks and labels their threads `Task`.
     func createTasks(_ tasks: [NewTask]) async throws(CoreClientError) -> [TaskItem] {
         try await call { try await core.createTasks(new: tasks) }
@@ -1757,6 +1788,8 @@ typealias WorkflowScore = KalutaCore.WorkflowScore
 typealias TriageSuggestion = KalutaCore.TriageSuggestion
 typealias TriageAnswer = KalutaCore.TriageAnswer
 typealias TriageKind = KalutaCore.TriageKind
+typealias WaitingInfo = KalutaCore.WaitingInfo
+typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo
 typealias DecisionCount = KalutaCore.DecisionCount
 
 // MARK: - Events

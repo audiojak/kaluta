@@ -48,6 +48,7 @@ mod sync;
 mod tasks;
 mod tasks_ai;
 mod triage;
+mod waiting;
 mod workflow_jobs;
 mod workflows;
 

@@ -128,6 +128,24 @@ pub fn triage_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"suggestions": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to a Kaluta waiting check (spec §14.13), or `None`
+/// for any other prompt: a sent email with a question in it expects an
+/// answer, the rest do not.
+pub fn waiting_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta waiting check") {
+        return None;
+    }
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let body = rest.split("</email>").next().unwrap_or(rest).split_once("\n\n").map(|(_, b)| b).unwrap_or("");
+        let (expects, reason) =
+            if body.contains('?') { (true, "It asks them something.") } else { (false, "Nothing is asked of them.") };
+        items.push(format!(r#"{{"thread_id": "{id}", "expects": {expects}, "reason": "{reason}"}}"#));
+    }
+    Some(format!(r#"{{"checks": [{}]}}"#, items.join(", ")))
+}
+
 /// The fake's answer to a Kaluta writing-guide analysis prompt (spec
 /// §14.9), or `None` for any other prompt. For every message it proposes
 /// the same few entries, quoting the message's own first words and last
@@ -343,6 +361,7 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
 pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
         .or_else(|| triage_answer(prompt))
+        .or_else(|| waiting_answer(prompt))
         .or_else(|| guide_answer(prompt))
         .or_else(|| change_answer(prompt))
         .or_else(|| merge_answer(prompt))

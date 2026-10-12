@@ -46,8 +46,10 @@ pub(crate) struct JobStep {
 
 /// The jobs, in the order they run; each workflow's lands with it
 /// (`docs/plans/workflows.md`).
-pub(crate) const JOBS: &[Job] =
-    &[Job { name: "triage", daily_cap: crate::triage::DAILY_CAP, step: crate::triage::step }];
+pub(crate) const JOBS: &[Job] = &[
+    Job { name: "triage", daily_cap: crate::triage::DAILY_CAP, step: crate::triage::step },
+    Job { name: "waiting", daily_cap: crate::waiting::DAILY_CAP, step: crate::waiting::step },
+];
 
 impl Core {
     /// While a workflow is on screen its items must hold still: jobs wait.

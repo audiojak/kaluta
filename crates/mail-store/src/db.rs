@@ -44,6 +44,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0025_workflow_jobs.sql"),
     include_str!("../migrations/0026_evidence_asked.sql"),
     include_str!("../migrations/0027_triage_suggestions.sql"),
+    include_str!("../migrations/0028_waiting.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -442,6 +443,7 @@ mod tests {
              DROP TABLE workflow_job_days;
              ALTER TABLE analysis_evidence DROP COLUMN asked_quote;
              DROP TABLE triage_suggestions;
+             DROP TABLE waiting_checks; DROP TABLE waiting;
              PRAGMA user_version = 19",
         )
         .unwrap();

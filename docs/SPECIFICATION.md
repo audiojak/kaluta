@@ -4462,6 +4462,13 @@ user asked.
   the workflow after 3 days. An answer takes the label off and the item
   off the list, and the rail says so ("Answered this morning · off the
   list").
+- The check reads ten messages per prompt (up to 100 a day), looking
+  back 14 days the first time; "to a person" means at least one
+  recipient that is not a no-reply address. Once nothing is left to read
+  it is done for the day; answers end waits on every look of the job
+  runner. The wait is kept in `waiting` with whether Kaluta put the label
+  on (`labelled`): only then does it take it off. The days before an item
+  joins are Settings › General › Workflows (1 to 30), kept per account.
 - Per item: **Nudge** (Return) with up to three follow-ups written ahead
   to pick from, then the editable email; sending starts the wait again.
   **Let it go** (E) takes the label off. **Check again** (L) hides it
