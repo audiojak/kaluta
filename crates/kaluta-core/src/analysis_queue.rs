@@ -127,10 +127,11 @@ pub struct AnalysisPairInfo {
     /// `None` once purged (retention).
     pub ai_text: Option<String>,
     pub sent_text: Option<String>,
-    /// The words the proposal cites: from the sent text, and what they
-    /// replaced in the AI's.
+    /// The words the proposal cites: from the sent text, what they
+    /// replaced in the AI's, and from what the user told Kaluta.
     pub sent_quote: String,
     pub ai_quote: String,
+    pub asked_quote: String,
 }
 
 /// How much AI drafts get changed (spec §14.10): the median distance per
@@ -388,6 +389,7 @@ impl Core {
                             sent_text: r.sent_text,
                             sent_quote: e.sent_quote,
                             ai_quote: e.ai_quote,
+                            asked_quote: e.asked_quote,
                         });
                     }
                     Ok(out)
@@ -648,7 +650,12 @@ impl Core {
                     }
                     let evidence = |ids: &[i64], sent: &str, ai: &str| -> Vec<EvidenceRow> {
                         ids.iter()
-                            .map(|id| EvidenceRow { composition_id: *id, sent_quote: sent.into(), ai_quote: ai.into() })
+                            .map(|id| EvidenceRow {
+                                composition_id: *id,
+                                sent_quote: sent.into(),
+                                ai_quote: ai.into(),
+                                ..Default::default()
+                            })
                             .collect()
                     };
                     let add = |tx: &mail_store::Transaction<'_>, op: &str, entry: Option<i64>, category: &str, kind: &str,
@@ -771,7 +778,12 @@ mod tests {
             };
             let evidence: Vec<EvidenceRow> = pairs
                 .iter()
-                .map(|id| EvidenceRow { composition_id: *id, sent_quote: "J".into(), ai_quote: "Best regards".into() })
+                .map(|id| EvidenceRow {
+                    composition_id: *id,
+                    sent_quote: "J".into(),
+                    ai_quote: "Best regards".into(),
+                    ..Default::default()
+                })
                 .collect();
             Ok(store::upsert_proposal(tx, &p, &evidence, mail_sync::now_millis())?.unwrap())
         }))

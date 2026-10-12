@@ -138,7 +138,12 @@ struct AnalysisPairCard: View {
             }
             HStack {
                 if !pair.instruction.isEmpty {
-                    Text("Asked: \(pair.instruction)").font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(1)
+                    // What the user told Kaluta is evidence too (spec §14.13):
+                    // the words the proposal cites are marked.
+                    Text(Self.told(pair))
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
                 Spacer(minLength: Space.m)
                 Button("Ignore Edits to This Message") { Task { await model.ignoreAnalysisPair(pair) } }
@@ -149,6 +154,16 @@ struct AnalysisPairCard: View {
         }
         .card()
         .accessibilityElement(children: .contain)
+    }
+
+    /// "You told Kaluta: …", with the words the proposal cites in bold.
+    static func told(_ pair: AnalysisPairInfo) -> AttributedString {
+        var text = AttributedString("You told Kaluta: \(pair.instruction)")
+        if !pair.askedQuote.isEmpty, let range = text.range(of: pair.askedQuote, options: .caseInsensitive) {
+            text[range].inlinePresentationIntent = .stronglyEmphasized
+            text[range].foregroundColor = .primary
+        }
+        return text
     }
 
     /// A cloud agent's report (spec §10.6) is named by its agent:

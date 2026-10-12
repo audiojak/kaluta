@@ -4367,7 +4367,13 @@ passed over for one that is, and comes back when it is.
 - **What the user tells Kaluta is evidence.** A direction ("fine on the
   cap, keep 30 days") is recorded with the composition (ADR 0013, the
   user's instruction) and read by the daily review (§14.10) as it reads
-  edits: it may propose rules and facts from it.
+  edits: it may propose rules and facts from it. A proposal cites the
+  direction's words as it cites edited ones (`asked_quote` beside the
+  sent and AI quotes), and Review shows them marked in *You told
+  Kaluta: …*. A draft sent as written is compared when it was directed
+  (anything beyond "Write a reply" or "Write this message"), and still
+  counts for the entries that applied; the facts glean reads each
+  message with what the user told Kaluta for it.
 - **Sending to a conversation with an open task** offers *Send and
   finish the task* (⌘Return) or *Send, keep the task open* (⌥⌘Return),
   wherever the reply is written; no dialog.

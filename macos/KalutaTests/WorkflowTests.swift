@@ -93,4 +93,14 @@ struct WorkflowTests {
         let late = samples[Int(1.0 * rate)..<Int(1.1 * rate)].map(abs).max() ?? 0
         #expect(late < early / 4)
     }
+
+    @Test func theReviewMarksTheWordsOfWhatTheUserToldKaluta() {
+        let pair = AnalysisPairInfo(compositionId: 1, createdAt: 0, agent: nil, kind: "reply", subject: "Logs", to: [],
+                                    instruction: "Keep it short, no exclamation marks", aiText: nil, sentText: nil,
+                                    sentQuote: "", aiQuote: "", askedQuote: "no exclamation marks")
+        let told = AnalysisPairCard.told(pair)
+        #expect(String(told.characters) == "You told Kaluta: Keep it short, no exclamation marks")
+        let marked = told.runs.filter { $0.inlinePresentationIntent == .stronglyEmphasized }
+        #expect(marked.map { String(told[$0.range].characters) } == ["no exclamation marks"])
+    }
 }

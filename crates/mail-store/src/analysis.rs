@@ -210,21 +210,40 @@ pub fn pairs_taken_on(conn: &Connection, day: &str) -> StoreResult<u32> {
 /// most `limit` (the cost cap); the rest wait for the next day.
 pub fn pairs_to_compare(conn: &Connection, limit: u32) -> StoreResult<Vec<i64>> {
     Ok(conn
-        .prepare_cached(
-            "SELECT id FROM ai_compositions WHERE status = 'matched' AND distance > ?1
+        .prepare_cached(&format!(
+            "SELECT id FROM ai_compositions WHERE status = 'matched' AND (distance > ?1 OR {DIRECTED})
              AND id NOT IN (SELECT composition_id FROM analysis_run_pairs)
-             ORDER BY created_at, id LIMIT ?2",
-        )?
+             ORDER BY created_at, id LIMIT ?2"
+        ))?
         .query_map(params![UNCHANGED, limit], |r| r.get(0))?
         .collect::<Result<_, _>>()?)
 }
 
-/// Matched pairs sent as written: they need no agent.
+/// A composition the user directed: what they told Kaluta says more than
+/// "write it" (spec §14.13), so it is evidence even when the draft was
+/// sent as written.
+const DIRECTED: &str = "LOWER(TRIM(instruction)) NOT IN ('', 'write a reply', 'write this message')";
+
+/// Of `ids`, the compositions sent as written (a directed one is compared
+/// all the same, and counts for what applied when it is).
+pub fn unchanged_among(conn: &Connection, ids: &[i64]) -> StoreResult<Vec<i64>> {
+    let mut stmt = conn.prepare_cached("SELECT distance <= ?2 FROM ai_compositions WHERE id = ?1")?;
+    let mut out = Vec::new();
+    for id in ids {
+        if stmt.query_row(params![id, UNCHANGED], |r| r.get::<_, Option<bool>>(0)).optional()?.flatten() == Some(true) {
+            out.push(*id);
+        }
+    }
+    Ok(out)
+}
+
+/// Matched pairs sent as written with no direction: they need no agent.
 pub fn unchanged_pairs(conn: &Connection) -> StoreResult<Vec<i64>> {
     Ok(conn
-        .prepare_cached(
-            "SELECT id FROM ai_compositions WHERE status = 'matched' AND distance <= ?1 ORDER BY created_at, id",
-        )?
+        .prepare_cached(&format!(
+            "SELECT id FROM ai_compositions WHERE status = 'matched' AND distance <= ?1 AND NOT {DIRECTED}
+             ORDER BY created_at, id"
+        ))?
         .query_map([UNCHANGED], |r| r.get(0))?
         .collect::<Result<_, _>>()?)
 }
@@ -310,6 +329,9 @@ pub struct EvidenceRow {
     pub composition_id: i64,
     pub sent_quote: String,
     pub ai_quote: String,
+    /// Words from what the user told Kaluta for the draft.
+    #[serde(default)]
+    pub asked_quote: String,
 }
 
 /// What a comparison proposes; `threshold` is how many pairs it needs
@@ -375,11 +397,12 @@ pub fn upsert_proposal(
         }
     };
     let mut add = tx.prepare_cached(
-        "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR IGNORE INTO analysis_evidence
+           (proposal_id, composition_id, sent_quote, ai_quote, asked_quote, added_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )?;
     for e in evidence {
-        add.execute(params![id, e.composition_id, e.sent_quote, e.ai_quote, now])?;
+        add.execute(params![id, e.composition_id, e.sent_quote, e.ai_quote, e.asked_quote, now])?;
     }
     tx.prepare_cached(
         "UPDATE analysis_proposals SET support = (SELECT COUNT(*) FROM analysis_evidence WHERE proposal_id = ?1)
@@ -462,11 +485,16 @@ pub fn proposals(conn: &Connection, statuses: &[&str]) -> StoreResult<Vec<Propos
 pub fn evidence(conn: &Connection, proposal_id: i64) -> StoreResult<Vec<EvidenceRow>> {
     Ok(conn
         .prepare_cached(
-            "SELECT composition_id, sent_quote, ai_quote FROM analysis_evidence WHERE proposal_id = ?1
+            "SELECT composition_id, sent_quote, ai_quote, asked_quote FROM analysis_evidence WHERE proposal_id = ?1
              ORDER BY added_at, composition_id",
         )?
         .query_map([proposal_id], |r| {
-            Ok(EvidenceRow { composition_id: r.get(0)?, sent_quote: r.get(1)?, ai_quote: r.get(2)? })
+            Ok(EvidenceRow {
+                composition_id: r.get(0)?,
+                sent_quote: r.get(1)?,
+                ai_quote: r.get(2)?,
+                asked_quote: r.get(3)?,
+            })
         })?
         .collect::<Result<_, _>>()?)
 }
@@ -523,11 +551,12 @@ pub fn restore_proposals(tx: &Transaction<'_>, snapshots: &[ProposalSnapshot], n
         ])?;
         tx.prepare_cached("DELETE FROM analysis_evidence WHERE proposal_id = ?1")?.execute([p.id])?;
         let mut add = tx.prepare_cached(
-            "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR IGNORE INTO analysis_evidence
+               (proposal_id, composition_id, sent_quote, ai_quote, asked_quote, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         for e in &s.evidence {
-            add.execute(params![p.id, e.composition_id, e.sent_quote, e.ai_quote, now])?;
+            add.execute(params![p.id, e.composition_id, e.sent_quote, e.ai_quote, e.asked_quote, now])?;
         }
     }
     Ok(())
@@ -572,10 +601,11 @@ pub fn drop_pair(tx: &Transaction<'_>, composition_id: i64) -> StoreResult<Vec<(
 pub fn restore_pair(tx: &Transaction<'_>, removed: &[(i64, EvidenceRow)], now: Millis) -> StoreResult<()> {
     for (id, row) in removed {
         tx.prepare_cached(
-            "INSERT OR IGNORE INTO analysis_evidence (proposal_id, composition_id, sent_quote, ai_quote, added_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR IGNORE INTO analysis_evidence
+               (proposal_id, composition_id, sent_quote, ai_quote, asked_quote, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?
-        .execute(params![id, row.composition_id, row.sent_quote, row.ai_quote, now])?;
+        .execute(params![id, row.composition_id, row.sent_quote, row.ai_quote, row.asked_quote, now])?;
         tx.prepare_cached(
             "UPDATE analysis_proposals SET support = (SELECT COUNT(*) FROM analysis_evidence WHERE proposal_id = ?1),
                status = CASE WHEN status = 'watching' AND shown_at IS NOT NULL THEN 'proposed' ELSE status END
@@ -616,13 +646,18 @@ pub fn health(conn: &Connection) -> StoreResult<Vec<(i64, i64, i64)>> {
 pub fn pairs_against(conn: &Connection, entry_id: i64) -> StoreResult<Vec<EvidenceRow>> {
     Ok(conn
         .prepare_cached(
-            "SELECT e.composition_id, MIN(e.sent_quote), MIN(e.ai_quote) FROM analysis_evidence e
+            "SELECT e.composition_id, MIN(e.sent_quote), MIN(e.ai_quote), MIN(e.asked_quote) FROM analysis_evidence e
              JOIN analysis_proposals p ON p.id = e.proposal_id
              WHERE p.target = 'guide' AND p.entry_id = ?1 AND p.status IN ('watching', 'proposed')
              GROUP BY e.composition_id ORDER BY e.composition_id",
         )?
         .query_map([entry_id], |r| {
-            Ok(EvidenceRow { composition_id: r.get(0)?, sent_quote: r.get(1)?, ai_quote: r.get(2)? })
+            Ok(EvidenceRow {
+                composition_id: r.get(0)?,
+                sent_quote: r.get(1)?,
+                ai_quote: r.get(2)?,
+                asked_quote: r.get(3)?,
+            })
         })?
         .collect::<Result<_, _>>()?)
 }
@@ -640,6 +675,10 @@ mod tests {
     }
 
     fn matched(db: &Db, at: Millis, distance: f64) -> i64 {
+        directed(db, at, distance, "")
+    }
+
+    fn directed(db: &Db, at: Millis, distance: f64, instruction: &'static str) -> i64 {
         db.write_blocking(move |tx| {
             let id = compositions::record(
                 tx,
@@ -652,7 +691,7 @@ mod tests {
                     in_reply_to: None,
                     recipients: Recipients::default(),
                     subject: String::new(),
-                    instruction: String::new(),
+                    instruction: instruction.into(),
                     ai_text: "text".into(),
                     ai_html: None,
                     guide_version: None,
@@ -664,6 +703,16 @@ mod tests {
             Ok(id)
         })
         .unwrap()
+    }
+
+    #[test]
+    fn a_direction_is_compared_even_when_sent_as_written() {
+        let (db, dir) = db("directed");
+        let plain = directed(&db, 1, 0.0, "Write a reply");
+        let told = directed(&db, 2, 0.0, "Keep it short, no exclamation marks");
+        assert_eq!(db.read_blocking(|c| pairs_to_compare(c, 50)).unwrap(), vec![told]);
+        assert_eq!(db.read_blocking(unchanged_pairs).unwrap(), vec![plain], "\"write a reply\" directs nothing");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -737,7 +786,12 @@ mod tests {
     }
 
     fn quote(pair: i64) -> EvidenceRow {
-        EvidenceRow { composition_id: pair, sent_quote: "J".into(), ai_quote: "Best, John".into() }
+        EvidenceRow {
+            composition_id: pair,
+            sent_quote: "J".into(),
+            ai_quote: "Best, John".into(),
+            ..Default::default()
+        }
     }
 
     #[test]

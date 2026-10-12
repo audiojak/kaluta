@@ -470,6 +470,14 @@ impl Core {
     /// was asked. An answer that cannot be read is asked for once more; a
     /// run stopped meanwhile drops the answer.
     async fn compare_batch(self: &Arc<Self>, run: i64, agent: &str, ids: &[i64]) -> Result<bool, CoreError> {
+        // Sent as written but directed (spec §14.13): it counts for what
+        // applied, as an undirected one does, and is compared for the
+        // direction.
+        let db = self.db()?;
+        let batch = ids.to_vec();
+        let unchanged =
+            runtime::run(async move { Ok(db.read(move |c| store::unchanged_among(c, &batch)).await?) }).await?;
+        self.support_applied(&unchanged, false, mail_sync::now_millis()).await?;
         let (pairs, entries) = self.compare_pairs(ids).await?;
         if pairs.is_empty() {
             return Ok(false);
