@@ -185,4 +185,22 @@ struct WorkflowTests {
             == "Back in the Inbox")
         #expect(WorkflowEndView.words("kept", count: 1, kind: .reading) == "kept for later")
     }
+
+    @Test func teachKalutaPutsRoutineChangesFirstGroupedByKind() throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        model.routineProposals = [
+            RoutineProposalInfo(id: 7, statement: "Leave mail from news@example.com in the Inbox",
+                                rule: "Mail from news@example.com: leave it in the Inbox",
+                                evidence: [RoutineEvidence(threadId: "t", subject: "Issue 42", bucket: "2-Weekly", at: 0)]),
+        ]
+        model.enterReview(.teach)
+        #expect(model.reviewMode == .teach)
+        #expect(model.reviewItems.first?.tag == "routine:7" && model.reviewItems.first?.group == "Sorting routine")
+        #expect(model.reviewSelection == "routine:7")
+        #expect(model.reviewIsWaiting("routine:7"))
+        #expect(ReviewQueueView.groups(model.reviewItems).first == "Sorting routine")
+        #expect(AppModel.routineCaption(model.routineProposals[0]).contains("1 conversation you moved back"))
+        model.leaveReview()
+        #expect(model.reviewMode == nil && model.teachSelection == nil)
+    }
 }

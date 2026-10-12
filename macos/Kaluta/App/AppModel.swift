@@ -377,6 +377,9 @@ final class AppModel {
     var agentMailboxSheet: AgentMailboxRequest?
     /// Review mode (spec §14.10, §14.11): deciding in the whole window.
     var reviewMode: ReviewMode?
+    /// Teach Kaluta's routine changes and its current item (spec §14.13).
+    var routineProposals: [RoutineProposalInfo] = []
+    var teachSelection: String?
     /// What the window shows when no review is open (spec §14.13): the start
     /// screen (home) or the mail view.
     var home: WorkflowHome = .start

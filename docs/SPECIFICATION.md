@@ -4549,7 +4549,10 @@ proposed writing-guide rules and proposed facts (including those learned
 from what the user told Kaluta), grouped by kind, each with its evidence
 and the change it makes; *Accept* (Return), *Edit…*, *Reject* (⌫), ⌘Z
 undoes; patterns still collecting evidence listed last. The Writing
-Guide's and Facts' bands open it on their kind.
+Guide's and Facts' bands open it on their kind. A routine change
+shows what it would leave alone, the rule it adds and the conversations
+moved back; it has no *Edit…*. Accepting one with no routine set up says
+so and leaves it waiting. *Accept All* takes every kind.
 
 #### Background jobs
 

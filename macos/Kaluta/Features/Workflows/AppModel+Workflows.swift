@@ -65,9 +65,7 @@ extension AppModel {
     func beginWorkflow(_ kind: WorkflowKind) async {
         switch kind {
         case .teach:
-            await analysis.load()
-            await guide.load()
-            enterReview(.rules)
+            await enterTeach()
             return
         case .agents:
             showMail()
