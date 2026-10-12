@@ -309,17 +309,20 @@ pub fn teach_count(conn: &Connection) -> StoreResult<u32> {
         .prepare_cached(
             "SELECT (SELECT COUNT(*) FROM guide_entries WHERE status = 'proposed')
                   + (SELECT COUNT(*) FROM analysis_proposals WHERE status = 'proposed')
-                  + (SELECT COUNT(*) FROM facts WHERE status = 'proposed')",
+                  + (SELECT COUNT(*) FROM facts WHERE status = 'proposed')
+                  + (SELECT COUNT(*) FROM routine_proposals WHERE status = 'proposed')",
         )?
         .query_row([], |r| r.get(0))?)
 }
 
-/// Teach Kaluta's items, grouped by kind: proposed rules (`rule:<id>` from
-/// the learning run, `proposal:<id>` from the daily review), then
-/// proposed facts (`fact:<id>`).
+/// Teach Kaluta's items, grouped by kind: changes to the sorting routine
+/// (`routine:<id>`), proposed rules (`rule:<id>` from the learning run,
+/// `proposal:<id>` from the daily review), then proposed facts
+/// (`fact:<id>`).
 pub fn teach_items(conn: &Connection) -> StoreResult<Vec<String>> {
     let mut out = Vec::new();
     for (prefix, sql) in [
+        ("routine", "SELECT id FROM routine_proposals WHERE status = 'proposed' ORDER BY id"),
         ("rule", "SELECT id FROM guide_entries WHERE status = 'proposed' ORDER BY id"),
         ("proposal", "SELECT id FROM analysis_proposals WHERE status = 'proposed' ORDER BY id"),
         ("fact", "SELECT id FROM facts WHERE status = 'proposed' ORDER BY id"),

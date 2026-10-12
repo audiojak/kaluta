@@ -285,6 +285,227 @@ impl Core {
     }
 }
 
+/// A change Kaluta proposes to the sorting routine (spec §14.13).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RoutineProposalInfo {
+    pub id: i64,
+    /// "Leave mail from news@example.com in the Inbox".
+    pub statement: String,
+    /// The line added to the routine's leave-alone rules.
+    pub rule: String,
+    /// The conversations moved back to the Inbox, with the bucket each was in.
+    pub evidence: Vec<RoutineEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RoutineEvidence {
+    pub thread_id: String,
+    pub subject: String,
+    pub bucket: String,
+    pub at: i64,
+}
+
+/// What *Back to the Inbox* did: the move (for Undo) and the proposal it
+/// added to.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BackToInbox {
+    pub undo: Option<crate::mutations::UndoToken>,
+    pub proposal_id: Option<i64>,
+}
+
+fn proposal_info(p: mail_store::routine_proposals::Proposal) -> RoutineProposalInfo {
+    RoutineProposalInfo {
+        id: p.id,
+        statement: p.statement,
+        rule: p.rule,
+        evidence: p
+            .evidence
+            .into_iter()
+            .map(|e| RoutineEvidence { thread_id: e.thread_id, subject: e.subject, bucket: e.bucket, at: e.at })
+            .collect(),
+    }
+}
+
+/// The bucket a conversation is filed in, the routine it is from, and its
+/// sender's address.
+struct Filing {
+    label_id: String,
+    bucket: String,
+    routine_id: Option<String>,
+    sender: Option<String>,
+    subject: String,
+    at: i64,
+}
+
+fn filing(conn: &mail_store::Connection, thread_id: &str) -> mail_store::StoreResult<Option<Filing>> {
+    let routines: Vec<Routine> = mail_store::routines::list(conn)?
+        .into_iter()
+        .filter(|r| r.enabled)
+        .filter_map(|r| serde_json::from_str(&r.definition_json).ok())
+        .collect();
+    for r in resolved_buckets(conn)? {
+        let Some(label) = r.label_id else { continue };
+        if !mail_store::waiting::has_label(conn, thread_id, &label)? {
+            continue;
+        }
+        let routine_id = routines.iter().find(|x| x.buckets.iter().any(|b| b.id == r.bucket.id)).map(|x| x.id.clone());
+        let found = store::filed(conn, &label, false)?.into_iter().find(|f| f.thread_id == thread_id);
+        return Ok(Some(Filing {
+            label_id: label,
+            bucket: r.bucket.label_name.clone(),
+            routine_id,
+            sender: found.as_ref().and_then(|f| f.from_email.clone()).map(|e| e.to_lowercase()),
+            subject: found.as_ref().map(|f| f.subject.clone()).unwrap_or_default(),
+            at: found.map_or(0, |f| f.at),
+        }));
+    }
+    Ok(None)
+}
+
+#[uniffi::export]
+impl Core {
+    /// *Back to the Inbox* (I, spec §14.13): the conversation leaves its
+    /// bucket for the Inbox, and Kaluta proposes leaving its sender's mail
+    /// alone. Nothing about the routine changes until that is accepted.
+    pub async fn back_to_inbox(&self, thread_id: String) -> Result<BackToInbox, CoreError> {
+        let db = self.db()?;
+        let t = thread_id.clone();
+        let Some(f) = runtime::run(async move { Ok(db.read(move |c| filing(c, &t)).await?) }).await? else {
+            let undo = self.move_to_inbox(vec![thread_id]).await?;
+            return Ok(BackToInbox { undo, proposal_id: None });
+        };
+        let undo = self
+            .modify_labels(
+                vec![thread_id.clone()],
+                vec![mail_domain::system_labels::INBOX.into()],
+                vec![f.label_id.clone()],
+            )
+            .await?;
+        let Some(sender) = f.sender.clone() else { return Ok(BackToInbox { undo, proposal_id: None }) };
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        let proposal_id = runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    mail_store::routine_proposals::propose(
+                        tx,
+                        f.routine_id.as_deref(),
+                        &format!("Leave mail from {sender} in the Inbox"),
+                        &format!("Mail from {sender}: leave it in the Inbox"),
+                        &format!("leave_alone:{sender}"),
+                        mail_store::routine_proposals::Evidence {
+                            thread_id,
+                            subject: f.subject,
+                            bucket: f.bucket,
+                            at: f.at,
+                        },
+                        now,
+                    )
+                })
+                .await?)
+        })
+        .await?;
+        self.account_events().emit(CoreEvent::WorkflowsChanged);
+        Ok(BackToInbox { undo, proposal_id })
+    }
+
+    /// Undo of *Back to the Inbox*'s proposal: the conversation no longer
+    /// counts for it.
+    pub async fn withdraw_routine_evidence(&self, proposal_id: i64, thread_id: String) -> Result<(), CoreError> {
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        runtime::run(async move {
+            Ok(db.write(move |tx| mail_store::routine_proposals::withdraw(tx, proposal_id, &thread_id, now)).await?)
+        })
+        .await?;
+        self.account_events().emit(CoreEvent::WorkflowsChanged);
+        Ok(())
+    }
+
+    /// The changes to the sorting routine waiting for the user.
+    pub async fn routine_proposals(&self) -> Result<Vec<RoutineProposalInfo>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            Ok(db.read(mail_store::routine_proposals::proposed).await?.into_iter().map(proposal_info).collect())
+        })
+        .await
+    }
+
+    /// Accept (the rule joins the routine's leave-alone rules) or reject a
+    /// proposed change. With no routine set up yet, accepting is refused
+    /// with the reason, and the change keeps waiting.
+    pub async fn decide_routine_proposal(&self, id: i64, accept: bool) -> Result<(), CoreError> {
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        let (proposal, rows) = runtime::run(async move {
+            Ok(db
+                .read(move |c| Ok((mail_store::routine_proposals::get(c, id)?, mail_store::routines::list(c)?)))
+                .await?)
+        })
+        .await?;
+        let p =
+            proposal.ok_or_else(|| CoreError::new(crate::ErrorKind::NotFound, "that change is no longer proposed"))?;
+        let mut routine_id = None;
+        if accept {
+            let mut routine = rows
+                .iter()
+                .filter(|r| p.routine_id.as_ref().is_none_or(|id| *id == r.uuid))
+                .find_map(|r| crate::routines::decode(&r.definition_json).ok())
+                .ok_or_else(|| {
+                    CoreError::new(
+                        crate::ErrorKind::InvalidInput,
+                        "Set up the sorting routine first (Routines…); this change will wait.",
+                    )
+                })?;
+            if !routine.leave_alone.custom.contains(&p.rule) {
+                routine.leave_alone.custom.push(p.rule.clone());
+            }
+            routine_id = Some(routine.id.clone());
+            self.store_routine(&routine).await?;
+        }
+        let db = self.db()?;
+        let status = if accept { "accepted" } else { "rejected" };
+        runtime::run(async move {
+            Ok(db
+                .write(move |tx| mail_store::routine_proposals::set_status(tx, id, status, routine_id.as_deref(), now))
+                .await?)
+        })
+        .await?;
+        self.account_events().emit(CoreEvent::WorkflowsChanged);
+        Ok(())
+    }
+
+    /// Undo of a decision: proposed again; an accepted rule leaves the
+    /// routine.
+    pub async fn reopen_routine_proposal(&self, id: i64) -> Result<(), CoreError> {
+        let db = self.db()?;
+        let (proposal, rows) = runtime::run(async move {
+            Ok(db
+                .read(move |c| Ok((mail_store::routine_proposals::get(c, id)?, mail_store::routines::list(c)?)))
+                .await?)
+        })
+        .await?;
+        let Some(p) = proposal else { return Ok(()) };
+        if p.status == "accepted"
+            && let Some(mut routine) = rows
+                .iter()
+                .filter(|r| p.routine_id.as_ref().is_some_and(|id| *id == r.uuid))
+                .find_map(|r| crate::routines::decode(&r.definition_json).ok())
+        {
+            routine.leave_alone.custom.retain(|r| *r != p.rule);
+            self.store_routine(&routine).await?;
+        }
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        runtime::run(async move {
+            Ok(db.write(move |tx| mail_store::routine_proposals::set_status(tx, id, "proposed", None, now)).await?)
+        })
+        .await?;
+        self.account_events().emit(CoreEvent::WorkflowsChanged);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,7 +532,9 @@ mod tests {
         stop_scheduler(core);
         core.debug_use_fake_agents();
         rt(core.debug_seed_workflow_demo(20)).unwrap();
-        // No routine yet: the template's buckets, found by their labels.
+        assert_eq!(rt(core.list_routines()).unwrap().len(), 1, "the demo's routine, switched off");
+        rt(core.delete_routine("demo-routine".into())).unwrap();
+        // No routine: the template's buckets, found by their labels.
         let report = rt(core.reading_report()).unwrap();
         assert_eq!(report.buckets.len(), 6, "{report:?}");
         assert!(report.buckets.iter().any(|b| b.cadence == "daily" && b.due_today));
@@ -322,5 +545,32 @@ mod tests {
         let summaries = rt(core.reading_summaries(news.thread_ids.clone())).unwrap();
         assert_eq!(summaries.len(), news.thread_ids.len());
         assert!(summaries.iter().all(|s| !s.line.is_empty()));
+
+        // Back to the Inbox: out of the bucket, into the Inbox, and a
+        // proposed change to the routine.
+        let thread = news.thread_ids[0].clone();
+        let back = rt(core.back_to_inbox(thread.clone())).unwrap();
+        let id = back.proposal_id.expect("a change proposed");
+        let db = core.db().unwrap();
+        let t = thread.clone();
+        assert!(!rt(db.read(move |c| mail_store::waiting::has_label(c, &t, "Label_MI2"))).unwrap());
+        let t = thread.clone();
+        assert!(rt(db.read(move |c| mail_store::waiting::has_label(c, &t, "INBOX"))).unwrap());
+        let proposals = rt(core.routine_proposals()).unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert!(proposals[0].statement.starts_with("Leave mail from "), "{proposals:?}");
+
+        // No routine yet: accepting waits for one.
+        assert!(rt(core.decide_routine_proposal(id, true)).is_err());
+        rt(core.create_routine_from_template("claude_cloud".into())).unwrap();
+        rt(core.decide_routine_proposal(id, true)).unwrap();
+        let routine = rt(core.list_routines()).unwrap().remove(0);
+        assert!(routine.definition_json.contains(&proposals[0].rule));
+        assert!(rt(core.routine_proposals()).unwrap().is_empty());
+        rt(core.reopen_routine_proposal(id)).unwrap();
+        let routine = rt(core.list_routines()).unwrap().remove(0);
+        assert!(!routine.definition_json.contains(&proposals[0].rule), "undo takes the rule out");
+        rt(core.withdraw_routine_evidence(id, thread)).unwrap();
+        assert!(rt(core.routine_proposals()).unwrap().is_empty());
     }
 }

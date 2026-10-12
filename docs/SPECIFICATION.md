@@ -4512,6 +4512,13 @@ own day), monthly ones on the 1st.
   change to the routine** (for example, add the sender to *Leave
   alone*), with the evidence; it waits in Teach Kaluta and nothing
   changes until the user accepts it.
+  The proposal is "Leave mail from news@example.com in the Inbox"; each
+  conversation moved back for the same sender is more evidence for it
+  (`routine_proposals`, with the bucket each came from). Accepting adds
+  the line to the routine's leave-alone rules (§11.2), ⌘Z takes it out;
+  with no routine set up yet, accepting is refused with the reason and
+  the change keeps waiting. A rejected change is not proposed again;
+  undoing the move takes its conversation off the proposal.
 
 #### Agents
 

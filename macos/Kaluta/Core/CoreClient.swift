@@ -763,6 +763,26 @@ final class CoreClient: Sendable {
         try await call { try await core.readingSummaries(threadIds: threadIDs) }
     }
 
+    func backToInbox(_ threadID: String) async throws(CoreClientError) -> BackToInbox {
+        try await call { try await core.backToInbox(threadId: threadID) }
+    }
+
+    func withdrawRoutineEvidence(_ proposalID: Int64, threadID: String) async throws(CoreClientError) {
+        try await call { try await core.withdrawRoutineEvidence(proposalId: proposalID, threadId: threadID) }
+    }
+
+    func routineProposals() async throws(CoreClientError) -> [RoutineProposalInfo] {
+        try await call { try await core.routineProposals() }
+    }
+
+    func decideRoutineProposal(_ id: Int64, accept: Bool) async throws(CoreClientError) {
+        try await call { try await core.decideRoutineProposal(id: id, accept: accept) }
+    }
+
+    func reopenRoutineProposal(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.reopenRoutineProposal(id: id) }
+    }
+
     // MARK: Waiting on others (spec §14.13)
 
     func waitingInfo(_ threadID: String) async throws(CoreClientError) -> WaitingInfo? {
@@ -1806,6 +1826,9 @@ typealias WaitingInfo = KalutaCore.WaitingInfo
 typealias ReadingReport = KalutaCore.ReadingReport
 typealias ReadingBucket = KalutaCore.ReadingBucket
 typealias ReadingSummary = KalutaCore.ReadingSummary
+typealias BackToInbox = KalutaCore.BackToInbox
+typealias RoutineProposalInfo = KalutaCore.RoutineProposalInfo
+typealias RoutineEvidence = KalutaCore.RoutineEvidence
 typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo
 typealias DecisionCount = KalutaCore.DecisionCount
 

@@ -20,6 +20,7 @@ pub mod outbox;
 pub mod queue;
 pub mod read;
 pub mod reading;
+pub mod routine_proposals;
 pub mod routines;
 pub mod search;
 pub mod tasks;
