@@ -23,8 +23,9 @@ struct WorkflowTests {
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("2"), "2", [], .pick2),
             (KeyEquivalent("/"), "/", [], .tellKaluta),
-            // A modifier makes it a menu key, not a workflow's.
-            (KeyEquivalent("e"), "e", .command, nil),
+            // ⌘E clears a reading bucket; another modifier makes it a menu key.
+            (KeyEquivalent("e"), "e", .command, .clearBucket),
+            (KeyEquivalent("e"), "e", [.command, .shift], nil),
             (KeyEquivalent("x"), "x", [], nil),
         ]
         for (key, characters, modifiers, expected) in keys {
@@ -165,5 +166,23 @@ struct WorkflowTests {
         #expect(WorkflowRail.detail(wait, item("answered"), now: now) == "Answered · off the list")
         #expect(WorkflowRail.detail(wait, item("nudged"), now: now) == "Nudged")
         #expect(WorkflowEndView.words("later", count: 2, kind: .waiting) == "to check again")
+    }
+
+    @Test func aReadingItemBelongsToItsDueBucket() {
+        let items = ["a", "b", "c"].map { WorkflowItem(key: "thread:\($0)", threadId: $0, taskId: nil, decision: nil) }
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .reading, items: items, startedAt: 0, resumed: false))
+        session.reading = ReadingReport(sortedThisWeek: 5, buckets: [
+            ReadingBucket(id: "daily", title: "Daily", labelId: "L1", cadence: "daily", dueToday: true,
+                          verb: "Act on what needs you", threadIds: ["a"]),
+            ReadingBucket(id: "news", title: "Newsletters", labelId: "L2", cadence: "weekly", dueToday: true,
+                          verb: "Read, then clear", threadIds: ["b", "c"]),
+            ReadingBucket(id: "events", title: "Events", labelId: "L3", cadence: "weekly", dueToday: false,
+                          verb: "", threadIds: ["c"]),
+        ])
+        #expect(session.bucket(of: items[0])?.id == "daily")
+        #expect(session.bucket(of: items[2])?.id == "news", "a bucket not due today does not claim it")
+        #expect(WorkflowRail.readingDetail(WorkflowItem(key: "thread:b", threadId: "b", taskId: nil, decision: "inbox"))
+            == "Back in the Inbox")
+        #expect(WorkflowEndView.words("kept", count: 1, kind: .reading) == "kept for later")
     }
 }

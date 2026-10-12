@@ -23,6 +23,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case replyNow
     /// I: back to the Inbox (Weekly reading).
     case backToInbox
+    /// ⌘E: clear the bucket (Weekly reading): the rest of it read.
+    case clearBucket
     /// C: copy the code (Agents).
     case copyCode
     /// ⌫: reject, don't send.
@@ -52,6 +54,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skip: "S"
         case .replyNow: "R"
         case .backToInbox: "I"
+        case .clearBucket: "⌘E"
         case .copyCode: "C"
         case .reject: "⌫"
         case .pick1: "1"
@@ -80,6 +83,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .escape: return .back
         default: break
         }
+        if modifiers == .command, characters.lowercased() == "e" { return .clearBucket }
         guard modifiers.isDisjoint(with: [.command, .control, .option]),
               let c = characters.lowercased().first, characters.count == 1 else { return nil }
         return Self.characters[c]
@@ -114,6 +118,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skip: "Skip for now"
         case .replyNow: "Reply now"
         case .backToInbox: "Back to the Inbox"
+        case .clearBucket: "Clear the bucket"
         case .copyCode: "Copy the code"
         case .reject: kind == .agents ? "Don't send" : "Reject"
         case .pick1: "First answer"

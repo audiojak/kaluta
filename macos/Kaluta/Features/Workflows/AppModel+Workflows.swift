@@ -86,6 +86,11 @@ extension AppModel {
             // item loads behind it.
             if kind == .tasks { await loadTaskInfo(session) }
             if kind == .waiting { await loadWaits(session) }
+            if kind == .reading {
+                await loadReading(session)
+                // The report first, unless the set was already begun today.
+                session.showsReport = session.decided == 0
+            }
             withAnimation(Self.workflowMotion) { workflowSession = session }
             await prepareCurrentItem()
             if session.current == nil { await finishWorkflow() }
@@ -170,6 +175,14 @@ extension AppModel {
         kind == .waiting ? detail.messages.last { !$0.isDraft } : latestReceived(detail)
     }
 
+    /// Weekly reading's report and Kaluta's summaries of the set.
+    func loadReading(_ session: WorkflowSession) async {
+        guard let core else { return }
+        session.reading = try? await core.readingReport()
+        let ids = session.items.compactMap(\.threadId)
+        for s in (try? await core.readingSummaries(ids)) ?? [] { session.summaries[s.threadId] = s }
+    }
+
     /// Every wait in a Waiting set, for the rail and the items.
     func loadWaits(_ session: WorkflowSession) async {
         guard let core else { return }
@@ -193,6 +206,9 @@ extension AppModel {
             WorkflowAction(command: c, title: title ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
+        if session.kind == .reading, session.showsReport {
+            return [a(.primary, .primary, "Start reading")]
+        }
         if session.choosingCheckAgain {
             return [a(.pick1, .plain, "Tomorrow"), a(.pick2, .plain, "In 3 days"), a(.pick3, .plain, "Next week"),
                     a(.back, .quiet, "Cancel")]
@@ -214,6 +230,9 @@ extension AppModel {
                                                                          a(.skip, .quiet)]
         case .waiting:
             return [a(.primary, .primary, "Nudge"), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
+        case .reading:
+            return [a(.done, .primary), a(.primary, .plain, session.showsInFull ? "Show the summary" : "Open in full"),
+                    a(.later), a(.backToInbox), a(.task), a(.clearBucket, .quiet), a(.skip, .quiet)]
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
@@ -321,6 +340,10 @@ extension AppModel {
             await performWriting(command, writer, item: item, session: session)
             return
         }
+        if session.kind == .reading, session.showsReport {
+            withAnimation(Self.itemMotion) { session.showsReport = false }
+            return
+        }
         if session.choosingCheckAgain {
             session.choosingCheckAgain = false
             let days: Int? = switch command {
@@ -368,6 +391,20 @@ extension AppModel {
             await finishTask(item, session: session)
         case (.tasks, .later):
             await moveTaskToTomorrow(item, session: session)
+        case (.reading, .primary):
+            session.showsInFull.toggle()
+        case (.reading, .done):
+            await markRead([item], session: session, notice: nil)
+        case (.reading, .later):
+            await decide(item, "kept", session: session, notice: "Kept for later")
+        case (.reading, .backToInbox):
+            await sendBackToInbox(item, session: session)
+        case (.reading, .task):
+            await openTaskForm(item, session: session)
+        case (.reading, .clearBucket):
+            let bucket = session.bucket(of: item)
+            let rest = session.items.filter { $0.decision == nil && session.bucket(of: $0)?.id == bucket?.id }
+            await markRead(rest, session: session, notice: "Cleared \(bucket?.title ?? "the bucket")")
         case (.waiting, .primary):
             startWriting(item, session: session)
         case (.waiting, .done):
@@ -468,6 +505,50 @@ extension AppModel {
                                         replyAll: task?.action == .replyAll, taskID: task?.id,
                                         email: session.bodies[id] ?? message.snippet, answers: answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
+    }
+
+    /// Read, next (E) and Clear the bucket (⌘E): the mail is marked read
+    /// and keeps the routine's label (spec §14.13); ⌘Z undoes all of it.
+    private func markRead(_ items: [WorkflowItem], session: WorkflowSession, notice: String?) async {
+        guard let core, let accountID = openAccountID, let first = items.first else { return }
+        let ids = items.compactMap(\.threadId)
+        let token = try? await core.setRead(ids, true)
+        let setID = session.workflowSet.id
+        let millis = session.elapsedMillis
+        session.exit = .left
+        for item in items {
+            try? await core.decideWorkflowItem(set: setID, key: item.key, decision: "read",
+                                               millis: item.key == first.key ? millis : 0)
+        }
+        undo.record(accountID: accountID, actionName: notice ?? "Read", noticeText: notice ?? "",
+                    showNotice: notice != nil,
+                    undo: { [weak self] in
+                        if let token { _ = try? await core.undo(token) }
+                        for item in items { _ = try? await core.undoWorkflowDecision(set: setID, key: item.key) }
+                        await self?.reloadWorkflow(setID)
+                    },
+                    redo: { [weak self] in
+                        if let token { _ = try? await core.redo(token) }
+                        for item in items {
+                            try? await core.decideWorkflowItem(set: setID, key: item.key, decision: "read", millis: 0)
+                        }
+                        await self?.reloadWorkflow(setID)
+                    })
+        await reloadWorkflow(setID)
+    }
+
+    /// Back to the Inbox (I): out of the bucket, and Kaluta proposes leaving
+    /// such mail alone, to accept in Teach Kaluta (spec §14.13).
+    private func sendBackToInbox(_ item: WorkflowItem, session: WorkflowSession) async {
+        guard let core, let id = threadID(of: item), let back = try? await core.backToInbox(id) else { return }
+        let notice = back.proposalId == nil ? "Back in the Inbox"
+            : "Back in the Inbox. Kaluta proposes a change to the routine in Teach Kaluta"
+        await decide(item, "inbox", session: session, notice: notice,
+                     undoMail: {
+                         if let token = back.undo { _ = try? await core.undo(token) }
+                         if let proposal = back.proposalId { try? await core.withdrawRoutineEvidence(proposal, threadID: id) }
+                     },
+                     redoMail: { if let token = back.undo { _ = try? await core.redo(token) } })
     }
 
     /// *Let it go* (E): the wait ends and Kaluta's label comes off; ⌘Z

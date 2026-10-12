@@ -4501,6 +4501,12 @@ own day), monthly ones on the 1st.
   in full* (Return), *Keep for later* (L), *Back to the Inbox* (I),
   *Clear the bucket* (⌘E). Reading and clearing **mark mail read and keep
   the routine's label**.
+- The report shows until *Start reading* (Return) on a set not yet
+  begun today; its cards are the buckets due today with three of Kaluta's
+  lines each. In a bucket, the rail lists that bucket one line each and
+  the item shows Kaluta's summary (Return opens it in full, again for the
+  summary); *T* makes a task on the item's screen, as in Triage. ⌘Z
+  undoes Read, next and Clear the bucket together with their marking.
 - The buckets are the account's enabled routines' (§11.2); with no
   routine yet, the shipped template's, found by their labels' names. A
   weekly bucket's day is set in the routine editor (*Read on*). The

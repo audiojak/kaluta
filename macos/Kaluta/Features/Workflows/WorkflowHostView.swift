@@ -19,12 +19,16 @@ struct WorkflowHostView: View {
             HStack(spacing: 0) {
             // Tasks: today's set beside the task, done ones ticked.
             // Writing needs the room: the rail steps aside meanwhile.
-            if session.kind == .tasks || session.kind == .waiting, !session.isFinished, session.writer == nil {
+            if [.tasks, .waiting, .reading].contains(session.kind), !session.isFinished, !session.showsReport,
+               session.writer == nil {
                 WorkflowRail(session: session)
             }
             Group {
                 if session.isFinished {
                     WorkflowEndView(session: session)
+                } else if session.kind == .reading, session.showsReport {
+                    ReadingReportView(session: session)
+                        .safeAreaInset(edge: .bottom, spacing: 0) { decisionBar(actions) }
                 } else if let item = session.current {
                     ZStack {
                         ScrollViewReader { proxy in
@@ -170,6 +174,12 @@ struct WorkflowItemView: View {
                     }
                 }
             }
+            if session.kind == .reading, let bucket = session.bucket(of: item) {
+                Text("\(bucket.title) · \(bucket.verb)")
+                    .font(TypeRole.workflowKey).fontWeight(.semibold)
+                    .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                    .background(Tone.workflow(session.kind).opacity(0.14), in: Capsule())
+            }
             if session.kind == .waiting, let threadID, let wait = session.waits[threadID] {
                 WaitingLine(wait: wait, kind: session.kind)
             }
@@ -187,7 +197,14 @@ struct WorkflowItemView: View {
                         Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
                             .font(TypeRole.workflowDisplay)
                     }
-                    let text = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
+                    // Weekly reading: Kaluta's summary until it is opened in full.
+                    let summary = session.kind == .reading && !session.showsInFull
+                        ? session.summaries[detail.thread.id]?.summary : nil
+                    if summary != nil {
+                        Label("Kaluta's summary", systemImage: "sparkle")
+                            .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                    }
+                    let text = summary ?? session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
                     // What the email asks, marked where an answer is written.
                     Text(Self.asksAnswer(session.kind)
                         ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
@@ -257,10 +274,13 @@ struct WorkflowRail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text(session.kind == .waiting ? "Waiting on" : "Today").font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
+                Text(railTitle).font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
                     .padding(.horizontal, Space.l)
-                ForEach(session.items, id: \.key) { item in
-                    if let id = item.taskId, let task = session.taskInfo[id] {
+                ForEach(railItems, id: \.key) { item in
+                    if session.kind == .reading, let id = item.threadId {
+                        WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject ?? "…",
+                                        detail: Self.readingDetail(item), state: state(item), kind: session.kind)
+                    } else if let id = item.taskId, let task = session.taskInfo[id] {
                         WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
                                         kind: session.kind)
                     } else if let id = item.threadId, let wait = session.waits[id] {
@@ -275,6 +295,33 @@ struct WorkflowRail: View {
         .frame(width: Self.width)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(session.kind == .waiting ? "Waiting on others" : "Today's tasks")
+    }
+
+    /// Weekly reading lists the bucket on screen, one line each.
+    private var railItems: [WorkflowItem] {
+        guard session.kind == .reading, let current = session.current, let bucket = session.bucket(of: current) else {
+            return session.items
+        }
+        return session.items.filter { session.bucket(of: $0)?.id == bucket.id }
+    }
+
+    private var railTitle: String {
+        switch session.kind {
+        case .waiting: "Waiting on"
+        case .reading: session.current.flatMap(session.bucket(of:))?.title ?? "Reading"
+        default: "Today"
+        }
+    }
+
+    static func readingDetail(_ item: WorkflowItem) -> String {
+        switch item.decision {
+        case "read": "Read"
+        case "kept": "Kept for later"
+        case "inbox": "Back in the Inbox"
+        case "task": "Made a task"
+        case .some: "Done"
+        case nil: "Unread"
+        }
     }
 
     private func state(_ item: WorkflowItem) -> WorkflowRailRow.State {
@@ -304,6 +351,70 @@ struct WorkflowRail: View {
     }
 
     static let width: CGFloat = 280
+}
+
+/// Weekly reading's report (spec §14.13): what the routine sorted this
+/// week, what is due today and how long it takes, a card per due bucket
+/// with its verb, and the routine's settings and this morning's run.
+struct ReadingReportView: View {
+    @Environment(AppModel.self) private var model
+    let session: WorkflowSession
+    @State private var morningRun: RoutineRunInfo?
+
+    var body: some View {
+        let report = session.reading
+        let due = report?.buckets.filter { $0.dueToday && !$0.threadIds.isEmpty } ?? []
+        let count = due.reduce(0) { $0 + $1.threadIds.count }
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.xxxl) {
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text("\(report?.sortedThisWeek ?? 0) sorted this week").font(TypeRole.workflowHeadline)
+                    Text(count == 0 ? "Nothing is due today."
+                                    : "\(count) due today, about \(max(1, (count * 20 + 30) / 60)) min.")
+                        .font(TypeRole.workflowContent).foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.cardWidth), spacing: Space.xl)], spacing: Space.xl) {
+                    ForEach(due, id: \.id) { bucket in card(bucket) }
+                }
+                HStack(spacing: Space.l) {
+                    Button("Routine settings…") { model.openRoutines?() }
+                        .hoverHelp("Change the sorting routine: its buckets, their days and what it leaves alone")
+                    if let run = morningRun {
+                        Button("Undo this morning's run") { Task { await undoRun(run) } }
+                            .hoverHelp("Put back what the routine sorted this morning")
+                    }
+                }
+                .controlSize(.large)
+            }
+            .padding(Space.page)
+            .frame(maxWidth: WorkflowHostView.readingWidth + Space.page * 2, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .task { morningRun = await model.morningRoutineRun() }
+    }
+
+    private func card(_ bucket: ReadingBucket) -> some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text(bucket.title).font(TypeRole.workflowHeading)
+            Text("\(bucket.threadIds.count) · \(bucket.verb)").font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            ForEach(bucket.threadIds.prefix(3), id: \.self) { id in
+                Text(session.summaries[id]?.line ?? "…").font(TypeRole.workflowKey).lineLimit(1)
+            }
+        }
+        .padding(Space.xxl)
+        .frame(maxWidth: .infinity, minHeight: Self.cardHeight, alignment: .topLeading)
+        .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func undoRun(_ run: RoutineRunInfo) async {
+        guard let core = model.core, (try? await core.undoRoutineRun(run.runId)) != nil else { return }
+        morningRun = nil
+        await model.loadReading(session)
+    }
+
+    static let cardWidth: CGFloat = 260
+    static let cardHeight: CGFloat = 130
 }
 
 /// Who a conversation waits on, for how long, and why Kaluta thinks an
@@ -438,6 +549,7 @@ struct WorkflowEndView: View {
         case .tasks: return "Today's tasks are done."
         case .replies: return "Everyone has an answer."
         case .waiting: return "Nobody is left hanging."
+        case .reading: return "The reading is done."
         default: return "All done."
         }
     }
@@ -456,6 +568,9 @@ struct WorkflowEndView: View {
         case "nudged": "nudged"
         case "let_go": "let go"
         case "answered": "answered meanwhile"
+        case "read": "read"
+        case "kept": "kept for later"
+        case "inbox": "back to the Inbox"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
         case "done": "done"
@@ -468,6 +583,17 @@ struct WorkflowEndView: View {
 }
 
 extension AppModel {
+    /// This morning's sorting run, if one ran today and was not undone.
+    func morningRoutineRun() async -> RoutineRunInfo? {
+        guard let core, let routines = try? await core.routines() else { return nil }
+        let start = Calendar.current.startOfDay(for: .now).timeIntervalSince1970 * 1000
+        for r in routines {
+            let runs = (try? await core.routineRuns(r.id, limit: 5)) ?? []
+            if let run = runs.first(where: { Double($0.startedAt) >= start && $0.status == "succeeded" }) { return run }
+        }
+        return nil
+    }
+
     /// The header's one pill: Tasks says what waits for later this week.
     func workflowPill(_ session: WorkflowSession) -> String? {
         guard session.kind == .tasks,

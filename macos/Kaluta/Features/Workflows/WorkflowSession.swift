@@ -56,6 +56,13 @@ final class WorkflowSession {
     var taskForm: WorkflowTaskForm?
     /// Every task in a Tasks set, finished ones too, by id: the rail.
     var taskInfo: [Int64: TaskItem] = [:]
+    /// Weekly reading: the report, Kaluta's summaries by thread id, whether
+    /// the report is showing (before the first bucket), and whether the
+    /// item shows in full rather than summarised.
+    var reading: ReadingReport?
+    var summaries: [String: ReadingSummary] = [:]
+    var showsReport = false
+    var showsInFull = false
     /// Each conversation's wait (Waiting on others), by thread id.
     var waits: [String: WaitingInfo] = [:]
     /// *Check again* is choosing its day.
@@ -73,6 +80,7 @@ final class WorkflowSession {
             writer = nil
             taskForm = nil
             choosingCheckAgain = false
+            showsInFull = false
         }
         self.workflowSet = set
         itemShownAt = .now
@@ -83,6 +91,12 @@ final class WorkflowSession {
     var decided: Int { workflowSet.items.count { $0.decision != nil } }
     var total: Int { workflowSet.items.count }
     var isFinished: Bool { score != nil }
+
+    /// The reading bucket an item is in.
+    func bucket(of item: WorkflowItem) -> ReadingBucket? {
+        guard let id = item.threadId else { return nil }
+        return reading?.buckets.first { $0.dueToday && $0.threadIds.contains(id) }
+    }
 
     /// "4 of 12": the item on screen, out of the set.
     var progress: String {
