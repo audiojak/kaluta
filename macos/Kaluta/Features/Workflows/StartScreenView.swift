@@ -52,7 +52,7 @@ struct StartScreenView: View {
         }
         .onKeyPress(phases: .down) { press in
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
-            if press.key == .return, let next = overview?.next {
+            if press.key.isReturn, let next = overview?.next {
                 start(next)
                 return .handled
             }

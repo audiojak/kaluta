@@ -4305,19 +4305,21 @@ which of the two was showing when it quits only for the rest of that day.
 - **Resume**: leaving keeps the set and the position for the rest of the
   day; coming back continues there with a one-line recap of the item.
 
-**Keys** (the same verb has the same key everywhere; single keys act
-when no text field has the focus):
+**Keys** (the same verb has the same key everywhere, and a key does the
+same in every item; single keys act when no text field has the focus;
+Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 
 | Key | Command |
 |---|---|
-| Return | the suggested or primary action: start, reply, make the task, nudge, accept, write it |
+| Return | in an item, always **Reply** (a nudge is a reply), and nothing where there is no reply; elsewhere, go on: start, next, make the task, write it. Return never archives, approves or sends |
 | ⌘Return | send (from an editable email) |
 | ⌥⌘Return | send and keep the conversation's task open |
-| E | done: archive, done, let it go, read and next |
+| E | done: archive, done, let it go, read and next, accept, approve |
 | T | make a task |
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
-| R | reply now (where the suggestion is something else) |
+| R | reply, as Return |
+| O | open in full, or back to the summary (Reading) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |
@@ -4416,14 +4418,17 @@ one decision with a one-line reason:
   *Archive the email* is ticked (it stays under the `Task` label).
   *Archive* when nothing is asked of the user; *Leave in Inbox* (L) is
   always offered.
-- Return takes the suggestion; T, E, L, S and R are always there. A
+- The bar is the same for every conversation: *Reply* (Return or R),
+  *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Skip* (S).
+  The suggestion is marked on its own button (a ring and a sparkle on its corner, so no button moves) and
+  taken with that button's key; Return is only ever Reply. A
   conversation that already has an open task says so, and T shows that
   task instead of making a second.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
   "Has a task: …" when the conversation has one. With no suggestion yet,
-  Reply leads. A quick reply sent here offers *Send and finish the task*
+  no button is marked. A quick reply sent here offers *Send and finish the task*
   when the conversation has one.
 - Making the task, Return saves it (or the conversation's task, changed),
   archives the email if ticked, and moves on; ⌘Z takes all of it back.
@@ -4519,13 +4524,13 @@ own day), monthly ones on the 1st.
 - **A bucket**, one line per item, summarised by Kaluta **when the
   routine sorts** (stored with the run, so the bucket opens ready); the
   current item's short summary at content size. *Read, next* (E), *Open
-  in full* (Return), *Keep for later* (L), *Back to the Inbox* (I),
+  in full* (O), *Keep for later* (L), *Back to the Inbox* (I),
   *Clear the bucket* (⌘E). Reading and clearing **mark mail read and keep
   the routine's label**.
 - The report shows until *Start reading* (Return) on a set not yet
   begun today; its cards are the buckets due today with three of Kaluta's
   lines each. In a bucket, the rail lists that bucket one line each and
-  the item shows Kaluta's summary (Return opens it in full, again for the
+  the item shows Kaluta's summary (O opens it in full, again for the
   summary); *T* makes a task on the item's screen, as in Triage. ⌘Z
   undoes Read, next and Clear the bucket together with their marking.
 - The buckets are the account's enabled routines' (§11.2); with no
@@ -4563,7 +4568,7 @@ One set of what agents wait on the user for, across accounts:
 A line under the rail says what agent mailboxes sent on their own since
 the user last looked, with *See them*. The set holds each proposal waiting (a send shows the
 draft's text to edit, and Send saves it and approves; *Save as a draft*
-declines and leaves it in Drafts; another action has *Approve* and
+declines and leaves it in Drafts; another action has *Approve* (E) and
 *Don't*), each code from the last half hour in any agent mailbox (six
 digits, alone or as two groups of three; the expiry from "expires in …"),
 and this morning's successful sorting run (*Keep*, *Undo the run*). What
@@ -4576,7 +4581,7 @@ holds says so.
 Review mode (§14.10) widened into one queue: proposed routine changes,
 proposed writing-guide rules and proposed facts (including those learned
 from what the user told Kaluta), grouped by kind, each with its evidence
-and the change it makes; *Accept* (Return), *Edit…*, *Reject* (⌫), ⌘Z
+and the change it makes; *Accept* (E; Return in Review mode), *Edit…*, *Reject* (⌫), ⌘Z
 undoes; patterns still collecting evidence listed last. The Writing
 Guide's and Facts' bands open it on their kind. A routine change
 shows what it would leave alone, the rule it adds and the conversations

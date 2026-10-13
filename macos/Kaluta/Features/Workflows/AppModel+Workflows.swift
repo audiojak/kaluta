@@ -292,23 +292,24 @@ extension AppModel {
         case .triage:
             return triageActions(session, a)
         case .replies:
-            return [a(.primary, .primary, "Reply"), a(.task), a(.done), a(.skip, .quiet)]
+            return [a(.replyNow, .primary), a(.task), a(.done), a(.skip, .quiet)]
         case .tasks:
             let replies: Bool = {
                 guard let item = session.current, let task = task(of: item) else { return false }
                 return task.action != .noEmail
             }()
-            return (replies ? [a(.primary, .primary, "Reply")] : []) + [a(.done, replies ? .plain : .primary), a(.later),
+            return (replies ? [a(.replyNow, .primary)] : []) + [a(.done, replies ? .plain : .primary), a(.later),
                                                                          a(.skip, .quiet)]
         case .waiting:
-            return [a(.primary, .primary, "Nudge"), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
+            return [a(.replyNow, .primary), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
         case .agents:
             switch session.current.flatMap({ agentItem($0, in: session) }) {
             case let .action(_, tool, _, draftID, _) where AgentStore.isSend(tool) && draftID != nil:
                 return [a(.send, .primary, "Send"), a(.reject, .plain, "Don't send"), a(.later, .plain, "Save as a draft"),
                         a(.skip, .quiet)]
             case .action:
-                return [a(.primary, .primary, "Approve"), a(.reject, .plain, "Don't"), a(.skip, .quiet)]
+                // E, as Teach Kaluta's Accept: Return is only ever Reply.
+                return [a(.done, .primary, "Approve"), a(.reject, .plain, "Don't"), a(.skip, .quiet)]
             case .code:
                 return [a(.copyCode, .primary), a(.done, .plain, "Done"), a(.skip, .quiet)]
             case .run:
@@ -322,36 +323,33 @@ extension AppModel {
             task.shown = false
             var skip = a(.skip, .quiet)
             skip.shown = false
-            return [a(.done, .primary), a(.primary, .plain, session.showsInFull ? "Show the summary" : "Open in full"),
+            return [a(.done, .primary), a(.openInFull, .plain, session.showsInFull ? "Show the summary" : nil),
                     a(.later), a(.backToInbox), a(.clearBucket, .quiet), task, skip]
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
     }
 
-    /// Triage (spec §14.13): Return takes Kaluta's suggestion; R, T, E, L
-    /// and S are always there (the one Return already takes is not shown
-    /// twice, its key still works).
+    /// Triage (spec §14.13): the same buttons in the same order for every
+    /// conversation, Reply (Return) first; Kaluta's suggestion is marked on
+    /// its own button, and taken with that button's key.
     private func triageActions(_ session: WorkflowSession,
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
-        let taken: WorkflowCommand? = switch suggested?.kind {
+        let mark = suggested.map(Self.triageCommand)
+        return [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
+                a(.skip, .quiet, nil)]
+            .map { var action = $0; action.suggested = action.command == mark; return action }
+    }
+
+    /// The command that takes a triage suggestion.
+    static func triageCommand(_ suggestion: TriageSuggestion) -> WorkflowCommand {
+        switch suggestion.kind {
         case .quickReply: .replyNow
         case .task: .task
         case .archive: .done
         case .leave: .later
-        case nil: nil
         }
-        let primary = taken.map { a(.primary, .primary, $0 == .replyNow ? "Reply" : $0.title(in: .triage)) }
-        let rest = [a(.replyNow, .plain, "Reply"), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil)]
-            .map { action -> WorkflowAction in
-                var action = action
-                if action.command == taken { action.shown = false }
-                // With no suggestion, Reply leads.
-                if taken == nil, action.command == .replyNow { action.style = .primary }
-                return action
-            }
-        return (primary.map { [$0] } ?? []) + rest + [a(.skip, .quiet, nil)]
     }
 
     /// While Kaluta writes the item's answer: the step's own actions.
@@ -432,7 +430,10 @@ extension AppModel {
         default:
             break
         }
-        guard let item = session.current, workflowActions().contains(where: { $0.command == command }) else { return }
+        let actions = workflowActions().map(\.command)
+        // Return in an item is Reply, and nothing where there is none.
+        let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow : command
+        guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)
             return
@@ -457,16 +458,6 @@ extension AppModel {
             return
         }
         switch (session.kind, command) {
-        case (.triage, .primary):
-            // Kaluta's suggestion, as its own key would.
-            let suggested = threadID(of: item).flatMap { session.suggestions[$0] }
-            switch suggested?.kind {
-            case .quickReply: startWriting(item, session: session)
-            case .task: await openTaskForm(item, session: session)
-            case .archive: await archiveCurrent(item, session: session)
-            case .leave: await decide(item, "leave", session: session, notice: "Left in the Inbox")
-            case nil: startWriting(item, session: session)
-            }
         case (.triage, .task):
             await openTaskForm(item, session: session)
         case (_, .skip):
@@ -478,7 +469,7 @@ extension AppModel {
             await archiveCurrent(item, session: session)
         case (.triage, .later):
             await decide(item, "leave", session: session, notice: "Left in the Inbox")
-        case (.triage, .replyNow), (.replies, .primary), (.tasks, .primary):
+        case (.triage, .replyNow), (.replies, .replyNow), (.tasks, .replyNow), (.waiting, .replyNow):
             startWriting(item, session: session)
         case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
@@ -490,7 +481,7 @@ extension AppModel {
             await moveTaskToTomorrow(item, session: session)
         case (.agents, _):
             await performAgents(command, item: item, session: session)
-        case (.reading, .primary):
+        case (.reading, .openInFull):
             session.showsInFull.toggle()
         case (.reading, .done):
             await markRead([item], session: session, notice: nil)
@@ -504,8 +495,6 @@ extension AppModel {
             let bucket = session.bucket(of: item)
             let rest = session.items.filter { $0.decision == nil && session.bucket(of: $0)?.id == bucket?.id }
             await markRead(rest, session: session, notice: "Cleared \(bucket?.title ?? "the bucket")")
-        case (.waiting, .primary):
-            startWriting(item, session: session)
         case (.waiting, .done):
             await letGo(item, session: session)
         case (.waiting, .later):
@@ -623,7 +612,7 @@ extension AppModel {
             }
             agent.resolve(id, approve: true)
             await decide(item, "sent", session: session, notice: nil)
-        case let (.action(id, _, _, _, _), .primary):
+        case let (.action(id, _, _, _, _), .done):
             agent.resolve(id, approve: true)
             await decide(item, "approved", session: session, notice: nil)
         case let (.action(id, _, _, _, _), .reject):

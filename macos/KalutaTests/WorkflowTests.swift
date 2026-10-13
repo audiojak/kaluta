@@ -11,6 +11,10 @@ struct WorkflowTests {
             (.return, "\r", [], .primary),
             (.return, "\r", .command, .send),
             (.return, "\r", [.command, .option], .sendKeepTask),
+            // Enter is Return, everywhere.
+            (.enter, "\u{3}", [], .primary),
+            (.enter, "\u{3}", .command, .send),
+            (.enter, "\u{3}", [.command, .option], .sendKeepTask),
             (.delete, "", [], .reject),
             (.escape, "", [], .back),
             (KeyEquivalent("e"), "e", [], .done),
@@ -19,6 +23,7 @@ struct WorkflowTests {
             (KeyEquivalent("l"), "l", [], .later),
             (KeyEquivalent("s"), "s", [], .skip),
             (KeyEquivalent("r"), "r", [], .replyNow),
+            (KeyEquivalent("o"), "o", [], .openInFull),
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("2"), "2", [], .pick2),
@@ -45,6 +50,23 @@ struct WorkflowTests {
         #expect(WorkflowCommand.done.title(in: .waiting) == "Let it go")
         #expect(WorkflowCommand.later.title(in: .tasks) == "Tomorrow")
         #expect(WorkflowCommand.done.keyLabel == "E")
+        // In an item Return is Reply: a nudge is one.
+        #expect(WorkflowCommand.replyNow.keyLabel == "Return")
+        #expect(WorkflowCommand.replyNow.title(in: .triage) == "Reply")
+        #expect(WorkflowCommand.replyNow.title(in: .waiting) == "Nudge")
+    }
+
+    /// Triage takes a suggestion with its own button's key, never Return
+    /// unless it is a reply.
+    @Test func aTriageSuggestionIsTakenByItsOwnKey() {
+        func suggestion(_ kind: TriageKind) -> TriageSuggestion {
+            TriageSuggestion(threadId: "t", kind: kind, seconds: nil, reason: "", answers: [], task: nil)
+        }
+        #expect(AppModel.triageCommand(suggestion(.quickReply)) == .replyNow)
+        #expect(AppModel.triageCommand(suggestion(.task)) == .task)
+        #expect(AppModel.triageCommand(suggestion(.archive)) == .done)
+        #expect(AppModel.triageCommand(suggestion(.leave)) == .later)
+        #expect(KeyEquivalent.enter.isReturn && KeyEquivalent.return.isReturn && !KeyEquivalent.space.isReturn)
     }
 
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {

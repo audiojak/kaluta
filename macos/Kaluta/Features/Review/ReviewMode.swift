@@ -425,7 +425,7 @@ struct ReviewQueueView: View {
         .listStyle(.inset)
         .focused($focused)
         .onAppear { focused = true }
-        .onKeyPress(.return) { model.reviewAct(.accept) ? .handled : .ignored }
+        .onKeyPress(keys: [.return, .enter]) { _ in model.reviewAct(.accept) ? .handled : .ignored }
         .onDeleteCommand { model.reviewAct(.reject) }
         .onKeyPress(characters: .init(charactersIn: "ejk"), phases: .down) { press in
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }

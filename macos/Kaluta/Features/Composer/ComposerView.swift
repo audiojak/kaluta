@@ -131,16 +131,18 @@ struct ComposerView: View {
             header(store)
                 .background {
                     // ⌘Return sends too, as in Gmail; with a task, ⌘Return
-                    // finishes it and ⌥⌘Return keeps it open.
-                    Button("Send") { send(store) } // no-help: hidden
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(!store.canSend)
-                        .hidden()
-                    if request.agentName == nil {
-                        Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
-                            .keyboardShortcut(.return, modifiers: [.command, .option])
-                            .disabled(!store.canSend || store.task == nil)
+                    // finishes it and ⌥⌘Return keeps it open. Enter as Return.
+                    ForEach([KeyEquivalent.return, .enter], id: \.character) { key in
+                        Button("Send") { send(store) } // no-help: hidden
+                            .keyboardShortcut(key, modifiers: .command)
+                            .disabled(!store.canSend)
                             .hidden()
+                        if request.agentName == nil {
+                            Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
+                                .keyboardShortcut(key, modifiers: [.command, .option])
+                                .disabled(!store.canSend || store.task == nil)
+                                .hidden()
+                        }
                     }
                 }
             if let task = store.task, request.agentName == nil {

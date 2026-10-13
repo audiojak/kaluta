@@ -29,13 +29,16 @@ struct WorkflowWriteView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .id(Self.scrollID)
         .background {
-            // ⌘Return and ⌥⌘Return send from inside the text, too.
-            Button("Send") { perform(.send) } // no-help: hidden
-                .keyboardShortcut(.return, modifiers: .command)
-                .hidden()
-            Button("Send, keep the task open") { perform(.sendKeepTask) } // no-help: hidden
-                .keyboardShortcut(.return, modifiers: [.command, .option])
-                .hidden()
+            // ⌘Return and ⌥⌘Return send from inside the text, too; Enter
+            // as Return.
+            ForEach([KeyEquivalent.return, .enter], id: \.character) { key in
+                Button("Send") { perform(.send) } // no-help: hidden
+                    .keyboardShortcut(key, modifiers: .command)
+                    .hidden()
+                Button("Send, keep the task open") { perform(.sendKeepTask) } // no-help: hidden
+                    .keyboardShortcut(key, modifiers: [.command, .option])
+                    .hidden()
+            }
         }
         .task(id: writer.step) {
             // The field or the text takes the keys. Focus asked for while

@@ -146,7 +146,7 @@ struct WorkflowHostView: View {
         HStack(spacing: Space.m) {
             ForEach(actions.filter(\.shown)) { action in
                 WorkflowButton(title: action.title, key: action.command.keyLabel, style: action.style,
-                               kind: session.kind) {
+                               kind: session.kind, suggested: action.suggested) {
                     Task { await model.performWorkflow(action.command) }
                 }
             }
