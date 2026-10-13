@@ -12,6 +12,7 @@ const ALLOWED: &[(&str, &str)] = &[
     // The record: dated plans, accepted ADRs, the original product spec.
     ("docs/plans/", "historical plans"),
     ("docs/adr/", "accepted decisions, and ADR 0017 on the rename"),
+    (".actual/", "rules the Actual sync generates from the ADRs, which name OpenAGC; regenerated, not edited"),
     ("Open-Source Agentic Email Client", "the original product spec"),
     ("README.md", "the note on the name"),
     ("CLAUDE.md", "never delete under the old data folder; the migration"),
