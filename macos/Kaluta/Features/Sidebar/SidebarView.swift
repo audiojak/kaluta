@@ -15,6 +15,15 @@ struct SidebarView: View {
         // foot. The account switcher sits in the sidebar's title bar.
         List(selection: $model.selectedMailboxID) {
             Section("Favorites") {
+                // Home, while the workflows are on (spec §14.13): the start
+                // screen is a click away from any mailbox.
+                if model.workflowsEnabled {
+                    Button { model.showStart() } label: {
+                        Label("What's Next", systemImage: "sun.max")
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHelp("The start screen: today's workflows (⌘0)")
+                }
                 ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)
                         .background(FocusRegionProbe(cycle: model.focus, region: .sidebar))

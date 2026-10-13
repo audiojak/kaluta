@@ -15,7 +15,7 @@ extension AppModel {
     /// Which of start screen and mail showed last, and on which day.
     static let workflowHomeKey = "workflowHome"
 
-    var workflowsEnabled: Bool { CoreClient.demoWorkflows || defaults.bool(forKey: Self.workflowsEnabledKey) }
+    var workflowsEnabled: Bool { CoreClient.demoWorkflows || workflowsPreference }
 
     /// The window shows the start screen or a workflow, not the mail view.
     var showsWorkflows: Bool { workflowsEnabled && home == .start }
@@ -23,6 +23,7 @@ extension AppModel {
     /// At launch: the start screen, unless the user chose Mail earlier
     /// today (spec §14.13: remembered for the rest of the day).
     func restoreHome(now: Date = .now) {
+        workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         // Kaluta's background jobs run only while workflows are on.
         core?.setWorkflowJobsOn(workflowsEnabled)
         let saved = defaults.string(forKey: Self.workflowHomeKey)?.split(separator: "@").map(String.init) ?? []
@@ -52,6 +53,7 @@ extension AppModel {
 
     /// Settings › General › Workflows changed.
     func workflowsSettingChanged() {
+        workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         core?.setWorkflowJobsOn(workflowsEnabled)
     }
 

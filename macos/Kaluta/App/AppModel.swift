@@ -739,6 +739,8 @@ final class AppModel {
     private(set) var tasksRevision = 0
     /// Bumped when a workflow set starts, changes or finishes (spec §14.13).
     private(set) var workflowsRevision = 0
+    /// Settings › General › Workflows, kept here so views follow it.
+    var workflowsPreference = false
     /// Bumped when the Inbox changes, so the start screen recounts.
     private(set) var inboxRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
