@@ -4364,7 +4364,7 @@ workflows: triage, replies, tasks, follow-ups and reading. It uses your
 agent in the background." *Turn On* switches them on and opens What's
 Next; *Not Now* puts the tip away for good. It is not offered in an
 imported or agent mailbox, or when workflows are already on. The agents
-are looked for at launch while the offer still waits.
+are looked for as each account opens.
 
 #### Kaluta's writing in workflows
 

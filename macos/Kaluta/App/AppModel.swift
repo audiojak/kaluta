@@ -630,7 +630,14 @@ final class AppModel {
         guard let core else { return }
         do {
             try await core.openAccount(accountID)
-            if agentStores[accountID] == nil { agentStores[accountID] = makeAgentStore(core: core, accountID: accountID) }
+            if agentStores[accountID] == nil {
+                let store = makeAgentStore(core: core, accountID: accountID)
+                agentStores[accountID] = store
+                // Which agents are ready, found now: the agent bar says
+                // "Looking for Claude…" until it knows, and the workflows
+                // are offered once one is (spec §14.13).
+                Task { await store.loadProviders() }
+            }
             accountState = .open(accountID: accountID)
             await mailboxes.reload()
             await reloadAccounts()

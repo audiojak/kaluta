@@ -241,4 +241,14 @@ struct WorkflowTests {
         #expect(model.workflowsEnabled && model.home == .start)
         #expect(!model.workflowsOfferable, "on already")
     }
+
+    @Test func anAccountsAgentsAreFoundWhenItOpens() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
+        await model.start(openDemo: true)
+        // Nothing asked for an agent: the account's own store looks anyway,
+        // so the agent bar does not stay on "Looking for Claude…".
+        for _ in 0..<200 where model.agent.providers.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(!model.agent.providers.isEmpty)
+    }
 }

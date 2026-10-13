@@ -25,11 +25,6 @@ extension AppModel {
     func restoreHome(now: Date = .now) {
         // Kaluta's background jobs run only while workflows are on.
         core?.setWorkflowJobsOn(workflowsEnabled)
-        // The workflows are offered once an agent is ready: find out now,
-        // while the offer still waits.
-        if !workflowsEnabled, !dismissedTips.contains(Tip.workflows.rawValue), agent.providers.isEmpty {
-            Task { await agent.loadProviders() }
-        }
         let saved = defaults.string(forKey: Self.workflowHomeKey)?.split(separator: "@").map(String.init) ?? []
         if saved.count == 2, saved[1] == DueDay.string(now), let home = WorkflowHome(rawValue: saved[0]) {
             self.home = home
