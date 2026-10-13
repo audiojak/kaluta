@@ -110,6 +110,14 @@ final class WorkflowSession {
         return nil
     }
 
+    /// A field has the keyboard's work: what to say, the email to send, or
+    /// a task being made. The workflow's own keys stand aside meanwhile.
+    var isTyping: Bool {
+        if taskForm != nil { return true }
+        guard let step = writer?.step else { return false }
+        return step == .say || step == .final
+    }
+
     /// The reading bucket an item is in.
     func bucket(of item: WorkflowItem) -> ReadingBucket? {
         guard let id = item.threadId else { return nil }

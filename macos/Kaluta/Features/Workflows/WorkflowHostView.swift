@@ -73,7 +73,9 @@ struct WorkflowHostView: View {
             }
             .workflowMorph(session.kind)
         }
-        .focusable()
+        // Not while there is text to type: a focusable screen keeps SwiftUI
+        // from handing the keyboard to the field inside it.
+        .focusable(!session.isTyping)
         .focused($focused)
         .defaultFocus($focused, true)
         .focusEffectDisabled()
@@ -83,10 +85,9 @@ struct WorkflowHostView: View {
         // Each item takes the keyboard back, whatever was clicked before,
         // and so does the item when its writing closes.
         .onChange(of: session.current?.key) { focused = true }
-        // Writing: the field takes the keys (the screen lets go); done, the
-        // screen takes them back.
-        .onChange(of: session.writer == nil) { _, closed in focused = closed }
-        .onChange(of: session.taskForm == nil) { _, closed in focused = closed }
+        // Typing: the field takes the keys (the screen lets go); done, the
+        // screen takes them back (Kaluta's answers' 1–3 and / are its).
+        .onChange(of: session.isTyping) { _, typing in focused = !typing }
         .onKeyPress(phases: .down) { press in
             // Typing or dictating in a field: the keys are the text's, not
             // the workflow's (⌘Return still sends, from the field's own

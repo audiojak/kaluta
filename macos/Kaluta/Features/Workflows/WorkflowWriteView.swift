@@ -37,14 +37,18 @@ struct WorkflowWriteView: View {
                 .keyboardShortcut(.return, modifiers: [.command, .option])
                 .hidden()
         }
-        .onChange(of: writer.step, initial: true) { _, step in
-            // The field or the text takes the keys, a turn later (focus set
-            // while a view appears is lost to the one it replaces).
-            Task { @MainActor in
-                // Long enough for the workflow screen to let go of the keys.
-                try? await Task.sleep(for: .milliseconds(80))
+        .task(id: writer.step) {
+            // The field or the text takes the keys. Focus asked for while
+            // the view is still appearing (it slides in with the item) can
+            // be lost, so ask until a text view has the keyboard.
+            let step = writer.step
+            guard step == .say || step == .final else { return }
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(60))
+                guard !Task.isCancelled else { return }
                 fieldFocused = step == .say
                 textFocused = step == .final
+                if WorkflowHostView.isEditingText { return }
             }
         }
     }
