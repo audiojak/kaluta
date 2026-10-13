@@ -101,12 +101,13 @@ final class WorkflowWriter {
 
     /// Return on *What do you want to say?*: Kaluta writes it, or, with no
     /// agent ready, the user's words become the email (*Write it yourself*).
-    func write(model: AppModel) async {
+    func write(model: AppModel, asWritten: Bool = false) async {
         let said = field.trimmingCharacters(in: .whitespacesAndNewlines)
         guard step == .say, !said.isEmpty else { return }
         directions = [said]
         field = ""
-        guard model.agent.isProviderReady else {
+        // Use my words, or no agent ready: what the user typed is the email.
+        guard model.agent.isProviderReady, !asWritten else {
             text = said
             aiText = nil
             step = .final

@@ -33,6 +33,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case pick1, pick2, pick3
     /// /: tell Kaluta what to say.
     case tellKaluta
+    /// The words typed are the email, as written: no drafting.
+    case ownWords
     /// Esc: back one step; from an item, back to Mail.
     case back
     /// Answers aloud and on screen what is left of the set.
@@ -62,7 +64,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .back: "Esc"
-        case .whatsLeft, .whereAmI: nil
+        case .whatsLeft, .whereAmI, .ownWords: nil
         }
     }
 
@@ -125,6 +127,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick2: "Second answer"
         case .pick3: "Third answer"
         case .tellKaluta: "Tell Kaluta what to say"
+        case .ownWords: "Use my words"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"

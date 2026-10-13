@@ -364,7 +364,11 @@ extension AppModel {
                 // The answers' own row says "None of these? Tell Kaluta…".
                 + [{ var x = a(.tellKaluta, .plain, nil); x.shown = false; return x }(), a(.back, .quiet, "Cancel")]
         case .say:
-            return [a(.primary, .primary, agent.isProviderReady ? "Write it" : "Write it yourself"), a(.back, .quiet, "Cancel")]
+            // Kaluta drafts from what the user said; or their words go as written.
+            guard agent.isProviderReady else {
+                return [a(.primary, .primary, "Write it yourself"), a(.back, .quiet, "Cancel")]
+            }
+            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), a(.back, .quiet, "Cancel")]
         case .final:
             let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
@@ -386,6 +390,8 @@ extension AppModel {
             session.writer = nil
         case (.say, .primary):
             await writer.write(model: self)
+        case (.say, .ownWords):
+            await writer.write(model: self, asWritten: true)
         case (.final, .back):
             writer.changeWhatISaid()
         case (.final, .send), (.final, .sendKeepTask):

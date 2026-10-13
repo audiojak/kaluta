@@ -83,7 +83,10 @@ struct WorkflowHostView: View {
         // Each item takes the keyboard back, whatever was clicked before,
         // and so does the item when its writing closes.
         .onChange(of: session.current?.key) { focused = true }
-        .onChange(of: session.writer == nil) { _, closed in if closed { focused = true } }
+        // Writing: the field takes the keys (the screen lets go); done, the
+        // screen takes them back.
+        .onChange(of: session.writer == nil) { _, closed in focused = closed }
+        .onChange(of: session.taskForm == nil) { _, closed in focused = closed }
         .onKeyPress(phases: .down) { press in
             // Typing or dictating in a field: the keys are the text's, not
             // the workflow's (⌘Return still sends, from the field's own

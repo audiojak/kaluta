@@ -41,6 +41,8 @@ struct WorkflowWriteView: View {
             // The field or the text takes the keys, a turn later (focus set
             // while a view appears is lost to the one it replaces).
             Task { @MainActor in
+                // Long enough for the workflow screen to let go of the keys.
+                try? await Task.sleep(for: .milliseconds(80))
                 fieldFocused = step == .say
                 textFocused = step == .final
             }
@@ -85,7 +87,13 @@ struct WorkflowWriteView: View {
 
     private var say: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
+                Text(model.agent.isProviderReady
+                     ? "Kaluta writes the email from it, for you to read and change before it goes."
+                     : "What you type is the email.")
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
             HStack(alignment: .top, spacing: Space.m) {
                 TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
                     .font(TypeRole.workflowContent)

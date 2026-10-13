@@ -251,4 +251,13 @@ struct WorkflowTests {
         for _ in 0..<200 where model.agent.providers.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         #expect(!model.agent.providers.isEmpty)
     }
+
+    @Test func useMyWordsSendsWhatWasTyped() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")
+        writer.field = "Happy to, next Tuesday at 10."
+        await writer.write(model: model, asWritten: true)
+        #expect(writer.step == .final && writer.text == "Happy to, next Tuesday at 10." && writer.aiText == nil)
+        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == nil)
+    }
 }
