@@ -86,16 +86,28 @@ struct WorkflowWriteView: View {
     private var say: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
-            TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
-                .font(TypeRole.workflowContent)
-                .textFieldStyle(.plain)
-                .lineLimit(2...6)
-                .padding(Space.xl)
-                .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-                .focused($fieldFocused)
-                .onSubmit { perform(.primary) }
-                .onExitCommand { perform(.back) }
-                .accessibilityLabel(Self.askTitle(session.kind))
+            HStack(alignment: .top, spacing: Space.m) {
+                TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
+                    .font(TypeRole.workflowContent)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...6)
+                    .focused($fieldFocused)
+                    .onSubmit { perform(.primary) }
+                    .onExitCommand { perform(.back) }
+                    .accessibilityLabel(Self.askTitle(session.kind))
+                // macOS dictation into the field, as Edit › Start Dictation
+                // (or the dictation key) does.
+                Button { startDictation() } label: {
+                    Image(systemName: "mic")
+                        .font(TypeRole.workflowContent)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Dictate (or press the dictation key, by default Fn twice)")
+                .accessibilityLabel("Dictate")
+            }
+            .padding(Space.xl)
+            .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
             if !writer.starters.isEmpty {
                 HStack(spacing: Space.s) {
                     ForEach(writer.starters, id: \.self) { starter in
@@ -154,6 +166,15 @@ struct WorkflowWriteView: View {
     }
 
     // MARK: Acting
+
+    /// Put the cursor in the field and start macOS dictation there.
+    private func startDictation() {
+        fieldFocused = true
+        Task { @MainActor in
+            // A turn later: the field must hold the keyboard first.
+            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+        }
+    }
 
     private func perform(_ command: WorkflowCommand) {
         Task { await model.performWorkflow(command) }

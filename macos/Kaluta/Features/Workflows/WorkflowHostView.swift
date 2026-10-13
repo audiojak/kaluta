@@ -85,6 +85,10 @@ struct WorkflowHostView: View {
         .onChange(of: session.current?.key) { focused = true }
         .onChange(of: session.writer == nil) { _, closed in if closed { focused = true } }
         .onKeyPress(phases: .down) { press in
+            // Typing or dictating in a field: the keys are the text's, not
+            // the workflow's (⌘Return still sends, from the field's own
+            // shortcuts).
+            if Self.isEditingText { return .ignored }
             guard let command = WorkflowCommand.command(key: press.key, characters: press.characters,
                                                         modifiers: press.modifiers) else { return .ignored }
             if session.isFinished {
@@ -134,6 +138,12 @@ struct WorkflowHostView: View {
         .padding(.vertical, Space.xl)
         .frame(maxWidth: Self.readingWidth + Space.page * 2)
         .frame(maxWidth: .infinity)
+    }
+
+    /// A text field or editor has the keyboard (its field editor is a text
+    /// view first responder).
+    static var isEditingText: Bool {
+        NSApp.keyWindow?.firstResponder is NSTextView
     }
 
     static let readingWidth: CGFloat = 900
