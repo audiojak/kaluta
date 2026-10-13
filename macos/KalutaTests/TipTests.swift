@@ -75,4 +75,13 @@ struct TipTests {
         #expect(other.dismissedTips.contains("cleanUp"), "opened from the menu: the tip is done too")
         UserDefaults().removePersistentDomain(forName: suite + "-2")
     }
+
+    @Test func theWorkflowsAreOfferedFirstOnceAnAgentIsReady() {
+        var c = inbox
+        c.workflowsAvailable = true
+        #expect(Tip.next(dismissed: [], context: c) == .workflows)
+        #expect(Tip.next(dismissed: ["workflows"], context: c) == .categories, "once put away, never again")
+        #expect(Tip.next(dismissed: [], context: inbox) == .categories, "no agent ready, or workflows on: no offer")
+        #expect(Tip.workflows.action == "Turn On" && Tip.workflows.dismiss == "Not Now")
+    }
 }

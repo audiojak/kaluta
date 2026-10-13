@@ -160,7 +160,8 @@ final class AppModel {
             agentShown: agent.isPresented,
             importantAvailable: !isAgentMailbox,
             inboxCount: Int(mailboxes.mailboxes.first { $0.kind == .inbox }?.totalCount ?? 0),
-            cleanUpAvailable: !isArchive))
+            cleanUpAvailable: !isArchive,
+            workflowsAvailable: workflowsOfferable))
     }
 
     /// Clean Up opened: its Inbox tip has done its work and never shows.
@@ -179,6 +180,7 @@ final class AppModel {
             agent.isPresented = true
             focusAgentPrompt()
         case (.cleanUp, true): openCleanUp?()
+        case (.workflows, true): turnOnWorkflows()
         default: break
         }
         dismissedTips.insert(tip.rawValue)

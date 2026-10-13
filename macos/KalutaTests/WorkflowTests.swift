@@ -231,4 +231,14 @@ struct WorkflowTests {
         #expect(quote.hasPrefix("On 2026-10-12, Morgan Okafor wrote:"))
         #expect(AppModel.splitQuote("Just a note").quote.isEmpty)
     }
+
+    @Test func turningOnTheOfferedWorkflowsOpensWhatsNext() throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
+        model.showMail()
+        #expect(!model.workflowsOfferable, "no agent found yet: nothing to offer")
+        model.finishTip(.workflows, accept: true)
+        #expect(model.workflowsEnabled && model.home == .start)
+        #expect(!model.workflowsOfferable, "on already")
+    }
 }

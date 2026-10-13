@@ -4354,6 +4354,18 @@ progress shows only past about a second; the user can keep deciding
 meanwhile. An item whose suggestion or answers are not ready yet is
 passed over for one that is, and comes back when it is.
 
+#### Turning them on
+
+While workflows are a preview they are off until the user turns them on
+(Settings › General › Workflows). Once Kaluta finds a ready agent (Claude
+Code or Codex), it offers them once, as the first of the Inbox's tips:
+*Daily Workflows* — "Kaluta can turn your mail into short daily
+workflows: triage, replies, tasks, follow-ups and reading. It uses your
+agent in the background." *Turn On* switches them on and opens What's
+Next; *Not Now* puts the tip away for good. It is not offered in an
+imported or agent mailbox, or when workflows are already on. The agents
+are looked for at launch while the offer still waits.
+
 #### Kaluta's writing in workflows
 
 - **Drafts follow the user.** Kaluta writes ahead only where the answer

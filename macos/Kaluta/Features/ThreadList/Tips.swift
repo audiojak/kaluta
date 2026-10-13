@@ -3,6 +3,9 @@ import Foundation
 /// The tips shown over the Inbox, one at a time and in this order, each
 /// until the user acts on it or puts it away (oagc-z87).
 enum Tip: String, CaseIterable {
+    /// The daily workflows (spec §14.13), offered once an agent is ready;
+    /// first, since it changes what Kaluta opens on.
+    case workflows
     /// Clean Up, for a large Inbox (spec §14.12); first, since it shows
     /// only when the Inbox is large.
     case cleanUp
@@ -25,6 +28,9 @@ enum Tip: String, CaseIterable {
         var inboxCount = 0
         /// The account can be cleaned up (an imported mailbox cannot).
         var cleanUpAvailable = true
+        /// An agent is ready and workflows are off (not an imported or
+        /// agent mailbox, not the demo, which has them on).
+        var workflowsAvailable = false
     }
 
     /// The Inbox size over which Clean Up is suggested: more than 1,000
@@ -37,6 +43,7 @@ enum Tip: String, CaseIterable {
         return allCases.first { tip in
             guard !dismissed.contains(tip.rawValue) else { return false }
             switch tip {
+            case .workflows: return c.workflowsAvailable
             case .cleanUp: return c.cleanUpAvailable && c.inboxCount > cleanUpThreshold
             case .categories: return c.categoriesAvailable && c.categoriesShown
             case .importantOnly: return c.importantAvailable && !c.importantOnly
@@ -47,6 +54,7 @@ enum Tip: String, CaseIterable {
 
     var systemImage: String {
         switch self {
+        case .workflows: "sun.max"
         case .cleanUp: "tray.full"
         case .categories: "rectangle.3.group"
         case .importantOnly: "chevron.right.2"
@@ -56,6 +64,7 @@ enum Tip: String, CaseIterable {
 
     var title: String {
         switch self {
+        case .workflows: "Daily Workflows"
         case .cleanUp: "Clean Up"
         case .categories: "Categories"
         case .importantOnly: "Important Only"
@@ -65,6 +74,7 @@ enum Tip: String, CaseIterable {
 
     var text: String {
         switch self {
+        case .workflows: "Kaluta can turn your mail into short daily workflows: triage, replies, tasks, follow-ups and reading. It uses your agent in the background."
         case .cleanUp: "See your Inbox grouped by sender, list or size, and archive thousands of messages at once."
         case .categories: "Your Inbox is sorted into Primary, Promotions, Social and Updates, as in Gmail."
         case .importantOnly: "See only the mail Gmail marks Important, and leave the rest for later."
@@ -74,6 +84,7 @@ enum Tip: String, CaseIterable {
 
     var action: String {
         switch self {
+        case .workflows: "Turn On"
         case .categories: "Keep"
         case .cleanUp: "Open Clean Up"
         case .importantOnly, .agent: "Try"
@@ -82,6 +93,7 @@ enum Tip: String, CaseIterable {
 
     var actionHelp: String {
         switch self {
+        case .workflows: "Open on What's Next with the daily workflows; Mail stays one key (M) away. Settings › General turns them off"
         case .cleanUp: "Open the Clean Up window for this account"
         case .categories: "Keep the category tabs above the Inbox"
         case .importantOnly: "Show only Important mail in the Inbox"
@@ -92,7 +104,7 @@ enum Tip: String, CaseIterable {
     var dismiss: String {
         switch self {
         case .categories: "Turn Off"
-        case .cleanUp, .importantOnly, .agent: "Not Now"
+        case .workflows, .cleanUp, .importantOnly, .agent: "Not Now"
         }
     }
 }
