@@ -8,6 +8,10 @@ struct WorkflowHostView: View {
     let session: WorkflowSession
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The item's scroll, for reading from the keyboard: ↑ ↓, Space and
+    /// ⇧Space, Page Up and Down, Home and End.
+    @State private var scroll = ScrollPosition()
+    @State private var scrollGeometry: ScrollGeometry?
 
     var body: some View {
         let actions = model.workflowActions()
@@ -39,6 +43,8 @@ struct WorkflowHostView: View {
                                     .frame(maxWidth: Self.readingWidth, alignment: .leading)
                                     .frame(maxWidth: .infinity)
                             }
+                            .scrollPosition($scroll)
+                            .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, g in scrollGeometry = g }
                             // Each writing step comes into view above the bar.
                             .onChange(of: [session.writer.map { "\($0.step)" }, session.taskForm.map { _ in "task" }]) { _, now in
                                 guard now.contains(where: { $0 != nil }) else { return }
@@ -84,7 +90,10 @@ struct WorkflowHostView: View {
         .onAppear { Task { @MainActor in focused = true } }
         // Each item takes the keyboard back, whatever was clicked before,
         // and so does the item when its writing closes.
-        .onChange(of: session.current?.key) { focused = true }
+        .onChange(of: session.current?.key) {
+            focused = true
+            scroll = ScrollPosition()
+        }
         // Typing: the field takes the keys (the screen lets go); done, the
         // screen takes them back (Kaluta's answers' 1–3 and / are its).
         .onChange(of: session.isTyping) { _, typing in focused = !typing }
@@ -93,6 +102,11 @@ struct WorkflowHostView: View {
             // the workflow's (⌘Return still sends, from the field's own
             // shortcuts).
             if Self.isEditingText { return .ignored }
+            // Reading the item from the keyboard, as in Mail.
+            if !session.isFinished, !session.showsReport, let target = scrollTarget(press) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { scroll.scrollTo(y: target) }
+                return .handled
+            }
             guard let command = WorkflowCommand.command(key: press.key, characters: press.characters,
                                                         modifiers: press.modifiers) else { return .ignored }
             if session.isFinished {
@@ -144,10 +158,38 @@ struct WorkflowHostView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// A text field or editor has the keyboard (its field editor is a text
-    /// view first responder).
+    /// Where a reading key moves the item to (the top edge's offset), or
+    /// nil for any other key: ↑ ↓ a line, Space and Page Down a page down,
+    /// ⇧Space and Page Up a page up, Home and End the ends.
+    private func scrollTarget(_ press: KeyPress) -> CGFloat? {
+        guard let g = scrollGeometry else { return nil }
+        let y = g.contentOffset.y
+        let page = max(Self.line, g.visibleRect.height - Self.pageOverlap)
+        let bottom = max(0, g.contentSize.height - g.containerSize.height + g.contentInsets.bottom)
+        let plain = press.modifiers.isDisjoint(with: [.command, .control, .option])
+        guard plain else { return nil }
+        let target: CGFloat? = switch press.key {
+        case .downArrow: y + Self.line
+        case .upArrow: y - Self.line
+        case .pageDown: y + page
+        case .pageUp: y - page
+        case .home: 0
+        case .end: bottom
+        case .space: press.modifiers.contains(.shift) ? y - page : y + page
+        default: nil
+        }
+        return target.map { min(max(0, $0), bottom) }
+    }
+
+    /// One arrow press, and how much of a page stays in view on Space.
+    static let line: CGFloat = 48
+    static let pageOverlap: CGFloat = 64
+
+    /// A text field or editor has the keyboard (its field editor is an
+    /// editable text view first responder).
     static var isEditingText: Bool {
-        NSApp.keyWindow?.firstResponder is NSTextView
+        // Text the user can only select (the email) does not count.
+        (NSApp.keyWindow?.firstResponder as? NSTextView)?.isEditable == true
     }
 
     static let readingWidth: CGFloat = 900
@@ -230,6 +272,8 @@ struct WorkflowItemView: View {
                         .font(TypeRole.workflowContent)
                         .lineSpacing(Space.xs)
                         .fixedSize(horizontal: false, vertical: true)
+                        // To copy from, for research or into the reply.
+                        .textSelection(.enabled)
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)

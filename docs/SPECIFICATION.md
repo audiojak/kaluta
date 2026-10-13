@@ -2952,7 +2952,7 @@ Every target in §1.3 traces to one of these rules.
 ### 14.3 Main window
 
 *(Amended 2026-10-11, ADR 0018: the window opens on the start screen,
-*What's next* (§14.13); everything below is the mail view, one key (M)
+*What's next* (§14.13); everything below is the mail view, one key (Esc or M)
 away, unchanged except where §14.13 says.)*
 
 - Sidebar: account avatar button (§7.7), mailboxes and labels, unread
@@ -4256,7 +4256,8 @@ ones every workflow must keep:
 #### The start screen
 
 The main window opens on the start screen (*What's next*); the mail app
-is one key away (**M**, and *View › Mail*), and the window remembers
+is one key away (**Esc** or **M**, *Open Mail* under the cards, and
+*View › Mail*), and the window remembers
 which of the two was showing when it quits only for the rest of that day.
 
 - **The day in one line**: the date and time, then an estimate ("About
@@ -4292,6 +4293,9 @@ which of the two was showing when it quits only for the rest of that day.
 - **A rail** where the workflow has one: what is up next (Triage), the
   set with each item's state (Replies, Tasks, Waiting, Agents), or the
   queue by kind (Teach Kaluta).
+- **The item's text** can be selected and copied; with no text field
+  focused, the arrow keys, Space and ⇧Space, Page Up and Down, and Home
+  and End scroll it.
 - **The decision bar**: the primary action filled in the workflow's
   colour, the others plain, each with its key on it.
 - **The end**: a ring that closes and a short burst, the score (what was
@@ -4320,7 +4324,8 @@ when no text field has the focus):
 | 1–3 | pick one of Kaluta's answers |
 | / | tell Kaluta what to say |
 | Esc | back one step; from an item, back to Mail |
-| M, 1–7 | Mail, a workflow (start screen) |
+| Esc or M, 1–7 | Mail, a workflow (start screen) |
+| ↑ ↓, Space, ⇧Space, Page Up/Down, Home/End | scroll the item |
 
 **One command layer.** Every action is a named command (`WorkflowCommand`)
 with one implementation that the key, the button, VoiceOver's actions

@@ -93,7 +93,7 @@ enum Tip: String, CaseIterable {
 
     var actionHelp: String {
         switch self {
-        case .workflows: "Open on What's Next with the daily workflows; Mail stays one key (M) away. Settings › General turns them off"
+        case .workflows: "Open on What's Next with the daily workflows; Mail stays one key (Esc or M) away. Settings › General turns them off"
         case .cleanUp: "Open the Clean Up window for this account"
         case .categories: "Keep the category tabs above the Inbox"
         case .importantOnly: "Show only Important mail in the Inbox"

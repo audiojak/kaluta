@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The start screen, *What's next* (spec §14.13): the day in one line, the
 /// next workflow as a large card (Return), the others on 1–7, Done today,
-/// and the mail view on M.
+/// and the mail view on Esc or M.
 struct StartScreenView: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focused: Bool
@@ -56,6 +56,10 @@ struct StartScreenView: View {
                 start(next)
                 return .handled
             }
+            if press.key == .escape {
+                model.showMail()
+                return .handled
+            }
             switch press.characters.lowercased() {
             case "m":
                 model.showMail()
@@ -95,7 +99,10 @@ struct StartScreenView: View {
         HStack(spacing: Space.l) {
             Text(Self.doneToday(overview)).foregroundStyle(.secondary)
             Spacer(minLength: Space.l)
-            Text("Return starts · 1–7 chooses · M opens Mail").foregroundStyle(.secondary)
+            Text("Return starts · 1–7 chooses").foregroundStyle(.secondary)
+            Button("Open Mail", systemImage: "tray") { model.showMail() }
+                .buttonStyle(.link)
+                .hoverHelp("Open the mailboxes (Esc or M)")
         }
         .font(TypeRole.workflowContext)
     }
