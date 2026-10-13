@@ -93,10 +93,9 @@ struct SidebarView: View {
         .onChange(of: model.routinesRevision) { Task { await model.routines.load() } }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                GuideRunFooter()
-                SyncStatusView()
-            }
+            // On a bar of its own, as in Mail: the folders scroll under it,
+            // never through its text.
+            SidebarFooter()
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -227,6 +226,23 @@ extension MailboxKind {
         case .spam: "xmark.bin"
         case .trash: "trash"
         case .label: "tag"
+        }
+    }
+}
+
+/// The sidebar's footer: the learning run and the sync status, on the bar
+/// material with a hairline above, shown only when either has something
+/// to say.
+private struct SidebarFooter: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            GuideRunFooter()
+            SyncStatusView()
+        }
+        .background {
+            // Sized by the content: nothing to say, no bar.
+            Rectangle().fill(.bar)
+                .overlay(alignment: .top) { InsetRule(inset: 0) }
         }
     }
 }
