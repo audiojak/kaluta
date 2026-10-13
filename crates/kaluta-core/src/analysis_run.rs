@@ -125,9 +125,9 @@ impl Core {
         runtime::run(async move { Ok(db.read(mail_store::compositions::recording).await?) }).await
     }
 
-    /// The agent reviews use: the one chosen for Analysis, else the one the
-    /// guide last learned with.
-    async fn analysis_agent(&self) -> Result<String, CoreError> {
+    /// The agent reviews (and workflow jobs) use: the one chosen for
+    /// Analysis, else the one the guide last learned with.
+    pub(crate) async fn analysis_agent(&self) -> Result<String, CoreError> {
         let db = self.db()?;
         runtime::run(async move {
             Ok(db
@@ -470,6 +470,14 @@ impl Core {
     /// was asked. An answer that cannot be read is asked for once more; a
     /// run stopped meanwhile drops the answer.
     async fn compare_batch(self: &Arc<Self>, run: i64, agent: &str, ids: &[i64]) -> Result<bool, CoreError> {
+        // Sent as written but directed (spec §14.13): it counts for what
+        // applied, as an undirected one does, and is compared for the
+        // direction.
+        let db = self.db()?;
+        let batch = ids.to_vec();
+        let unchanged =
+            runtime::run(async move { Ok(db.read(move |c| store::unchanged_among(c, &batch)).await?) }).await?;
+        self.support_applied(&unchanged, false, mail_sync::now_millis()).await?;
         let (pairs, entries) = self.compare_pairs(ids).await?;
         if pairs.is_empty() {
             return Ok(false);

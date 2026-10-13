@@ -9,11 +9,15 @@ import SwiftUI
 enum ReviewMode: Equatable {
     case rules
     case facts
+    /// Teach Kaluta (spec §14.13): one queue of routine changes, rules and
+    /// facts, grouped by kind.
+    case teach
 
     var title: String {
         switch self {
         case .rules: "Proposed Rules"
         case .facts: "Proposed Facts"
+        case .teach: "Teach Kaluta"
         }
     }
 }
@@ -32,26 +36,43 @@ struct ReviewItem: Identifiable, Equatable {
     let symbol: String
     /// A pattern short of the threshold: shown last, not yet proposed.
     var watching = false
+    /// Its kind's heading in Teach Kaluta's queue.
+    var group = ""
     var id: String { tag }
+
+    static func routineTag(_ id: Int64) -> String { "routine:\(id)" }
 }
 
 extension AppModel {
     /// Open the mode on what waits now; the first undecided item is current.
     func enterReview(_ mode: ReviewMode) {
         guidePrompt = nil
-        selectedMailboxID = mode == .rules ? Self.guideMailboxID : Self.factsMailboxID
+        selectedMailboxID = mode == .facts ? Self.factsMailboxID : Self.guideMailboxID
         reviewItems = reviewQueue(for: mode)
         reviewOutcomes = [:]
         reviewMode = mode
-        analysis.reviewingRules = mode == .rules
-        analysis.reviewingFacts = mode == .facts
+        analysis.reviewingRules = mode != .facts
+        analysis.reviewingFacts = mode != .rules
         let first = reviewItems.first { !$0.watching }?.tag ?? reviewItems.first?.tag
-        if mode == .rules { analysis.selection = first } else { facts.selection = first }
+        reviewSelection = first
+    }
+
+    /// Teach Kaluta: everything proposed, in one queue (spec §14.13).
+    func enterTeach() async {
+        await analysis.load()
+        await guide.load()
+        await loadRoutineProposals()
+        enterReview(.teach)
+    }
+
+    func loadRoutineProposals() async {
+        routineProposals = (try? await core?.routineProposals()) ?? []
     }
 
     /// Done or Esc: back to the page, a category or fact chosen.
     func leaveReview() {
         reviewMode = nil
+        teachSelection = nil
         reviewItems = []
         reviewOutcomes = [:]
         analysis.reviewingRules = false
@@ -62,7 +83,19 @@ extension AppModel {
 
     /// The queue for a page, in the order the user goes down it.
     func reviewQueue(for mode: ReviewMode) -> [ReviewItem] {
-        switch mode {
+        if mode == .teach {
+            // Routine changes, then the guide's, then facts; what is still
+            // collecting evidence last.
+            let routines = routineProposals.map { p in
+                ReviewItem(tag: ReviewItem.routineTag(p.id), statement: p.statement,
+                           caption: Self.routineCaption(p), symbol: "tray.and.arrow.down", group: "Sorting routine")
+            }
+            let rules = reviewQueue(for: .rules).map { var x = $0; x.group = "Writing guide"; return x }
+            let facts = reviewQueue(for: .facts).map { var x = $0; x.group = "Facts"; return x }
+            let all = routines + rules + facts
+            return all.filter { !$0.watching } + all.filter(\.watching)
+        }
+        return switch mode {
         case .rules:
             guide.decisions.map { entry in
                 ReviewItem(tag: AnalysisStore.tag(entry), statement: entry.statement,
@@ -73,12 +106,18 @@ extension AppModel {
                            caption: Self.reviewCaption(proposal, in: self), symbol: proposal.symbol,
                            watching: proposal.watching)
             }
-        case .facts:
+        case .facts, .teach:
             analysis.factProposals.map { proposal in
                 ReviewItem(tag: AnalysisStore.tag(proposal), statement: proposal.headline, caption: proposal.subtitle,
                            symbol: proposal.symbol)
             }
         }
+    }
+
+    /// "From 2 conversations you moved back to the Inbox".
+    static func routineCaption(_ p: RoutineProposalInfo) -> String {
+        let n = p.evidence.count
+        return "Routine change · from \(n) conversation\(n == 1 ? "" : "s") you moved back to the Inbox"
     }
 
     /// Whether an item still waits (it is in the stores), else its outcome.
@@ -88,6 +127,7 @@ extension AppModel {
     }
 
     func reviewIsWaiting(_ tag: String) -> Bool {
+        if tag.hasPrefix("routine:") { return routineProposals.contains { ReviewItem.routineTag($0.id) == tag } }
         if AnalysisStore.isFactProposalTag(tag) { return analysis.factProposal(tagged: tag) != nil }
         return guide.decisions.contains { AnalysisStore.tag($0) == tag }
             || (analysis.proposals + analysis.watching).contains { AnalysisStore.tag($0) == tag }
@@ -95,8 +135,24 @@ extension AppModel {
 
     /// The current item's tag, by mode.
     var reviewSelection: String? {
-        get { reviewMode == .facts ? facts.selection : analysis.selection }
-        set { if reviewMode == .facts { facts.selection = newValue } else { analysis.selection = newValue } }
+        get {
+            switch reviewMode {
+            case .facts: facts.selection
+            case .teach: teachSelection
+            default: analysis.selection
+            }
+        }
+        set {
+            switch reviewMode {
+            case .facts: facts.selection = newValue
+            case .teach:
+                teachSelection = newValue
+                // The rule or fact pages' own detail follows the queue.
+                if let newValue, AnalysisStore.isFactProposalTag(newValue) { facts.selection = newValue }
+                else if let newValue, !newValue.hasPrefix("routine:") { analysis.selection = newValue }
+            default: analysis.selection = newValue
+            }
+        }
     }
 
     /// "3 of 7": decided so far, out of what the mode opened on.
@@ -118,6 +174,13 @@ extension AppModel {
     @discardableResult
     func reviewAct(_ action: ReviewAction, on tag: String? = nil) -> Bool {
         guard let tag = tag ?? reviewSelection else { return false }
+        if let proposal = routineProposals.first(where: { ReviewItem.routineTag($0.id) == tag }) {
+            guard action != .edit else { return false }
+            let accept = action == .accept
+            reviewOutcomes[tag] = accept ? .accepted : .rejected
+            Task { await decideRoutineProposal(proposal, accept: accept) }
+            return true
+        }
         if let entry = guide.decisions.first(where: { AnalysisStore.tag($0) == tag }) {
             switch action {
             case .accept:
@@ -159,10 +222,46 @@ extension AppModel {
         return false
     }
 
+    /// A routine change decided (spec §14.13): accepted, its rule joins the
+    /// routine's leave-alone rules; ⌘Z puts it back to wait. Refused with
+    /// the reason when there is no routine to change.
+    func decideRoutineProposal(_ proposal: RoutineProposalInfo, accept: Bool) async {
+        guard let core, let accountID = openAccountID else { return }
+        let tag = ReviewItem.routineTag(proposal.id)
+        do {
+            try await core.decideRoutineProposal(proposal.id, accept: accept)
+        } catch {
+            reviewOutcomes[tag] = nil
+            undo.show(error.message, accountID: accountID, offersUndo: false)
+            return
+        }
+        await loadRoutineProposals()
+        undo.record(accountID: accountID, actionName: accept ? "Accept Change" : "Reject Change",
+                    noticeText: accept ? "The routine now leaves this mail alone" : "Left the routine as it is",
+                    undo: { [weak self] in
+                        try? await core.reopenRoutineProposal(proposal.id)
+                        await self?.loadRoutineProposals()
+                        self?.reviewOutcomes[tag] = nil
+                    },
+                    redo: { [weak self] in
+                        try? await core.decideRoutineProposal(proposal.id, accept: accept)
+                        await self?.loadRoutineProposals()
+                        self?.reviewOutcomes[tag] = accept ? .accepted : .rejected
+                    })
+        reviewMove(1)
+    }
+
     /// Accept All in the mode: every item waiting that goes against none
     /// of the user's (rules), or every proposed fact.
     func reviewAcceptAll() async {
         switch reviewMode {
+        case .teach:
+            for item in reviewItems where reviewOutcome(of: item) == nil && !item.watching {
+                reviewOutcomes[item.tag] = .accepted
+            }
+            for p in routineProposals { await decideRoutineProposal(p, accept: true) }
+            await acceptAllProposedRules()
+            await decideProposedFacts(analysis.factProposals, accept: true)
         case .rules:
             for item in reviewItems where reviewOutcome(of: item) == nil { reviewOutcomes[item.tag] = .accepted }
             await acceptAllProposedRules()
@@ -300,9 +399,20 @@ struct ReviewQueueView: View {
         let waiting = model.reviewItems.filter { !$0.watching }
         let watching = model.reviewItems.filter(\.watching)
         List(selection: Binding(get: { model.reviewSelection }, set: { model.reviewSelection = $0 })) {
-            // No heading over the queue: the toolbar's title names it.
-            ForEach(waiting) { item in
-                ReviewQueueRow(item: item, outcome: model.reviewOutcome(of: item)).tag(item.tag)
+            if mode == .teach {
+                // Teach Kaluta: grouped by kind.
+                ForEach(Self.groups(waiting), id: \.self) { group in
+                    Section(group) {
+                        ForEach(waiting.filter { $0.group == group }) { item in
+                            ReviewQueueRow(item: item, outcome: model.reviewOutcome(of: item)).tag(item.tag)
+                        }
+                    }
+                }
+            } else {
+                // No heading over the queue: the toolbar's title names it.
+                ForEach(waiting) { item in
+                    ReviewQueueRow(item: item, outcome: model.reviewOutcome(of: item)).tag(item.tag)
+                }
             }
             if !watching.isEmpty {
                 Section("Collecting evidence") {
@@ -328,6 +438,13 @@ struct ReviewQueueView: View {
             return .handled
         }
         .accessibilityLabel("Decisions")
+    }
+
+    /// The kinds present, in the queue's order.
+    static func groups(_ items: [ReviewItem]) -> [String] {
+        var out: [String] = []
+        for item in items where !out.contains(item.group) { out.append(item.group) }
+        return out
     }
 }
 
@@ -395,6 +512,8 @@ struct ReviewDecisionView: View {
                 document { ProposalDecisionBody(proposal: proposal) } actions: { proposalActions(proposal) }
             } else if let proposal = model.analysis.factProposal(tagged: tag) {
                 document { FactDecisionBody(proposal: proposal) } actions: { factActions(proposal) }
+            } else if let tag, let proposal = model.routineProposals.first(where: { ReviewItem.routineTag($0.id) == tag }) {
+                document { RoutineDecisionBody(proposal: proposal) } actions: { routineActions(proposal) }
             } else if let item, let outcome = model.reviewOutcome(of: item) {
                 DecidedView(item: item, outcome: outcome)
             } else {
@@ -459,6 +578,14 @@ struct ReviewDecisionView: View {
         }
         Button("Reject") { model.reviewAct(.reject, on: AnalysisStore.tag(proposal)) } // undoable
             .hoverHelp("Leave the guide as it is; this will not be proposed again (⌫)")
+    }
+
+    @ViewBuilder private func routineActions(_ proposal: RoutineProposalInfo) -> some View {
+        Button("Accept") { model.reviewAct(.accept, on: ReviewItem.routineTag(proposal.id)) }
+            .buttonStyle(.borderedProminent)
+            .hoverHelp("Add it to the sorting routine's leave-alone rules (Return); Undo takes it out")
+        Button("Reject") { model.reviewAct(.reject, on: ReviewItem.routineTag(proposal.id)) } // undoable
+            .hoverHelp("Leave the routine as it is; this will not be proposed again (⌫)")
     }
 
     @ViewBuilder private func factActions(_ proposal: AnalysisFactProposalInfo) -> some View {
@@ -549,6 +676,30 @@ private struct SectionLabel: View {
 }
 
 // MARK: - Bodies
+
+/// A change to the sorting routine: what it would leave alone, the rule
+/// it adds, and the conversations the user moved back (spec §14.13).
+private struct RoutineDecisionBody: View {
+    let proposal: RoutineProposalInfo
+
+    var body: some View {
+        CueRow(kind: "Routine change", category: "Leave alone", source: "From what you moved back")
+        Text(proposal.statement).font(TypeRole.display).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionLabel(text: "The rule it adds")
+            Text(proposal.rule).font(TypeRole.reading).fixedSize(horizontal: false, vertical: true)
+        }
+        VStack(alignment: .leading, spacing: Space.m) {
+            SectionLabel(text: "Moved back to the Inbox")
+            ForEach(proposal.evidence, id: \.threadId) { e in
+                VStack(alignment: .leading, spacing: Space.hair) {
+                    Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
+                    Text("Was in \(e.bucket)").font(TypeRole.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
 
 /// A learning decision: the proposed entry, the entry of the user's it
 /// goes against, and the messages that show it.
@@ -769,8 +920,7 @@ struct ReviewSummaryView: View {
                 Text(Self.summary(accepted: accepted, rejected: rejected, mode: mode))
                     .font(TypeRole.reading).foregroundStyle(.secondary)
             } else {
-                Text(mode == .rules ? "Rules the daily review and learning propose wait here."
-                     : "Facts the daily review finds in your mail wait here.")
+                Text(Self.emptyLine(mode))
                     .font(TypeRole.reading).foregroundStyle(.secondary)
             }
             HStack(spacing: Space.l) {
@@ -791,9 +941,21 @@ struct ReviewSummaryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    static func emptyLine(_ mode: ReviewMode) -> String {
+        switch mode {
+        case .rules: "Rules the daily review and learning propose wait here."
+        case .facts: "Facts the daily review finds in your mail wait here."
+        case .teach: "Changes Kaluta proposes to your routine, your writing guide and your facts wait here."
+        }
+    }
+
     /// "5 added to your writing guide, 2 left out."
     static func summary(accepted: Int, rejected: Int, mode: ReviewMode) -> String {
-        let home = mode == .rules ? "your writing guide" : "your facts"
+        let home = switch mode {
+        case .rules: "your writing guide"
+        case .facts: "your facts"
+        case .teach: "what Kaluta knows"
+        }
         var parts: [String] = []
         if accepted > 0 { parts.append("\(accepted) added to \(home)") }
         if rejected > 0 { parts.append("\(rejected) left out") }

@@ -48,7 +48,10 @@ final class CoreClient: Sendable {
         }
         // Tests never run the user's real agent CLIs (which would use their
         // account); neither do UI runs that ask for fakes.
-        if UserDefaults.standard.bool(forKey: "KalutaFakeAgents") || Self.isRunningTests {
+        if Self.demoWorkflows {
+            // The workflow demo's agent also uses the mail tools.
+            core.debugUseDemoAgents()
+        } else if UserDefaults.standard.bool(forKey: "KalutaFakeAgents") || Self.isRunningTests {
             core.debugUseFakeAgents()
         }
         // Agent mailboxes (spec §7.9): tests and fake-agent runs never
@@ -62,8 +65,21 @@ final class CoreClient: Sendable {
     /// tests, and in scratch runs that ask for fakes. Never on the real data
     /// directory, where a fake mailbox would mix with real ones.
     static var usesFakeAgentMail: Bool {
-        isRunningTests || (isScratchRun && (UserDefaults.standard.bool(forKey: "KalutaFakeAgents")
+        isRunningTests || demoWorkflows || (isScratchRun && (UserDefaults.standard.bool(forKey: "KalutaFakeAgents")
             || UserDefaults.standard.bool(forKey: "KalutaFakeAgentMail")))
+    }
+
+    /// The workflow demo (`-KalutaDemoWorkflows YES`, docs/plans/design-review.md):
+    /// the demo mailbox dated from now, mail arriving, and agents that use
+    /// the mail tools. Only on a scratch data directory, never the real one.
+    static var demoWorkflows: Bool {
+        isScratchRun && UserDefaults.standard.bool(forKey: "KalutaDemoWorkflows")
+    }
+
+    /// How often the workflow demo's mail arrives (`-KalutaDemoArrivalSeconds`).
+    static var demoArrivalSeconds: UInt32 {
+        let seconds = UserDefaults.standard.integer(forKey: "KalutaDemoArrivalSeconds")
+        return seconds > 0 ? UInt32(seconds) : 180
     }
 
     /// The app's Keychain items, or a separate service when hosting tests
@@ -696,6 +712,120 @@ final class CoreClient: Sendable {
 
     func listTasks(includeDone: Bool = false) async throws(CoreClientError) -> [TaskItem] {
         try await call { try await core.listTasks(includeDone: includeDone) }
+    }
+
+    // MARK: Workflows (spec §14.13)
+
+    /// The start screen: each workflow's count, estimate and first names.
+    func workflowOverview() async throws(CoreClientError) -> WorkflowOverview {
+        try await call { try await core.workflowOverview() }
+    }
+
+    /// Today's open set of `kind`, resumed, or a new one fixed from now.
+    func startWorkflow(_ kind: WorkflowKind) async throws(CoreClientError) -> WorkflowSet {
+        try await call { try await core.startWorkflow(kind: kind) }
+    }
+
+    func decideWorkflowItem(set: Int64, key: String, decision: String, millis: Int64) async throws(CoreClientError) {
+        try await call { try await core.decideWorkflowItem(setId: set, key: key, decision: decision, millis: millis) }
+    }
+
+    @discardableResult
+    func undoWorkflowDecision(set: Int64, key: String) async throws(CoreClientError) -> Bool {
+        try await call { try await core.undoWorkflowDecision(setId: set, key: key) }
+    }
+
+    func skipWorkflowItem(set: Int64, key: String) async throws(CoreClientError) -> WorkflowSet {
+        try await call { try await core.skipWorkflowItem(setId: set, key: key) }
+    }
+
+    func finishWorkflow(set: Int64) async throws(CoreClientError) -> WorkflowScore {
+        try await call { try await core.finishWorkflow(setId: set) }
+    }
+
+    /// Background jobs wait while a workflow is on screen (spec §14.13).
+    func setWorkflowOpen(_ open: Bool) { core.setWorkflowOpen(open: open) }
+
+    /// Background jobs run only while workflows are on.
+    func setWorkflowJobsOn(_ on: Bool) { core.setWorkflowJobsOn(on: on) }
+
+    func triageSuggestion(_ threadID: String) async throws(CoreClientError) -> TriageSuggestion? {
+        try await call { try await core.triageSuggestion(threadId: threadID) }
+    }
+
+    // MARK: Weekly reading (spec §14.13)
+
+    func readingReport() async throws(CoreClientError) -> ReadingReport {
+        try await call { try await core.readingReport() }
+    }
+
+    func readingSummaries(_ threadIDs: [String]) async throws(CoreClientError) -> [ReadingSummary] {
+        try await call { try await core.readingSummaries(threadIds: threadIDs) }
+    }
+
+    func backToInbox(_ threadID: String) async throws(CoreClientError) -> BackToInbox {
+        try await call { try await core.backToInbox(threadId: threadID) }
+    }
+
+    func withdrawRoutineEvidence(_ proposalID: Int64, threadID: String) async throws(CoreClientError) {
+        try await call { try await core.withdrawRoutineEvidence(proposalId: proposalID, threadId: threadID) }
+    }
+
+    func routineProposals() async throws(CoreClientError) -> [RoutineProposalInfo] {
+        try await call { try await core.routineProposals() }
+    }
+
+    func decideRoutineProposal(_ id: Int64, accept: Bool) async throws(CoreClientError) {
+        try await call { try await core.decideRoutineProposal(id: id, accept: accept) }
+    }
+
+    func reopenRoutineProposal(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.reopenRoutineProposal(id: id) }
+    }
+
+    // MARK: Agents (spec §14.13)
+
+    func agentsWork() async throws(CoreClientError) -> AgentsWork {
+        try await call { try await core.agentsWork() }
+    }
+
+    func markAgentsLooked() async throws(CoreClientError) {
+        try await call { try await core.markAgentsLooked() }
+    }
+
+    // MARK: Waiting on others (spec §14.13)
+
+    func waitingInfo(_ threadID: String) async throws(CoreClientError) -> WaitingInfo? {
+        try await call { try await core.waitingInfo(threadId: threadID) }
+    }
+
+    func waitingLog(limit: UInt32 = 200) async throws(CoreClientError) -> [WaitingCheckInfo] {
+        try await call { try await core.waitingLog(limit: limit) }
+    }
+
+    func letGoWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.letGoWaiting(threadId: threadID) }
+    }
+
+    func resumeWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.resumeWaiting(threadId: threadID) }
+    }
+
+    func checkWaitingAgain(_ threadID: String, until: Date?) async throws(CoreClientError) {
+        let ms = until.map { Int64($0.timeIntervalSince1970 * 1000) }
+        try await call { try await core.checkWaitingAgain(threadId: threadID, until: ms) }
+    }
+
+    func restartWaiting(_ threadID: String) async throws(CoreClientError) {
+        try await call { try await core.restartWaiting(threadId: threadID) }
+    }
+
+    func waitingDays() async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.waitingDays() }
+    }
+
+    func setWaitingDays(_ days: UInt32) async throws(CoreClientError) {
+        try await call { try await core.setWaitingDays(days: days) }
     }
 
     /// Adds the tasks and labels their threads `Task`.
@@ -1435,6 +1565,18 @@ final class CoreClient: Sendable {
         try await call { try await core.debugSeedDemoMailbox(threads: threads) }
     }
 
+    /// The workflow demo: a synthetic mailbox ending two days ago, then
+    /// hand-written conversations dated from now.
+    @discardableResult
+    func seedWorkflowDemo(threads: UInt32) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.debugSeedWorkflowDemo(threads: threads) }
+    }
+
+    /// The workflow demo: new mail every `seconds`, as sync delivers it.
+    func startDemoArrivals(every seconds: UInt32) throws(CoreClientError) {
+        try callSync { try core.debugStartDemoArrivals(intervalSecs: seconds) }
+    }
+
     /// Runs a core call, converting generated errors to `CoreClientError`.
     /// Compose operations pinned to one account (spec §7.7).
     nonisolated func composer(for accountID: String) -> AccountComposer {
@@ -1680,6 +1822,28 @@ typealias GuideCheckFailure = KalutaCore.GuideCheckFailure
 typealias GuideChangeQuestion = KalutaCore.GuideChangeQuestion
 typealias GuideMergePlan = KalutaCore.GuideMergePlan
 typealias GuideMergeDecision = KalutaCore.GuideMergeDecision
+typealias WorkflowKind = KalutaCore.WorkflowKind
+typealias WorkflowOverview = KalutaCore.WorkflowOverview
+typealias WorkflowSummary = KalutaCore.WorkflowSummary
+typealias WorkflowDay = KalutaCore.WorkflowDay
+typealias WorkflowItem = KalutaCore.WorkflowItem
+typealias WorkflowSet = KalutaCore.WorkflowSet
+typealias WorkflowScore = KalutaCore.WorkflowScore
+typealias TriageSuggestion = KalutaCore.TriageSuggestion
+typealias TriageAnswer = KalutaCore.TriageAnswer
+typealias TriageKind = KalutaCore.TriageKind
+typealias WaitingInfo = KalutaCore.WaitingInfo
+typealias ReadingReport = KalutaCore.ReadingReport
+typealias ReadingBucket = KalutaCore.ReadingBucket
+typealias ReadingSummary = KalutaCore.ReadingSummary
+typealias BackToInbox = KalutaCore.BackToInbox
+typealias AgentsWork = KalutaCore.AgentsWork
+typealias AgentCode = KalutaCore.AgentCode
+typealias AgentSent = KalutaCore.AgentSent
+typealias RoutineProposalInfo = KalutaCore.RoutineProposalInfo
+typealias RoutineEvidence = KalutaCore.RoutineEvidence
+typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo
+typealias DecisionCount = KalutaCore.DecisionCount
 
 // MARK: - Events
 
@@ -1721,6 +1885,7 @@ enum CoreClientEvent: Sendable, Equatable {
     case agent(sessionID: String, events: [AgentEventInfo])
     case routinesChanged
     case tasksChanged
+    case workflowsChanged
     case guideChanged
     case guideProgress(GuideProgress)
     case analysisProgress(AnalysisProgress)
@@ -1811,6 +1976,8 @@ private extension CoreClientEvent {
             self = .routinesChanged
         case .tasksChanged:
             self = .tasksChanged
+        case .workflowsChanged:
+            self = .workflowsChanged
         case .guideChanged:
             self = .guideChanged
         case let .guideProgress(progress):

@@ -86,6 +86,112 @@ pub fn task_answer(prompt: &str) -> Option<String> {
     Some(format!("[{}]", items.join(", ")))
 }
 
+/// The fake's answer to a Kaluta triage prompt (spec §14.13), or `None`
+/// for any other prompt. Per `<email thread_id="…">` block: a question
+/// gets a quick reply with two answers, mail from a no-reply address is
+/// archived, a long email becomes a task, the rest stay in the Inbox.
+pub fn triage_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta triage suggestions") {
+        return None;
+    }
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let rest = rest.split("</email>").next().unwrap_or(rest);
+        let from = rest.lines().find_map(|l| l.strip_prefix("From: ")).unwrap_or_default().to_lowercase();
+        let name = from.split(['<', ' ']).next().unwrap_or_default();
+        let name = name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + &name[c.len_utf8()..])
+            .unwrap_or_default();
+        let body = rest.split_once("\n\n").map(|(_, b)| b).unwrap_or_default();
+        let esc = |s: &str| s.replace(['\\', '"'], "");
+        items.push(if from.contains("no-reply") || from.contains("noreply") || from.contains("notifications") {
+            format!(r#"{{"thread_id": "{id}", "kind": "archive", "reason": "Nothing is asked of you."}}"#)
+        } else if body.len() > 600 {
+            format!(
+                r#"{{"thread_id": "{id}", "kind": "task", "reason": "It needs more than a quick answer.", "task": {{"title": "Answer {}", "category": "Reply", "due": null, "action": "reply", "why": "A longer answer is needed."}}}}"#,
+                esc(&name)
+            )
+        } else if body.contains('?') {
+            format!(
+                r#"{{"thread_id": "{id}", "kind": "reply", "seconds": 20, "reason": "{} asks something quick.", "answers": [{{"label": "Yes", "text": "Hi {},\n\nYes, that works for me.\n\nJo"}}, {{"label": "Not this week", "text": "Hi {},\n\nNot this week, sorry. Could we look at next week?\n\nJo"}}]}}"#,
+                esc(&name),
+                esc(&name),
+                esc(&name)
+            )
+        } else {
+            format!(r#"{{"thread_id": "{id}", "kind": "leave", "reason": "Worth seeing again."}}"#)
+        });
+    }
+    Some(format!(r#"{{"suggestions": [{}]}}"#, items.join(", ")))
+}
+
+/// The fake's answer to a Kaluta waiting check (spec §14.13), or `None`
+/// for any other prompt: a sent email with a question in it expects an
+/// answer, the rest do not.
+pub fn waiting_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta waiting check") {
+        return None;
+    }
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let body = rest.split("</email>").next().unwrap_or(rest).split_once("\n\n").map(|(_, b)| b).unwrap_or("");
+        let (expects, reason) =
+            if body.contains('?') { (true, "It asks them something.") } else { (false, "Nothing is asked of them.") };
+        items.push(format!(r#"{{"thread_id": "{id}", "expects": {expects}, "reason": "{reason}"}}"#));
+    }
+    Some(format!(r#"{{"checks": [{}]}}"#, items.join(", ")))
+}
+
+/// The fake's answer to a Kaluta nudges prompt (spec §14.13), or `None`:
+/// three follow-ups for each email, addressed to its recipient.
+pub fn nudge_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta nudges") {
+        return None;
+    }
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let to = rest.lines().find_map(|l| l.strip_prefix("To: ")).unwrap_or_default();
+        let name = to.split([' ', '<', '@']).next().unwrap_or_default().replace(['"', '\\'], "");
+        let name = name
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().collect::<String>() + &name[c.len_utf8()..])
+            .unwrap_or_default();
+        items.push(format!(
+            r#"{{"thread_id": "{id}", "answers": [{{"label": "Gentle nudge", "text": "Hi {name},\n\nJust bringing this back to the top of your inbox. Any news?\n\nJo"}}, {{"label": "Offer a call", "text": "Hi {name},\n\nWould a quick call be easier? I'm free most afternoons this week.\n\nJo"}}, {{"label": "Set a date", "text": "Hi {name},\n\nCould you let me know by Friday? I'd like to settle this before next week.\n\nJo"}}]}}"#
+        ));
+    }
+    Some(format!(r#"{{"nudges": [{}]}}"#, items.join(", ")))
+}
+
+/// The fake's answer to a Kaluta reading prompt (spec §14.13), or `None`:
+/// the subject as the line, the first sentence of the body as the summary.
+pub fn reading_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta reading summaries") {
+        return None;
+    }
+    let esc = |s: &str| s.replace(['\\', '"', '\n'], " ");
+    let mut items = Vec::new();
+    for block in prompt.split("<email thread_id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let rest = rest.split("</email>").next().unwrap_or(rest);
+        let subject = rest.lines().find_map(|l| l.strip_prefix("Subject: ")).unwrap_or("A filed email");
+        let body = rest.split_once("\n\n").map(|(_, b)| b.trim()).unwrap_or("");
+        let first = body.split_inclusive(['.', '!', '?']).next().unwrap_or(body);
+        items.push(format!(
+            r#"{{"thread_id": "{id}", "line": "{}", "summary": "{}"}}"#,
+            esc(subject),
+            esc(first.trim())
+        ));
+    }
+    Some(format!(r#"{{"summaries": [{}]}}"#, items.join(", ")))
+}
+
 /// The fake's answer to a Kaluta writing-guide analysis prompt (spec
 /// §14.9), or `None` for any other prompt. For every message it proposes
 /// the same few entries, quoting the message's own first words and last
@@ -296,6 +402,22 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
     )
 }
 
+/// The scripted answer to one of Kaluta's own prompts (tasks, the writing
+/// guide, analysis, facts, writing help's questions), or `None`.
+pub fn scripted_answer(prompt: &str) -> Option<String> {
+    task_answer(prompt)
+        .or_else(|| triage_answer(prompt))
+        .or_else(|| waiting_answer(prompt))
+        .or_else(|| nudge_answer(prompt))
+        .or_else(|| reading_answer(prompt))
+        .or_else(|| guide_answer(prompt))
+        .or_else(|| change_answer(prompt))
+        .or_else(|| merge_answer(prompt))
+        .or_else(|| compare_answer(prompt))
+        .or_else(|| glean_answer(prompt))
+        .or_else(|| writing_help_answer(prompt))
+}
+
 struct FakeSession {
     sink: EventSink,
     external: String,
@@ -305,14 +427,7 @@ struct FakeSession {
 impl AgentSession for FakeSession {
     async fn send(&mut self, turn: TurnInput) -> AgentResult<()> {
         self.sink.emit(AgentEvent::TurnStarted);
-        let text = task_answer(&turn.prompt)
-            .or_else(|| guide_answer(&turn.prompt))
-            .or_else(|| change_answer(&turn.prompt))
-            .or_else(|| merge_answer(&turn.prompt))
-            .or_else(|| compare_answer(&turn.prompt))
-            .or_else(|| glean_answer(&turn.prompt))
-            .or_else(|| writing_help_answer(&turn.prompt))
-            .unwrap_or_else(|| format!("You said: {}", turn.prompt));
+        let text = scripted_answer(&turn.prompt).unwrap_or_else(|| format!("You said: {}", turn.prompt));
         self.sink.emit(AgentEvent::TextDelta { text });
         self.sink.emit(AgentEvent::TurnCompleted {
             usage: Some(Usage { input_tokens: 10, output_tokens: 5, cached_input_tokens: 0 }),

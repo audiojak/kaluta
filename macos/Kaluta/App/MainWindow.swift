@@ -8,6 +8,7 @@ struct MainWindow: View {
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @FocusState private var searchFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var workflowSpace
 
     var body: some View {
         Group {
@@ -20,6 +21,19 @@ struct MainWindow: View {
                 // until Done; the split view comes back as it was.
                 if let mode = model.reviewMode {
                     ReviewModeView(mode: mode)
+                } else if model.showsWorkflows {
+                    // The start screen is home (spec §14.13); a workflow
+                    // takes the whole window, as Review mode does.
+                    Group {
+                        if let session = model.workflowSession {
+                            WorkflowHostView(session: session)
+                                .transition(.opacity)
+                        } else {
+                            StartScreenView()
+                                .transition(.opacity)
+                        }
+                    }
+                    .environment(\.workflowMorph, workflowSpace)
                 } else {
                     mailWindow
                 }
@@ -28,10 +42,6 @@ struct MainWindow: View {
         .focusedSceneValue(\.isMailWindow, true)
         .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
             TaskDialog(draft: draft)
-        }
-        .sheet(item: Binding(get: { model.taskDoneQuestion },
-                             set: { if $0 == nil, model.taskDoneQuestion != nil { Task { await model.answerTaskDone(false) } } })) {
-            TaskDoneDialog(question: $0)
         }
         .sheet(item: Binding(get: { model.guideSheet }, set: { model.guideSheet = $0 })) { sheet in
             switch sheet {

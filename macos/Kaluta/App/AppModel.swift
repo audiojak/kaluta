@@ -377,6 +377,19 @@ final class AppModel {
     var agentMailboxSheet: AgentMailboxRequest?
     /// Review mode (spec §14.10, §14.11): deciding in the whole window.
     var reviewMode: ReviewMode?
+    /// Teach Kaluta's routine changes and its current item (spec §14.13).
+    var routineProposals: [RoutineProposalInfo] = []
+    var teachSelection: String?
+    /// What the window shows when no review is open (spec §14.13): the start
+    /// screen (home) or the mail view.
+    var home: WorkflowHome = .start
+    /// The workflow being worked through, over the whole window.
+    var workflowSession: WorkflowSession? {
+        // Kaluta's background jobs wait while a workflow is on screen.
+        didSet { core?.setWorkflowOpen(workflowSession != nil) }
+    }
+    /// The start screen's counts, estimates and Done today.
+    var workflowOverview: WorkflowOverview?
     /// What the mode opened on, decided ones included, until Done.
     var reviewItems: [ReviewItem] = []
     /// How each decided item went, by tag; an item back in the stores
@@ -403,8 +416,6 @@ final class AppModel {
     var bulkTasks: BulkTaskDraft?
     /// The Settings tab to show when Settings next opens.
     var settingsTab: SettingsTab = .general
-    /// Asked after a task's reply is sent: is the task done?
-    var taskDoneQuestion: TaskDoneQuestion?
     /// The user's accounts in their order, with Inbox unread counts.
     private(set) var accounts: [AccountSummary] = []
     /// Where each account's window was (mailbox, thread), restored on switch.
@@ -462,7 +473,8 @@ final class AppModel {
 
     /// Open the remembered account, or the demo when asked for on launch.
     func start(openDemo: Bool? = nil) async {
-        let openDemo = openDemo ?? defaults.bool(forKey: "KalutaDemo")
+        let openDemo = openDemo ?? (defaults.bool(forKey: "KalutaDemo") || CoreClient.demoWorkflows)
+        restoreHome()
         guard let core else {
             accountState = .failed("The core failed to start. See ~/Library/Logs/Kaluta/core.log.")
             return
@@ -513,10 +525,16 @@ final class AppModel {
         do {
             try await core.openAccount(Self.demoAccountID)
             let inbox = try await core.mailboxes().first { $0.kind == .inbox }
-            if (inbox?.totalCount ?? 0) == 0 {
+            let fresh = (inbox?.totalCount ?? 0) == 0
+            if fresh, CoreClient.demoWorkflows {
+                try await core.seedWorkflowDemo(threads: Self.demoThreadCount)
+            } else if fresh {
                 try await core.seedDemoMailbox(threads: Self.demoThreadCount)
             }
             await open(accountID: Self.demoAccountID)
+            if CoreClient.demoWorkflows {
+                await prepareDemoWorkflows(fresh: fresh)
+            }
         } catch {
             accountState = .failed(error.message)
         }
@@ -710,6 +728,10 @@ final class AppModel {
     private(set) var routinesRevision = 0
     /// Bumped when a task was added, changed or removed (spec §14.8).
     private(set) var tasksRevision = 0
+    /// Bumped when a workflow set starts, changes or finishes (spec §14.13).
+    private(set) var workflowsRevision = 0
+    /// Bumped when the Inbox changes, so the start screen recounts.
+    private(set) var inboxRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
     private(set) var guideRevision = 0
     /// The learning run's progress and the decisions waiting (spec §14.9).
@@ -1271,29 +1293,19 @@ final class AppModel {
         return store
     }
 
-    /// A message was sent (or is held for Undo Send). A reply a task
-    /// called for asks whether that task is done (spec §14.8): the answer
-    /// is the user's, in `taskDoneQuestion`.
-    func messageSent(heldDraftID: Int64?, taskID: Int64?, accountID: String) async {
-        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: taskID) }
-        guard let taskID, let core, let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }),
-              !task.done
+    /// A message was sent (or is held for Undo Send). Sent with *Send and
+    /// finish the task*, its task is done, with Undo (spec §14.13).
+    func messageSent(heldDraftID: Int64?, taskID: Int64?, finishTask: Bool, accountID: String) async {
+        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: finishTask ? taskID : nil) }
+        guard finishTask, let taskID, let core,
+              let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }), !task.done,
+              (try? await core.setTaskDone(task.id, true)) != nil
         else { return }
-        taskDoneQuestion = TaskDoneQuestion(task: task, accountID: accountID, held: heldDraftID != nil)
-    }
-
-    /// The answer to "Mark the task done?": done (undoable), or kept open.
-    func answerTaskDone(_ done: Bool) async {
-        guard let question = taskDoneQuestion else { return }
-        taskDoneQuestion = nil
-        guard done, let core else { return }
-        let task = question.task
-        guard (try? await core.setTaskDone(task.id, true)) != nil else { return }
         await tasks.load()
         // While a send is held, its Undo Send notice stays on screen; ⌘Z
         // still reopens the task first.
-        undo.record(accountID: question.accountID, actionName: "Complete Task",
-                    noticeText: "Task done: “\(task.title)”", showNotice: !question.held,
+        undo.record(accountID: accountID, actionName: "Complete Task",
+                    noticeText: "Task done: “\(task.title)”", showNotice: heldDraftID == nil,
                     undo: { _ = try? await core.setTaskDone(task.id, false) },
                     redo: { _ = try? await core.setTaskDone(task.id, true) })
     }
@@ -1305,7 +1317,6 @@ final class AppModel {
             if await core.cancelSend(draftID, in: accountID) {
                 // Taken back: its task is not done after all.
                 if let taskID { _ = try? await core.setTaskDone(taskID, false) }
-                if self.taskDoneQuestion?.task.id == taskID { self.taskDoneQuestion = nil }
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
                 // Sending it again still answers the task.
                 self.compose(.draft(id: draftID, task: taskID))
@@ -1414,7 +1425,7 @@ final class AppModel {
 
     /// Run an action; if it changed anything, put it on the undo stack and
     /// acknowledge it.
-    private func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
+    func perform(_ action: UndoableAction, _ body: () async throws -> UndoToken?) async {
         do {
             if let token = try await body() { undo.record(token, action) }
         } catch {
@@ -1555,6 +1566,7 @@ final class AppModel {
         let event = tagged.event
         switch event {
         case let .threadsChanged(mailboxID, hint):
+            if mailboxID == "INBOX" { inboxRevision &+= 1 }
             await mailboxes.reload()
             updateBadge()
             cleanUp.mailChanged()
@@ -1651,6 +1663,8 @@ final class AppModel {
             await analysisChanged()
         case .rulesPublicationChanged:
             break // above, for every account
+        case .workflowsChanged:
+            workflowsRevision += 1
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

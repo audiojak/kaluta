@@ -180,8 +180,35 @@ final class AgentStore {
         }
     }
 
+    /// A proposal waiting here, with the request that produced it (the
+    /// user's prompt before it), for the Agents workflow (spec §14.13).
+    func proposalInfo(_ actionID: Int64) -> (tool: String, summary: String, draftID: Int64?, request: String?)? {
+        var request: String?
+        for entry in entries {
+            switch entry.kind {
+            case let .prompt(text): request = text
+            case let .proposal(id, tool, summary, draftID, _) where id == actionID:
+                return (tool, summary, draftID, request)
+            default: break
+            }
+        }
+        return nil
+    }
+
+    /// A proposal that sends mail: it is approved from the editable email.
+    static func isSend(_ tool: String) -> Bool { tool == "mail_send" || tool == "mail_forward" }
+
+    /// Pending proposals Approve All may take: everything but sends of
+    /// messages this window can open (spec §10.4).
+    var approvableProposals: [Int64] {
+        pendingProposals.filter { id in
+            guard let (tool, draftID, _) = proposal(id) else { return false }
+            return !(Self.isSend(tool) && draftID != nil)
+        }
+    }
+
     func approveAll() {
-        for id in pendingProposals { resolve(id, approve: true) }
+        for id in approvableProposals { resolve(id, approve: true) }
     }
 
     /// A pending proposal was decided (here or by the core's event, which

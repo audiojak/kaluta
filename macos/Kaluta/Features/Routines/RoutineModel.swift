@@ -24,6 +24,13 @@ struct RoutineDefinition: Codable, Equatable {
         var negativeExamples: [String]
         var priorityWhenAmbiguous: String?
         var listIndividuallyInReport: Bool
+        /// A weekly bucket's reading day, 0 Monday to 6 Sunday; nil is
+        /// Friday (spec §14.13).
+        var dueWeekday: Int?
+
+        /// Weekdays for the reading-day picker, Monday first.
+        static let weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        static let defaultWeekday = 4
     }
     struct Unmatched: Codable, Equatable { var kind: String; var label: String? }
     struct Report: Codable, Equatable { var counts: Bool; var maxLines: Int }

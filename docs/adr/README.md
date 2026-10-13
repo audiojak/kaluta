@@ -25,3 +25,4 @@ stay in the spec's dated amendments and the nightly plans in `docs/plans/`.
 | [0015](0015-service-accounts.md) | Agent mailboxes belong to service accounts | 2026-10-08 |
 | [0016](0016-rules-server.md) | A rules server serves agent mailboxes' guides and facts to cloud agents | 2026-10-08 |
 | [0017](0017-named-kaluta.md) | The project is named Kaluta | 2026-10-09 |
+| [0018](0018-workflows.md) | The start screen is home, and each daily job is a focused workflow | 2026-10-11 |

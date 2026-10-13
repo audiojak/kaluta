@@ -133,7 +133,7 @@ pub fn prompt(pairs: &[Pair], entries: &[GuideEntry]) -> String {
         .map(|p| {
             let applied = p.applied.iter().map(|id| format!("#{id}")).collect::<Vec<_>>().join(", ");
             format!(
-                "<pair id=\"{}\" type=\"{}\">\nAudience: {}\nThe user asked: {}\nGuide entries that applied: {}\n\
+                "<pair id=\"{}\" type=\"{}\">\nAudience: {}\nThe user told Kaluta: {}\nGuide entries that applied: {}\n\
                  <ai>\n{}\n</ai>\n<sent>\n{}\n</sent>\n</pair>",
                 p.id,
                 p.kind,
@@ -158,6 +158,9 @@ pub fn prompt(pairs: &[Pair], entries: &[GuideEntry]) -> String {
          Only style counts: tone, length, greetings and sign-offs, wording, structure, punctuation, formatting. \
          A change of substance (a different date, a new plan, a fact the assistant could not know, a paragraph \
          about something else) is not style: leave it out.\n\n\
+         What the user told Kaluta is evidence too: a direction about how to write (\"keep it short\", \
+         \"no exclamation marks\") may support a change even when the sent text matches the AI's. A direction \
+         about this one message's content (\"say Friday works\") is not style.\n\n\
          The guide now (rules and guidelines, by #id):\n{}\n\n\
          Categories: {categories}\n\n\
          {blocks}\n\n\
@@ -165,14 +168,16 @@ pub fn prompt(pairs: &[Pair], entries: &[GuideEntry]) -> String {
          {{\"proposals\": [{{\"op\": \"add\", \"category\": \"B6\", \"kind\": \"rule\" or \"guideline\", \
          \"statement\": \"...\", \"scope\": {{\"groups\": [], \"people\": [], \"message_types\": [], \
          \"languages\": []}}, \"contradicts\": null or an entry id, \"evidence\": [{{\"pair\": 12, \"sent\": \
-         \"words from the sent text\", \"ai\": \"what they replaced in the AI text\"}}]}}, \
+         \"words from the sent text\", \"ai\": \"what they replaced in the AI text\", \"asked\": \
+         \"words from what the user told Kaluta\"}}]}}, \
          {{\"op\": \"edit\", \"id\": 7, \"statement\": \"...\", \"kind\": \"guideline\", \"evidence\": [...]}}, \
          {{\"op\": \"rescope\", \"id\": 7, \"scope\": {{...}}, \"evidence\": [...]}}, \
          {{\"op\": \"remove\", \"id\": 7, \"evidence\": [...]}}]}}\n\n\
          - A statement is one sentence, an instruction to someone drafting for the user.\n\
          - Edit, rescope or remove an entry by its #id when the user's edits go against it; add an entry for \
          what the guide does not cover.\n\
-         - Quote exactly: \"sent\" must be words from that pair's sent text and \"ai\" words from its AI text.\n\
+         - Quote exactly: \"sent\" must be words from that pair's sent text, \"ai\" words from its AI text and \
+         \"asked\" words from what the user told Kaluta; give at least one.\n\
          - Propose nothing rather than guess; one edit is not a habit.\n\
          - Do not use tools, and do not create, change, send or delete any mail.",
         if guide.is_empty() { "(empty)".to_owned() } else { guide },
@@ -229,12 +234,16 @@ pub fn parse(text: &str, pairs: &[Pair], entries: &[GuideEntry]) -> Option<Vec<C
         let mut seen = BTreeSet::new();
         for e in p.get("evidence").and_then(Value::as_array).into_iter().flatten() {
             let Some(pair) = e.get("pair").and_then(Value::as_i64).and_then(|id| by_id.get(&id)) else { continue };
-            let sent_given = e.get("sent").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty());
-            let ai_given = e.get("ai").and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty());
+            let given = |k: &str| e.get(k).and_then(Value::as_str).is_some_and(|s| !s.trim().is_empty());
             let sent = verified(e.get("sent").and_then(Value::as_str), &pair.sent);
             let ai = verified(e.get("ai").and_then(Value::as_str), &pair.ai);
+            let asked = verified(e.get("asked").and_then(Value::as_str), &pair.instruction);
             // Every quote given must be found; at least one is needed.
-            if (sent_given && sent.is_none()) || (ai_given && ai.is_none()) || (sent.is_none() && ai.is_none()) {
+            if (given("sent") && sent.is_none())
+                || (given("ai") && ai.is_none())
+                || (given("asked") && asked.is_none())
+                || (sent.is_none() && ai.is_none() && asked.is_none())
+            {
                 continue;
             }
             if seen.insert(pair.id) {
@@ -242,6 +251,7 @@ pub fn parse(text: &str, pairs: &[Pair], entries: &[GuideEntry]) -> Option<Vec<C
                     composition_id: pair.id,
                     sent_quote: sent.unwrap_or_default(),
                     ai_quote: ai.unwrap_or_default(),
+                    asked_quote: asked.unwrap_or_default(),
                 });
             }
         }
@@ -457,6 +467,18 @@ impl Core {
 
     /// Drafts sent as written support the entries that applied to them.
     pub(crate) async fn reinforce_unchanged(&self, ids: &[i64], now: mail_domain::Millis) -> Result<(), CoreError> {
+        self.support_applied(ids, true, now).await
+    }
+
+    /// Support for the entries that applied to each pair still waiting for
+    /// review; with `review`, the pairs are reviewed too (sent as written
+    /// with no direction: nothing left to compare).
+    pub(crate) async fn support_applied(
+        &self,
+        ids: &[i64],
+        review: bool,
+        now: mail_domain::Millis,
+    ) -> Result<(), CoreError> {
         if ids.is_empty() {
             return Ok(());
         }
@@ -479,7 +501,9 @@ impl Core {
                                 store::add_health(tx, *entry, 1, 0, now)?;
                             }
                         }
-                        store::mark_reviewed(tx, &[*id], now)?;
+                        if review {
+                            store::mark_reviewed(tx, &[*id], now)?;
+                        }
                     }
                     Ok(())
                 })
@@ -562,6 +586,22 @@ mod tests {
         assert_eq!(changes[0].key(), "edit|7|guideline|sign off with 'j'");
         assert_eq!((changes[1].op, changes[1].category.as_str()), (Op::Add, "B1"));
         assert!(parse("not json", &pairs, &entries).is_none());
+    }
+
+    #[test]
+    fn what_the_user_told_kaluta_is_evidence() {
+        let mut told = pair(5, "Hi Ann, thanks!", "Hi Ann, thanks!");
+        told.instruction = "Keep it short, no exclamation marks".into();
+        let answer = r#"{"proposals": [
+            {"op": "add", "category": "C3", "statement": "No exclamation marks", "evidence": [{"pair": 5, "asked": "no exclamation marks"}]},
+            {"op": "add", "category": "C3", "statement": "Be brief", "evidence": [{"pair": 5, "asked": "be very brief"}]}
+        ]}"#;
+        let changes = parse(answer, &[told], &[]).unwrap();
+        assert_eq!(changes.len(), 1, "an asked quote must be in what the user said: {changes:#?}");
+        let e = &changes[0].evidence[0];
+        assert_eq!((e.asked_quote.as_str(), e.sent_quote.as_str()), ("no exclamation marks", ""));
+        let p = prompt(&[pair(5, "a", "b")], &[]);
+        assert!(p.contains("The user told Kaluta: Write a reply"));
     }
 
     #[test]

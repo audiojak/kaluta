@@ -387,7 +387,7 @@ fn capitalize(s: &str) -> String {
 
 /// A minimal valid one-page PDF showing `title`, so demo attachments open
 /// in Quick Look.
-fn one_page_pdf(title: &str) -> Vec<u8> {
+pub(crate) fn one_page_pdf(title: &str) -> Vec<u8> {
     let text: String = title.chars().filter(|c| c.is_ascii_alphanumeric() || *c == ' ').collect();
     let stream = format!("BT /F1 28 Tf 72 700 Td ({text}) Tj ET");
     let objects = [

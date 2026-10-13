@@ -501,6 +501,60 @@ plain text, thinking and tool calls are disclosure groups, and a proposal
 is a `.card(.attention)` while it waits and `.neutral` after. An agent
 error is a `Tone.failure` line.
 
+### Workflows
+
+The start screen and the workflows (spec §14.13) are built from
+`Design/Workflow.swift` and `Features/Workflows/`. Each workflow may look
+like its own place; the vocabulary stays the same.
+
+- **Type**: `TypeRole.workflowDisplay` (34 pt semibold: the item's title),
+  `workflowHeadline` (40 pt: the start screen's and an end's one line),
+  `workflowContent` (21 pt: the email, a draft, a summary),
+  `workflowHeading` (20 pt semibold: a card's name), `workflowContext`
+  (15 pt, secondary: who, when, why), `workflowControl` (17 pt semibold:
+  decision buttons), `workflowKey` (13 pt: keycaps, pills, labels),
+  `workflowFigure` (a score's figure).
+- **Colour**: `Tone.workflow(kind)`, one per workflow (Triage indigo,
+  Replies teal, Tasks orange, Waiting purple, Reading sand, Agents
+  graphite, Teach green), white text on it at 4.5:1;
+  `Tone.workflowGround(kind)` its faint ground; `Tone.workflowSurface`
+  for cards and fields on it.
+- **Parts**: `WorkflowHeader` (‹ Mail with Esc, the name and "n of N",
+  one pill), `WorkflowProgress` (a segment per item up to 20, else one
+  bar), `WorkflowButton` (primary filled, plain, quiet; its `Keycap`),
+  `WorkflowRailRow`, `ScoreTile`, `CompletionRing`.
+- **Commands**: every action is a `WorkflowCommand` with one key, one
+  spoken name per workflow and one implementation
+  (`AppModel.performWorkflow`); the decision bar, the keys and
+  VoiceOver's actions all go through it. A button shows its key; its
+  help says it ("Archive (E)").
+- **Focus**: the workflow view holds the keyboard; it takes it back on
+  every new item, so a click on the content never strands the keys.
+- **Notices**: the undo notice shows over a workflow, clear of its
+  decision bar.
+- **Writing**: `WorkflowWriter` and `WorkflowWriteView` under the item's
+  email: up to three answers (1–3, a one-line label each) with *None of
+  these? Tell Kaluta what to say…* (/); *What do you want to say?* (*What
+  did you decide?* for a task) with starters from the email's questions,
+  which are tinted in the email (`WritingText`); then the email that will
+  be sent, editable at content size, with *You said: …* and Change above
+  it, Shorter, Warmer and *Tell Kaluta what to change…* below, and Send
+  (with a task: Send and finish the task, Send, keep the task open).
+  Each step scrolls into view above the decision bar; Kaluta's work shows
+  as "Kaluta is writing…". With no agent ready the user's words are the
+  email (*Write it yourself*).
+- **Motion**: start ↔ workflow is `AppModel.workflowMotion` (about
+  350 ms): the card and the window share a frame (`.workflowMorph(kind)`)
+  while the content cross-fades. Item → item is `AppModel.itemMotion`
+  (about 200 ms): the decided item leaves by `WorkflowExit` (archive
+  and done left, reply right, task down, the rest up) and the next rises.
+  The end's `CompletionRing(animated:)` closes (0.4 s), then bursts
+  (0.6 s spring). Reduce Motion: cross-fades only, the ring drawn closed.
+- **Sound**: `WorkflowSound.playChord` as the ring bursts, only when
+  something was decided: a G major chord rendered in the app and played
+  as a system sound, so macOS's *Play user interface sound effects* and
+  Kaluta's *Play sounds* (Settings › General › Workflows) both silence it.
+
 ### Data grids
 
 Diagnostics (the Sync Debugger, the Keyboard Shortcuts window) use `Grid`

@@ -208,13 +208,14 @@ enum ToolbarHelp {
         case "Attach": "Attach files (⇧⌘A)"
         case "Discard": "Delete this draft"
         case "Send": "Send (⇧⌘D or ⌘Return)"
+        case "Send and Finish Task": "Send and finish the task (⇧⌘D or ⌘Return); ⌥⌘Return keeps it open"
         default: label
         }
     }
 
     static func text(for label: String, model: AppModel) -> String? {
         switch label {
-        case "Attach", "Discard", "Send": composer(label)
+        case "Attach", "Discard", "Send", "Send and Finish Task": composer(label)
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
         case "Reply": "Reply (⌘R)"
         case "Reply All": "Reply All (⇧⌘R)"

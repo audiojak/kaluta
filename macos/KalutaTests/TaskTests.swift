@@ -235,7 +235,7 @@ struct TaskListTests {
         #expect(model.tasks.tasks.first { $0.id == task.id }?.title == task.title)
     }
 
-    @Test func sendingATasksReplyAsksWhetherItIsDone() async throws {
+    @Test func sendingATasksReplyFinishesItOrKeepsItOpen() async throws {
         let model = try await demoWithTasks()
         let account = try #require(model.openAccountID)
         var opened: [ComposeRequest] = []
@@ -246,17 +246,21 @@ struct TaskListTests {
         model.reply(all: false)
         #expect(opened.first?.taskID == task.id, "the reply carries its task")
 
-        await model.messageSent(heldDraftID: nil, taskID: task.id, accountID: account)
-        #expect(model.taskDoneQuestion?.task.id == task.id, "sending asks whether the task is done")
-        await model.answerTaskDone(false)
-        #expect(model.taskDoneQuestion == nil)
-        try await settle(model)
-        #expect(model.tasks.tasks.contains { $0.id == task.id }, "No keeps it open")
+        // A reply to the conversation finds its open task, from anywhere.
+        let detail = try #require(try await model.core?.thread(task.threadId))
+        let message = try #require(detail.messages.last)
+        let store = ComposerStore(core: model.core, attachmentsDirectory: CoreClient.testScratch())
+        await store.load(.reply(messageID: message.id, all: false))
+        store.findTask(in: try #require(try await model.core?.listTasks()))
+        #expect(store.task?.id == task.id && store.taskID == task.id)
 
-        await model.messageSent(heldDraftID: nil, taskID: task.id, accountID: account)
-        await model.answerTaskDone(true)
+        await model.messageSent(heldDraftID: nil, taskID: task.id, finishTask: false, accountID: account)
         try await settle(model)
-        #expect(!model.tasks.tasks.contains { $0.id == task.id }, "Yes finishes it")
+        #expect(model.tasks.tasks.contains { $0.id == task.id }, "Send, keep the task open")
+
+        await model.messageSent(heldDraftID: nil, taskID: task.id, finishTask: true, accountID: account)
+        try await settle(model)
+        #expect(!model.tasks.tasks.contains { $0.id == task.id }, "Send and finish the task")
         #expect(model.undo.notice?.text.hasPrefix("Task done") == true)
         model.undo.undo(in: account)
         try await settle(model)

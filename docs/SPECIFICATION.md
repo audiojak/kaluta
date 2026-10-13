@@ -47,6 +47,7 @@ The short version. Everything below elaborates on these.
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
 | Distribution | Direct download, Developer ID, notarized, Sparkle 2 auto-update; **not** sandboxed, **not** App Store |
 | Telemetry | None in MVP |
+| Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (*What's next*); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -1994,6 +1995,13 @@ Additional hard limits, independent of policy:
 5. Batch: proposals arriving within 2 s of each other are grouped in one
    sheet with per-item checkboxes; "Approve all" still records one
    `AgentAction` per item.
+   *(Amended 2026-10-11, ADR 0018, oagc-px8w: sends and forwards are left
+   out of "Approve all"; each ends on the editable email, and the card's
+   action is *Review and Send*, as step 2 says. In that composer, Send
+   saves the edits and approves the send, which the agent then makes, held
+   for Undo Send on its card; Discard rejects it; closing keeps it
+   pending. A proposal from an agent outside Kaluta whose draft this
+   window cannot open keeps *Approve*.)*
 
 Both agent CLIs tolerate long-running tool calls (their MCP tool timeouts
 are configured to 15 minutes for the `kaluta` server).
@@ -2553,6 +2561,7 @@ Bucket
   negative_examples [text]  "not this — see bucket X" cross-references
   priority_when_ambiguous   e.g. "alert AND receipt → Daily"
   list_individually_in_report bool
+  due_weekday               Option<0..6>  weekly buckets' reading day, Monday 0; Friday when unset (§14.13)
 ```
 
 Stored in `routines` (JSON payload column) and `routine_runs` in the
@@ -2632,6 +2641,10 @@ Generated prompts are deterministic for a given `Routine` + runner +
 template version, and are snapshot-tested (§18).
 
 ### 11.5 Client UX
+
+*(Amended 2026-10-11, §14.13: Kaluta summarises what a run sorts, for
+the Weekly reading workflow; moving sorted mail back to the Inbox
+proposes a routine change, decided in Teach Kaluta.)*
 
 **Settings › Routines** (also reachable from the sidebar as a "Routines"
 section listing each routine with its last-known activity).
@@ -2937,6 +2950,10 @@ Every target in §1.3 traces to one of these rules.
   windows (`WindowGroup` keyed by draft id), Settings (`Settings` scene).
 
 ### 14.3 Main window
+
+*(Amended 2026-10-11, ADR 0018: the window opens on the start screen,
+*What's next* (§14.13); everything below is the mail view, one key (M)
+away, unchanged except where §14.13 says.)*
 
 - Sidebar: account avatar button (§7.7), mailboxes and labels, unread
   badges, drag-to-label target. *(Amended 2026-09-26: labels are a
@@ -3319,6 +3336,12 @@ and a Default tag show which agent answers.
 
 ### 14.8 Tasks **(Amendment 2026-09-29)**
 
+*(Amended 2026-10-11, §14.13: sending to a conversation with an open task
+offers *Send and finish the task* or *Send, keep the task open*,
+wherever the reply is written, in place of the "Mark the Task Done?"
+question; tasks from an earlier day are *carried over*, not overdue;
+the Tasks workflow works today's set one at a time.)*
+
 A task-based way through email that changes the app as little as
 possible: Claude reads an email and suggests what the user has to do about
 it, by when, and in which category; accepted tasks go in a task list the
@@ -3380,13 +3403,15 @@ need or made a decision.
   category (a chooser with number keys), `⌫` delete, `j` `k` move; the
   same in the context menu, and Mark as Done and Category in the list
   column's toolbar. Every change goes on the undo stack with a notice.
-  A reply or forward started from the task list answers the task: when it
-  is sent, the app asks "Mark the Task Done?" (Y or Return: done, and the
-  thread's `Task` label goes with its last open task; N or Escape: it
-  stays open). ⌘Z reopens a task marked done; Undo Send takes the message
-  back and reopens the task, and sending it again asks again
-  (amended 2026-09-29 at the maintainer's request: it had completed the
-  task without asking). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
+  A reply or forward to a conversation with an open task answers the
+  task, wherever it is written: the composer names the task and offers
+  **Send and Finish Task** (⌘Return, ⇧⌘D, the toolbar's Send) and
+  **Send, Keep Task Open** (⌥⌘Return). Finishing shows "Task done: …"
+  with Undo, and the thread's `Task` label goes with its last open task.
+  ⌘Z reopens a task finished this way; Undo Send takes the message back
+  and reopens the task, and the reopened draft offers both again
+  (amended 2026-09-29: it had completed the task without asking; amended
+  2026-10-11, §14.13: the choice is made at Send, not asked after it). `⌫` deletes the task only, never its email. Searching while in Tasks shows mail
   results as anywhere else.
 - **Many emails: `⇧T`.** In a mail list, `⇧T` (also Message › Create
   Tasks… and the context menu) opens the **bulk sheet** for the
@@ -3587,6 +3612,10 @@ in the account's store on this Mac. Export writes Markdown (readable) and
 JSON (for import and merge) without evidence quotes unless the user asks.
 
 ### 14.10 Proposed rules and the daily review **(Amendment 2026-10-05)**
+
+*(Amended 2026-10-11, §14.13: what the user tells Kaluta to write is
+evidence, read as edits are; proposed routine changes join the queue;
+Review mode widens into the Teach Kaluta workflow.)*
 
 The writing guide keeps learning after onboarding. Once a day, while the
 app is open, a background review compares what an AI wrote with what the
@@ -4194,6 +4223,391 @@ the other tips, until put away or until Clean Up is opened.)*
   Junk) leaves the Inbox on this Mac only; no `archived` label is added at
   the service (§7.9, ADR 0014).
 
+### 14.13 Workflows **(Amendment 2026-10-11)**
+
+A workflow is a focused, full-window place for one daily job, beside the
+mail app (§14.3), which stays as it is for people and for other Gmail
+clients. Decisions: ADR 0018; plan `docs/plans/workflows.md`; the review
+that led here and every maintainer decision behind this section:
+`docs/plans/design-review.md`, `docs/design-review/`; the designs:
+the canvas *Kaluta Workflows*
+(https://claude.ai/artifact/RDwYuhs22AcmZWZfg3xYhu).
+
+**Principles.** Each rule below follows from the plan's principles; the
+ones every workflow must keep:
+
+- *Works alongside Gmail.* What a workflow records about a conversation
+  is a label where it can be (`Task`, `Waiting`); counts follow changes
+  made in other clients, and that work counts as done.
+- *One thing at a time* from a set fixed on entry, with a count; the
+  next item arrives by itself. *An end*: a score, a reward, the next
+  workflow. *Leave anywhere* (Esc) and come back to the same place.
+- *Act, then Undo*: no confirmation dialogs; undoing a decision puts the
+  item back in the set.
+- *Honest counts*: figures describe the job (what is left to decide),
+  never a mailbox.
+- *Kaluta is the one that learns and acts*: the interface says Kaluta
+  where it means the AI, and names the inference backend only where the
+  user chooses or audits it (Settings › Agents, the backend picker, the
+  activity log, setup errors) or where mail goes to it.
+- *Reward finishing; never punish*: no streaks, no red counts; work from
+  an earlier day is *carried over*, never *overdue*.
+
+#### The start screen
+
+The main window opens on the start screen (*What's next*); the mail app
+is one key away (**M**, and *View › Mail*), and the window remembers
+which of the two was showing when it quits only for the rest of that day.
+
+- **The day in one line**: the date and time, then an estimate ("About
+  25 minutes of mail today") and what to start with.
+- **The next workflow** as one large card: its name, what is waiting
+  ("12 conversations since 8:40 this morning"), an estimate, the first
+  senders' initials; **Return** starts it. The next is the first of, in
+  order, Triage (new mail), Tasks (due today), Replies, Waiting on others
+  (due), Weekly reading (due groups), Agents, Teach Kaluta, that has
+  anything in it.
+- **The other workflows** as cards with their counts, on keys **1–7**,
+  in that order; a workflow with nothing in it shows "Nothing waiting"
+  and is not focusable.
+- **Done today**: one quiet line ("1 set · 9 conversations cleared · 1
+  task finished"). No streaks.
+- Estimates are per item kind, from the user's own pace once there is
+  some (the median time per decision in that workflow over the last 14
+  days), else defaults: 30 s per triage item, 2 min per reply or task,
+  20 s per nudge or reading item.
+
+#### A workflow's shape
+
+- **The window**: the workflow replaces the split view, as Review mode
+  does; the sidebar and toolbar step aside. Its header: *‹ Mail* (Esc),
+  the workflow's name with "*n* of *N*", and at most one status pill
+  ("2 new will wait for the end", "Next 2 answers ready").
+- **Progress** under the header: one segment per item up to 20, else a
+  continuous bar; decided segments in the workflow's colour, the current
+  one lighter.
+- **The set** is fixed on entry. Mail that arrives meanwhile waits: the
+  end says "3 new arrived while you worked" and offers to start on them.
+  **Skip** (S) moves the current item to the end of the set.
+- **A rail** where the workflow has one: what is up next (Triage), the
+  set with each item's state (Replies, Tasks, Waiting, Agents), or the
+  queue by kind (Teach Kaluta).
+- **The decision bar**: the primary action filled in the workflow's
+  colour, the others plain, each with its key on it.
+- **The end**: a ring that closes and a short burst, the score (what was
+  decided, in the workflow's own terms), the *Next* workflow (Return)
+  and *Back to the start* (Esc). The last workflow of the day ends with
+  the day's summary ("You're done for today") and *Open Mail* (M).
+- **Resume**: leaving keeps the set and the position for the rest of the
+  day; coming back continues there with a one-line recap of the item.
+
+**Keys** (the same verb has the same key everywhere; single keys act
+when no text field has the focus):
+
+| Key | Command |
+|---|---|
+| Return | the suggested or primary action: start, reply, make the task, nudge, accept, write it |
+| ⌘Return | send (from an editable email) |
+| ⌥⌘Return | send and keep the conversation's task open |
+| E | done: archive, done, let it go, read and next |
+| T | make a task |
+| L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
+| S | skip for now |
+| R | reply now (where the suggestion is something else) |
+| I | back to the Inbox (Reading) |
+| C | copy the code (Agents) |
+| ⌫ | reject, don't send |
+| 1–3 | pick one of Kaluta's answers |
+| / | tell Kaluta what to say |
+| Esc | back one step; from an item, back to Mail |
+| M, 1–7 | Mail, a workflow (start screen) |
+
+**One command layer.** Every action is a named command (`WorkflowCommand`)
+with one implementation that the key, the button, VoiceOver's actions
+and, next, voice call; each has a short spoken name equal to its label.
+Every workflow answers *What's left?* ("8 of 12 left, about 4 minutes")
+and *Where am I?* (the workflow, the item, its sender and subject). No
+action needs the pointer, hover or a drag.
+
+**Type** (new `TypeRole` roles, design system): *display* 34–40 pt
+semibold (the item's title, the end's headline); *content* 20–22 pt (the
+email, the draft, a summary); *context* 15 pt secondary (who, when, why);
+*control* 17 pt semibold on buttons, 13 pt for keys and pills. Each
+workflow has its own accent (`Tone.workflow(_)`): Triage indigo, Replies
+teal, Tasks orange, Waiting purple, Reading sand, Agents graphite, Teach
+green; text on them meets 4.5:1 in both appearances.
+
+**Motion and sound.** Start → workflow: the chosen card grows into the
+window (about 350 ms) while the first item loads behind it, and never
+holds it back. Item → item: the decided item leaves in the direction of
+its verb (archive left, reply right, task down) and the next rises
+(about 200 ms). The end: the ring closes, a short burst plays (about
+600 ms), and a **G major chord** sounds (G3 B3 D4 G4, strummed over
+about 0.1 s, fading over about a second). The chord is silent when
+macOS's *Play user interface sound effects* is off or Kaluta's *Play
+sounds* setting (Settings › General › Workflows, on by default) is off;
+it plays only when the set decided something. Reduce Motion:
+cross-fades only; the ring is drawn closed.
+
+**Loading and slow actions.** An action is acknowledged at once;
+progress shows only past about a second; the user can keep deciding
+meanwhile. An item whose suggestion or answers are not ready yet is
+passed over for one that is, and comes back when it is.
+
+#### Kaluta's writing in workflows
+
+- **Drafts follow the user.** Kaluta writes ahead only where the answer
+  is short and predictable (a quick reply in Triage, a nudge in Waiting),
+  and then writes **up to three** genuinely different answers to pick
+  from (1–3), each with a one-line label, plus *None of these? Tell
+  Kaluta what to say…* (/, with dictation). Otherwise the screen leads
+  with **What do you want to say?** (typed or dictated, with starters
+  drawn from the questions Kaluta found in the email, which are
+  highlighted in it); Kaluta writes after that.
+- **Every AI-written email from the user's own accounts ends on an
+  editable screen**: the text that will be sent, at content size, with
+  what the user said (or chose) above it and *Change*, quick changes
+  (Shorter, Warmer, *Tell Kaluta what to change…*), and Send. The same
+  holds outside workflows (§10.4, amended).
+- **What the user tells Kaluta is evidence.** A direction ("fine on the
+  cap, keep 30 days") is recorded with the composition (ADR 0013, the
+  user's instruction) and read by the daily review (§14.10) as it reads
+  edits: it may propose rules and facts from it. A proposal cites the
+  direction's words as it cites edited ones (`asked_quote` beside the
+  sent and AI quotes), and Review shows them marked in *You told
+  Kaluta: …*. A draft sent as written is compared when it was directed
+  (anything beyond "Write a reply" or "Write this message"), and still
+  counts for the entries that applied; the facts glean reads each
+  message with what the user told Kaluta for it.
+- **Sending to a conversation with an open task** offers *Send and
+  finish the task* (⌘Return) or *Send, keep the task open* (⌥⌘Return),
+  wherever the reply is written; no dialog.
+- Without a ready agent: no suggestions or answers; *Write it yourself*
+  replaces *Write it*; the workflows otherwise work.
+
+#### Triage
+
+New conversations since the user last finished a triage set, people
+first, then automated mail grouped by kind. For each, Kaluta suggests
+one decision with a one-line reason:
+
+- **The 30-second rule.** *Quick reply* when Kaluta judges the answer
+  takes 30 seconds or less to check and send (the estimate is shown,
+  "about 20 seconds"); then up to three answers are ready.
+  **Make a task** when it takes longer; the task (title, category, due
+  day, what completes it) is filled in on the same screen, editable, and
+  *Archive the email* is ticked (it stays under the `Task` label).
+  *Archive* when nothing is asked of the user; *Leave in Inbox* (L) is
+  always offered.
+- Return takes the suggestion; T, E, L, S and R are always there. A
+  conversation that already has an open task says so, and T shows that
+  task instead of making a second.
+- Suggestions are made ahead, when mail arrives, by the triage job (below).
+  Above the email: the suggestion ("Quick reply · about 20 seconds",
+  "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
+  "Has a task: …" when the conversation has one. With no suggestion yet,
+  Reply leads. A quick reply sent here offers *Send and finish the task*
+  when the conversation has one.
+- Making the task, Return saves it (or the conversation's task, changed),
+  archives the email if ticked, and moves on; ⌘Z takes all of it back.
+- **Arrivals wait for the end.** The set does not grow; at its end, mail
+  that arrived meanwhile is the next thing offered (*Triage 3 that
+  arrived*, Return) before the next workflow.
+
+#### Replies
+
+Conversations waiting on the user's answer **that have no task** (a
+conversation with a task belongs to Tasks): people's mail that asks the
+user something, not answered in Triage (left in the Inbox, skipped, or
+arrived outside a set). Each item: the email with its questions
+highlighted, *What do you want to say?*, then the editable email; Send
+and archive. Kaluta writes no draft before the user has said something.
+
+#### Tasks
+
+Today's open tasks (due today, and *carried over* from earlier days,
+first), one at a time: the task at display size (its category, *Due
+today* or *Carried over from yesterday*, Kaluta's reason), its email
+below. A task that ends in a reply asks *What did you decide?* (with
+starters from the email) and goes on to the editable reply; *Send and
+finish the task* completes it and archives the email (the `Task` label
+goes with the task). A task with nothing to send has *Done* (E). *L*
+moves a task to tomorrow without penalty. Tasks finished elsewhere
+(by a reply in Triage) show as done in the rail. Later days stay out of
+the set ("3 more later this week").
+
+The rail lists the set beside the task: the one on screen marked, done
+ones ticked with how ("Done", "Tomorrow", "Done elsewhere"); it steps
+aside while a reply is written. A task finished outside the set is
+decided *elsewhere* when the set resumes, with no time counted, and the
+end's score says "done elsewhere". The due line reads *Due today*,
+*Carried over from yesterday*, *Carried over from Friday* (within the
+week) or *Carried over from 3 Oct*; "3 more later this week" is the
+header's pill. Replies archives the conversation when the reply is sent;
+Tasks does when *Send and finish the task* finishes it; ⌘Z puts it
+back. The starters for a question that offers a choice are the choices
+as things to do ("Go for Tuesday", "Push to Thursday").
+
+#### Waiting on others
+
+Sent mail that expects an answer and has had none for **3 days**
+(a setting), longest first, naming who owes it, how long, and what the
+user asked.
+
+- **The waiting check**, a background job once a day (below), reads the
+  sent messages not yet checked (the user wrote last, to a person, no
+  reply since) and decides whether each expects an answer (a "thanks!"
+  never does), with a one-line reason. **A running log** in the account's
+  store (`waiting_checks`: message, thread, checked at, verdict, reason,
+  agent) keeps every checked message, so none is checked twice; a new
+  message in the conversation is checked on its own.
+- One that expects an answer gets the account's **`Waiting` label** at
+  once (found by name or created, remembered by id, through the outbox
+  like `Task`, never touched when the user applied it by hand) and joins
+  the workflow after 3 days. An answer takes the label off and the item
+  off the list, and the rail says so ("Answered this morning · off the
+  list").
+- The check reads ten messages per prompt (up to 100 a day), looking
+  back 14 days the first time; "to a person" means at least one
+  recipient that is not a no-reply address. It reads only what was sent
+  before the day began, so once those are logged it finds nothing more
+  until tomorrow; answers end waits on every look of the job runner. The wait is kept in `waiting` with whether Kaluta put the label
+  on (`labelled`): only then does it take it off. The days before an item
+  joins are Settings › General › Workflows (1 to 30), kept per account.
+- The nudges job writes the follow-ups for each wait as it joins (five
+  per prompt, up to 60 a day); a wait restarted by a nudge gets new ones
+  when it joins again. A set resumed later the same day takes answered
+  conversations off ("Answered · off the list" in the rail). The item
+  shows "Waiting on Hayden · 9 days" with the check's reason, above what
+  the user wrote; *Check again* offers tomorrow (1), in three days (2)
+  or next week (3).
+- Per item: **Nudge** (Return) with up to three follow-ups written ahead
+  to pick from, then the editable email; sending starts the wait again.
+  **Let it go** (E) takes the label off. **Check again** (L) hides it
+  until the day chosen.
+
+#### Weekly reading
+
+What the sorting routine (§11) filed, when it is due: daily buckets
+daily, weekly ones on **Friday** by default (each bucket may have its
+own day), monthly ones on the 1st.
+
+- **The report first**: what the routine sorted this week, what is due
+  today and how long it takes; the day's alerts that need the user (with
+  *Make a task*; one that already has a task says so); a card per due
+  bucket with its own verb (Newsletters: read, then clear; Receipts:
+  check the amounts, then file; Events: *Interested* makes a task, *Not
+  going* archives; Applicants: each becomes a task); *Undo this
+  morning's run* and *Routine settings…*.
+- **A bucket**, one line per item, summarised by Kaluta **when the
+  routine sorts** (stored with the run, so the bucket opens ready); the
+  current item's short summary at content size. *Read, next* (E), *Open
+  in full* (Return), *Keep for later* (L), *Back to the Inbox* (I),
+  *Clear the bucket* (⌘E). Reading and clearing **mark mail read and keep
+  the routine's label**.
+- The report shows until *Start reading* (Return) on a set not yet
+  begun today; its cards are the buckets due today with three of Kaluta's
+  lines each. In a bucket, the rail lists that bucket one line each and
+  the item shows Kaluta's summary (Return opens it in full, again for the
+  summary); *T* makes a task on the item's screen, as in Triage. ⌘Z
+  undoes Read, next and Clear the bucket together with their marking.
+- The buckets are the account's enabled routines' (§11.2); with no
+  routine yet, the shipped template's, found by their labels' names. A
+  weekly bucket's day is set in the routine editor (*Read on*). The
+  reading job summarises filed conversations from the last 35 days, ten
+  per prompt and up to 200 a day, for each one's latest message
+  (`reading_summaries`); the set is the unread mail of the buckets due
+  today.
+- **Back to the Inbox** moves the email back and has Kaluta **propose a
+  change to the routine** (for example, add the sender to *Leave
+  alone*), with the evidence; it waits in Teach Kaluta and nothing
+  changes until the user accepts it.
+  The proposal is "Leave mail from news@example.com in the Inbox"; each
+  conversation moved back for the same sender is more evidence for it
+  (`routine_proposals`, with the bucket each came from). Accepting adds
+  the line to the routine's leave-alone rules (§11.2), ⌘Z takes it out;
+  with no routine set up yet, accepting is refused with the reason and
+  the change keeps waiting. A rejected change is not proposed again;
+  undoing the move takes its conversation off the proposal.
+
+#### Agents
+
+One set of what agents wait on the user for, across accounts:
+
+- a send Kaluta proposes from the user's own account (§10.4): the
+  workflow opens on the editable email, says which of the user's
+  requests produced it; *Send* (⌘Return), *Don't send* (⌫), *Save as a
+  draft*;
+- in an agent mailbox, a verification code (shown large, with *Copy the
+  code* (C) and when it expires; codes also notify when they arrive) or
+  a sign-up to confirm;
+- the latest routine run, to keep or undo.
+
+A line under the rail says what agent mailboxes sent on their own since
+the user last looked, with *See them*. The set holds each proposal waiting (a send shows the
+draft's text to edit, and Send saves it and approves; *Save as a draft*
+declines and leaves it in Drafts; another action has *Approve* and
+*Don't*), each code from the last half hour in any agent mailbox (six
+digits, alone or as two groups of three; the expiry from "expires in …"),
+and this morning's successful sorting run (*Keep*, *Undo the run*). What
+agent mailboxes sent on their own is counted since the workflow was last
+left, and shows as the header's pill. A proposal another account's panel
+holds says so.
+
+#### Teach Kaluta
+
+Review mode (§14.10) widened into one queue: proposed routine changes,
+proposed writing-guide rules and proposed facts (including those learned
+from what the user told Kaluta), grouped by kind, each with its evidence
+and the change it makes; *Accept* (Return), *Edit…*, *Reject* (⌫), ⌘Z
+undoes; patterns still collecting evidence listed last. The Writing
+Guide's and Facts' bands open it on their kind. A routine change
+shows what it would leave alone, the rule it adds and the conversations
+moved back; it has no *Edit…*. Accepting one with no routine set up says
+so and leaves it waiting. *Accept All* takes every kind.
+
+#### Background jobs
+
+Run while the app is open, after sync has settled, when no workflow is
+open, in hidden read-only agent sessions (ADR 0007) with the user's
+chosen agent (the one the daily review uses, §14.10), capped per
+account per day, surviving a quit like the daily review: each job finds
+its own work in the store, batch by batch, and what it did each day is
+counted in `workflow_job_days` against its cap. When the agent cannot
+work, the jobs wait an hour and try again; opening a workflow stops them
+between batches until it is closed. While workflows are a preview
+(Settings › General), the jobs run only when they are on.
+
+The triage job takes ten new conversations per prompt (up to 200 a day
+per account), the latest message of each as fenced data with today's
+date and the task categories. Its answer is held to the rules whatever
+the agent says: a quick reply over 30 seconds, or with no answers, is a
+task when it describes one, else *leave*; a task with no task described
+is *leave*; at most three answers. A suggestion is stored for the
+conversation's latest message (`triage_suggestions`) and stops counting
+when a newer one arrives, so the job suggests again.
+
+| Job | When | Makes |
+|---|---|---|
+| Triage suggestions | as new mail arrives, in batches | a suggestion per new conversation (kind, seconds, reason; up to three answers for a quick reply), kept until the conversation changes |
+| Waiting check | once at the start of the day | verdicts in `waiting_checks`; `Waiting` labels |
+| Reading summaries | after each routine run | one line and a short summary per sorted message |
+| Nudges | when an item joins Waiting | up to three follow-ups |
+
+Email content goes into the prompts as data, in fenced blocks whose
+instructions are to be ignored, as for tasks (§14.8). Nothing is sent or
+changed by a job except the `Waiting` label.
+
+#### Stored
+
+Per account (§6.2): `triage_suggestions`, `waiting_checks`, `waiting`
+(thread, since, due, until, state), `reading_summaries`,
+`routine_proposals` (or proposals of kind *routine* beside the guide's),
+`workflow_progress` (the day, the workflow, the set, the position, the
+decisions; for resume, the scores and *Done today*), `workflow_job_days`
+(each job's items per day, its last attempt and why it stopped). Nothing here is
+synced; the labels are.
+
 ---
 
 ## 15. Security Model and Threat Model
@@ -4320,6 +4734,32 @@ crash reporter in MVP.
 | UI | XCUITest, small | launch, connect (mocked core), archive via keyboard, compose/send approval |
 | Performance | XCTest `measure` + signposts | §1.3 targets against a 100k-message fixture (generated by a `cargo xtask`) |
 | Security regression | golden suite | sanitizer and permission tests are the gate for any change under `mail-mime/` or `permissions/` |
+
+**Workflow demo (Amendment 2026-10-11).** For design reviews of the
+daily workflows (plan `docs/plans/design-review.md`), `scripts/demo.sh`
+runs the Debug app with `-KalutaDemoWorkflows YES`, honoured only on a
+scratch data directory (`-KalutaDataDirectory`), never the real one. It
+adds, on top of `-KalutaDemo` and `-KalutaFakeAgents`:
+
+- the synthetic mailbox ending two days before launch, with hand-written
+  conversations dated from launch on top (`mail-store` `demo_workflows`):
+  mail waiting on a reply, sent mail nobody has answered, things to read,
+  and Important automated mail for the sorting routine;
+- new mail every few minutes (`-KalutaDemoArrivalSeconds`, default 180),
+  written and announced as sync does (`ThreadsChanged`, `NewMail`);
+- a demo agent in place of the fake Claude Code: Kaluta's own prompts get
+  the fake's scripted answers; a few requests ("which need a reply",
+  "who haven't I heard back from", "what's new", "draft a reply and send
+  it", "summarise", "archive these", and the sorting routine's run and
+  preview) are carried out with the real tools over the session's socket,
+  so result lists, agent drafts, approval cards and routine runs are the
+  real ones; writing help answers with a short plausible reply;
+- seeded once: tasks on the hand-written conversations, a learned writing
+  guide with proposed rules, facts with proposals, the sorting routine
+  run once on this Mac, and an agent mailbox with sign-up mail.
+
+The fakes answer at once, so the demo shows steps and screens, not model
+latency.
 
 Fixtures: a corpus of ~200 real-world-shaped MIME messages (multipart
 edge cases, RFC 2047 headers, calendar invites, inline images, HTML-only

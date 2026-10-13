@@ -233,5 +233,27 @@ struct ApprovalCardTests {
     @Test func reviewRequestsCarryTheAgentName() {
         #expect(ComposeRequest.review(draftID: 3, agent: "Claude").agentName == "Claude")
         #expect(ComposeRequest.draft(id: 3).agentName == nil)
+        #expect(ComposeRequest.review(draftID: 3, agent: "Claude", action: 7).agentAction == 7)
+        #expect(ComposeRequest.review(draftID: 3, agent: "Claude").agentAction == nil)
+    }
+
+    /// Spec §10.4 (oagc-px8w): a send from the user's account is approved
+    /// only from the editable email; Approve All leaves sends out.
+    @Test func approveAllLeavesSendsToTheEditableEmail() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        let agent = model.agent
+        await agent.loadProviders()
+        await model.askAgent("hi")
+        let session = try #require(agent.sessionID)
+        await agent.apply(sessionID: session, events: [
+            .actionProposed(actionId: 7, tool: "mail_send", summary: "Send “Lunch”", draftId: 3),
+            .actionProposed(actionId: 8, tool: "mail_forward", summary: "Forward “Plan”", draftId: 4),
+            .actionProposed(actionId: 9, tool: "mail_archive", summary: "Archive 2 threads", draftId: nil),
+        ])
+        #expect(agent.approvableProposals == [9])
+        agent.approveAll()
+        #expect(agent.pendingProposals == [7, 8], "the sends wait for the composer")
+        #expect(AgentStore.isSend("mail_send") && AgentStore.isSend("mail_forward") && !AgentStore.isSend("mail_archive"))
     }
 }

@@ -48,6 +48,10 @@ private struct GeneralSettings: View {
     @AppStorage(NewMailNotifier.notifyKey, store: CoreClient.appDefaults()) private var notify = true
     @AppStorage(NewMailNotifier.badgeKey, store: CoreClient.appDefaults()) private var badge = true
     @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
+    @AppStorage(AppModel.workflowsEnabledKey, store: CoreClient.appDefaults()) private var workflows = false
+    @AppStorage(WorkflowSound.playSoundsKey, store: CoreClient.appDefaults()) private var sounds = true
+    /// Per account, in its store (spec §14.13).
+    @State private var waitingDays = 3
     @Environment(AppModel.self) private var model
     @Environment(Updater.self) private var updater
 
@@ -64,6 +68,19 @@ private struct GeneralSettings: View {
                 Text("Messages wait this long before they go, so you can take one back with Undo (⌘Z). Quitting sends them at once.")
                     .font(TypeRole.caption)
                     .foregroundStyle(.secondary)
+            }
+            Section("Workflows") {
+                Toggle("Open on the start screen (preview)", isOn: $workflows)
+                    .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (M) away")
+                    .onChange(of: workflows) { model.workflowsSettingChanged() }
+                Stepper(value: $waitingDays, in: 1...30) {
+                    Text("Waiting on others after \(waitingDays) day\(waitingDays == 1 ? "" : "s") without an answer")
+                }
+                .hoverHelp("How long a sent message waits for an answer before it joins Waiting on others")
+                .onChange(of: waitingDays) { _, days in Task { try? await model.core?.setWaitingDays(UInt32(days)) } }
+                .task { if let days = try? await model.core?.waitingDays() { waitingDays = Int(days) } }
+                Toggle("Play sounds", isOn: $sounds)
+                    .hoverHelp("A short chord when a workflow's set is done; silent when macOS's sound effects are off")
             }
             Section("New Mail") {
                 Toggle("Notify me about new mail in the Inbox", isOn: $notify)

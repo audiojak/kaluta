@@ -65,6 +65,9 @@ impl FactsFrom {
 pub struct Sent {
     pub message_id: String,
     pub text: String,
+    /// What the user told Kaluta when it drafted the message: evidence as
+    /// good as the message (spec §14.13).
+    pub asked: String,
 }
 
 /// What a fact proposal carries (`analysis_proposals.payload_json`).
@@ -211,12 +214,20 @@ pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]
         .join("\n");
     let messages: String = sent
         .iter()
-        .map(|m| format!("<message id=\"{}\">\n{}\n</message>", m.message_id, fenced(&capped(&m.text, TEXT_CAP))))
+        .map(|m| {
+            let asked = if m.asked.trim().is_empty() {
+                String::new()
+            } else {
+                format!("<told_kaluta>\n{}\n</told_kaluta>\n", fenced(&capped(&m.asked, TEXT_CAP)))
+            };
+            format!("<message id=\"{}\">\n{asked}{}\n</message>", m.message_id, fenced(&capped(&m.text, TEXT_CAP)))
+        })
         .collect::<Vec<_>>()
         .join("\n\n");
     format!(
         "{GLEAN_MARKER}\n\n\
-         Below are emails the user sent (their own words only). Find facts about the user and their work that \
+         Below are emails the user sent (their own words only), each with what the user told Kaluta when it \
+         drafted the email, if anything (<told_kaluta>). Find facts about the user and their work that \
          an assistant drafting email for them could use: who they are, how to reach them, when they are \
          available, who the people they mention are to them, their work, their preferences, and anything that \
          fits one of their own categories.\n\n\
@@ -233,7 +244,8 @@ pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]
          {{\"op\": \"remove\", \"id\": 12, \"evidence\": {{...}}}}], \
          \"categories\": [{{\"name\": \"...\", \"description\": \"...\", \"facts\": [ids of facts in other]}}], \
          \"starter_set\": null or \"business\" or \"freelance\" or \"household\" or \"job_search\"}}\n\n\
-         - Only facts the messages state; never guess. Quote the words that state each one.\n\
+         - Only facts the messages (or what the user told Kaluta) state; never guess. Quote the words that state \
+         each one.\n\
          - Propose a category only for three or more facts in other that belong together.\n\
          - Name a starter set only when the facts plainly fit it (company facts on a work account: business).\n\
          - Do not use tools, and do not create, change, send or delete any mail.",
@@ -273,7 +285,8 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
         let quote = clean(e.and_then(|e| e.get("quote")), QUOTE_CAP);
         let Some(m) = by_id.get(message) else { continue };
         // At least two words, found in the message.
-        if quote.split_whitespace().count() < 2 || !loose(&fenced(&m.text)).contains(&loose(&quote)) {
+        let said = |t: &str| loose(&fenced(t)).contains(&loose(&quote));
+        if quote.split_whitespace().count() < 2 || !(said(&m.text) || said(&m.asked)) {
             continue;
         }
         let mut p = FactPayload {
@@ -429,12 +442,14 @@ impl Core {
                 Ok(db
                     .read(move |c| {
                         Ok(c.prepare_cached(
-                            "SELECT matched_message_id, sent_text FROM ai_compositions
+                            "SELECT matched_message_id, sent_text, instruction FROM ai_compositions
                              WHERE status = 'reviewed' AND reviewed_at >= ?1 AND sent_text IS NOT NULL
                                AND matched_message_id IS NOT NULL
                              ORDER BY reviewed_at, id LIMIT ?2",
                         )?
-                        .query_map(rusqlite_params(started), |r| Ok(Sent { message_id: r.get(0)?, text: r.get(1)? }))?
+                        .query_map(rusqlite_params(started), |r| {
+                            Ok(Sent { message_id: r.get(0)?, text: r.get(1)?, asked: r.get(2)? })
+                        })?
                         .collect::<Result<_, _>>()?)
                     })
                     .await?)
@@ -460,10 +475,11 @@ impl Core {
         Ok(chosen
             .into_iter()
             .filter_map(|m| {
-                texts
-                    .get(&m.message_id)
-                    .filter(|t| !t.trim().is_empty())
-                    .map(|t| Sent { message_id: m.message_id, text: t.clone() })
+                texts.get(&m.message_id).filter(|t| !t.trim().is_empty()).map(|t| Sent {
+                    message_id: m.message_id,
+                    text: t.clone(),
+                    asked: String::new(),
+                })
             })
             .collect())
     }
@@ -704,11 +720,27 @@ mod tests {
     }
 
     fn sent(text: &str) -> Vec<Sent> {
-        vec![Sent { message_id: "m1".into(), text: text.into() }]
+        vec![Sent { message_id: "m1".into(), text: text.into(), asked: String::new() }]
     }
 
     fn categories() -> Vec<FactCategoryInfo> {
         crate::facts::categories_from(&[])
+    }
+
+    #[test]
+    fn a_fact_may_be_quoted_from_what_the_user_told_kaluta() {
+        let mail = vec![Sent {
+            message_id: "m1".into(),
+            text: "Fine, thanks.".into(),
+            asked: "fine on the cap, we keep logs 30 days".into(),
+        }];
+        let answer = r#"{"facts": [
+            {"op": "add", "category": "work", "label": "Log retention", "value": "30 days", "evidence": {"message_id": "m1", "quote": "we keep logs 30 days"}}
+        ]}"#;
+        let found = parse(answer, &mail, &categories(), &[]).unwrap();
+        assert_eq!(found.len(), 1);
+        let p = prompt(&mail, &categories(), &[]);
+        assert!(p.contains("<told_kaluta>\nfine on the cap, we keep logs 30 days\n</told_kaluta>"));
     }
 
     #[test]

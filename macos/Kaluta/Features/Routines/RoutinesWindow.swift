@@ -378,6 +378,13 @@ private struct BucketEditor: View {
             ForEach(RoutineDefinition.Bucket.cadences, id: \.self) { Text($0.capitalized).tag($0) }
         }
         .hoverHelp("How often you plan to look at this bucket; the agent uses it to judge urgency")
+        if bucket.cadence == "weekly" {
+            Picker("Read on", selection: Binding(get: { bucket.dueWeekday ?? RoutineDefinition.Bucket.defaultWeekday },
+                                                 set: { bucket.dueWeekday = $0 == RoutineDefinition.Bucket.defaultWeekday ? nil : $0 })) {
+                ForEach(Array(RoutineDefinition.Bucket.weekdays.enumerated()), id: \.offset) { i, day in Text(day).tag(i) }
+            }
+            .hoverHelp("The day Weekly reading brings this bucket up")
+        }
         VStack(alignment: .leading) {
             Text("What belongs here").font(TypeRole.caption).foregroundStyle(.secondary)
             TextEditor(text: $bucket.description).frame(minHeight: 60).font(TypeRole.body)

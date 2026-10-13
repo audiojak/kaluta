@@ -15,13 +15,19 @@ enum ComposeRequest: Codable, Hashable, Sendable {
     case reply(messageID: String, all: Bool, task: Int64? = nil)
     case forward(messageID: String, task: Int64? = nil)
     case draft(id: Int64, task: Int64? = nil)
-    /// A draft an agent wrote, opened for the user to check before
-    /// approving the send.
-    case review(draftID: Int64, agent: String)
+    /// A draft an agent wrote, opened for the user to check and send (spec
+    /// §10.4): with `action`, the agent's proposed send, which Send
+    /// approves with the user's edits and Discard rejects.
+    case review(draftID: Int64, agent: String, action: Int64? = nil)
 
     /// Who wrote the draft, for the composer's banner.
     var agentName: String? {
-        if case let .review(_, agent) = self { agent } else { nil }
+        if case let .review(_, agent, _) = self { agent } else { nil }
+    }
+
+    /// The agent's proposed send this composer decides, if any.
+    var agentAction: Int64? {
+        if case let .review(_, _, action) = self { action } else { nil }
     }
 
     /// The task sending this completes.
@@ -61,8 +67,13 @@ final class ComposerStore {
     private(set) var heldSend: Int64?
     /// Sent (rather than discarded), for what follows a send.
     private(set) var didSend = false
-    /// The task this message answers (spec §14.8).
+    /// The task this message answers (spec §14.8): the one it was started
+    /// from, else the conversation's open task (§14.13).
     private(set) var taskID: Int64?
+    /// That task, while open: Send offers to finish it or keep it open.
+    private(set) var task: TaskItem?
+    /// Sent with *Send, keep the task open*.
+    private(set) var keepsTask = false
     /// The account the composer sends as.
     var accountID: String? { core?.accountID }
 
@@ -119,7 +130,7 @@ final class ComposerStore {
                 try await core.replyDraft(to: messageID, all: all)
             case let .forward(messageID, _):
                 try await core.forwardDraft(of: messageID)
-            case let .draft(id, _), let .review(id, _):
+            case let .draft(id, _), let .review(id, _, _):
                 try await core.draft(id)
             }
             guard let draft else {
@@ -237,8 +248,31 @@ final class ComposerStore {
 
     // MARK: Send and discard
 
-    func send() async {
+    /// The task this message answers, from `open` (the open account's open
+    /// tasks): the one it was started from, else the conversation's.
+    func findTask(in open: [TaskItem]) {
+        let found = taskID.flatMap { id in open.first { $0.id == id } }
+            ?? threadID.flatMap { thread in open.first { $0.threadId == thread } }
+        task = found
+        taskID = found?.id ?? taskID
+    }
+
+    /// The agent's proposed send is approved with this draft as it now is:
+    /// the agent sends it (and its card shows the Undo Send hold), so the
+    /// composer closes without sending itself.
+    func handToAgent() async {
+        guard canSend else { return }
+        isDirty = true
+        await save()
+        guard saveError == nil else { return }
+        phase = .sent
+    }
+
+    /// Sends the message; with a task, `keepTask` leaves it open, otherwise
+    /// sending finishes it (spec §14.13).
+    func send(keepTask: Bool = false) async {
         guard canSend, let core else { return }
+        keepsTask = keepTask
         isDirty = true
         await save()
         guard saveError == nil, draftID != 0 else { return }
