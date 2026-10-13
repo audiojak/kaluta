@@ -173,11 +173,11 @@ struct WorkflowTests {
         let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .reading, items: items, startedAt: 0, resumed: false))
         session.reading = ReadingReport(sortedThisWeek: 5, buckets: [
             ReadingBucket(id: "daily", title: "Daily", labelId: "L1", cadence: "daily", dueToday: true,
-                          verb: "Act on what needs you", threadIds: ["a"]),
+                          verb: "Act on what needs you", threadIds: ["a"], subjects: ["A"]),
             ReadingBucket(id: "news", title: "Newsletters", labelId: "L2", cadence: "weekly", dueToday: true,
-                          verb: "Read, then clear", threadIds: ["b", "c"]),
+                          verb: "Read, then clear", threadIds: ["b", "c"], subjects: ["B", "C"]),
             ReadingBucket(id: "events", title: "Events", labelId: "L3", cadence: "weekly", dueToday: false,
-                          verb: "", threadIds: ["c"]),
+                          verb: "", threadIds: ["c"], subjects: ["C"]),
         ])
         #expect(session.bucket(of: items[0])?.id == "daily")
         #expect(session.bucket(of: items[2])?.id == "news", "a bucket not due today does not claim it")
@@ -222,5 +222,13 @@ struct WorkflowTests {
         else { Issue.record("the run") }
         #expect(AgentItemView.spaced("482913") == "482 913")
         #expect(model.workflowPill(session) == "Agent mailboxes sent 2 on their own")
+    }
+
+    @Test func anAgentsDraftIsEditedAboveItsQuote() {
+        let text = "Hi Morgan,\nYes to two years.\nJo\nOn 2026-10-12, Morgan Okafor wrote:\nHi Jo,\nCan you?"
+        let (reply, quote) = AppModel.splitQuote(text)
+        #expect(reply == "Hi Morgan,\nYes to two years.\nJo")
+        #expect(quote.hasPrefix("On 2026-10-12, Morgan Okafor wrote:"))
+        #expect(AppModel.splitQuote("Just a note").quote.isEmpty)
     }
 }

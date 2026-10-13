@@ -67,6 +67,12 @@ final class WorkflowSession {
     /// of each proposed send, by item key.
     var agentsWork: AgentsWork?
     var agentDrafts: [String: String] = [:]
+    /// Each draft's reply as the agent wrote it and the quoted original
+    /// below it, which the edit leaves as it was.
+    var agentDraftReplies: [String: String] = [:]
+    var agentDraftQuotes: [String: String] = [:]
+    /// The morning run's record, by item key.
+    var agentRuns: [String: RoutineRunInfo] = [:]
     /// Each conversation's wait (Waiting on others), by thread id.
     var waits: [String: WaitingInfo] = [:]
     /// *Check again* is choosing its day.
@@ -95,6 +101,14 @@ final class WorkflowSession {
     var decided: Int { workflowSet.items.count { $0.decision != nil } }
     var total: Int { workflowSet.items.count }
     var isFinished: Bool { score != nil }
+
+    /// A filed conversation's subject, from the reading report.
+    func readingSubject(_ threadID: String) -> String? {
+        for b in reading?.buckets ?? [] {
+            if let i = b.threadIds.firstIndex(of: threadID), i < b.subjects.count { return b.subjects[i] }
+        }
+        return nil
+    }
 
     /// The reading bucket an item is in.
     func bucket(of item: WorkflowItem) -> ReadingBucket? {

@@ -114,8 +114,9 @@ pub struct ReadingBucket {
     pub due_today: bool,
     /// What it asks: "Read, then clear".
     pub verb: String,
-    /// Its unread conversations, newest first.
+    /// Its unread conversations, newest first, and their subjects.
     pub thread_ids: Vec<String>,
+    pub subjects: Vec<String>,
 }
 
 /// Weekly reading's report (spec §14.13): what was sorted this week and
@@ -255,6 +256,7 @@ impl Core {
                             .into(),
                             due_today: r.bucket.due_on(weekday, day),
                             verb: verb(&r).into(),
+                            subjects: all.iter().filter(|f| f.unread).map(|f| f.subject.clone()).collect(),
                             thread_ids: all.into_iter().filter(|f| f.unread).map(|f| f.thread_id).collect(),
                         });
                     }
@@ -532,8 +534,6 @@ mod tests {
         stop_scheduler(core);
         core.debug_use_fake_agents();
         rt(core.debug_seed_workflow_demo(20)).unwrap();
-        assert_eq!(rt(core.list_routines()).unwrap().len(), 1, "the demo's routine, switched off");
-        rt(core.delete_routine("demo-routine".into())).unwrap();
         // No routine: the template's buckets, found by their labels.
         let report = rt(core.reading_report()).unwrap();
         assert_eq!(report.buckets.len(), 6, "{report:?}");

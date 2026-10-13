@@ -180,9 +180,30 @@ extension AppModel {
             guard let id = Int64(item.key.dropFirst("action:".count)),
                   let info = agent.proposalInfo(id), let draftID = info.draftID,
                   let draft = try? await core.draft(draftID) else { continue }
-            session.agentDrafts[item.key] = ComposerAssistant.plainText(fromHTML: draft.bodyHtml)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let (reply, quote) = Self.splitQuote(ComposerAssistant.plainText(fromHTML: draft.bodyHtml))
+            session.agentDrafts[item.key] = reply
+            session.agentDraftReplies[item.key] = reply
+            session.agentDraftQuotes[item.key] = quote
         }
+        for item in session.items where item.key.hasPrefix("run:") {
+            let parts = item.key.dropFirst("run:".count).split(separator: "/")
+            guard parts.count == 2, let run = Int64(parts[1]),
+                  let runs = try? await core.routineRuns(String(parts[0]), limit: 5) else { continue }
+            session.agentRuns[item.key] = runs.first { $0.runId == run }
+        }
+    }
+
+    /// A draft's text split at the quoted original ("On … wrote:", or the
+    /// first "> " line): the reply above to edit, the quote below to keep.
+    static func splitQuote(_ text: String) -> (reply: String, quote: String) {
+        let lines = text.components(separatedBy: .newlines)
+        let at = lines.firstIndex { line in
+            let t = line.trimmingCharacters(in: .whitespaces)
+            return (t.hasPrefix("On ") && t.hasSuffix("wrote:")) || t.hasPrefix(">")
+        }
+        guard let at else { return (text.trimmingCharacters(in: .whitespacesAndNewlines), "") }
+        return (lines[..<at].joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+                lines[at...].joined(separator: "\n"))
     }
 
     /// What an Agents item is.
@@ -281,8 +302,13 @@ extension AppModel {
                 return [a(.done, .primary, "Done"), a(.skip, .quiet)]
             }
         case .reading:
+            // T and S answer their keys without a button: the bar fits.
+            var task = a(.task)
+            task.shown = false
+            var skip = a(.skip, .quiet)
+            skip.shown = false
             return [a(.done, .primary), a(.primary, .plain, session.showsInFull ? "Show the summary" : "Open in full"),
-                    a(.later), a(.backToInbox), a(.task), a(.clearBucket, .quiet), a(.skip, .quiet)]
+                    a(.later), a(.backToInbox), a(.clearBucket, .quiet), task, skip]
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
@@ -565,8 +591,12 @@ extension AppModel {
         switch (agentItem(item, in: session), command) {
         case let (.action(id, _, _, draftID?, _), .send):
             // The email as edited here is what goes (spec §10.4).
-            if let text = session.agentDrafts[item.key], var draft = try? await core.draft(draftID) {
-                draft.bodyHtml = ComposerHTML.html(from: NSAttributedString(string: text,
+            // Only an edited reply is saved; the quote below it goes as it was.
+            if let text = session.agentDrafts[item.key], text != session.agentDraftReplies[item.key],
+               var draft = try? await core.draft(draftID) {
+                let quote = session.agentDraftQuotes[item.key] ?? ""
+                let whole = quote.isEmpty ? text : text + "\n\n" + quote
+                draft.bodyHtml = ComposerHTML.html(from: NSAttributedString(string: whole,
                                                                              attributes: [.font: ComposerHTML.bodyFont]))
                 _ = try? await core.saveDraft(draft)
             }

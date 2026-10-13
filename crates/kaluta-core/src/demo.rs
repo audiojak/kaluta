@@ -55,22 +55,6 @@ impl Core {
             service: None,
         })
         .await?;
-        // The sorting routine the demo's labels came from, so its proposed
-        // changes can be accepted: switched off and local, so it never runs.
-        if self.list_routines().await?.is_empty() {
-            let identity = agent_api::routines::Identity {
-                primary_email: mail_store::demo::ME.to_owned(),
-                aliases: vec![],
-                frequently_cc: vec![],
-            };
-            let mut routine = agent_api::routines::Routine::sort_important(
-                "demo-routine",
-                identity,
-                agent_api::routines::Runner::Local,
-            );
-            routine.enabled = false;
-            self.store_routine(&routine).await?;
-        }
         Ok(written)
     }
 

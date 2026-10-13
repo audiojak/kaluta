@@ -281,7 +281,8 @@ struct WorkflowRail: View {
                     .padding(.horizontal, Space.l)
                 ForEach(railItems, id: \.key) { item in
                     if session.kind == .reading, let id = item.threadId {
-                        WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject ?? "…",
+                        WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
+                                            ?? session.readingSubject(id) ?? "…",
                                         detail: Self.readingDetail(item), state: state(item), kind: session.kind)
                     } else if let id = item.taskId, let task = session.taskInfo[id] {
                         WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
@@ -400,6 +401,14 @@ struct AgentItemView: View {
                 }
             case .run:
                 Text("This morning's sorting run").font(TypeRole.workflowDisplay)
+                if let run = session.agentRuns[item.key] {
+                    let at = Date(timeIntervalSince1970: TimeInterval(run.startedAt) / 1000)
+                    Text("At \(at.formatted(date: .omitted, time: .shortened)) it filed \(run.threadCount) conversation\(run.threadCount == 1 ? "" : "s").")
+                        .font(TypeRole.workflowContent)
+                    if let report = run.reportText?.split(separator: "\n").first {
+                        Text(String(report)).font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                    }
+                }
                 Text("Keep what it filed, or undo the run to put it all back.")
                     .font(TypeRole.workflowContent).foregroundStyle(.secondary)
             case nil:
@@ -459,8 +468,10 @@ struct ReadingReportView: View {
         VStack(alignment: .leading, spacing: Space.s) {
             Text(bucket.title).font(TypeRole.workflowHeading)
             Text("\(bucket.threadIds.count) · \(bucket.verb)").font(TypeRole.workflowContext).foregroundStyle(.secondary)
-            ForEach(bucket.threadIds.prefix(3), id: \.self) { id in
-                Text(session.summaries[id]?.line ?? "…").font(TypeRole.workflowKey).lineLimit(1)
+            ForEach(Array(bucket.threadIds.prefix(3).enumerated()), id: \.element) { i, id in
+                // Kaluta's line once it is written, the subject until then.
+                Text(session.summaries[id]?.line ?? (i < bucket.subjects.count ? bucket.subjects[i] : ""))
+                    .font(TypeRole.workflowKey).lineLimit(1)
             }
         }
         .padding(Space.xxl)
