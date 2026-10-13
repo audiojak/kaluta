@@ -33,12 +33,16 @@ struct ComposerView: View {
                     editor(store)
                 }
             } else {
-                Color.clear
+                // Waiting for the account to open (a composer restored at launch).
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 520, minHeight: 380)
         .navigationTitle(store?.windowTitle ?? "New Message")
-        .task {
+        .task(id: model.openAccountID) {
+            // Restored by macOS at launch, a composer can appear before the
+            // account opens: it waits for it rather than failing.
+            guard store == nil, model.openAccountID != nil || model.accountState != .starting else { return }
             let store = ComposerStore(core: model.core, account: model.openAccountID)
             self.store = store
             await store.load(request)

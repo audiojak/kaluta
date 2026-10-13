@@ -17,6 +17,7 @@ prefs_before=$(prefs_stamp)
 # The user's own Kaluta (or OpenAGC) may write them itself.
 app_running=$(pgrep -f '(Kaluta|OpenAGC).app/Contents/MacOS/' >/dev/null && echo yes || echo no)
 "$APP" -KalutaDataDirectory "$DATA" -KalutaDemo YES -KalutaFakeAgents YES \
+  -ApplePersistenceIgnoreState YES \
   -KalutaSnapshot "$OUT" "$@" >/dev/null 2>"${SNAPSHOT_LOG:-/dev/null}"
 echo "snapshot: $OUT"
 sleep 2 # cfprefsd writes just after the app quits
