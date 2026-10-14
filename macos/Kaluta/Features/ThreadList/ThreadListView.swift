@@ -213,6 +213,26 @@ enum ThreadDrag {
 final class ThreadTableView: NSTableView {
     weak var model: AppModel?
 
+    /// Shown with nothing holding the keyboard (Mail back from the start
+    /// screen, or at launch): the list takes it, as in Mail, without
+    /// selecting anything, so Esc and the list's keys work at once.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            if Self.isIdle(window.firstResponder, in: window) { window.makeFirstResponder(self) }
+        }
+    }
+
+    /// Nothing that takes keys has the keyboard: the window, its root
+    /// view (where SwiftUI leaves it when the focused view goes), or a view
+    /// no longer in it.
+    static func isIdle(_ responder: NSResponder?, in window: NSWindow) -> Bool {
+        guard let responder, responder !== window else { return true }
+        guard let view = responder as? NSView else { return false }
+        return view === window.contentView || view.window !== window
+    }
+
     /// Gmail-style j/k: move the selection like the arrow keys.
     private func moveSelection(by delta: Int) {
         guard numberOfRows > 0 else { return }
