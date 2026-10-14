@@ -262,9 +262,23 @@ struct WorkflowItemView: View {
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
                     let latest = AppModel.shownMessage(detail, session.kind)
-                    Text(Self.contextLine(latest))
-                        .font(TypeRole.workflowContext)
-                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                        Text(Self.contextLine(latest))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        // At the top, where a long email cannot push it out of view.
+                        if session.kind == .triage {
+                            Button { Task { await model.performWorkflow(.openInFull) } } label: {
+                                HStack(spacing: Space.s) {
+                                    Text("Open the email")
+                                    Keycap(key: "O")
+                                }
+                            }
+                            .buttonStyle(.link)
+                            .hoverHelp("Open the email in its own window, as it was sent (O)")
+                        }
+                    }
+                    .font(TypeRole.workflowContext)
                     if model.task(of: item) == nil {
                         Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
                             .font(TypeRole.workflowDisplay)
@@ -291,17 +305,6 @@ struct WorkflowItemView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         // To copy from, for research or into the reply.
                         .textSelection(.enabled)
-                    if session.kind == .triage {
-                        Button { Task { await model.performWorkflow(.openInFull) } } label: {
-                            HStack(spacing: Space.s) {
-                                Text(summary == nil ? "Open the email with its formatting" : "Read the whole email")
-                                Keycap(key: "O")
-                            }
-                        }
-                        .buttonStyle(.link)
-                        .font(TypeRole.workflowContext)
-                        .hoverHelp("Open the email in its own window, as it was sent (O)")
-                    }
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)

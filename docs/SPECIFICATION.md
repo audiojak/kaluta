@@ -4448,8 +4448,8 @@ one decision with a one-line reason:
 - A long email meant for reading (a newsletter, a digest, a report)
   shows *Kaluta's summary*, two or three sentences made with its
   suggestion, in place of its text (over 800 characters); every email
-  has *Open the email with its formatting* (O; *Read the whole email*
-  under a summary), which opens it in its own window as it was sent.
+  has *Open the email* (O) beside its sender, which opens it in its own
+  window as it was sent.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
