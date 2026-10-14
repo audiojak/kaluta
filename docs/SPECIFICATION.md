@@ -4333,6 +4333,11 @@ that day.
 - **A rail** where the workflow has one: what is up next (Triage), the
   set with each item's state (Replies, Tasks, Waiting, Agents), or the
   queue by kind (Teach Kaluta).
+- **The item's email** shows as it was sent, with its own formatting, in
+  the reader's locked-down web view (the same sanitizer, policy and link
+  check, §14.4), as tall as the email so the workflow keeps the one
+  scroll; *Load images* (or the sender's *Always*) shows its pictures.
+  Kaluta's summary, where it stands in for a long email, is text.
 - **The item's text** can be selected and copied; with no text field
   focused, the arrow keys, Space and ⇧Space, Page Up and Down, and Home
   and End scroll it.

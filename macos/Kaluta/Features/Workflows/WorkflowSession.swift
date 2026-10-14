@@ -45,6 +45,10 @@ final class WorkflowSession {
     var threads: [String: ThreadDetail] = [:]
     /// The text of each conversation's latest message from someone else.
     var bodies: [String: String] = [:]
+    /// That message as sanitized HTML, shown with its own formatting.
+    var rendered: [String: RenderedBody] = [:]
+    /// Conversations whose remote images the user loaded here.
+    var imagesLoaded: Set<String> = []
     /// The end's score, once the set is finished.
     var score: WorkflowScore?
     private(set) var itemShownAt = Date()

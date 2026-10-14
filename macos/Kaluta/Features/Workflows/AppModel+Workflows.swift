@@ -145,9 +145,19 @@ extension AppModel {
             session.threads[threadID] = detail
             if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),
                let html = body.html {
+                session.rendered[threadID] = body
                 session.bodies[threadID] = Self.readingText(ComposerAssistant.plainText(fromHTML: html))
             }
         }
+    }
+
+    /// A workflow's email shows its remote images: loaded here, or always
+    /// for its sender (the reader's setting).
+    func workflowImagesAllowed(_ threadID: String, session: WorkflowSession) -> Bool {
+        if session.imagesLoaded.contains(threadID) { return true }
+        let allowed = Set(defaults.stringArray(forKey: ReaderStore.allowedSendersKey) ?? [])
+        let latest = session.threads[threadID].flatMap { Self.shownMessage($0, session.kind) }
+        return latest?.from.map { allowed.contains($0.email.lowercased()) } ?? false
     }
 
     /// Plain text for reading at content size: paragraphs apart, the

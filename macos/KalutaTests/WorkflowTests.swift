@@ -109,6 +109,16 @@ struct WorkflowTests {
         #expect(WorkflowCommand.openInFull.title(in: .triage) == "Open the email")
     }
 
+    /// A workflow's email is one message's page: the reader's policy, its
+    /// own sheet kept to its container, a page that blends into the card.
+    @Test func aWorkflowEmailIsTheMessageOnItsOwn() {
+        let page = EmailDocument.single("<style>@scope{p{color:red}}</style><p>Hi</p>", isDark: false)
+        #expect(page.contains(EmailDocument.contentSecurityPolicy))
+        #expect(page.contains(#"<div class="body"><style>@scope"#), "the email's sheet scoped to its own container")
+        #expect(page.contains("background: transparent"))
+        #expect(EmailDocument.single(#"<p style="color:#333">x</p>"#, isDark: true).contains(#"class="body paper""#))
+    }
+
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
         #expect(WorkflowKind.all.map(\.number) == Array(1...7))
         #expect(WorkflowKind.all.first == .triage && WorkflowKind.all.last == .teach)

@@ -266,6 +266,12 @@ struct WorkflowItemView: View {
                         Text(Self.contextLine(latest))
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
+                        if session.rendered[detail.thread.id]?.hasRemoteImages == true,
+                           !model.workflowImagesAllowed(detail.thread.id, session: session) {
+                            Button("Load images") { session.imagesLoaded.insert(detail.thread.id) }
+                                .buttonStyle(.link)
+                                .hoverHelp("Show this email's pictures; loading them tells the sender it was opened")
+                        }
                         // At the top, where a long email cannot push it out of view.
                         if session.kind == .triage {
                             Button { Task { await model.performWorkflow(.openInFull) } } label: {
@@ -305,16 +311,23 @@ struct WorkflowItemView: View {
                             .font(TypeRole.workflowContext).foregroundStyle(.secondary)
                     }
                     let text = summary ?? full
-                    // What the email asks, marked where an answer is written.
-                    Text(Self.asksAnswer(session.kind)
-                        ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
-                                                  tint: Tone.workflow(session.kind).opacity(0.16))
-                        : AttributedString(text))
-                        .font(TypeRole.workflowContent)
-                        .lineSpacing(Space.xs)
-                        .fixedSize(horizontal: false, vertical: true)
-                        // To copy from, for research or into the reply.
-                        .textSelection(.enabled)
+                    if summary == nil, let html = session.rendered[detail.thread.id]?.html {
+                        // The email as it was sent: its own formatting, in
+                        // the reader's locked-down web view.
+                        WorkflowEmailBody(html: html,
+                                          allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session))
+                    } else {
+                        // What the email asks, marked where an answer is written.
+                        Text(Self.asksAnswer(session.kind)
+                            ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
+                                                      tint: Tone.workflow(session.kind).opacity(0.16))
+                            : AttributedString(text))
+                            .font(TypeRole.workflowContent)
+                            .lineSpacing(Space.xs)
+                            .fixedSize(horizontal: false, vertical: true)
+                            // To copy from, for research or into the reply.
+                            .textSelection(.enabled)
+                    }
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -843,4 +856,24 @@ extension AppModel {
         workflowSession = nil
         if let next { Task { await beginWorkflow(next) } } else { Task { await refreshWorkflowOverview() } }
     }
+}
+
+/// A workflow item's email with its own formatting: the reader's web view,
+/// as tall as the email, so the workflow scrolls it with everything else.
+struct WorkflowEmailBody: View {
+    let html: String
+    let allowRemote: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var height: CGFloat = Self.startHeight
+
+    var body: some View {
+        MessageWebView(html: EmailDocument.single(html, isDark: colorScheme == .dark), allowRemoteImages: allowRemote,
+                       onContentHeight: { measured in
+                           if abs(measured - height) > 1 { height = measured }
+                       })
+            .frame(height: height)
+            .accessibilityLabel("The email")
+    }
+
+    static let startHeight: CGFloat = 160
 }

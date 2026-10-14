@@ -16,6 +16,10 @@ struct MessageWebView: NSViewRepresentable {
     /// than the top. The page itself still runs no script: this is the
     /// app's own call, after each load.
     var scrollToLatest = false
+    /// The page's height once laid out (and again as images arrive), for a
+    /// view that grows to fit the email instead of scrolling it: a
+    /// workflow's item, where the workflow keeps the one scroll.
+    var onContentHeight: ((CGFloat) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -27,7 +31,18 @@ struct MessageWebView: NSViewRepresentable {
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.scheme)
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.loadedScheme)
         config.setURLSchemeHandler(context.coordinator.inlineImages, forURLScheme: CidSchemeHandler.scheme)
-        let webView = WKWebView(frame: .zero, configuration: config)
+        // Sized to its content, it hands the scroll wheel to the view around it.
+        let webView: WKWebView
+        if onContentHeight == nil {
+            webView = WKWebView(frame: .zero, configuration: config)
+        } else {
+            let fitted = FittedWebView(frame: .zero, configuration: config)
+            // A new width reflows the email: measured again.
+            fitted.widthChanged = { [weak coordinator = context.coordinator, weak fitted] in
+                if let fitted { coordinator?.measure(fitted, after: [0.05]) }
+            }
+            webView = fitted
+        }
         onCreated?(webView)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
@@ -45,6 +60,7 @@ struct MessageWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.onContentHeight = onContentHeight
         let remoteChanged = coordinator.remoteImages.allowRemote != allowRemoteImages
         coordinator.remoteImages.allowRemote = allowRemoteImages
         let images = inlineImages
@@ -69,8 +85,23 @@ struct MessageWebView: NSViewRepresentable {
         var loadedInlineImages: Set<String> = []
         var suspiciousLinks: [String: String] = [:]
         var scrollToLatest = false
+        var onContentHeight: ((CGFloat) -> Void)?
+
+        func measure(_ webView: WKWebView, after delays: [Double]) {
+            guard onContentHeight != nil else { return }
+            for delay in delays {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak webView] in
+                    webView?.evaluateJavaScript("document.documentElement.scrollHeight") { value, _ in
+                        if let height = value as? Double { self?.onContentHeight?(CGFloat(height)) }
+                    }
+                }
+            }
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // Measured by the app (the page runs no script), now and as its
+            // images arrive.
+            measure(webView, after: [0.0, 0.3, 1.0, 2.5, 5.0])
             // Each load (bodies and images arriving reload the page) starts
             // at the top again.
             guard scrollToLatest else { return }
@@ -112,6 +143,36 @@ struct MessageWebView: NSViewRepresentable {
                 guard alert.runModal() == .alertSecondButtonReturn else { return }
             }
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+/// A web view that is as tall as its page: the scroll wheel goes to the
+/// scroll view it sits in.
+final class FittedWebView: WKWebView {
+    var widthChanged: (() -> Void)?
+    private var lastWidth: CGFloat = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+
+    /// ↑ ↓, Space, Page Up and Down, Home and End scroll what it sits in;
+    /// with nothing of its own to scroll, it would swallow them.
+    override func keyDown(with event: NSEvent) {
+        let reading: Set<UInt16> = [123, 124, 125, 126, 49, 116, 121, 115, 119]
+        if reading.contains(event.keyCode), event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            nextResponder?.keyDown(with: event)
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if abs(newSize.width - lastWidth) > 1 {
+            lastWidth = newSize.width
+            widthChanged?()
         }
     }
 }
