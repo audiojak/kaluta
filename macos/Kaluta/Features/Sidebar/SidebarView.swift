@@ -19,10 +19,19 @@ struct SidebarView: View {
                 // screen is a click away from any mailbox.
                 if model.workflowsEnabled {
                     Button { model.showStart() } label: {
-                        Label("What's Next", systemImage: "sun.max")
+                        Label {
+                            HStack(spacing: Space.s) {
+                                Text("What's Next")
+                                Spacer(minLength: 0)
+                                // Esc here, as Esc there comes back to Mail.
+                                Keycap(key: "Esc")
+                            }
+                        } icon: {
+                            Image(systemName: "sun.max")
+                        }
                     }
                     .buttonStyle(.plain)
-                    .hoverHelp("The start screen: today's workflows (⌘0)")
+                    .hoverHelp("The start screen: today's workflows (Esc or ⌘0)")
                 }
                 ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)

@@ -4257,8 +4257,11 @@ ones every workflow must keep:
 
 The main window opens on the start screen (*What's next*); the mail app
 is one key away (**Esc** or **M**, *Open Mail* under the cards, and
-*View › Mail*), and the window remembers
-which of the two was showing when it quits only for the rest of that day.
+*View › Mail*), and Esc in the mail app comes back (as do *What's Next*
+at the top of the sidebar, marked with an Esc keycap, and *View › What's
+Next*, ⌘0), except while typing in a field. The window
+remembers which of the two was showing when it quits only for the rest of
+that day.
 
 - **The day in one line**: the date and time, then an estimate ("About
   25 minutes of mail today") and what to start with.
