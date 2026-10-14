@@ -146,6 +146,14 @@ final class ReaderStore {
         return out
     }
 
+    /// How many inline images a message has that `inlineImages` would load.
+    static func inlineImageCount(of message: MessageInfo) -> Int {
+        message.attachments.count { attachment in
+            attachment.contentId.map(normalizedContentID).map { !$0.isEmpty } ?? false
+                && attachment.mimeType.hasPrefix("image/") && attachment.size <= inlineImageLimit
+        }
+    }
+
     static func normalizedContentID(_ cid: String) -> String {
         cid.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
     }
