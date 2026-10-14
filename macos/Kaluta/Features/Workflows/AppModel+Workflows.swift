@@ -430,15 +430,20 @@ extension AppModel {
                 // The answers' own row says "None of these? Tell Kaluta…".
                 + [{ var x = a(.tellKaluta, .plain, nil); x.shown = false; return x }(), a(.back, .quiet, "Cancel")]
         case .say:
-            // Kaluta drafts from what the user said; or their words go as written.
+            // Kaluta drafts from what the user said; or their words go as
+            // written. ⌘. discards here too, as Cancel does.
+            var discard = a(.discard, .quiet, nil)
+            discard.shown = false
             guard agent.isProviderReady else {
-                return [a(.primary, .primary, "Write it yourself"), a(.back, .quiet, "Cancel")]
+                return [a(.primary, .primary, "Write it yourself"), a(.back, .quiet, "Cancel"), discard]
             }
-            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), a(.back, .quiet, "Cancel")]
+            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), a(.back, .quiet, "Cancel"),
+                    discard]
         case .final:
             let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
-            return send + [a(.back, .quiet, "Change what I said")]
+            // Esc goes back a step; Discard drops the email, back to the item.
+            return send + [a(.back, .quiet, "Change what I said"), a(.discard, .quiet, nil)]
         case .writing, .sending:
             return []
         }
@@ -452,7 +457,7 @@ extension AppModel {
         case (.choose, .pick2): writer.pick(1)
         case (.choose, .pick3): writer.pick(2)
         case (.choose, .tellKaluta): writer.tellKaluta()
-        case (.choose, .back), (.say, .back):
+        case (.choose, .back), (.say, .back), (_, .discard):
             session.writer = nil
         case (.say, .primary):
             await writer.write(model: self)

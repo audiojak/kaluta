@@ -59,6 +59,7 @@ struct WorkflowTests {
         // Teach Kaluta: E accepts, W edits, O shows the evidence.
         #expect(WorkflowCommand.done.title(in: .teach) == "Accept")
         #expect(WorkflowCommand.edit.keyLabel == "W")
+        #expect(WorkflowCommand.discard.keyLabel == "⌘." && WorkflowCommand.discard.title(in: .waiting) == "Discard")
         #expect(WorkflowCommand.openInFull.title(in: .teach) == "Show the evidence")
     }
 

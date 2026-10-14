@@ -29,8 +29,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case openInFull
     /// W: edit before deciding (Teach Kaluta's rules).
     case edit
-    /// G: the conversation in Gmail, in the browser (Triage, a Gmail account).
+    /// G: the conversation in Gmail, in the browser (a Gmail account).
     case openInGmail
+    /// ⌘.: drop what Kaluta wrote and go back to the item (writing).
+    case discard
     /// I: back to the Inbox (Weekly reading).
     case backToInbox
     /// ⌘E: clear the bucket (Weekly reading): the rest of it read.
@@ -68,6 +70,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .openInFull: "O"
         case .edit: "W"
         case .openInGmail: "G"
+        case .discard: "⌘."
         case .backToInbox: "I"
         case .clearBucket: "⌘E"
         case .copyCode: "C"
@@ -140,6 +143,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
+        case .discard: "Discard"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"
         case .copyCode: "Copy the code"

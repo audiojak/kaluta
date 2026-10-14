@@ -4373,6 +4373,7 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |
 | W | edit before deciding (Teach Kaluta) |
+| ⌘. | discard what Kaluta wrote and go back to the item (writing); Esc goes back one step, from inside the text too |
 | 1–3 | pick one of Kaluta's answers |
 | / | tell Kaluta what to say |
 | Esc | back one step; from an item, back to Mail |
