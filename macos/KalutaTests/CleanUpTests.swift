@@ -379,7 +379,7 @@ struct CleanUpTests {
                                         body: "Remove <me>\nplease")
         #expect(draft.to.map(\.email) == ["leave@list.example"])
         #expect(draft.cc.map(\.email) == ["x@list.example"])
-        #expect(draft.bodyHtml == "<p>Remove &lt;me&gt;<br>please</p>")
+        #expect(draft.bodyHtml == "<div>Remove &lt;me&gt;<br>please</div>")
         #expect(CleanUpGroupRowView.detailLine(CleanupGroup(key: "l", title: "List", aka: [], detail: "list.example",
                                                             count: 3, unsubscribed: true))
             == "Unsubscribed · list.example")

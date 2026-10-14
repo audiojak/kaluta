@@ -3137,8 +3137,13 @@ Rich text via `NSTextView` in an `NSViewRepresentable`, `NSAttributedString`
 model, toolbar for bold/italic/underline/lists/link/quote; attachments by
 drag-drop or picker; recipients field with a token view fed by
 `addresses_fts` (frecency-ranked). Serialization: attributed string → HTML
-by a small Swift serializer emitting a constrained tag set (`p, br, b, i, u,
-a, ul, ol, li, blockquote`) so the HTML is predictable; plain-text part
+by a small Swift serializer emitting a constrained tag set (`div, br, b, i,
+u, a, ul, ol, li, blockquote`) so the HTML is predictable. *(Amended
+2026-10-14.)* Each line is a `div` and a blank line `<div><br></div>`, as
+Gmail writes them: as `p` (with empty `<p><br></p>` for blank lines) every
+mail client added a paragraph margin to each, and sent mail showed gaps.
+HTML in paragraphs with no such blank lines (an agent's Markdown) loads
+into the editor with a blank line between paragraphs. Plain-text part
 generated in Rust from the HTML. Reply quoting inserts the sanitized parent
 HTML inside `<blockquote>` with a "On <date>, <name> wrote:" line.
 Autosave to `drafts` every 2 s of idleness; Gmail draft sync through the
