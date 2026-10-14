@@ -174,6 +174,15 @@ extension AppModel {
     @discardableResult
     func reviewAct(_ action: ReviewAction, on tag: String? = nil) -> Bool {
         guard let tag = tag ?? reviewSelection else { return false }
+        let acted = decideReviewItem(action, tag: tag)
+        // Accept or reject, and the next one waiting comes up (Edit… opens
+        // a sheet and stays). Review mode for rules or facts alone moves on
+        // in their stores, once the decision is made.
+        if acted, action != .edit, reviewMode == .teach { reviewAdvance(from: tag) }
+        return acted
+    }
+
+    private func decideReviewItem(_ action: ReviewAction, tag: String) -> Bool {
         if let proposal = routineProposals.first(where: { ReviewItem.routineTag($0.id) == tag }) {
             guard action != .edit else { return false }
             let accept = action == .accept
@@ -248,7 +257,6 @@ extension AppModel {
                         await self?.loadRoutineProposals()
                         self?.reviewOutcomes[tag] = accept ? .accepted : .rejected
                     })
-        reviewMove(1)
     }
 
     /// Accept All in the mode: every item waiting that goes against none
@@ -269,6 +277,18 @@ extension AppModel {
             for item in reviewItems where reviewOutcome(of: item) == nil { reviewOutcomes[item.tag] = .accepted }
             await decideProposedFacts(analysis.factProposals, accept: true)
         case nil: break
+        }
+    }
+
+    /// After a decision: the next item waiting, below `tag` and then from
+    /// the top (patterns still collecting evidence are not waiting); the
+    /// decided one stays shown when none is left.
+    func reviewAdvance(from tag: String) {
+        let tags = reviewItems.filter { !$0.watching }.map(\.tag)
+        let at = tags.firstIndex(of: tag) ?? tags.count - 1
+        let order = tags.suffix(from: min(at + 1, tags.count)) + tags.prefix(max(at, 0))
+        if let next = order.first(where: { reviewOutcomes[$0] == nil && reviewIsWaiting($0) }) {
+            reviewSelection = next
         }
     }
 
