@@ -92,6 +92,13 @@ struct SchemeHandlerTests {
             == URL(string: "https://img.example.com/a.png?x=1"))
         #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:file:///etc/passwd")) == nil)
         #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:javascript:alert(1)")) == nil)
+        // Load Images asks again under other addresses: WebKit kept the blank
+        // pixels the first load got and answered with them.
+        #expect(RemoteImageSchemeHandler.loading(#"<img src="kaluta-remote:https://a.example/x.png">"#)
+            == #"<img src="kaluta-remote-loaded:https://a.example/x.png">"#)
+        #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote-loaded:https://a.example/x.png"))
+            == URL(string: "https://a.example/x.png"))
+        #expect(EmailDocument.contentSecurityPolicy.contains("kaluta-remote-loaded:"))
         #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "https://img.example.com/a.png")) == nil)
     }
 }

@@ -3094,7 +3094,10 @@ Triage) shows the conversation in the browser exactly as Gmail does.
 are not kept, as a browser would not read them; the email's `<body>` is
 kept as a `div` with its class and style (class `e-kbody` added); a
 sheet's `body` selector becomes `.e-kbody` and `html` becomes `:scope`;
-`background` is allowed for colours and gradients.
+`background` is allowed for colours and gradients. Loaded remote images are asked for as
+`kaluta-remote-loaded:` (allowed by the content policy): under their
+first addresses WebKit's memory cache answered with the blank pixels the
+blocked load got, and *Load Images* left gaps.
 
 `WKWebView` configuration: JavaScript disabled
 (`defaultWebpagePreferences.allowsContentJavaScript = false`), a custom
