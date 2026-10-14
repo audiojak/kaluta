@@ -4292,7 +4292,11 @@ that day.
   one lighter.
 - **The set** is fixed on entry. Mail that arrives meanwhile waits: the
   end says "3 new arrived while you worked" and offers to start on them.
-  **Skip** (S) moves the current item to the end of the set.
+  **Skip** (S) moves the current item to the end of the set. What was
+  handled meanwhile, in Gmail or elsewhere in Kaluta, leaves it as *Done
+  elsewhere* when the set resumes and after each decision: in Triage and
+  Replies a conversation out of the Inbox or whose latest message is the
+  user's; in Tasks a task no longer open.
 - **A rail** where the workflow has one: what is up next (Triage), the
   set with each item's state (Replies, Tasks, Waiting, Agents), or the
   queue by kind (Teach Kaluta).
@@ -4322,10 +4326,11 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
 | R | reply, as Return |
-| O | open in full, or back to the summary (Reading) |
+| O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |
+| W | edit before deciding (Teach Kaluta) |
 | 1–3 | pick one of Kaluta's answers |
 | / | tell Kaluta what to say |
 | Esc | back one step; from an item, back to Mail |
@@ -4581,15 +4586,31 @@ holds says so.
 
 #### Teach Kaluta
 
-Review mode (§14.10) widened into one queue: proposed routine changes,
-proposed writing-guide rules and proposed facts (including those learned
-from what the user told Kaluta), grouped by kind, each with its evidence
-and the change it makes; *Accept* (E; Return in Review mode), *Edit…*, *Reject* (⌫), ⌘Z
-undoes; patterns still collecting evidence listed last. The Writing
-Guide's and Facts' bands open it on their kind. A routine change
-shows what it would leave alone, the rule it adds and the conversations
-moved back; it has no *Edit…*. Accepting one with no routine set up says
-so and leaves it waiting. *Accept All* takes every kind.
+*(Amended 2026-10-13: a workflow like the others, one proposal at a time,
+no longer Review mode widened.)* The set holds, grouped by kind, the
+proposed routine changes, the learning run's and the daily review's
+proposed rules, and the daily review's proposed facts (including those
+learned from what the user told Kaluta); patterns still collecting
+evidence wait for more, and facts merged from a file that differ wait on
+the Facts page. The rail lists the set, each line with its kind, then how
+it was decided.
+
+- **The item** shows the change it makes, large, with its cues (kind,
+  category, source), its scope and check, and what it goes against.
+- **Its evidence on O** (*Show the evidence*, again to hide): the AI's
+  drafts beside what the user sent for a daily-review rule, the messages
+  that show a learned rule, the words in the user's mail for a fact, the
+  conversations moved back for a routine change.
+- *Accept* (E), *Edit…* (W, for rules; saving accepts it as edited),
+  *Reject* (⌫), *Skip* (S). There is no *Accept All*: each one is looked
+  at. One ⌘Z undoes a decision and its change to the guide, the facts or
+  the routine together, and puts the item back.
+- A routine change has no *Edit…*; accepting one with no routine set up
+  says so and leaves it waiting. What was decided on the Writing Guide or
+  Facts page meanwhile leaves the set as decided.
+
+Review mode (§14.10, §14.11) stays the way to decide one page's queue
+from its band.
 
 #### Background jobs
 

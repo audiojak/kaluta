@@ -278,7 +278,17 @@ impl Core {
                                 .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {id}")))?;
                             return Core::set_info(tx, open, true);
                         }
-                        if kind == WorkflowKind::Tasks && store::decide_done_elsewhere(tx, open.id, now)? > 0 {
+                        // Answered or archived meanwhile, in Gmail or here: done
+                        // elsewhere, so the set never shows it as new.
+                        let elsewhere = match kind {
+                            WorkflowKind::Tasks => store::decide_done_elsewhere(tx, open.id, now)?,
+                            WorkflowKind::Triage | WorkflowKind::Replies => {
+                                store::decide_handled_elsewhere(tx, open.id, now)?
+                            }
+                            WorkflowKind::Teach => store::decide_taught_elsewhere(tx, open.id, now)?,
+                            _ => 0,
+                        };
+                        if elsewhere > 0 {
                             let id = open.id;
                             let open = store::get_set(tx, id)?
                                 .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {id}")))?;

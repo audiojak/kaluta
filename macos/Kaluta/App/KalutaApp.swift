@@ -138,8 +138,12 @@ struct MailCommands: Commands {
     private var mailKey: Bool { isMailWindow == true && model.isMailOpen }
     /// Edit › Undo acts on the open account's mail actions here.
     private var undoKey: Bool { mailKey || (isCleanUpWindow == true && model.isMailOpen) }
-    private var noTargets: Bool { !mailKey || model.actionTargets.isEmpty }
-    private var noReplyTarget: Bool { !mailKey || model.replyTargetMessageID == nil }
+    /// The mail view is on screen: not the start screen, a workflow or
+    /// Review mode, whose own keys act on their items, never on the list
+    /// behind them.
+    private var mailShown: Bool { mailKey && !model.showsWorkflows && model.reviewMode == nil }
+    private var noTargets: Bool { !mailShown || model.actionTargets.isEmpty }
+    private var noReplyTarget: Bool { !mailShown || model.replyTargetMessageID == nil }
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -231,7 +235,9 @@ struct MailCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.command, .control])
                 .disabled(noTargets || model.selectedMailboxID == "INBOX")
             Button("Move to Trash") { model.trashSelection() }
-                .keyboardShortcut(.delete)
+                // ⌫ is a workflow's Reject or Don't send there: a disabled
+                // item would still take the key.
+                .keyboardShortcut(mailShown ? KeyboardShortcut(.delete) : nil)
                 .disabled(noTargets)
             Button(model.isSpamMailbox ? "Not Junk" : "Mark as Junk") { model.toggleJunkSelection() }
                 .keyboardShortcut("j", modifiers: [.command, .shift])

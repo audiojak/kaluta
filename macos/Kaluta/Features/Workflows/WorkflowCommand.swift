@@ -23,8 +23,11 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// Return (or Enter) and R in an item: reply, wherever there is one
     /// (a nudge is a reply). Return never does anything else in an item.
     case replyNow
-    /// O: open in full, or back to the summary (Weekly reading).
+    /// O: open in full, or back to the summary (Weekly reading); show or
+    /// hide the evidence (Teach Kaluta).
     case openInFull
+    /// W: edit before deciding (Teach Kaluta's rules).
+    case edit
     /// I: back to the Inbox (Weekly reading).
     case backToInbox
     /// ⌘E: clear the bucket (Weekly reading): the rest of it read.
@@ -60,6 +63,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skip: "S"
         case .replyNow: "Return"
         case .openInFull: "O"
+        case .edit: "W"
         case .backToInbox: "I"
         case .clearBucket: "⌘E"
         case .copyCode: "C"
@@ -75,8 +79,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
 
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
-        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "i": .backToInbox,
-        "c": .copyCode,
+        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit,
+        "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
 
@@ -125,7 +129,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .skip: "Skip for now"
         case .replyNow: kind == .waiting ? "Nudge" : "Reply"
-        case .openInFull: "Open in full"
+        case .openInFull: kind == .teach ? "Show the evidence" : "Open in full"
+        case .edit: "Edit…"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"
         case .copyCode: "Copy the code"

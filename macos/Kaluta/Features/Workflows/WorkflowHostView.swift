@@ -23,7 +23,7 @@ struct WorkflowHostView: View {
             HStack(spacing: 0) {
             // Tasks: today's set beside the task, done ones ticked.
             // Writing needs the room: the rail steps aside meanwhile.
-            if [.tasks, .waiting, .reading].contains(session.kind), !session.isFinished, !session.showsReport,
+            if [.tasks, .waiting, .reading, .teach].contains(session.kind), !session.isFinished, !session.showsReport,
                session.writer == nil {
                 WorkflowRail(session: session)
             }
@@ -90,6 +90,16 @@ struct WorkflowHostView: View {
         .onAppear { Task { @MainActor in focused = true } }
         // Each item takes the keyboard back, whatever was clicked before,
         // and so does the item when its writing closes.
+        // ⌫ reaches the screen as the Delete command, not as a key press:
+        // Reject, Don't send.
+        .onDeleteCommand {
+            guard !Self.isEditingText, !session.isFinished else { return }
+            Task { await model.performWorkflow(.reject) }
+        }
+        // Teach Kaluta's Edit… sheet closed: what it decided leaves the set.
+        .onChange(of: model.guideSheet == nil) { _, closed in
+            if closed, session.kind == .teach { Task { await model.teachEdited() } }
+        }
         .onChange(of: session.current?.key) {
             focused = true
             scroll = ScrollPosition()
@@ -233,6 +243,9 @@ struct WorkflowItemView: View {
             if session.kind == .agents {
                 AgentItemView(session: session, item: item)
             }
+            if session.kind == .teach {
+                TeachItemView(session: session, item: item)
+            }
             if session.kind == .reading, let bucket = session.bucket(of: item) {
                 Text("\(bucket.title) · \(bucket.verb)")
                     .font(TypeRole.workflowKey).fontWeight(.semibold)
@@ -330,6 +343,7 @@ struct WorkflowItemView: View {
 /// finished ones ticked (those finished elsewhere too). What is left for
 /// later in the week is the header's pill.
 struct WorkflowRail: View {
+    @Environment(AppModel.self) private var model
     let session: WorkflowSession
 
     var body: some View {
@@ -338,7 +352,11 @@ struct WorkflowRail: View {
                 Text(railTitle).font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
                     .padding(.horizontal, Space.l)
                 ForEach(railItems, id: \.key) { item in
-                    if session.kind == .reading, let id = item.threadId {
+                    if session.kind == .teach {
+                        let line = session.teachLines[item.key]
+                        WorkflowRailRow(title: line?.title ?? "Decided", detail: Self.teachDetail(line, item),
+                                        state: state(item), kind: session.kind)
+                    } else if session.kind == .reading, let id = item.threadId {
                         WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
                                             ?? session.readingSubject(id) ?? "…",
                                         detail: Self.readingDetail(item), state: state(item), kind: session.kind)
@@ -356,7 +374,8 @@ struct WorkflowRail: View {
         }
         .frame(width: Self.width)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(session.kind == .waiting ? "Waiting on others" : "Today's tasks")
+        .accessibilityLabel(session.kind == .waiting ? "Waiting on others"
+                            : session.kind == .teach ? "To decide" : "Today's tasks")
     }
 
     /// Weekly reading lists the bucket on screen, one line each.
@@ -370,8 +389,21 @@ struct WorkflowRail: View {
     private var railTitle: String {
         switch session.kind {
         case .waiting: "Waiting on"
+        case .teach: "To decide"
         case .reading: session.current.flatMap(session.bucket(of:))?.title ?? "Reading"
         default: "Today"
+        }
+    }
+
+    /// Its kind while it waits, then how it was decided.
+    static func teachDetail(_ line: TeachLine?, _ item: WorkflowItem) -> String {
+        switch item.decision {
+        case "accepted": "Accepted"
+        case "rejected": "Rejected"
+        // Edited and accepted here, or decided on its page.
+        case "elsewhere": "Decided"
+        case .some: "Done"
+        case nil: line?.kind ?? ""
         }
     }
 
@@ -681,6 +713,7 @@ struct WorkflowEndView: View {
         case .replies: return "Everyone has an answer."
         case .waiting: return "Nobody is left hanging."
         case .reading: return "The reading is done."
+        case .teach: return "Every proposal is decided."
         default: return "All done."
         }
     }
@@ -695,7 +728,7 @@ struct WorkflowEndView: View {
         switch decision {
         case "archive": "archived"
         case "reply": count == 1 ? "reply" : "replies"
-        case "elsewhere": "done elsewhere"
+        case "elsewhere": kind == .teach ? "edited or decided" : "done elsewhere"
         case "nudged": "nudged"
         case "let_go": "let go"
         case "answered": "answered meanwhile"
@@ -708,6 +741,8 @@ struct WorkflowEndView: View {
         case "undone": "runs undone"
         case "kept": kind == .agents ? "runs kept" : "kept for later"
         case "inbox": "back to the Inbox"
+        case "accepted": "accepted"
+        case "rejected": "rejected"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
         case "done": "done"

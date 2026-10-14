@@ -58,13 +58,6 @@ extension AppModel {
     }
 
     /// Teach Kaluta: everything proposed, in one queue (spec §14.13).
-    func enterTeach() async {
-        await analysis.load()
-        await guide.load()
-        await loadRoutineProposals()
-        enterReview(.teach)
-    }
-
     func loadRoutineProposals() async {
         routineProposals = (try? await core?.routineProposals()) ?? []
     }
@@ -715,8 +708,10 @@ private struct SectionLabel: View {
 
 /// A change to the sorting routine: what it would leave alone, the rule
 /// it adds, and the conversations the user moved back (spec §14.13).
-private struct RoutineDecisionBody: View {
+struct RoutineDecisionBody: View {
     let proposal: RoutineProposalInfo
+    /// The conversations behind it (Teach Kaluta shows them on O).
+    var evidence = true
 
     var body: some View {
         CueRow(kind: "Routine change", category: "Leave alone", source: "From what you moved back")
@@ -725,12 +720,14 @@ private struct RoutineDecisionBody: View {
             SectionLabel(text: "The rule it adds")
             Text(proposal.rule).font(TypeRole.reading).fixedSize(horizontal: false, vertical: true)
         }
-        VStack(alignment: .leading, spacing: Space.m) {
-            SectionLabel(text: "Moved back to the Inbox")
-            ForEach(proposal.evidence, id: \.threadId) { e in
-                VStack(alignment: .leading, spacing: Space.hair) {
-                    Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
-                    Text("Was in \(e.bucket)").font(TypeRole.caption).foregroundStyle(.secondary)
+        if evidence {
+            VStack(alignment: .leading, spacing: Space.m) {
+                SectionLabel(text: "Moved back to the Inbox")
+                ForEach(proposal.evidence, id: \.threadId) { e in
+                    VStack(alignment: .leading, spacing: Space.hair) {
+                        Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
+                        Text("Was in \(e.bucket)").font(TypeRole.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -739,9 +736,11 @@ private struct RoutineDecisionBody: View {
 
 /// A learning decision: the proposed entry, the entry of the user's it
 /// goes against, and the messages that show it.
-private struct RuleDecisionBody: View {
+struct RuleDecisionBody: View {
     @Environment(AppModel.self) private var model
     let entry: GuideEntry
+    /// The messages that show it (Teach Kaluta shows them on O).
+    var evidence = true
 
     var body: some View {
         CueRow(kind: entry.kind.title, kindStrong: entry.kind == .rule, category: categoryName,
@@ -757,7 +756,7 @@ private struct RuleDecisionBody: View {
             ConflictBlock(statement: against.statement, lead: "Your mail disagrees with this entry of yours")
         }
         let quotes = entry.evidence.filter { !$0.contradicts }.prefix(3)
-        if !quotes.isEmpty {
+        if evidence, !quotes.isEmpty {
             VStack(alignment: .leading, spacing: Space.l) {
                 SectionLabel(text: "\(entry.support.formatted()) \(entry.support == 1 ? "message shows" : "messages show") this")
                 ForEach(Array(quotes.enumerated()), id: \.offset) { _, quote in QuoteBlock(text: quote.quote) }
@@ -773,9 +772,12 @@ private struct RuleDecisionBody: View {
 
 /// A rule the daily review proposed: the change, its strength and the
 /// messages behind it, the AI's draft beside what the user sent.
-private struct ProposalDecisionBody: View {
+struct ProposalDecisionBody: View {
     @Environment(AppModel.self) private var model
     let proposal: AnalysisProposalInfo
+    /// The AI's drafts beside what the user sent (Teach Kaluta shows them
+    /// on O).
+    var evidence = true
 
     var body: some View {
         CueRow(kind: proposal.kind.title, kindStrong: proposal.kind == .rule, category: categoryName,
@@ -807,19 +809,21 @@ private struct ProposalDecisionBody: View {
         }
         let pairs = model.analysis.pairs
         let shown = model.analysis.showsAllPairs ? pairs : Array(pairs.prefix(Self.firstPairs))
-        VStack(alignment: .leading, spacing: Space.l) {
-            SectionLabel(text: proposal.watching ? "\(proposal.strength), waiting for more" : proposal.strength)
-            if proposal.watching {
-                Text("Not proposed yet: your edits have shown this, but not often enough. Accepting it now is fine too.")
-                    .font(TypeRole.reading).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(shown, id: \.compositionId) { pair in
-                AnalysisPairCard(pair: pair)
-            }
-            if pairs.count > shown.count {
-                Button("Show All \(pairs.count) Messages") { model.analysis.showsAllPairs = true }
-                    .buttonStyle(.link)
-                    .hoverHelp("Every message behind this proposal, with your edits marked")
+        if evidence {
+            VStack(alignment: .leading, spacing: Space.l) {
+                SectionLabel(text: proposal.watching ? "\(proposal.strength), waiting for more" : proposal.strength)
+                if proposal.watching {
+                    Text("Not proposed yet: your edits have shown this, but not often enough. Accepting it now is fine too.")
+                        .font(TypeRole.reading).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(shown, id: \.compositionId) { pair in
+                    AnalysisPairCard(pair: pair)
+                }
+                if pairs.count > shown.count {
+                    Button("Show All \(pairs.count) Messages") { model.analysis.showsAllPairs = true }
+                        .buttonStyle(.link)
+                        .hoverHelp("Every message behind this proposal, with your edits marked")
+                }
             }
         }
     }
@@ -839,9 +843,11 @@ private struct ProposalDecisionBody: View {
 
 /// A proposed fact, category or starter set: what it would say, the
 /// words in the user's mail, and how freely drafts may use it.
-private struct FactDecisionBody: View {
+struct FactDecisionBody: View {
     @Environment(AppModel.self) private var model
     let proposal: AnalysisFactProposalInfo
+    /// The words in the user's mail (Teach Kaluta shows them on O).
+    var evidence = true
 
     var body: some View {
         CueRow(kind: kindWords, category: proposal.kind == "fact" ? proposal.categoryName : nil, source: "From the daily review")
@@ -878,7 +884,7 @@ private struct FactDecisionBody: View {
                 }
             }
         }
-        if !proposal.quote.isEmpty {
+        if evidence, !proposal.quote.isEmpty {
             VStack(alignment: .leading, spacing: Space.l) {
                 SectionLabel(text: "In your mail")
                 QuoteBlock(text: proposal.quote)

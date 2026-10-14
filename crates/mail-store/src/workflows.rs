@@ -309,24 +309,27 @@ pub fn teach_count(conn: &Connection) -> StoreResult<u32> {
         .prepare_cached(
             "SELECT (SELECT COUNT(*) FROM guide_entries WHERE status = 'proposed')
                   + (SELECT COUNT(*) FROM analysis_proposals WHERE status = 'proposed')
-                  + (SELECT COUNT(*) FROM facts WHERE status = 'proposed')
                   + (SELECT COUNT(*) FROM routine_proposals WHERE status = 'proposed')",
         )?
         .query_row([], |r| r.get(0))?)
 }
 
+/// Each Teach Kaluta key's prefix and the proposed ones of its kind.
+const TEACH_SOURCES: [(&str, &str); 4] = [
+    ("routine", "SELECT id FROM routine_proposals WHERE status = 'proposed' ORDER BY id"),
+    ("rule", "SELECT id FROM guide_entries WHERE status = 'proposed' ORDER BY id"),
+    ("proposal", "SELECT id FROM analysis_proposals WHERE status = 'proposed' AND target = 'guide' ORDER BY id"),
+    ("fact", "SELECT id FROM analysis_proposals WHERE status = 'proposed' AND target = 'fact' ORDER BY id"),
+];
+
 /// Teach Kaluta's items, grouped by kind: changes to the sorting routine
 /// (`routine:<id>`), proposed rules (`rule:<id>` from the learning run,
-/// `proposal:<id>` from the daily review), then proposed facts
-/// (`fact:<id>`).
+/// `proposal:<id>` from the daily review), then the daily review's
+/// proposed facts (`fact:<id>`, also an analysis proposal). Facts merged
+/// from a file that differ wait on the Facts page, not here.
 pub fn teach_items(conn: &Connection) -> StoreResult<Vec<String>> {
     let mut out = Vec::new();
-    for (prefix, sql) in [
-        ("routine", "SELECT id FROM routine_proposals WHERE status = 'proposed' ORDER BY id"),
-        ("rule", "SELECT id FROM guide_entries WHERE status = 'proposed' ORDER BY id"),
-        ("proposal", "SELECT id FROM analysis_proposals WHERE status = 'proposed' ORDER BY id"),
-        ("fact", "SELECT id FROM facts WHERE status = 'proposed' ORDER BY id"),
-    ] {
+    for (prefix, sql) in TEACH_SOURCES {
         let mut stmt = conn.prepare_cached(sql)?;
         let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
         out.extend(ids.into_iter().map(|id| format!("{prefix}:{id}")));
@@ -346,6 +349,52 @@ pub fn decide_done_elsewhere(tx: &Transaction, set_id: i64, now: Millis) -> Stor
         let Some(id) = key.strip_prefix("task:").and_then(|id| id.parse::<i64>().ok()) else { continue };
         let still_open = open.query_row([id], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false);
         if !still_open {
+            decide(tx, set_id, key, "elsewhere", now, 0)?;
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Teach Kaluta's items decided outside the set (on the Writing Guide or
+/// Facts page, or accepted as edited): no longer proposed, they are
+/// decided `elsewhere`, with no time spent. The number decided.
+pub fn decide_taught_elsewhere(tx: &Transaction, set_id: i64, now: Millis) -> StoreResult<usize> {
+    let Some(set) = get_set(tx, set_id)? else { return Ok(0) };
+    let decided: Vec<String> = decisions(tx, set_id)?.into_iter().map(|d| d.item).collect();
+    let mut waiting: Vec<String> = Vec::new();
+    for (prefix, sql) in TEACH_SOURCES {
+        let mut stmt = tx.prepare_cached(sql)?;
+        let ids: Vec<i64> = stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        waiting.extend(ids.into_iter().map(|id| format!("{prefix}:{id}")));
+    }
+    let mut n = 0;
+    for key in set.items.iter().filter(|k| !decided.contains(k) && !waiting.contains(k)) {
+        decide(tx, set_id, key, "elsewhere", now, 0)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Conversations handled outside the set (Triage, Replies): out of the
+/// Inbox, or answered (the latest message is the user's), in Gmail or
+/// here, since the set was fixed. Decided `elsewhere`, with no time spent,
+/// as for tasks. The number decided.
+pub fn decide_handled_elsewhere(tx: &Transaction, set_id: i64, now: Millis) -> StoreResult<usize> {
+    let Some(set) = get_set(tx, set_id)? else { return Ok(0) };
+    let decided: Vec<String> = decisions(tx, set_id)?.into_iter().map(|d| d.item).collect();
+    let inbox = label_rowid(tx, system_labels::INBOX)?;
+    let mut waiting = tx.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM thread_labels i WHERE i.thread_id = t.id AND i.label_id = ?2)
+                AND NOT COALESCE((SELECT m.is_sent_by_me FROM messages m WHERE m.thread_id = t.id AND m.is_draft = 0
+                                   ORDER BY m.internal_date DESC, m.id DESC LIMIT 1), 0)
+           FROM threads t WHERE t.gmail_id = ?1",
+    )?;
+    let mut n = 0;
+    for key in set.items.iter().filter(|k| !decided.contains(k)) {
+        let Some(thread) = key.strip_prefix("thread:") else { continue };
+        let still = waiting.query_row(params![thread, inbox], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false);
+        if !still {
             decide(tx, set_id, key, "elsewhere", now, 0)?;
             n += 1;
         }
@@ -680,6 +729,81 @@ mod tests {
         assert!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().is_none());
         let again = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
         assert!(again.iter().any(|c| c.thread_id == first.thread_id && c.message_id == "newer"));
+    }
+
+    #[test]
+    fn teach_kaluta_holds_proposals_by_kind_and_lets_go_of_those_decided_elsewhere() {
+        let Store(_, db) = &store("teach");
+        db.write_blocking(|tx| {
+            tx.execute(
+                "INSERT INTO routine_proposals (op, statement, rule, match_key, status, created_at, updated_at)
+                 VALUES ('leave_alone', 'Leave mail from a@example.com', 'a', 'a', 'proposed', 0, 0)",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO guide_entries (category, kind, statement, norm, status, source, created_at, updated_at)
+                 VALUES ('C8', 'rule', 'Never write circle back', 'never write circle back', 'proposed', 'learned', 0, 0)",
+                [],
+            )?;
+            for (target, key) in [("fact", "f"), ("guide", "g"), ("guide", "w")] {
+                tx.execute(
+                    "INSERT INTO analysis_proposals (target, op, category, match_key, status, created_at, updated_at)
+                     VALUES (?1, 'add', 'A1', ?2, ?3, 0, 0)",
+                    params![target, key, if key == "w" { "watching" } else { "proposed" }],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let items = db.read_blocking(teach_items).unwrap();
+        assert_eq!(items, keys(&["routine:1", "rule:1", "proposal:2", "fact:1"]), "watching ones wait for more");
+        assert_eq!(db.read_blocking(teach_count).unwrap(), 4);
+        let set = db.write_blocking(move |tx| create_set(tx, "teach", "2026-10-12", &items, NOW)).unwrap();
+        assert_eq!(db.write_blocking(move |tx| decide_taught_elsewhere(tx, set, NOW)).unwrap(), 0);
+        // Accepted on the Writing Guide page meanwhile.
+        db.write_blocking(|tx| {
+            tx.execute("UPDATE analysis_proposals SET status = 'accepted' WHERE id = 2", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(db.write_blocking(move |tx| decide_taught_elsewhere(tx, set, NOW)).unwrap(), 1);
+        let d = db.read_blocking(move |c| decisions(c, set)).unwrap();
+        assert_eq!((d[0].item.as_str(), d[0].decision.as_str()), ("proposal:2", "elsewhere"));
+    }
+
+    #[test]
+    fn conversations_answered_or_archived_elsewhere_leave_the_set() {
+        let Store(_, db) = &store("handled");
+        crate::demo_workflows::generate(db, NOW).unwrap();
+        let items =
+            keys(&["thread:demowf-board-prep", "thread:demowf-renewal", "thread:demowf-standup", "thread:gone"]);
+        let set = db.write_blocking(move |tx| create_set(tx, "triage", "2026-10-12", &items, NOW)).unwrap();
+        assert_eq!(
+            db.write_blocking(move |tx| decide_handled_elsewhere(tx, set, NOW)).unwrap(),
+            1,
+            "only the deleted one"
+        );
+        // Answered in Gmail; archived in Gmail.
+        db.write_blocking(move |tx| {
+            tx.execute(
+                "INSERT INTO messages (thread_id, gmail_id, from_email, subject, date, internal_date, is_sent_by_me)
+                 SELECT id, 'my-reply', 'me@example.com', 'Re', ?1, ?1, 1 FROM threads WHERE gmail_id = 'demowf-board-prep'",
+                [NOW],
+            )?;
+            let inbox = label_rowid(tx, system_labels::INBOX)?;
+            tx.execute(
+                "DELETE FROM thread_labels WHERE label_id = ?1
+                   AND thread_id = (SELECT id FROM threads WHERE gmail_id = 'demowf-renewal')",
+                [inbox],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(db.write_blocking(move |tx| decide_handled_elsewhere(tx, set, NOW)).unwrap(), 2);
+        let d = db.read_blocking(move |c| decisions(c, set)).unwrap();
+        assert!(d.iter().all(|d| d.decision == "elsewhere" && d.millis == 0));
+        assert!(!d.iter().any(|d| d.item == "thread:demowf-standup"), "still waiting in the Inbox");
+        assert_eq!(db.write_blocking(move |tx| decide_handled_elsewhere(tx, set, NOW)).unwrap(), 0, "once");
     }
 
     #[test]

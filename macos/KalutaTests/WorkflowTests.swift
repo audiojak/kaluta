@@ -24,6 +24,7 @@ struct WorkflowTests {
             (KeyEquivalent("s"), "s", [], .skip),
             (KeyEquivalent("r"), "r", [], .replyNow),
             (KeyEquivalent("o"), "o", [], .openInFull),
+            (KeyEquivalent("w"), "w", [], .edit),
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("2"), "2", [], .pick2),
@@ -54,6 +55,10 @@ struct WorkflowTests {
         #expect(WorkflowCommand.replyNow.keyLabel == "Return")
         #expect(WorkflowCommand.replyNow.title(in: .triage) == "Reply")
         #expect(WorkflowCommand.replyNow.title(in: .waiting) == "Nudge")
+        // Teach Kaluta: E accepts, W edits, O shows the evidence.
+        #expect(WorkflowCommand.done.title(in: .teach) == "Accept")
+        #expect(WorkflowCommand.edit.keyLabel == "W")
+        #expect(WorkflowCommand.openInFull.title(in: .teach) == "Show the evidence")
     }
 
     /// Triage takes a suggestion with its own button's key, never Return

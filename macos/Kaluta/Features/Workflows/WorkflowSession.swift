@@ -79,6 +79,9 @@ final class WorkflowSession {
     var choosingCheckAgain = false
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
+    /// Teach Kaluta's rail: each item's line and kind, by key, kept from
+    /// the start (a decided proposal leaves its store).
+    var teachLines: [String: TeachLine] = [:]
 
     init(set: WorkflowSet) {
         kind = set.kind
@@ -141,4 +144,10 @@ final class WorkflowSession {
         let minutes = max(1, (left * secondsPerItem + 30) / 60)
         return "\(left) of \(total) left, about \(minutes) minute\(minutes == 1 ? "" : "s")."
     }
+}
+
+/// A Teach Kaluta item on the rail: what it says and what kind it is.
+struct TeachLine: Equatable {
+    let title: String
+    let kind: String
 }

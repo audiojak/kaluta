@@ -75,18 +75,11 @@ extension AppModel {
         workflowOverview = try? await core.workflowOverview()
     }
 
-    /// Start (or resume) a workflow. Teach Kaluta is Review mode for now
-    /// (oagc-k6o8.19); Agents is the agent column (oagc-k6o8.20).
+    /// Start (or resume) a workflow.
     func beginWorkflow(_ kind: WorkflowKind) async {
-        switch kind {
-        case .teach:
-            await enterTeach()
-            return
-
-        default:
-            break
-        }
         guard let core else { return }
+        // Teach Kaluta's proposals, before the set is matched to them.
+        if kind == .teach { await loadTeach() }
         do {
             let set = try await core.startWorkflow(kind)
             let session = WorkflowSession(set: set)
@@ -97,6 +90,7 @@ extension AppModel {
             if kind == .tasks { await loadTaskInfo(session) }
             if kind == .waiting { await loadWaits(session) }
             if kind == .agents { await loadAgentsWork(session) }
+            if kind == .teach { noteTeachLines(session) }
             if kind == .reading {
                 await loadReading(session)
                 // The report first, unless the set was already begun today.
@@ -133,6 +127,10 @@ extension AppModel {
     }
 
     private func prepare(_ item: WorkflowItem, in session: WorkflowSession) async {
+        if session.kind == .teach {
+            await prepareTeach(item)
+            return
+        }
         guard let core, let threadID = threadID(of: item) else { return }
         if session.kind == .triage, session.suggestions[threadID] == nil,
            let suggestion = try? await core.triageSuggestion(threadID) {
@@ -317,6 +315,8 @@ extension AppModel {
             case .elsewhere, nil:
                 return [a(.done, .primary, "Done"), a(.skip, .quiet)]
             }
+        case .teach:
+            return teachActions(session, a)
         case .reading:
             // T and S answer their keys without a button: the bar fits.
             var task = a(.task)
@@ -481,6 +481,8 @@ extension AppModel {
             await moveTaskToTomorrow(item, session: session)
         case (.agents, _):
             await performAgents(command, item: item, session: session)
+        case (.teach, _):
+            await performTeach(command, item: item, session: session)
         case (.reading, .openInFull):
             session.showsInFull.toggle()
         case (.reading, .done):
@@ -511,6 +513,19 @@ extension AppModel {
     }
 
     // MARK: Deciding
+
+    /// `decide`, for workflows kept in files of their own.
+    func decideWorkflowItem(_ item: WorkflowItem, _ decision: String, session: WorkflowSession, notice: String?,
+                            undoMail: (@MainActor () async -> Void)? = nil,
+                            redoMail: (@MainActor () async -> Void)? = nil) async {
+        await decide(item, decision, session: session, notice: notice, undoMail: undoMail, redoMail: redoMail)
+    }
+
+    /// The set as stored now, what was decided elsewhere meanwhile left.
+    func refreshWorkflow() async {
+        guard let session = workflowSession else { return }
+        await reloadWorkflow(session.workflowSet.id)
+    }
 
     /// Record a decision and move on; ⌘Z undoes it (and `undoMail`, the
     /// mail change it made), putting the item back in the set.
