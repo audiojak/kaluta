@@ -22,6 +22,23 @@ pub fn written_to(conn: &Connection) -> StoreResult<HashMap<String, u32>> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Of these addresses, the ones the user has sent mail to (to, cc or bcc),
+/// lowercased: people they know, whose remote images can load.
+pub fn known(conn: &Connection, emails: &[String]) -> StoreResult<Vec<String>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM participants p JOIN messages m ON m.id = p.message_id
+                         WHERE p.email = ?1 COLLATE NOCASE AND p.role IN ('to', 'cc', 'bcc')
+                           AND m.is_sent_by_me = 1 AND m.is_draft = 0)",
+    )?;
+    let mut out = Vec::new();
+    for email in emails {
+        if stmt.query_row([email], |r| r.get::<_, bool>(0))? {
+            out.push(email.to_lowercase());
+        }
+    }
+    Ok(out)
+}
+
 /// One conversation's signals, from its latest message.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Signals {
@@ -114,6 +131,20 @@ mod tests {
 
     const NOW: i64 = 1_760_000_000_000;
 
+    /// An address the demo's user has sent mail to.
+    fn known_list(db: &Db) -> String {
+        db.read_blocking(|c| {
+            Ok(c.query_row(
+                "SELECT p.email FROM participants p JOIN messages m ON m.id = p.message_id
+                  WHERE m.is_sent_by_me = 1 AND p.role = 'to' LIMIT 1",
+                [],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .unwrap()
+        .to_uppercase()
+    }
+
     #[test]
     fn the_people_written_to_and_a_conversation_that_answers_the_user() {
         let dir = std::env::temp_dir().join(format!("kaluta-priority-{}", std::process::id()));
@@ -168,6 +199,9 @@ mod tests {
         })
         .unwrap();
         let found = db.read_blocking(move |c| written_since(c, thread)).unwrap().unwrap();
+        let someone = vec!["nobody@nowhere.example".to_owned(), known_list(&db)];
+        let k = db.read_blocking(move |c| super::known(c, &someone)).unwrap();
+        assert_eq!(k.len(), 1, "only the one written to: {k:?}");
         assert_eq!((found.count, found.at), (1, NOW + 60_000), "any case of their address");
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -9,6 +9,24 @@ import Observation
 final class ReaderStore {
     static let cacheLimit = 200
     static let allowedSendersKey = "remoteImagesAllowedSenders"
+    /// Remote images load by themselves from people the user has written
+    /// to (Settings › Privacy); on unless turned off.
+    static let knownSendersKey = "remoteImagesFromKnownSenders"
+
+    static func loadsFromKnown(_ defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: knownSendersKey) as? Bool ?? true
+    }
+
+    /// Of these senders, those whose remote images load by themselves:
+    /// always allowed, or written to (when that is on).
+    static func imagesAllowed(for senders: [String], known: Set<String>, defaults: UserDefaults) -> Bool {
+        let allowed = Set(defaults.stringArray(forKey: allowedSendersKey) ?? [])
+            .union(loadsFromKnown(defaults) ? known : [])
+        return !senders.isEmpty && senders.allSatisfy(allowed.contains)
+    }
+
+    /// Senders of the shown thread the user has written to.
+    private(set) var knownSenders: Set<String> = []
 
     private(set) var threadID: String?
     private(set) var detail: ThreadDetail?
@@ -37,9 +55,8 @@ final class ReaderStore {
     var allowsRemoteImages: Bool {
         if remoteImagesAllowedForThread { return true }
         guard let detail else { return false }
-        let allowed = Set(defaults.stringArray(forKey: Self.allowedSendersKey) ?? [])
-        let senders = detail.messages.compactMap { $0.from?.email.lowercased() }
-        return !senders.isEmpty && senders.allSatisfy(allowed.contains)
+        let senders = detail.messages.filter { !$0.isSentByMe }.compactMap { $0.from?.email.lowercased() }
+        return Self.imagesAllowed(for: senders, known: knownSenders, defaults: defaults)
     }
 
     func show(threadID: String?) async {
@@ -55,6 +72,8 @@ final class ReaderStore {
             return
         }
         guard let loaded = try? await core.thread(threadID), generation == loadGeneration else { return }
+        knownSenders = await core.knownSenders(Array(Set(loaded.messages.compactMap { $0.from?.email })))
+        guard generation == loadGeneration else { return }
         // Show cached bodies immediately, then fill the rest.
         detail = loaded
         bodies = loaded.messages.reduce(into: [:]) { acc, m in
@@ -111,6 +130,20 @@ final class ReaderStore {
                 inlineImages[cid] = InlineImage(data: data, mimeType: attachment.mimeType)
             }
         }
+    }
+
+    /// A message's inline images (`cid:`), from its attachments: what
+    /// workflows show too. Part of the email, so no remote fetch.
+    static func inlineImages(of message: MessageInfo, core: CoreClient) async -> [String: InlineImage] {
+        var out: [String: InlineImage] = [:]
+        for attachment in message.attachments {
+            guard let cid = attachment.contentId.map(normalizedContentID), !cid.isEmpty,
+                  attachment.mimeType.hasPrefix("image/"), attachment.size <= inlineImageLimit,
+                  let file = try? await core.attachmentFile(attachment.id),
+                  let data = try? Data(contentsOf: file.url, options: .mappedIfSafe) else { continue }
+            out[cid] = InlineImage(data: data, mimeType: attachment.mimeType)
+        }
+        return out
     }
 
     static func normalizedContentID(_ cid: String) -> String {

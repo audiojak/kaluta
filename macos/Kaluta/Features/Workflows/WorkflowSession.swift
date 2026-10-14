@@ -49,6 +49,10 @@ final class WorkflowSession {
     var rendered: [String: RenderedBody] = [:]
     /// Conversations whose remote images the user loaded here.
     var imagesLoaded: Set<String> = []
+    /// Each email's inline images, by thread id.
+    var inlineImages: [String: [String: InlineImage]] = [:]
+    /// Senders the user has written to (their images may load by themselves).
+    var knownSenders: Set<String> = []
     /// The end's score, once the set is finished.
     var score: WorkflowScore?
     private(set) var itemShownAt = Date()

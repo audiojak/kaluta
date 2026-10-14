@@ -317,6 +317,13 @@ pub struct WrittenSince {
 
 #[uniffi::export]
 impl Core {
+    /// Of these addresses, the ones the user has sent mail to, lowercased:
+    /// people they know, whose remote images may load (spec §14.4).
+    pub async fn known_senders(&self, emails: Vec<String>) -> Result<Vec<String>, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move { Ok(db.read(move |c| mail_store::priority::known(c, &emails)).await?) }).await
+    }
+
     /// What the user sent the sender of this conversation's latest message
     /// since it, in other conversations (Triage, Replies). A local lookup.
     pub async fn written_since(&self, thread_id: String) -> Result<Option<WrittenSince>, CoreError> {
