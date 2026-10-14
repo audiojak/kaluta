@@ -28,7 +28,8 @@ struct ThreadWindow: View {
             if model.openAccountID == request.accountID, model.gmailURL(threadID: request.threadID) != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Open in Gmail", systemImage: "safari") { model.openInGmail(threadID: request.threadID) }
-                        .help("Open this conversation in Gmail in your browser, exactly as Gmail shows it") // toolbar
+                        .keyboardShortcut("o", modifiers: [.command, .shift])
+                        .help("Open this conversation in Gmail in your browser, exactly as Gmail shows it (⇧⌘O)") // toolbar
                 }
             }
         }

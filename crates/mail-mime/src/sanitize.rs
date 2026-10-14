@@ -25,7 +25,7 @@ use ammonia::{Builder, UrlRelative};
 
 /// Bump when the policy changes; stored bodies with an older version are
 /// re-sanitized lazily.
-pub const SANITIZER_VERSION: u32 = 2;
+pub const SANITIZER_VERSION: u32 = 3;
 
 pub const REMOTE_SCHEME: &str = "kaluta-remote";
 pub const CID_SCHEME: &str = "kaluta-cid";
@@ -38,6 +38,9 @@ const MAX_DATA_URL: usize = 256 * 1024;
 /// position, z-index, cursor): for inline `style` and kept stylesheets.
 const STYLE_PROPERTIES: &[&str] = &[
     "color",
+    // Colours and gradients only: a value with url() or image-set() is
+    // refused by `safe_declaration`.
+    "background",
     "background-color",
     "font",
     "font-family",
@@ -105,8 +108,13 @@ pub struct Sanitized {
 pub fn sanitize_html(html: &str) -> Sanitized {
     // The email's own stylesheet, cleaned and kept to the message
     // (`@scope` with no selector: the element the fragment is put in).
-    let sheet = kept_stylesheet(html).map(|css| format!("<style>@scope{{{css}}}</style>")).unwrap_or_default();
-    let html = sheet + &SANITIZER.clean(html).to_string();
+    // Outside comments only, as a browser reads it: Outlook's conditional
+    // sheets (`<!--[if mso]><style>`) are not for us.
+    let visible = without_html_comments(html);
+    let sheet = kept_stylesheet(&visible).map(|css| format!("<style>@scope{{{css}}}</style>")).unwrap_or_default();
+    // The email's <body>, kept as a div with its classes and style (where
+    // newsletters set their background), as Gmail does.
+    let html = sheet + &SANITIZER.clean(&body_as_div(html)).to_string();
     let has_remote_images = html.contains(&format!("src=\"{REMOTE_SCHEME}:"));
     Sanitized { html, has_remote_images }
 }
@@ -319,6 +327,56 @@ fn is_safe_data_image(lower: &str, len: usize) -> bool {
             .any(|p| lower.starts_with(p))
 }
 
+/// `html` without `<!-- … -->` comments.
+fn without_html_comments(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find("<!--") {
+        out.push_str(&rest[..i]);
+        rest = rest[i + 4..].find("-->").map_or("", |j| &rest[i + 4 + j + 3..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The first `<body …>` as `<div class="kbody …" …>` and its `</body>` as
+/// `</div>`, so its attributes survive (a fragment has no body of its own).
+fn body_as_div(html: &str) -> Cow<'_, str> {
+    let lower = html.to_ascii_lowercase();
+    let Some(start) =
+        lower.find("<body").filter(|&i| lower[i + 5..].starts_with(|c: char| c.is_ascii_whitespace() || c == '>'))
+    else {
+        return Cow::Borrowed(html);
+    };
+    let Some(end) = lower[start..].find('>').map(|i| start + i) else { return Cow::Borrowed(html) };
+    let attrs = &html[start + 5..end];
+    let attrs_lower = &lower[start + 5..end];
+    // Its class list gains "kbody" (stylesheets' `body` selectors become
+    // `.e-kbody`); a class attribute of its own keeps its names.
+    let attrs = match attrs_lower.find("class=") {
+        Some(i) => {
+            let at = i + "class=".len();
+            let quote = attrs[at..].chars().next().filter(|c| *c == '"' || *c == '\'');
+            match quote {
+                Some(q) => format!("{}{q}kbody {}", &attrs[..at], &attrs[at + 1..]),
+                None => format!("{}kbody {}", &attrs[..at], &attrs[at..]),
+            }
+        }
+        None => format!(" class=\"kbody\"{attrs}"),
+    };
+    let close = lower.rfind("</body").unwrap_or(lower.len());
+    let mut out = String::with_capacity(html.len() + 16);
+    out.push_str(&html[..start]);
+    out.push_str("<div");
+    out.push_str(&attrs);
+    out.push_str(&html[end..close]);
+    if close < html.len() {
+        out.push_str("</div>");
+        out.push_str(html[close..].split_once('>').map_or("", |(_, after)| after));
+    }
+    Cow::Owned(out)
+}
+
 /// The email's `<style>` sheets, cleaned: rules and `@media` blocks whose
 /// declarations the inline filter would keep. `None` when nothing is left.
 fn kept_stylesheet(html: &str) -> Option<String> {
@@ -379,7 +437,7 @@ fn clean_rules(css: &str, depth: usize) -> String {
         if prelude.is_empty() || !safe_prelude(prelude) {
             continue;
         }
-        let prelude = &prefixed_classes(prelude);
+        let prelude = &document_selectors(&prefixed_classes(prelude));
         let kept: Vec<String> = inner
             .split(';')
             .filter_map(|d| {
@@ -405,6 +463,47 @@ fn clean_rules(css: &str, depth: usize) -> String {
 fn safe_prelude(prelude: &str) -> bool {
     let lower = prelude.to_ascii_lowercase();
     !prelude.contains(['\\', '{', '}', ';']) && !lower.contains("url(") && !lower.contains("expression(")
+}
+
+/// A selector's `body` as the email's body (now `.e-kbody`) and its `html`
+/// as the message itself (`:scope`): what Gmail does with them.
+fn document_selectors(selector: &str) -> String {
+    let mut out = String::with_capacity(selector.len() + 8);
+    let chars: Vec<char> = selector.chars().collect();
+    let mut i = 0;
+    let mut quote: Option<char> = None;
+    let mut bracket = false;
+    while i < chars.len() {
+        let c = chars[i];
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '[') => bracket = true,
+            (None, ']') => bracket = false,
+            (None, c) if !bracket && c.is_ascii_alphabetic() => {
+                let before = i.checked_sub(1).map(|j| chars[j]);
+                let starts_type =
+                    !before.is_some_and(|b| b.is_ascii_alphanumeric() || matches!(b, '.' | '#' | ':' | '-' | '_'));
+                let end = (i..chars.len())
+                    .find(|&j| !(chars[j].is_ascii_alphanumeric() || matches!(chars[j], '-' | '_')))
+                    .unwrap_or(chars.len());
+                let word: String = chars[i..end].iter().collect::<String>().to_ascii_lowercase();
+                if starts_type && (word == "body" || word == "html") {
+                    out.push_str(if word == "body" { ".e-kbody" } else { ":scope" });
+                    i = end;
+                    continue;
+                }
+                out.extend(&chars[i..end]);
+                i = end;
+                continue;
+            }
+            _ => {}
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
 }
 
 /// A class name worth keeping: letters, digits, `-` and `_`.

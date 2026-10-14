@@ -234,6 +234,11 @@ struct MailCommands: Commands {
             Button("Move to Inbox") { model.moveSelectionToInbox() }
                 .keyboardShortcut("i", modifiers: [.command, .control])
                 .disabled(noTargets || model.selectedMailboxID == "INBOX")
+            // The selected conversation in Gmail, in the browser (⇧⌘O; a
+            // message window's toolbar has the same).
+            Button("Open in Gmail") { model.selectedThreadID.map { model.openInGmail(threadID: $0) } }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+                .disabled(!mailShown || model.selectedThreadID.flatMap { model.gmailURL(threadID: $0) } == nil)
             Button("Move to Trash") { model.trashSelection() }
                 // ⌫ is a workflow's Reject or Don't send there: a disabled
                 // item would still take the key.

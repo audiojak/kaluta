@@ -189,3 +189,29 @@ fn a_kept_stylesheet_is_not_text() {
     let text = mail_mime::html_to_text(&clean("<style>p{color:red}</style><p>Hello there</p>"));
     assert_eq!(text.trim(), "Hello there");
 }
+
+#[test]
+fn outlooks_conditional_sheets_are_not_kept() {
+    let out = clean(
+        r#"<style>h1{font-family:Georgia,serif}</style><!--[if mso]><style>h1{font-family:Arial !important}</style><![endif]--><h1>t</h1>"#,
+    );
+    assert!(out.contains("font-family:Georgia,serif"), "{out}");
+    assert!(!out.contains("Arial"), "{out}");
+    // Shown to everyone but Outlook: kept.
+    let shown = clean(r#"<!--[if !mso]><!--><style>p{color:red}</style><!--<![endif]--><p>x</p>"#);
+    assert!(shown.contains("p{color:red}"), "{shown}");
+}
+
+#[test]
+fn the_emails_body_keeps_its_class_and_background_as_gmail_shows_it() {
+    let out = clean(
+        r#"<html><head><style>.a{background-color:#FEF1E8} body{margin:0} html body .x{color:red}</style></head><body class="a" style="background:#FEF1E8"><p class="x">Hi</p></body></html>"#,
+    );
+    assert!(out.contains(r#"class="e-kbody e-a""#), "{out}");
+    assert!(out.contains("background:#FEF1E8") || out.contains("background: #FEF1E8"), "{out}");
+    assert!(out.contains(".e-kbody{margin:0}"), "{out}");
+    assert!(out.contains(":scope .e-kbody .e-x{color:red}"), "{out}");
+    // `background` keeps colours, never a fetch.
+    assert_absent(r#"<div style="background: #fff url(https://evil.example/t.gif)">x</div>"#, &["evil", "url("]);
+    assert_absent(r#"<style>p{background:linear-gradient(red,blue),url(https://evil.example/x)}</style>"#, &["evil"]);
+}

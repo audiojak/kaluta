@@ -29,6 +29,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case openInFull
     /// W: edit before deciding (Teach Kaluta's rules).
     case edit
+    /// G: the conversation in Gmail, in the browser (Triage, a Gmail account).
+    case openInGmail
     /// I: back to the Inbox (Weekly reading).
     case backToInbox
     /// ⌘E: clear the bucket (Weekly reading): the rest of it read.
@@ -65,6 +67,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .replyNow: "Return"
         case .openInFull: "O"
         case .edit: "W"
+        case .openInGmail: "G"
         case .backToInbox: "I"
         case .clearBucket: "⌘E"
         case .copyCode: "C"
@@ -80,7 +83,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
 
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
-        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit,
+        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail,
         "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
@@ -131,6 +134,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .replyNow: kind == .waiting ? "Nudge" : "Reply"
         case .openInFull: kind == .teach ? "Show the evidence" : kind == .triage ? "Open the email" : "Open in full"
         case .edit: "Edit…"
+        case .openInGmail: "Open in Gmail"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"
         case .copyCode: "Copy the code"

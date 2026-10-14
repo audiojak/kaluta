@@ -25,6 +25,7 @@ struct WorkflowTests {
             (KeyEquivalent("r"), "r", [], .replyNow),
             (KeyEquivalent("o"), "o", [], .openInFull),
             (KeyEquivalent("w"), "w", [], .edit),
+            (KeyEquivalent("g"), "g", [], .openInGmail),
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("2"), "2", [], .pick2),

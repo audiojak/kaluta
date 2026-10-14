@@ -3087,9 +3087,14 @@ another message in the thread. `class` attributes are kept, each name
 prefixed `e-` (and the sheet's selectors with it), so none can be one of
 the reader's own. Each stored body records the sanitizer version it was
 cleaned with; opening a thread fetches again, once, any of its bodies an
-older version cleaned. *Open in Gmail* (a Gmail account's message window
-toolbar, and Triage) shows the conversation in the browser exactly as
-Gmail does.
+older version cleaned. *Open in Gmail* (⇧⌘O: Message › Open in Gmail for the
+selected conversation, a Gmail account's message window toolbar; G in
+Triage) shows the conversation in the browser exactly as Gmail does.
+*(Version 3.)* Sheets inside HTML comments (Outlook's `<!--[if mso]>`)
+are not kept, as a browser would not read them; the email's `<body>` is
+kept as a `div` with its class and style (class `e-kbody` added); a
+sheet's `body` selector becomes `.e-kbody` and `html` becomes `:scope`;
+`background` is allowed for colours and gradients.
 
 `WKWebView` configuration: JavaScript disabled
 (`defaultWebpagePreferences.allowsContentJavaScript = false`), a custom
@@ -4352,6 +4357,7 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | S | skip for now |
 | R | reply, as Return |
 | O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta); the email in its own window (Triage) |
+| G | the conversation in Gmail, in the browser (Triage) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |

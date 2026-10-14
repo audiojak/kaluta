@@ -364,8 +364,11 @@ extension AppModel {
         // button in the bar.
         var open = a(.openInFull, .plain, nil)
         open.shown = false
+        var gmail = a(.openInGmail, .plain, nil)
+        gmail.shown = false
+        let inGmail = session.current.flatMap(threadID(of:)).flatMap { gmailURL(threadID: $0) } != nil
         return [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                a(.skip, .quiet, nil), open]
+                a(.skip, .quiet, nil), open] + (inGmail ? [gmail] : [])
             .map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
@@ -489,6 +492,8 @@ extension AppModel {
             await openTaskForm(item, session: session)
         case (.triage, .openInFull):
             if let id = threadID(of: item) { openThreads([id]) }
+        case (.triage, .openInGmail):
+            if let id = threadID(of: item) { openInGmail(threadID: id) }
         case (_, .skip):
             session.exit = .up
             if let core, let set = try? await core.skipWorkflowItem(set: session.workflowSet.id, key: item.key) {
