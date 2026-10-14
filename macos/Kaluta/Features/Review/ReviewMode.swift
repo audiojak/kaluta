@@ -366,6 +366,9 @@ struct ReviewModeView: View {
             PaneDivider()
             ReviewDecisionView(mode: mode)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Decisions' notices, and why one could not be made (a
+                // routine change with no routine to change).
+                .overlay(alignment: .bottom) { UndoNoticeView().padding(.bottom, Self.noticeInset) }
         }
         .navigationTitle(mode.title)
         .navigationSubtitle(model.reviewProgress)
@@ -385,6 +388,8 @@ struct ReviewModeView: View {
     }
 
     static let queueWidth: CGFloat = 340
+    /// The notice clears the Accept and Reject bar.
+    static let noticeInset: CGFloat = 64
 }
 
 /// The queue: every decision the mode opened on, the current one
@@ -424,7 +429,16 @@ struct ReviewQueueView: View {
         }
         .listStyle(.inset)
         .focused($focused)
-        .onAppear { focused = true }
+        .defaultFocus($focused, true)
+        // The queue takes the keys (Return, ⌫, e, j, k). Focus set while
+        // the mode is still appearing is lost to the view it replaces, so
+        // it is asked for again a moment after.
+        .task {
+            for _ in 0..<Self.focusTries {
+                focused = true
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+        }
         .onKeyPress(keys: [.return, .enter]) { _ in model.reviewAct(.accept) ? .handled : .ignored }
         .onDeleteCommand { model.reviewAct(.reject) }
         .onKeyPress(characters: .init(charactersIn: "ejk"), phases: .down) { press in
@@ -439,6 +453,8 @@ struct ReviewQueueView: View {
         }
         .accessibilityLabel("Decisions")
     }
+
+    static let focusTries = 5
 
     /// The kinds present, in the queue's order.
     static func groups(_ items: [ReviewItem]) -> [String] {
