@@ -25,7 +25,7 @@ use ammonia::{Builder, UrlRelative};
 
 /// Bump when the policy changes; stored bodies with an older version are
 /// re-sanitized lazily.
-pub const SANITIZER_VERSION: u32 = 3;
+pub const SANITIZER_VERSION: u32 = 4;
 
 pub const REMOTE_SCHEME: &str = "kaluta-remote";
 pub const CID_SCHEME: &str = "kaluta-cid";
@@ -108,10 +108,7 @@ pub struct Sanitized {
 pub fn sanitize_html(html: &str) -> Sanitized {
     // The email's own stylesheet, cleaned and kept to the message
     // (`@scope` with no selector: the element the fragment is put in).
-    // Outside comments only, as a browser reads it: Outlook's conditional
-    // sheets (`<!--[if mso]><style>`) are not for us.
-    let visible = without_html_comments(html);
-    let sheet = kept_stylesheet(&visible).map(|css| format!("<style>@scope{{{css}}}</style>")).unwrap_or_default();
+    let sheet = kept_stylesheet(html).map(|css| format!("<style>@scope{{{css}}}</style>")).unwrap_or_default();
     // The email's <body>, kept as a div with its classes and style (where
     // newsletters set their background), as Gmail does.
     let html = sheet + &SANITIZER.clean(&body_as_div(html)).to_string();
@@ -327,18 +324,6 @@ fn is_safe_data_image(lower: &str, len: usize) -> bool {
             .any(|p| lower.starts_with(p))
 }
 
-/// `html` without `<!-- … -->` comments.
-fn without_html_comments(html: &str) -> String {
-    let mut out = String::with_capacity(html.len());
-    let mut rest = html;
-    while let Some(i) = rest.find("<!--") {
-        out.push_str(&rest[..i]);
-        rest = rest[i + 4..].find("-->").map_or("", |j| &rest[i + 4 + j + 3..]);
-    }
-    out.push_str(rest);
-    out
-}
-
 /// The first `<body …>` as `<div class="kbody …" …>` and its `</body>` as
 /// `</div>`, so its attributes survive (a fragment has no body of its own).
 fn body_as_div(html: &str) -> Cow<'_, str> {
@@ -379,14 +364,25 @@ fn body_as_div(html: &str) -> Cow<'_, str> {
 
 /// The email's `<style>` sheets, cleaned: rules and `@media` blocks whose
 /// declarations the inline filter would keep. `None` when nothing is left.
+///
+/// Read as a browser reads it: a sheet inside an HTML comment (Outlook's
+/// `<!--[if mso]><style>`) is not one, while `<!--` and `-->` inside a
+/// sheet are only CSS's way of hiding it from old mail readers (Outlook
+/// wraps all its CSS so: dropping it lost `p.MsoNormal{margin:0}`).
 fn kept_stylesheet(html: &str) -> Option<String> {
     let lower = html.to_ascii_lowercase();
     let mut css = String::new();
     let mut at = 0;
-    while let Some(start) = lower[at..].find("<style").map(|i| at + i) {
+    loop {
+        let comment = lower[at..].find("<!--").map(|i| at + i);
+        let Some(start) = lower[at..].find("<style").map(|i| at + i) else { break };
+        if let Some(c) = comment.filter(|&c| c < start) {
+            at = lower[c + 4..].find("-->").map_or(lower.len(), |j| c + 4 + j + 3);
+            continue;
+        }
         let Some(open) = lower[start..].find('>').map(|i| start + i + 1) else { break };
         let close = lower[open..].find("</style").map_or(lower.len(), |i| open + i);
-        css.push_str(&html[open..close]);
+        css.push_str(&html[open..close].replace("<!--", "").replace("-->", ""));
         css.push('\n');
         at = close;
         if css.len() > MAX_STYLESHEET {

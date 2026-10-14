@@ -215,3 +215,13 @@ fn the_emails_body_keeps_its_class_and_background_as_gmail_shows_it() {
     assert_absent(r#"<div style="background: #fff url(https://evil.example/t.gif)">x</div>"#, &["evil", "url("]);
     assert_absent(r#"<style>p{background:linear-gradient(red,blue),url(https://evil.example/x)}</style>"#, &["evil"]);
 }
+
+#[test]
+fn outlooks_sheet_hidden_in_a_comment_inside_style_is_kept() {
+    // Outlook wraps its CSS in <!-- --> inside <style>: still CSS to a browser.
+    let out = clean(
+        r#"<style><!-- p.MsoNormal, li.MsoNormal {margin:0in;font-size:11pt;font-family:"Aptos",sans-serif} --></style><p class="MsoNormal">Hi John,</p><p class="MsoNormal">&nbsp;</p>"#,
+    );
+    assert!(out.contains("p.e-MsoNormal, li.e-MsoNormal{margin:0in;font-size:11pt"), "{out}");
+    assert!(!out.contains("<!--") && !out.contains("-->"), "{out}");
+}

@@ -68,6 +68,37 @@ enum EmailDocument {
         return out
     }
 
+    /// One message's body on its own (a workflow's item): no card, no
+    /// header, a transparent page so it sits in the workflow's card, the
+    /// same policy and the same rules for the email's own styles.
+    static func single(_ html: String, isDark: Bool) -> String {
+        let paper = isDark && looksStyled(html)
+        return """
+        <!doctype html><html><head><meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
+        <meta name="color-scheme" content="light dark">
+        <style>\(singleStylesheet)</style></head><body>
+        <div class="body\(paper ? " paper" : "")">\(html)</div></body></html>
+        """
+    }
+
+    private static let singleStylesheet = """
+    :root { color-scheme: light dark; }
+    html, body { margin: 0; padding: 0; background: transparent; color: CanvasText; overflow: hidden; }
+    body { font: 16px/1.5 -apple-system, system-ui, sans-serif; overflow-wrap: anywhere; }
+    .body img { max-width: 100%; height: auto; }
+    .body table { max-width: 100%; }
+    .body pre { white-space: pre-wrap; }
+    .body.paper { background: #ffffff; color: #111111; color-scheme: light; border-radius: 8px; padding: 12px; }
+    blockquote { margin: 8px 0; padding-left: 8px; border-left: 2px solid color-mix(in srgb, CanvasText 25%, transparent); color: GrayText; }
+    a { color: LinkText; }
+    .body details.kaluta-quote { margin: 12px 0 0; }
+    .body details.kaluta-quote > summary { display: inline-block; list-style: none; padding: 0 8px; border-radius: 8px; \
+    cursor: pointer; font: 700 12px/16px -apple-system, system-ui; letter-spacing: 1px; color: GrayText; \
+    background: color-mix(in srgb, CanvasText 9%, transparent); }
+    .body details.kaluta-quote > summary::-webkit-details-marker { display: none; }
+    """
+
     /// "Darshan Patel", "Me & Darshan Patel", "Darshan Patel, Austin Born + 10".
     static func shortRecipients(_ names: [String]) -> String {
         switch names.count {

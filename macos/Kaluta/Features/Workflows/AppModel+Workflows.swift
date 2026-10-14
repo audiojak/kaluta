@@ -145,9 +145,26 @@ extension AppModel {
             session.threads[threadID] = detail
             if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),
                let html = body.html {
+                session.rendered[threadID] = body
+                // Cleaned by an older sanitizer: fetched and cleaned again,
+                // then shown as it was sent.
+                Task { [weak self] in
+                    guard let core = self?.core, await core.refreshStaleBodies(threadID) > 0,
+                          let fresh = try? await core.renderedBody(latest.id) else { return }
+                    session.rendered[threadID] = fresh
+                }
                 session.bodies[threadID] = Self.readingText(ComposerAssistant.plainText(fromHTML: html))
             }
         }
+    }
+
+    /// A workflow's email shows its remote images: loaded here, or always
+    /// for its sender (the reader's setting).
+    func workflowImagesAllowed(_ threadID: String, session: WorkflowSession) -> Bool {
+        if session.imagesLoaded.contains(threadID) { return true }
+        let allowed = Set(defaults.stringArray(forKey: ReaderStore.allowedSendersKey) ?? [])
+        let latest = session.threads[threadID].flatMap { Self.shownMessage($0, session.kind) }
+        return latest?.from.map { allowed.contains($0.email.lowercased()) } ?? false
     }
 
     /// Plain text for reading at content size: paragraphs apart, the
@@ -313,7 +330,7 @@ extension AppModel {
         case .triage:
             return triageActions(session, a)
         case .replies:
-            return [a(.replyNow, .primary), a(.task), a(.done), a(.skip, .quiet)]
+            return [a(.replyNow, .primary), a(.task), a(.done), a(.skip, .quiet)] + emailLinks(session, a, opens: true)
         case .tasks:
             let replies: Bool = {
                 guard let item = session.current, let task = task(of: item) else { return false }
@@ -321,8 +338,10 @@ extension AppModel {
             }()
             return (replies ? [a(.replyNow, .primary)] : []) + [a(.done, replies ? .plain : .primary), a(.later),
                                                                          a(.skip, .quiet)]
+                + emailLinks(session, a, opens: true)
         case .waiting:
             return [a(.replyNow, .primary), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
+                + emailLinks(session, a, opens: true)
         case .agents:
             switch session.current.flatMap({ agentItem($0, in: session) }) {
             case let .action(_, tool, _, draftID, _) where AgentStore.isSend(tool) && draftID != nil:
@@ -346,8 +365,9 @@ extension AppModel {
             task.shown = false
             var skip = a(.skip, .quiet)
             skip.shown = false
+            // O is Open in full here; G still opens it in Gmail.
             return [a(.done, .primary), a(.openInFull, .plain, session.showsInFull ? "Show the summary" : nil),
-                    a(.later), a(.backToInbox), a(.clearBucket, .quiet), task, skip]
+                    a(.later), a(.backToInbox), a(.clearBucket, .quiet), task, skip] + emailLinks(session, a, opens: false)
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
@@ -360,16 +380,30 @@ extension AppModel {
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
-        // O opens the email with its formatting: a link on the email, not a
-        // button in the bar.
-        var open = a(.openInFull, .plain, nil)
-        open.shown = false
-        var gmail = a(.openInGmail, .plain, nil)
-        gmail.shown = false
-        let inGmail = session.current.flatMap(threadID(of:)).flatMap { gmailURL(threadID: $0) } != nil
         return [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                a(.skip, .quiet, nil), open] + (inGmail ? [gmail] : [])
+                a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
             .map { var action = $0; action.suggested = action.command == mark; return action }
+    }
+
+    /// The keys behind the email's links (spec §14.13): O opens it in its
+    /// own window where O means nothing else, G in Gmail in a Gmail account.
+    /// Links on the email, not buttons in the bar.
+    private func emailLinks(_ session: WorkflowSession,
+                            _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction,
+                            opens: Bool) -> [WorkflowAction] {
+        guard let id = session.current.flatMap(threadID(of:)) else { return [] }
+        var out: [WorkflowAction] = []
+        if opens {
+            var open = a(.openInFull, .plain, "Open the email")
+            open.shown = false
+            out.append(open)
+        }
+        if gmailURL(threadID: id) != nil {
+            var gmail = a(.openInGmail, .plain, nil)
+            gmail.shown = false
+            out.append(gmail)
+        }
+        return out
     }
 
     /// The command that takes a triage suggestion.
@@ -490,9 +524,9 @@ extension AppModel {
         switch (session.kind, command) {
         case (.triage, .task):
             await openTaskForm(item, session: session)
-        case (.triage, .openInFull):
+        case (.triage, .openInFull), (.replies, .openInFull), (.tasks, .openInFull), (.waiting, .openInFull):
             if let id = threadID(of: item) { openThreads([id]) }
-        case (.triage, .openInGmail):
+        case (_, .openInGmail):
             if let id = threadID(of: item) { openInGmail(threadID: id) }
         case (_, .skip):
             session.exit = .up
