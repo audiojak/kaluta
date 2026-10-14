@@ -59,6 +59,7 @@ struct WorkflowTests {
         // Teach Kaluta: E accepts, W edits, O shows the evidence.
         #expect(WorkflowCommand.done.title(in: .teach) == "Accept")
         #expect(WorkflowCommand.edit.keyLabel == "W")
+        #expect(WorkflowCommand.discard.keyLabel == "⌘." && WorkflowCommand.discard.title(in: .waiting) == "Discard")
         #expect(WorkflowCommand.openInFull.title(in: .teach) == "Show the evidence")
     }
 
@@ -119,6 +120,17 @@ struct WorkflowTests {
         #expect(page.contains(#"<div class="body"><style>@scope"#), "the email's sheet scoped to its own container")
         #expect(page.contains("background: transparent"))
         #expect(EmailDocument.single(#"<p style="color:#333">x</p>"#, isDark: true).contains(#"class="body paper""#))
+    }
+
+    /// Written to the sender since, elsewhere: the line says so.
+    @Test func theWrittenSinceLineSaysWhenAndWhere() {
+        let now = DueDay.date("2026-10-14")!
+        let oct5 = Int64(DueDay.date("2026-10-05")!.timeIntervalSince1970 * 1000)
+        let one = WrittenSince(threadId: "t", subject: "Re: ORCA renewal", at: oct5, count: 1)
+        #expect(WrittenSinceLine.words(one, name: "Melissa Brown", now: now)
+            == "You wrote to Melissa Brown on \(DueDay.date("2026-10-05")!.formatted(.dateTime.month(.abbreviated).day())) · Re: ORCA renewal")
+        let three = WrittenSince(threadId: "t", subject: "", at: oct5, count: 3)
+        #expect(WrittenSinceLine.words(three, name: "Ann", now: now).hasSuffix("· (no subject) and 2 more"))
     }
 
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {

@@ -756,6 +756,11 @@ final class CoreClient: Sendable {
 
     func setTriageByPriority(_ on: Bool) { core.setTriageByPriority(on: on) }
 
+    /// The user's latest email to this conversation's sender elsewhere, since their message.
+    func writtenSince(_ threadID: String) async -> WrittenSince? {
+        (try? await call { try await core.writtenSince(threadId: threadID) }) ?? nil
+    }
+
     func triageSuggestion(_ threadID: String) async throws(CoreClientError) -> TriageSuggestion? {
         try await call { try await core.triageSuggestion(threadId: threadID) }
     }
@@ -1833,6 +1838,7 @@ typealias WorkflowKind = KalutaCore.WorkflowKind
 typealias WorkflowOverview = KalutaCore.WorkflowOverview
 typealias WorkflowSummary = KalutaCore.WorkflowSummary
 typealias WorthLook = KalutaCore.WorthLook
+typealias WrittenSince = KalutaCore.WrittenSince
 typealias WorthReason = KalutaCore.WorthReason
 typealias WorkflowDay = KalutaCore.WorkflowDay
 typealias WorkflowItem = KalutaCore.WorkflowItem

@@ -39,6 +39,16 @@ struct WorkflowWriteView: View {
                     .keyboardShortcut(key, modifiers: [.command, .option])
                     .hidden()
             }
+            // Esc goes back a step and ⌘. discards, from inside the text too
+            // (the field would otherwise keep Esc for itself).
+            if writer.step == .say || writer.step == .final {
+                Button("Back") { perform(.back) } // no-help: hidden
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .hidden()
+                Button("Discard") { perform(.discard) } // no-help: hidden
+                    .keyboardShortcut(".", modifiers: .command)
+                    .hidden()
+            }
         }
         .task(id: writer.step) {
             // The field or the text takes the keys. Focus asked for while
