@@ -74,6 +74,29 @@ struct WorkflowTests {
         #expect(KeyEquivalent.enter.isReturn && KeyEquivalent.return.isReturn && !KeyEquivalent.space.isReturn)
     }
 
+    /// The Triage card (spec §14.13): the people the user writes to by
+    /// name, how many others, and why a conversation is worth a look.
+    @Test func theTriageCardNamesThePeopleTheUserKnows() {
+        func summary(_ people: [String], more: UInt32, others: UInt32) -> WorkflowSummary {
+            WorkflowSummary(kind: .triage, count: 22, estimateSecs: 0, preview: [], later: 0, inProgress: false,
+                            people: people, peopleMore: more, fromOthers: others, worth: [])
+        }
+        #expect(TriageCardText.from(summary(["Eric Koziol", "Sam Rivera", "Morgan Okafor", "Ann Bell"], more: 2,
+                                            others: 17))
+            == "From Eric Koziol, Sam Rivera, Morgan Okafor, Ann Bell and 2 others you know · 17 from others")
+        #expect(TriageCardText.from(summary(["Eric Koziol", "Sam Rivera"], more: 0, others: 0))
+            == "From Eric Koziol and Sam Rivera")
+        #expect(TriageCardText.from(summary([], more: 0, others: 5)) == "From no one you write to yet")
+        #expect(TriageCardText.from(summary([], more: 0, others: 0)) == nil)
+
+        let now = DueDay.date("2026-10-14")!
+        #expect(TriageCardText.reasons([.answersYou, .due(day: "2026-10-15"), .toYouAlone], now: now)
+            == "answers you · due tomorrow · to you alone")
+        #expect(TriageCardText.dueWords("2026-10-16", now: now) == now.addingTimeInterval(2 * 86_400)
+            .formatted(.dateTime.weekday(.wide)))
+        #expect(TriageCardText.reasons([], now: now) == nil)
+    }
+
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
         #expect(WorkflowKind.all.map(\.number) == Array(1...7))
         #expect(WorkflowKind.all.first == .triage && WorkflowKind.all.last == .teach)

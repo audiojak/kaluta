@@ -134,7 +134,8 @@ private struct NextWorkflowCard: View {
         Button(action: start) { label }
         .buttonStyle(.plain)
         .hoverHelp("\(summary.kind.startTitle) (Return)")
-        .accessibilityLabel("Next: \(summary.kind.startTitle). \(WorkflowCard.detail(summary))")
+        .accessibilityLabel("Next: \(summary.kind.startTitle). \(WorkflowCard.detail(summary))"
+                            + (summary.kind == .triage ? TriageCardText.spoken(summary) : ""))
     }
 
     private var label: some View {
@@ -143,7 +144,12 @@ private struct NextWorkflowCard: View {
                 Text("NEXT").font(TypeRole.workflowKey).fontWeight(.semibold).opacity(0.85)
                 Text(summary.kind.startTitle).font(TypeRole.workflowDisplay)
                 Text(WorkflowCard.detail(summary)).font(TypeRole.workflowContent).opacity(0.92)
-                if !summary.preview.isEmpty {
+                if summary.kind == .triage, let from = TriageCardText.from(summary) {
+                    // Who the user knows among the senders (spec §14.13).
+                    Text(from).font(TypeRole.workflowContext).opacity(0.92)
+                        .lineLimit(2)
+                    if !summary.worth.isEmpty { worthALook }
+                } else if !summary.preview.isEmpty {
                     HStack(spacing: Space.s) {
                         ForEach(summary.preview.prefix(4), id: \.self) { name in
                             Text(Self.initials(name))
@@ -180,6 +186,22 @@ private struct NextWorkflowCard: View {
             RoundedRectangle(cornerRadius: Self.radius).fill(Tone.workflow(summary.kind)).workflowMorph(summary.kind)
         }
         .contentShape(RoundedRectangle(cornerRadius: Self.radius))
+    }
+
+    /// Up to three conversations worth a look first, and why.
+    private var worthALook: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Text("WORTH A LOOK").font(TypeRole.workflowKey).fontWeight(.semibold).opacity(0.85)
+            ForEach(summary.worth, id: \.threadId) { w in
+                (Text(w.name).fontWeight(.semibold)
+                    + Text(" — \(w.subject.isEmpty ? "(no subject)" : w.subject)")
+                    + Text(TriageCardText.reasons(w.reasons).map { " · \($0)" } ?? "").italic())
+                    .font(TypeRole.workflowContext)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(.top, Space.s)
     }
 
     static func initials(_ name: String) -> String {
@@ -245,4 +267,60 @@ private struct WorkflowCard: View {
     }
 
     static let height: CGFloat = 120
+}
+
+/// The Triage card's words (spec §14.13): who the user knows among the
+/// senders, and why a conversation is worth a look.
+enum TriageCardText {
+    /// "From Eric Koziol, Sam Rivera and 2 others you know · 17 from others".
+    static func from(_ s: WorkflowSummary) -> String? {
+        guard !s.people.isEmpty else {
+            return s.fromOthers > 0 ? "From no one you write to yet" : nil
+        }
+        var names = s.people.joined(separator: ", ")
+        if s.peopleMore > 0 {
+            names += " and \(s.peopleMore) other\(s.peopleMore == 1 ? "" : "s") you know"
+        } else if s.people.count > 1, let last = s.people.last {
+            names = s.people.dropLast().joined(separator: ", ") + " and " + last
+        }
+        let others = s.fromOthers > 0 ? " · \(s.fromOthers) from others" : ""
+        return "From \(names)\(others)"
+    }
+
+    /// "answers you · due Friday".
+    static func reasons(_ reasons: [WorthReason], now: Date = .now) -> String? {
+        let words = reasons.map { r -> String in
+            switch r {
+            case .answersYou: "answers you"
+            case .asksYou: "asks you something"
+            case let .due(day): "due \(dueWords(day, now: now))"
+            case .toYouAlone: "to you alone"
+            case .starred: "starred"
+            }
+        }
+        return words.isEmpty ? nil : words.joined(separator: " · ")
+    }
+
+    /// "today", "tomorrow", "Friday" within the week, else "16 Oct".
+    static func dueWords(_ day: String, now: Date) -> String {
+        guard let date = DueDay.date(day) else { return day }
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: date).day ?? 0
+        switch days {
+        case ..<0: return "\(date.formatted(.dateTime.day().month(.abbreviated))), overdue"
+        case 0: return "today"
+        case 1: return "tomorrow"
+        case 2...6: return date.formatted(.dateTime.weekday(.wide))
+        default: return date.formatted(.dateTime.day().month(.abbreviated))
+        }
+    }
+
+    /// The card's names and list, for VoiceOver.
+    static func spoken(_ s: WorkflowSummary) -> String {
+        var out = from(s).map { ". \($0)" } ?? ""
+        for w in s.worth {
+            out += ". Worth a look: \(w.name), \(w.subject)" + (reasons(w.reasons).map { ", \($0)" } ?? "")
+        }
+        return out
+    }
 }

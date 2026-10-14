@@ -749,6 +749,8 @@ final class CoreClient: Sendable {
     /// Background jobs run only while workflows are on.
     func setWorkflowJobsOn(_ on: Bool) { core.setWorkflowJobsOn(on: on) }
 
+    func setTriageByPriority(_ on: Bool) { core.setTriageByPriority(on: on) }
+
     func triageSuggestion(_ threadID: String) async throws(CoreClientError) -> TriageSuggestion? {
         try await call { try await core.triageSuggestion(threadId: threadID) }
     }
@@ -1825,6 +1827,8 @@ typealias GuideMergeDecision = KalutaCore.GuideMergeDecision
 typealias WorkflowKind = KalutaCore.WorkflowKind
 typealias WorkflowOverview = KalutaCore.WorkflowOverview
 typealias WorkflowSummary = KalutaCore.WorkflowSummary
+typealias WorthLook = KalutaCore.WorthLook
+typealias WorthReason = KalutaCore.WorthReason
 typealias WorkflowDay = KalutaCore.WorkflowDay
 typealias WorkflowItem = KalutaCore.WorkflowItem
 typealias WorkflowSet = KalutaCore.WorkflowSet

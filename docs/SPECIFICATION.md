@@ -4267,7 +4267,17 @@ that day.
   25 minutes of mail today") and what to start with.
 - **The next workflow** as one large card: its name, what is waiting
   ("12 conversations since 8:40 this morning"), an estimate, the first
-  senders' initials; **Return** starts it. The next is the first of, in
+  senders' initials; **Return** starts it. *(Amended 2026-10-14.)* For
+  Triage, in place of initials, the people the user writes to by name
+  ("From Eric Koziol, Sam Rivera and 2 others you know · 17 from
+  others"; known means the user has sent them mail, the most written to
+  first), and **Worth a look**: up to three conversations, each with why
+  (*answers you*, *asks you something*, *due Friday*, *to you alone*,
+  *starred*). A conversation scores 5 for answering the user, 3 for
+  asking something (Kaluta's suggestion is a reply or a task), 3 for a
+  star, 2 for a sender the user writes to (3 for five messages or more),
+  2 for a due day, 1 for being to the user alone, 1 for Gmail's
+  Important; 4 or more is worth a look. The next is the first of, in
   order, Triage (new mail), Tasks (due today), Replies, Waiting on others
   (due), Weekly reading (due groups), Agents, Teach Kaluta, that has
   anything in it.
@@ -4415,7 +4425,10 @@ are looked for as each account opens.
 #### Triage
 
 New conversations since the user last finished a triage set, people
-first, then automated mail grouped by kind. For each, Kaluta suggests
+first, then automated mail grouped by kind; or, with Settings › General
+› *Triage what matters most first* (off by default), the highest score
+first (as Worth a look scores them), equals in that order. A set started
+today keeps its order. For each, Kaluta suggests
 one decision with a one-line reason:
 
 - **The 30-second rule.** *Quick reply* when Kaluta judges the answer

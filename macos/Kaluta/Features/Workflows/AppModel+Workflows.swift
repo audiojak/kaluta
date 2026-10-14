@@ -12,6 +12,8 @@ extension AppModel {
     /// Workflows are a preview until Triage lands: on in the workflow
     /// demo, else by Settings › General.
     static let workflowsEnabledKey = "workflowsEnabled"
+    /// Triage starts with what matters most (spec §14.13); off by default.
+    static let triageByPriorityKey = "triageByPriority"
     /// Which of start screen and mail showed last, and on which day.
     static let workflowHomeKey = "workflowHome"
 
@@ -26,6 +28,7 @@ extension AppModel {
         workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         // Kaluta's background jobs run only while workflows are on.
         core?.setWorkflowJobsOn(workflowsEnabled)
+        core?.setTriageByPriority(defaults.bool(forKey: Self.triageByPriorityKey))
         let saved = defaults.string(forKey: Self.workflowHomeKey)?.split(separator: "@").map(String.init) ?? []
         if saved.count == 2, saved[1] == DueDay.string(now), let home = WorkflowHome(rawValue: saved[0]) {
             self.home = home
@@ -55,6 +58,8 @@ extension AppModel {
     func workflowsSettingChanged() {
         workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         core?.setWorkflowJobsOn(workflowsEnabled)
+        core?.setTriageByPriority(defaults.bool(forKey: Self.triageByPriorityKey))
+        Task { await refreshWorkflowOverview() }
     }
 
     /// M, View › Mail: the mail view; any workflow stays where it was.
