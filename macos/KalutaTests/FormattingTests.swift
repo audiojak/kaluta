@@ -21,7 +21,7 @@ struct FormattingTests {
         commands.toggleBold()
         commands.toggleUnderline()
         #expect(commands.state.bold && commands.state.underline)
-        #expect(ComposerHTML.html(from: view.attributedString()) == "<p><b><u>Hello</u></b> world</p>")
+        #expect(ComposerHTML.html(from: view.attributedString()) == "<div><b><u>Hello</u></b> world</div>")
         commands.toggleBold()
         #expect(!commands.state.bold)
     }
@@ -32,18 +32,18 @@ struct FormattingTests {
         commands.refresh()
         commands.toggleBulleted()
         #expect(commands.state.bulleted)
-        #expect(ComposerHTML.html(from: view.attributedString()) == "<ul><li>One</li><li>Two</li></ul><p>After</p>")
+        #expect(ComposerHTML.html(from: view.attributedString()) == "<ul><li>One</li><li>Two</li></ul><div>After</div>")
         view.setSelectedRange(NSRange(location: 1, length: 0))
         commands.refresh()
         commands.toggleBulleted()
-        #expect(ComposerHTML.html(from: view.attributedString()).hasPrefix("<p>One</p>"), "back to a paragraph")
+        #expect(ComposerHTML.html(from: view.attributedString()).hasPrefix("<div>One</div>"), "back to a paragraph")
 
         let (quoted, q) = editor("Said before\nMy answer")
         quoted.setSelectedRange(NSRange(location: 0, length: 0))
         q.refresh()
         q.toggleQuote()
         #expect(q.state.quoted)
-        #expect(ComposerHTML.html(from: quoted.attributedString()) == "<blockquote><p>Said before</p></blockquote><p>My answer</p>")
+        #expect(ComposerHTML.html(from: quoted.attributedString()) == "<blockquote><div>Said before</div></blockquote><div>My answer</div>")
         let reloaded = ComposerHTML.attributedString(fromHTML: ComposerHTML.html(from: quoted.attributedString()))
         #expect(ComposerHTML.html(from: reloaded).hasPrefix("<blockquote>"), "a saved draft keeps its quote")
     }
@@ -56,7 +56,7 @@ struct FormattingTests {
         view.setSelectedRange(NSRange(location: 0, length: 4))
         commands.toggleItalic()
         view.undoManager?.undo()
-        #expect(ComposerHTML.html(from: view.attributedString()) == "<p>Text</p>")
+        #expect(ComposerHTML.html(from: view.attributedString()) == "<div>Text</div>")
     }
 
     @Test func linksAreWebOrMailOnly() {

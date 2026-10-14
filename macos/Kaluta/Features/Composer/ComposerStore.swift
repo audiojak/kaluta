@@ -305,8 +305,8 @@ final class ComposerStore {
 extension DraftInfo {
     /// A new draft with these recipients, subject and plain-text body.
     static func prefilled(to: [String], cc: [String], subject: String, body: String) -> DraftInfo {
-        let html = body.isEmpty ? "" : "<p>" + ComposerHTML.escape(body).replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\n", with: "<br>") + "</p>"
+        let html = body.isEmpty ? "" : "<div>" + ComposerHTML.escape(body).replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "<br>") + "</div>"
         return DraftInfo(id: 0, threadId: nil, inReplyToMessageId: nil, to: to.map { AddressInfo(name: nil, email: $0) },
                          cc: cc.map { AddressInfo(name: nil, email: $0) }, bcc: [], subject: subject, bodyHtml: html,
                          quotedHtml: "", attachments: [], status: .editing, error: nil, updatedAt: 0)

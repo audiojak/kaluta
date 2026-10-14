@@ -1,7 +1,7 @@
 import AppKit
 
 /// Converts between the composer's attributed text and the small HTML
-/// subset we send (spec §14.5): paragraphs, line breaks, bold, italic,
+/// subset we send (spec §14.5): lines (as Gmail's divs), line breaks, bold, italic,
 /// underline, strikethrough, links, bulleted or numbered lists and quotes
 /// (indented paragraphs, sent as a blockquote). Fonts,
 /// colors and sizes are deliberately dropped so every message looks like
@@ -47,7 +47,11 @@ enum ComposerHTML {
             if list != nil {
                 out += "<li>\(inline.isEmpty ? "<br>" : inline)</li>"
             } else {
-                out += "<p>\(inline.isEmpty ? "<br>" : inline)</p>"
+                // A line is a div and a blank line <div><br></div>, as
+                // Gmail writes them: paragraphs (<p>) carry a margin in
+                // every mail client, so each line and blank line opened a
+                // gap in what was sent.
+                out += "<div>\(inline.isEmpty ? "<br>" : inline)</div>"
             }
             if NSMaxRange(range) >= string.length {
                 // The last paragraph; a trailing newline adds nothing.
@@ -58,7 +62,7 @@ enum ComposerHTML {
         if let current = openList { out += "</\(current.tag)>" }
         if inQuote { out += "</blockquote>" }
         // An empty document serializes to nothing, not an empty paragraph.
-        return out == "<p><br></p>" ? "" : out
+        return out == "<div><br></div>" ? "" : out
     }
 
     /// A quoted paragraph: indented, not a list item.
@@ -136,9 +140,20 @@ enum ComposerHTML {
     /// Loads a saved draft's body into the editor with the editor's font,
     /// keeping bold and italic. The HTML came from `html(from:)` (or from
     /// the Rust sanitizer for quoted text), never from a remote page.
+    /// HTML in paragraphs (an agent's Markdown, other mail) with a blank
+    /// line between them, as they look: the editor's lines are divs with no
+    /// margin, so the paragraphs would otherwise run together once saved.
+    /// The editor's own HTML, and its old paragraphs (blank lines as
+    /// `<p><br></p>`), are left as they are.
+    static func paragraphsAsLines(_ html: String) -> String {
+        guard html.contains("</p>"), !html.contains("<p><br></p>") else { return html }
+        return html.replacingOccurrences(of: #"</p>\s*<p"#, with: "</p><p><br></p><p", options: .regularExpression)
+    }
+
     @MainActor
     static func attributedString(fromHTML html: String) -> NSAttributedString {
         guard !html.isEmpty else { return NSAttributedString(string: "", attributes: [.font: bodyFont]) }
+        let html = Self.paragraphsAsLines(html)
         // AppKit's HTML import drops blockquotes (and margins), so the
         // top-level quotes `html(from:)` writes are imported on their own
         // and indented as the editor quotes.

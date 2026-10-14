@@ -30,18 +30,18 @@ struct ComposerTests {
             ("\nSecond <line> & more", [:]),
         ])
         #expect(ComposerHTML.html(from: text) ==
-            "<p>Hi <b>bold</b> and <b><i>both</i></b>, <u>u</u> <a href=\"https://example.com/?a=1&amp;b=2\">site</a></p>"
-            + "<p>Second &lt;line&gt; &amp; more</p>")
+            "<div>Hi <b>bold</b> and <b><i>both</i></b>, <u>u</u> <a href=\"https://example.com/?a=1&amp;b=2\">site</a></div>"
+            + "<div>Second &lt;line&gt; &amp; more</div>")
     }
 
     @Test func unsafeLinksBecomePlainText() {
         let text = styled([("click", [.link: URL(string: "javascript:alert(1)")!])])
-        #expect(ComposerHTML.html(from: text) == "<p>click</p>")
+        #expect(ComposerHTML.html(from: text) == "<div>click</div>")
     }
 
     @Test func emptyAndBlankParagraphs() {
         #expect(ComposerHTML.html(from: NSAttributedString()) == "")
-        #expect(ComposerHTML.html(from: styled([("a\n\nb\n", [:])])) == "<p>a</p><p><br></p><p>b</p>")
+        #expect(ComposerHTML.html(from: styled([("a\n\nb\n", [:])])) == "<div>a</div><div><br></div><div>b</div>")
     }
 
     @Test func listsSerializeAsListElements() {
@@ -57,14 +57,20 @@ struct ComposerTests {
             ("End", [:]),
         ])
         #expect(ComposerHTML.html(from: text) ==
-            "<p>Intro</p><ul><li>one</li><li>two</li></ul><ol><li>first</li></ol><p>End</p>")
+            "<div>Intro</div><ul><li>one</li><li>two</li></ul><ol><li>first</li></ol><div>End</div>")
     }
 
     @Test func htmlRoundTripsThroughTheEditor() {
-        let html = "<p>Hello <b>there</b>, <i>friend</i>.</p><p>Bye</p>"
+        let html = "<div>Hello <b>there</b>, <i>friend</i>.</div><div><br></div><div>Bye</div>"
         let text = ComposerHTML.attributedString(fromHTML: html)
-        #expect(text.string == "Hello there, friend.\nBye")
+        #expect(text.string == "Hello there, friend.\n\nBye")
         #expect(ComposerHTML.html(from: text) == html)
+        // Paragraphs (an agent's Markdown) keep a blank line between them;
+        // the editor's old paragraphs, blank lines and all, load as they were.
+        let markdown = ComposerHTML.attributedString(fromHTML: "<p>Hello <b>there</b>, <i>friend</i>.</p>\n<p>Bye</p>")
+        #expect(markdown.string == "Hello there, friend.\n\nBye")
+        let old = ComposerHTML.attributedString(fromHTML: "<p>Hello</p><p><br></p><p>Bye</p>")
+        #expect(old.string == "Hello\n\nBye")
     }
 
     // MARK: Recipients
@@ -126,7 +132,7 @@ struct ComposerTests {
         #expect(store.isDirty)
         try await waitUntil { store.draftID != 0 }
         let saved = try #require(try await model.core!.draft(store.draftID))
-        #expect(saved.bodyHtml.hasPrefix("<p>Thursday works.</p>"))
+        #expect(saved.bodyHtml.hasPrefix("<div>Thursday works.</div>"))
         #expect(saved.bodyHtml.contains("<blockquote>"), "the quote is kept with the saved body")
         #expect(saved.inReplyToMessageId == message.id)
 
