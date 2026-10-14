@@ -96,6 +96,17 @@ struct WorkflowTests {
         #expect(AppModel.readingText(text) == "Hi Jo,\n\nCan you do Thursday?\n\nSam")
         let spaced = "Hi Jo,\n\nFirst line\nsecond line.\n\nSam"
         #expect(AppModel.readingText(spaced) == "Hi Jo,\n\nFirst line\nsecond line.\n\nSam")
+        // Outlook's quoted history, and the ellipsis left where it folds.
+        let outlook = "John - sorry for the delay.\n\nThanks,\nEric\n\n...\nFrom: John Kennedy <john@actual.ai>\n"
+            + "Date: Thursday, October 8, 2026 at 16:02\nTo: Koziol, Eric\nSubject: Re: Times\n\nHi Eric,"
+        #expect(AppModel.readingText(outlook) == "John - sorry for the delay.\n\nThanks,\nEric")
+        let original = "Yes, Tuesday.\n\n-----Original Message-----\nFrom: Ann\nSent: Monday"
+        #expect(AppModel.readingText(original) == "Yes, Tuesday.")
+        let ruled = "Works for me.\n________________________________\nFrom: Ann\nSent: Monday\nTo: Jo"
+        #expect(AppModel.readingText(ruled) == "Works for me.")
+        // A "From:" line in the body itself stays.
+        let body = "From: the board, a note.\nWe meet Friday."
+        #expect(AppModel.readingText(body) == "From: the board, a note.\n\nWe meet Friday.")
     }
 
     @Test func aDecidedItemLeavesByItsVerb() {

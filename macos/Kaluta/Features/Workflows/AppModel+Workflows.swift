@@ -146,19 +146,37 @@ extension AppModel {
     }
 
     /// Plain text for reading at content size: paragraphs apart, the
-    /// quoted history (from "On … wrote:") left out.
+    /// quoted history left out (from Gmail's "On … wrote:", or Outlook's
+    /// "From: / Sent: / To:" block, "-----Original Message-----" or rule
+    /// of underscores).
     static func readingText(_ text: String) -> String {
         var lines: [String] = []
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let all = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+        for (i, trimmed) in all.enumerated() {
             if trimmed.hasPrefix("On "), trimmed.hasSuffix("wrote:") { break }
+            if isQuoteHeader(all, at: i) { break }
             if trimmed.hasPrefix(">") { continue }
             lines.append(trimmed)
         }
+        // The ellipsis a mail app leaves where it folded the history.
+        while let last = lines.last, last.isEmpty || ["...", "…", "•••"].contains(last) { lines.removeLast() }
         // A greeting line and a sign-off stay tight; paragraphs get air.
         let paragraphs = lines.split(separator: "", omittingEmptySubsequences: true).map { $0.joined(separator: "\n") }
         let joined = paragraphs.count > 1 ? paragraphs.joined(separator: "\n\n") : lines.filter { !$0.isEmpty }.joined(separator: "\n\n")
         return joined.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Where an Outlook-style quote starts: "-----Original Message-----", a
+    /// rule of underscores, or a "From:" line with "Sent:" or "Date:" and
+    /// "To:" or "Subject:" in the few lines after it.
+    private static func isQuoteHeader(_ lines: [String], at i: Int) -> Bool {
+        let line = lines[i]
+        if line.range(of: "Original Message", options: .caseInsensitive) != nil, line.hasPrefix("-") { return true }
+        if line.count >= 10, line.allSatisfy({ $0 == "_" }) { return true }
+        guard line.hasPrefix("From:") else { return false }
+        let next = lines[(i + 1)..<min(i + 5, lines.count)]
+        let has = { (field: String) in next.contains { $0.hasPrefix(field) } }
+        return (has("Sent:") || has("Date:")) && (has("To:") || has("Subject:"))
     }
 
     /// The conversation an item is about.
