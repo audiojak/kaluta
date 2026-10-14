@@ -127,6 +127,9 @@ struct WorkflowButton: View {
     let key: String?
     var style: Style = .plain
     let kind: WorkflowKind
+    /// Kaluta suggests this action: a ring in the colour and a sparkle on
+    /// the corner.
+    var suggested = false
     let action: () -> Void
 
     var body: some View {
@@ -142,11 +145,24 @@ struct WorkflowButton: View {
             .padding(.horizontal, Space.xxl)
             .frame(minHeight: Self.height)
             .background(background, in: Capsule())
+            .overlay { if suggested { Capsule().strokeBorder(Tone.workflow(kind), lineWidth: Self.ring) } }
+            // On the corner, so the bar's buttons never move.
+            .overlay(alignment: .topTrailing) {
+                if suggested {
+                    Image(systemName: "sparkle")
+                        .font(TypeRole.workflowKey)
+                        .foregroundStyle(.white)
+                        .padding(Space.xs)
+                        .background(Tone.workflow(kind), in: Circle())
+                        .overlay(Circle().strokeBorder(.background, lineWidth: Self.ring / 2))
+                        .offset(x: Space.xs, y: -Space.s)
+                }
+            }
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .hoverHelp(key.map { "\(title) (\($0))" } ?? title)
-        .accessibilityLabel(title)
+        .hoverHelp((suggested ? "Kaluta suggests: " : "") + (key.map { "\(title) (\($0))" } ?? title))
+        .accessibilityLabel(suggested ? "\(title), suggested" : title)
     }
 
     private var background: AnyShapeStyle {
@@ -159,6 +175,7 @@ struct WorkflowButton: View {
 
     /// Touch-target height (44 pt and more).
     static let height: CGFloat = 48
+    static let ring: CGFloat = 2
 }
 
 /// A workflow's header: back to Mail, the workflow's name with "n of N",

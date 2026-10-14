@@ -24,6 +24,15 @@ struct ThreadWindow: View {
             }
         }
         .frame(minWidth: 480, minHeight: 360)
+        .toolbar {
+            if model.openAccountID == request.accountID, model.gmailURL(threadID: request.threadID) != nil {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Open in Gmail", systemImage: "safari") { model.openInGmail(threadID: request.threadID) }
+                        .keyboardShortcut("o", modifiers: [.command, .shift])
+                        .help("Open this conversation in Gmail in your browser, exactly as Gmail shows it (⇧⌘O)") // toolbar
+                }
+            }
+        }
         .navigationTitle(store?.detail.map { $0.thread.subject.isEmpty ? "(no subject)" : $0.thread.subject } ?? "Message")
         .task {
             guard store == nil else { return }

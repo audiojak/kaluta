@@ -8,6 +8,10 @@ struct WorkflowHostView: View {
     let session: WorkflowSession
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The item's scroll, for reading from the keyboard: ↑ ↓, Space and
+    /// ⇧Space, Page Up and Down, Home and End.
+    @State private var scroll = ScrollPosition()
+    @State private var scrollGeometry: ScrollGeometry?
 
     var body: some View {
         let actions = model.workflowActions()
@@ -19,7 +23,7 @@ struct WorkflowHostView: View {
             HStack(spacing: 0) {
             // Tasks: today's set beside the task, done ones ticked.
             // Writing needs the room: the rail steps aside meanwhile.
-            if [.tasks, .waiting, .reading].contains(session.kind), !session.isFinished, !session.showsReport,
+            if [.tasks, .waiting, .reading, .teach].contains(session.kind), !session.isFinished, !session.showsReport,
                session.writer == nil {
                 WorkflowRail(session: session)
             }
@@ -39,6 +43,8 @@ struct WorkflowHostView: View {
                                     .frame(maxWidth: Self.readingWidth, alignment: .leading)
                                     .frame(maxWidth: .infinity)
                             }
+                            .scrollPosition($scroll)
+                            .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, g in scrollGeometry = g }
                             // Each writing step comes into view above the bar.
                             .onChange(of: [session.writer.map { "\($0.step)" }, session.taskForm.map { _ in "task" }]) { _, now in
                                 guard now.contains(where: { $0 != nil }) else { return }
@@ -73,7 +79,9 @@ struct WorkflowHostView: View {
             }
             .workflowMorph(session.kind)
         }
-        .focusable()
+        // Not while there is text to type: a focusable screen keeps SwiftUI
+        // from handing the keyboard to the field inside it.
+        .focusable(!session.isTyping)
         .focused($focused)
         .defaultFocus($focused, true)
         .focusEffectDisabled()
@@ -82,9 +90,33 @@ struct WorkflowHostView: View {
         .onAppear { Task { @MainActor in focused = true } }
         // Each item takes the keyboard back, whatever was clicked before,
         // and so does the item when its writing closes.
-        .onChange(of: session.current?.key) { focused = true }
-        .onChange(of: session.writer == nil) { _, closed in if closed { focused = true } }
+        // ⌫ reaches the screen as the Delete command, not as a key press:
+        // Reject, Don't send.
+        .onDeleteCommand {
+            guard !Self.isEditingText, !session.isFinished else { return }
+            Task { await model.performWorkflow(.reject) }
+        }
+        // Teach Kaluta's Edit… sheet closed: what it decided leaves the set.
+        .onChange(of: model.guideSheet == nil) { _, closed in
+            if closed, session.kind == .teach { Task { await model.teachEdited() } }
+        }
+        .onChange(of: session.current?.key) {
+            focused = true
+            scroll = ScrollPosition()
+        }
+        // Typing: the field takes the keys (the screen lets go); done, the
+        // screen takes them back (Kaluta's answers' 1–3 and / are its).
+        .onChange(of: session.isTyping) { _, typing in focused = !typing }
         .onKeyPress(phases: .down) { press in
+            // Typing or dictating in a field: the keys are the text's, not
+            // the workflow's (⌘Return still sends, from the field's own
+            // shortcuts).
+            if Self.isEditingText { return .ignored }
+            // Reading the item from the keyboard, as in Mail.
+            if !session.isFinished, !session.showsReport, let target = scrollTarget(press) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { scroll.scrollTo(y: target) }
+                return .handled
+            }
             guard let command = WorkflowCommand.command(key: press.key, characters: press.characters,
                                                         modifiers: press.modifiers) else { return .ignored }
             if session.isFinished {
@@ -124,7 +156,7 @@ struct WorkflowHostView: View {
         HStack(spacing: Space.m) {
             ForEach(actions.filter(\.shown)) { action in
                 WorkflowButton(title: action.title, key: action.command.keyLabel, style: action.style,
-                               kind: session.kind) {
+                               kind: session.kind, suggested: action.suggested) {
                     Task { await model.performWorkflow(action.command) }
                 }
             }
@@ -134,6 +166,40 @@ struct WorkflowHostView: View {
         .padding(.vertical, Space.xl)
         .frame(maxWidth: Self.readingWidth + Space.page * 2)
         .frame(maxWidth: .infinity)
+    }
+
+    /// Where a reading key moves the item to (the top edge's offset), or
+    /// nil for any other key: ↑ ↓ a line, Space and Page Down a page down,
+    /// ⇧Space and Page Up a page up, Home and End the ends.
+    private func scrollTarget(_ press: KeyPress) -> CGFloat? {
+        guard let g = scrollGeometry else { return nil }
+        let y = g.contentOffset.y
+        let page = max(Self.line, g.visibleRect.height - Self.pageOverlap)
+        let bottom = max(0, g.contentSize.height - g.containerSize.height + g.contentInsets.bottom)
+        let plain = press.modifiers.isDisjoint(with: [.command, .control, .option])
+        guard plain else { return nil }
+        let target: CGFloat? = switch press.key {
+        case .downArrow: y + Self.line
+        case .upArrow: y - Self.line
+        case .pageDown: y + page
+        case .pageUp: y - page
+        case .home: 0
+        case .end: bottom
+        case .space: press.modifiers.contains(.shift) ? y - page : y + page
+        default: nil
+        }
+        return target.map { min(max(0, $0), bottom) }
+    }
+
+    /// One arrow press, and how much of a page stays in view on Space.
+    static let line: CGFloat = 48
+    static let pageOverlap: CGFloat = 64
+
+    /// A text field or editor has the keyboard (its field editor is an
+    /// editable text view first responder).
+    static var isEditingText: Bool {
+        // Text the user can only select (the email) does not count.
+        (NSApp.keyWindow?.firstResponder as? NSTextView)?.isEditable == true
     }
 
     static let readingWidth: CGFloat = 900
@@ -177,6 +243,9 @@ struct WorkflowItemView: View {
             if session.kind == .agents {
                 AgentItemView(session: session, item: item)
             }
+            if session.kind == .teach {
+                TeachItemView(session: session, item: item)
+            }
             if session.kind == .reading, let bucket = session.bucket(of: item) {
                 Text("\(bucket.title) · \(bucket.verb)")
                     .font(TypeRole.workflowKey).fontWeight(.semibold)
@@ -193,21 +262,49 @@ struct WorkflowItemView: View {
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
                     let latest = AppModel.shownMessage(detail, session.kind)
-                    Text(Self.contextLine(latest))
-                        .font(TypeRole.workflowContext)
-                        .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                        Text(Self.contextLine(latest))
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                        // At the top, where a long email cannot push it out of view.
+                        if session.kind == .triage {
+                            Button { Task { await model.performWorkflow(.openInFull) } } label: {
+                                HStack(spacing: Space.s) {
+                                    Text("Open the email")
+                                    Keycap(key: "O")
+                                }
+                            }
+                            .buttonStyle(.link)
+                            .hoverHelp("Open the email in its own window, as it was sent (O)")
+                            if model.gmailURL(threadID: detail.thread.id) != nil {
+                                Button { Task { await model.performWorkflow(.openInGmail) } } label: {
+                                    HStack(spacing: Space.s) {
+                                        Text("Open in Gmail")
+                                        Keycap(key: "G")
+                                    }
+                                }
+                                .buttonStyle(.link)
+                                .hoverHelp("Open this conversation in Gmail in your browser (G)")
+                            }
+                        }
+                    }
+                    .font(TypeRole.workflowContext)
                     if model.task(of: item) == nil {
                         Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
                             .font(TypeRole.workflowDisplay)
                     }
                     // Weekly reading: Kaluta's summary until it is opened in full.
+                    // Triage: a long email's summary, the email on O.
+                    let full = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
                     let summary = session.kind == .reading && !session.showsInFull
-                        ? session.summaries[detail.thread.id]?.summary : nil
+                        ? session.summaries[detail.thread.id]?.summary
+                        : session.kind == .triage ? Self.triageSummary(session.suggestions[detail.thread.id], text: full)
+                        : nil
                     if summary != nil {
                         Label("Kaluta's summary", systemImage: "sparkle")
                             .font(TypeRole.workflowContext).foregroundStyle(.secondary)
                     }
-                    let text = summary ?? session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
+                    let text = summary ?? full
                     // What the email asks, marked where an answer is written.
                     Text(Self.asksAnswer(session.kind)
                         ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
@@ -216,6 +313,8 @@ struct WorkflowItemView: View {
                         .font(TypeRole.workflowContent)
                         .lineSpacing(Space.xs)
                         .fixedSize(horizontal: false, vertical: true)
+                        // To copy from, for research or into the reply.
+                        .textSelection(.enabled)
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -237,6 +336,16 @@ struct WorkflowItemView: View {
             }
         }
     }
+
+    /// A long email's summary, from its triage suggestion; the text itself
+    /// when it is short enough to read.
+    static func triageSummary(_ suggestion: TriageSuggestion?, text: String) -> String? {
+        guard let summary = suggestion?.summary, !summary.isEmpty, text.count > longEmail else { return nil }
+        return summary
+    }
+
+    /// Longer than this, an email with a summary shows the summary.
+    static let longEmail = 800
 
     /// Workflows where the user answers the email: its questions are marked.
     static func asksAnswer(_ kind: WorkflowKind) -> Bool {
@@ -272,6 +381,7 @@ struct WorkflowItemView: View {
 /// finished ones ticked (those finished elsewhere too). What is left for
 /// later in the week is the header's pill.
 struct WorkflowRail: View {
+    @Environment(AppModel.self) private var model
     let session: WorkflowSession
 
     var body: some View {
@@ -280,7 +390,11 @@ struct WorkflowRail: View {
                 Text(railTitle).font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
                     .padding(.horizontal, Space.l)
                 ForEach(railItems, id: \.key) { item in
-                    if session.kind == .reading, let id = item.threadId {
+                    if session.kind == .teach {
+                        let line = session.teachLines[item.key]
+                        WorkflowRailRow(title: line?.title ?? "Decided", detail: Self.teachDetail(line, item),
+                                        state: state(item), kind: session.kind)
+                    } else if session.kind == .reading, let id = item.threadId {
                         WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
                                             ?? session.readingSubject(id) ?? "…",
                                         detail: Self.readingDetail(item), state: state(item), kind: session.kind)
@@ -298,7 +412,8 @@ struct WorkflowRail: View {
         }
         .frame(width: Self.width)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(session.kind == .waiting ? "Waiting on others" : "Today's tasks")
+        .accessibilityLabel(session.kind == .waiting ? "Waiting on others"
+                            : session.kind == .teach ? "To decide" : "Today's tasks")
     }
 
     /// Weekly reading lists the bucket on screen, one line each.
@@ -312,8 +427,21 @@ struct WorkflowRail: View {
     private var railTitle: String {
         switch session.kind {
         case .waiting: "Waiting on"
+        case .teach: "To decide"
         case .reading: session.current.flatMap(session.bucket(of:))?.title ?? "Reading"
         default: "Today"
+        }
+    }
+
+    /// Its kind while it waits, then how it was decided.
+    static func teachDetail(_ line: TeachLine?, _ item: WorkflowItem) -> String {
+        switch item.decision {
+        case "accepted": "Accepted"
+        case "rejected": "Rejected"
+        // Edited and accepted here, or decided on its page.
+        case "elsewhere": "Decided"
+        case .some: "Done"
+        case nil: line?.kind ?? ""
         }
     }
 
@@ -623,6 +751,7 @@ struct WorkflowEndView: View {
         case .replies: return "Everyone has an answer."
         case .waiting: return "Nobody is left hanging."
         case .reading: return "The reading is done."
+        case .teach: return "Every proposal is decided."
         default: return "All done."
         }
     }
@@ -637,7 +766,7 @@ struct WorkflowEndView: View {
         switch decision {
         case "archive": "archived"
         case "reply": count == 1 ? "reply" : "replies"
-        case "elsewhere": "done elsewhere"
+        case "elsewhere": kind == .teach ? "edited or decided" : "done elsewhere"
         case "nudged": "nudged"
         case "let_go": "let go"
         case "answered": "answered meanwhile"
@@ -650,6 +779,8 @@ struct WorkflowEndView: View {
         case "undone": "runs undone"
         case "kept": kind == .agents ? "runs kept" : "kept for later"
         case "inbox": "back to the Inbox"
+        case "accepted": "accepted"
+        case "rejected": "rejected"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
         case "done": "done"

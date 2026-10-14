@@ -50,6 +50,7 @@ private struct GeneralSettings: View {
     @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
     @AppStorage(AppModel.workflowsEnabledKey, store: CoreClient.appDefaults()) private var workflows = false
     @AppStorage(WorkflowSound.playSoundsKey, store: CoreClient.appDefaults()) private var sounds = true
+    @AppStorage(AppModel.triageByPriorityKey, store: CoreClient.appDefaults()) private var triageByPriority = false
     /// Per account, in its store (spec §14.13).
     @State private var waitingDays = 3
     @Environment(AppModel.self) private var model
@@ -71,7 +72,7 @@ private struct GeneralSettings: View {
             }
             Section("Workflows") {
                 Toggle("Open on the start screen (preview)", isOn: $workflows)
-                    .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (M) away")
+                    .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (Esc or M) away")
                     .onChange(of: workflows) { model.workflowsSettingChanged() }
                 Stepper(value: $waitingDays, in: 1...30) {
                     Text("Waiting on others after \(waitingDays) day\(waitingDays == 1 ? "" : "s") without an answer")
@@ -79,6 +80,12 @@ private struct GeneralSettings: View {
                 .hoverHelp("How long a sent message waits for an answer before it joins Waiting on others")
                 .onChange(of: waitingDays) { _, days in Task { try? await model.core?.setWaitingDays(UInt32(days)) } }
                 .task { if let days = try? await model.core?.waitingDays() { waitingDays = Int(days) } }
+                Toggle("Triage what matters most first", isOn: $triageByPriority)
+                    .hoverHelp("Start Triage with answers to you, questions and people you write to; off, people come first, the newest first")
+                    .onChange(of: triageByPriority) { model.workflowsSettingChanged() }
+                Text("Applies to the next set: one started today keeps its order.")
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Play sounds", isOn: $sounds)
                     .hoverHelp("A short chord when a workflow's set is done; silent when macOS's sound effects are off")
             }

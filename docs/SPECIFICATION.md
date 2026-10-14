@@ -2952,7 +2952,7 @@ Every target in §1.3 traces to one of these rules.
 ### 14.3 Main window
 
 *(Amended 2026-10-11, ADR 0018: the window opens on the start screen,
-*What's next* (§14.13); everything below is the mail view, one key (M)
+*What's next* (§14.13); everything below is the mail view, one key (Esc or M)
 away, unchanged except where §14.13 says.)*
 
 - Sidebar: account avatar button (§7.7), mailboxes and labels, unread
@@ -3070,11 +3070,34 @@ policy: allowlisted tags (no `script`, `iframe`, `object`, `form`, `input`,
 `meta`, `link`, `base`), `style` attribute allowed but filtered to a
 property allowlist (`color`, `background-color`, `font-*`, `text-*`,
 `margin*`, `padding*`, `border*`, `width`, `height`, `display`, `float`,
-`vertical-align`), `<style>` blocks dropped in MVP, all URLs rewritten:
+`vertical-align`), all URLs rewritten:
 `http(s)` image `src` → `kaluta-blocked://` placeholder unless remote
 images are allowed for that sender, `cid:` → `kaluta-cid://<attachment>`,
-links keep their `href` but get `target="_blank" rel="noopener"`. A
-`sanitizer_version` column lets a policy change re-sanitize lazily.
+links keep their `href` but get `target="_blank" rel="noopener"`.
+
+*(Amended 2026-10-14, sanitizer version 2.)* An email's `<style>` sheets
+are kept, cleaned the way inline styles are: only rules and `@media`
+blocks survive (any other at-rule, `@import` and `@font-face` among them,
+is dropped), only declarations of allowlisted properties whose values
+cannot fetch or execute anything (no `url(`, `image-set(`, `expression(`,
+backslash escapes), no comments and no `<`, rebuilt so braces balance,
+64 KB at most. The sheet is wrapped in `@scope { }` with no selector, so
+it styles its own message's container alone: never the reader, never
+another message in the thread. `class` attributes are kept, each name
+prefixed `e-` (and the sheet's selectors with it), so none can be one of
+the reader's own. Each stored body records the sanitizer version it was
+cleaned with; opening a thread fetches again, once, any of its bodies an
+older version cleaned. *Open in Gmail* (⇧⌘O: Message › Open in Gmail for the
+selected conversation, a Gmail account's message window toolbar; G in
+Triage) shows the conversation in the browser exactly as Gmail does.
+*(Version 3.)* Sheets inside HTML comments (Outlook's `<!--[if mso]>`)
+are not kept, as a browser would not read them; the email's `<body>` is
+kept as a `div` with its class and style (class `e-kbody` added); a
+sheet's `body` selector becomes `.e-kbody` and `html` becomes `:scope`;
+`background` is allowed for colours and gradients. Loaded remote images are asked for as
+`kaluta-remote-loaded:` (allowed by the content policy): under their
+first addresses WebKit's memory cache answered with the blank pixels the
+blocked load got, and *Load Images* left gaps.
 
 `WKWebView` configuration: JavaScript disabled
 (`defaultWebpagePreferences.allowsContentJavaScript = false`), a custom
@@ -4256,14 +4279,28 @@ ones every workflow must keep:
 #### The start screen
 
 The main window opens on the start screen (*What's next*); the mail app
-is one key away (**M**, and *View › Mail*), and the window remembers
-which of the two was showing when it quits only for the rest of that day.
+is one key away (**Esc** or **M**, *Open Mail* under the cards, and
+*View › Mail*), and Esc in the mail app comes back (as do *What's Next*
+at the top of the sidebar, marked with an Esc keycap, and *View › What's
+Next*, ⌘0), except while typing in a field. The window
+remembers which of the two was showing when it quits only for the rest of
+that day.
 
 - **The day in one line**: the date and time, then an estimate ("About
   25 minutes of mail today") and what to start with.
 - **The next workflow** as one large card: its name, what is waiting
   ("12 conversations since 8:40 this morning"), an estimate, the first
-  senders' initials; **Return** starts it. The next is the first of, in
+  senders' initials; **Return** starts it. *(Amended 2026-10-14.)* For
+  Triage, in place of initials, the people the user writes to by name
+  ("From Eric Koziol, Sam Rivera and 2 others you know · 17 from
+  others"; known means the user has sent them mail, the most written to
+  first), and **Worth a look**: up to three conversations, each with why
+  (*answers you*, *asks you something*, *due Friday*, *to you alone*,
+  *starred*). A conversation scores 5 for answering the user, 3 for
+  asking something (Kaluta's suggestion is a reply or a task), 3 for a
+  star, 2 for a sender the user writes to (3 for five messages or more),
+  2 for a due day, 1 for being to the user alone, 1 for Gmail's
+  Important; 4 or more is worth a look. The next is the first of, in
   order, Triage (new mail), Tasks (due today), Replies, Waiting on others
   (due), Weekly reading (due groups), Agents, Teach Kaluta, that has
   anything in it.
@@ -4288,10 +4325,17 @@ which of the two was showing when it quits only for the rest of that day.
   one lighter.
 - **The set** is fixed on entry. Mail that arrives meanwhile waits: the
   end says "3 new arrived while you worked" and offers to start on them.
-  **Skip** (S) moves the current item to the end of the set.
+  **Skip** (S) moves the current item to the end of the set. What was
+  handled meanwhile, in Gmail or elsewhere in Kaluta, leaves it as *Done
+  elsewhere* when the set resumes and after each decision: in Triage and
+  Replies a conversation out of the Inbox or whose latest message is the
+  user's; in Tasks a task no longer open.
 - **A rail** where the workflow has one: what is up next (Triage), the
   set with each item's state (Replies, Tasks, Waiting, Agents), or the
   queue by kind (Teach Kaluta).
+- **The item's text** can be selected and copied; with no text field
+  focused, the arrow keys, Space and ⇧Space, Page Up and Down, and Home
+  and End scroll it.
 - **The decision bar**: the primary action filled in the workflow's
   colour, the others plain, each with its key on it.
 - **The end**: a ring that closes and a short burst, the score (what was
@@ -4301,26 +4345,31 @@ which of the two was showing when it quits only for the rest of that day.
 - **Resume**: leaving keeps the set and the position for the rest of the
   day; coming back continues there with a one-line recap of the item.
 
-**Keys** (the same verb has the same key everywhere; single keys act
-when no text field has the focus):
+**Keys** (the same verb has the same key everywhere, and a key does the
+same in every item; single keys act when no text field has the focus;
+Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 
 | Key | Command |
 |---|---|
-| Return | the suggested or primary action: start, reply, make the task, nudge, accept, write it |
+| Return | in an item, always **Reply** (a nudge is a reply), and nothing where there is no reply; elsewhere, go on: start, next, make the task, write it. Return never archives, approves or sends |
 | ⌘Return | send (from an editable email) |
 | ⌥⌘Return | send and keep the conversation's task open |
-| E | done: archive, done, let it go, read and next |
+| E | done: archive, done, let it go, read and next, accept, approve |
 | T | make a task |
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
-| R | reply now (where the suggestion is something else) |
+| R | reply, as Return |
+| O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta); the email in its own window (Triage) |
+| G | the conversation in Gmail, in the browser (Triage) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |
+| W | edit before deciding (Teach Kaluta) |
 | 1–3 | pick one of Kaluta's answers |
 | / | tell Kaluta what to say |
 | Esc | back one step; from an item, back to Mail |
-| M, 1–7 | Mail, a workflow (start screen) |
+| Esc or M, 1–7 | Mail, a workflow (start screen) |
+| ↑ ↓, Space, ⇧Space, Page Up/Down, Home/End | scroll the item |
 
 **One command layer.** Every action is a named command (`WorkflowCommand`)
 with one implementation that the key, the button, VoiceOver's actions
@@ -4353,6 +4402,18 @@ cross-fades only; the ring is drawn closed.
 progress shows only past about a second; the user can keep deciding
 meanwhile. An item whose suggestion or answers are not ready yet is
 passed over for one that is, and comes back when it is.
+
+#### Turning them on
+
+While workflows are a preview they are off until the user turns them on
+(Settings › General › Workflows). Once Kaluta finds a ready agent (Claude
+Code or Codex), it offers them once, as the first of the Inbox's tips:
+*Daily Workflows* — "Kaluta can turn your mail into short daily
+workflows: triage, replies, tasks, follow-ups and reading. It uses your
+agent in the background." *Turn On* switches them on and opens What's
+Next; *Not Now* puts the tip away for good. It is not offered in an
+imported or agent mailbox, or when workflows are already on. The agents
+are looked for as each account opens.
 
 #### Kaluta's writing in workflows
 
@@ -4388,7 +4449,10 @@ passed over for one that is, and comes back when it is.
 #### Triage
 
 New conversations since the user last finished a triage set, people
-first, then automated mail grouped by kind. For each, Kaluta suggests
+first, then automated mail grouped by kind; or, with Settings › General
+› *Triage what matters most first* (off by default), the highest score
+first (as Worth a look scores them), equals in that order. A set started
+today keeps its order. For each, Kaluta suggests
 one decision with a one-line reason:
 
 - **The 30-second rule.** *Quick reply* when Kaluta judges the answer
@@ -4399,14 +4463,22 @@ one decision with a one-line reason:
   *Archive the email* is ticked (it stays under the `Task` label).
   *Archive* when nothing is asked of the user; *Leave in Inbox* (L) is
   always offered.
-- Return takes the suggestion; T, E, L, S and R are always there. A
+- The bar is the same for every conversation: *Reply* (Return or R),
+  *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Skip* (S).
+  The suggestion is marked on its own button (a ring and a sparkle on its corner, so no button moves) and
+  taken with that button's key; Return is only ever Reply. A
   conversation that already has an open task says so, and T shows that
   task instead of making a second.
+- A long email meant for reading (a newsletter, a digest, a report)
+  shows *Kaluta's summary*, two or three sentences made with its
+  suggestion, in place of its text (over 800 characters); every email
+  has *Open the email* (O) beside its sender, which opens it in its own
+  window as it was sent.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
   "Has a task: …" when the conversation has one. With no suggestion yet,
-  Reply leads. A quick reply sent here offers *Send and finish the task*
+  no button is marked. A quick reply sent here offers *Send and finish the task*
   when the conversation has one.
 - Making the task, Return saves it (or the conversation's task, changed),
   archives the email if ticked, and moves on; ⌘Z takes all of it back.
@@ -4421,7 +4493,8 @@ conversation with a task belongs to Tasks): people's mail that asks the
 user something, not answered in Triage (left in the Inbox, skipped, or
 arrived outside a set). Each item: the email with its questions
 highlighted, *What do you want to say?*, then the editable email; Send
-and archive. Kaluta writes no draft before the user has said something.
+and archive. *Archive* (E), as in Triage, when no reply is needed.
+Kaluta writes no draft before the user has said something.
 
 #### Tasks
 
@@ -4502,13 +4575,13 @@ own day), monthly ones on the 1st.
 - **A bucket**, one line per item, summarised by Kaluta **when the
   routine sorts** (stored with the run, so the bucket opens ready); the
   current item's short summary at content size. *Read, next* (E), *Open
-  in full* (Return), *Keep for later* (L), *Back to the Inbox* (I),
+  in full* (O), *Keep for later* (L), *Back to the Inbox* (I),
   *Clear the bucket* (⌘E). Reading and clearing **mark mail read and keep
   the routine's label**.
 - The report shows until *Start reading* (Return) on a set not yet
   begun today; its cards are the buckets due today with three of Kaluta's
   lines each. In a bucket, the rail lists that bucket one line each and
-  the item shows Kaluta's summary (Return opens it in full, again for the
+  the item shows Kaluta's summary (O opens it in full, again for the
   summary); *T* makes a task on the item's screen, as in Triage. ⌘Z
   undoes Read, next and Clear the bucket together with their marking.
 - The buckets are the account's enabled routines' (§11.2); with no
@@ -4546,7 +4619,7 @@ One set of what agents wait on the user for, across accounts:
 A line under the rail says what agent mailboxes sent on their own since
 the user last looked, with *See them*. The set holds each proposal waiting (a send shows the
 draft's text to edit, and Send saves it and approves; *Save as a draft*
-declines and leaves it in Drafts; another action has *Approve* and
+declines and leaves it in Drafts; another action has *Approve* (E) and
 *Don't*), each code from the last half hour in any agent mailbox (six
 digits, alone or as two groups of three; the expiry from "expires in …"),
 and this morning's successful sorting run (*Keep*, *Undo the run*). What
@@ -4556,15 +4629,31 @@ holds says so.
 
 #### Teach Kaluta
 
-Review mode (§14.10) widened into one queue: proposed routine changes,
-proposed writing-guide rules and proposed facts (including those learned
-from what the user told Kaluta), grouped by kind, each with its evidence
-and the change it makes; *Accept* (Return), *Edit…*, *Reject* (⌫), ⌘Z
-undoes; patterns still collecting evidence listed last. The Writing
-Guide's and Facts' bands open it on their kind. A routine change
-shows what it would leave alone, the rule it adds and the conversations
-moved back; it has no *Edit…*. Accepting one with no routine set up says
-so and leaves it waiting. *Accept All* takes every kind.
+*(Amended 2026-10-13: a workflow like the others, one proposal at a time,
+no longer Review mode widened.)* The set holds, grouped by kind, the
+proposed routine changes, the learning run's and the daily review's
+proposed rules, and the daily review's proposed facts (including those
+learned from what the user told Kaluta); patterns still collecting
+evidence wait for more, and facts merged from a file that differ wait on
+the Facts page. The rail lists the set, each line with its kind, then how
+it was decided.
+
+- **The item** shows the change it makes, large, with its cues (kind,
+  category, source), its scope and check, and what it goes against.
+- **Its evidence on O** (*Show the evidence*, again to hide): the AI's
+  drafts beside what the user sent for a daily-review rule, the messages
+  that show a learned rule, the words in the user's mail for a fact, the
+  conversations moved back for a routine change.
+- *Accept* (E), *Edit…* (W, for rules; saving accepts it as edited),
+  *Reject* (⌫), *Skip* (S). There is no *Accept All*: each one is looked
+  at. One ⌘Z undoes a decision and its change to the guide, the facts or
+  the routine together, and puts the item back.
+- A routine change has no *Edit…*; accepting one with no routine set up
+  says so and leaves it waiting. What was decided on the Writing Guide or
+  Facts page meanwhile leaves the set as decided.
+
+Review mode (§14.10, §14.11) stays the way to decide one page's queue
+from its band.
 
 #### Background jobs
 
@@ -4583,8 +4672,9 @@ per account), the latest message of each as fenced data with today's
 date and the task categories. Its answer is held to the rules whatever
 the agent says: a quick reply over 30 seconds, or with no answers, is a
 task when it describes one, else *leave*; a task with no task described
-is *leave*; at most three answers. A suggestion is stored for the
-conversation's latest message (`triage_suggestions`) and stops counting
+is *leave*; at most three answers. A long email meant for reading also
+gets a summary of two or three sentences (migration 0031). A suggestion
+is stored for the conversation's latest message (`triage_suggestions`) and stops counting
 when a newer one arrives, so the job suggests again.
 
 | Job | When | Makes |

@@ -36,6 +36,12 @@ struct MainWindow: View {
                     .environment(\.workflowMorph, workflowSpace)
                 } else {
                     mailWindow
+                        // Esc goes to the start screen, as Esc there comes
+                        // back here; not while typing (the search, Ask
+                        // Claude), where Esc is the field's.
+                        .onExitCommand {
+                            if model.workflowsEnabled, !WorkflowHostView.isEditingText { model.showStart() }
+                        }
                 }
             }
         }

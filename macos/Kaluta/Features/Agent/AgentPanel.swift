@@ -64,7 +64,7 @@ struct AgentPromptBar: View {
                     .onKeyPress(.downArrow) { move(1, in: chips) }
                     .onKeyPress(.tab) { move(1, in: chips) }
                     .onKeyPress(.upArrow) { move(-1, in: chips) }
-                    .onKeyPress(.return) {
+                    .onKeyPress(keys: [.return, .enter]) { _ in
                         guard let highlighted, chips.indices.contains(highlighted) else { return .ignored }
                         self.highlighted = nil
                         model.choose(chips[highlighted])

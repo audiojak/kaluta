@@ -79,6 +79,9 @@ final class WorkflowSession {
     var choosingCheckAgain = false
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
+    /// Teach Kaluta's rail: each item's line and kind, by key, kept from
+    /// the start (a decided proposal leaves its store).
+    var teachLines: [String: TeachLine] = [:]
 
     init(set: WorkflowSet) {
         kind = set.kind
@@ -110,6 +113,14 @@ final class WorkflowSession {
         return nil
     }
 
+    /// A field has the keyboard's work: what to say, the email to send, or
+    /// a task being made. The workflow's own keys stand aside meanwhile.
+    var isTyping: Bool {
+        if taskForm != nil { return true }
+        guard let step = writer?.step else { return false }
+        return step == .say || step == .final
+    }
+
     /// The reading bucket an item is in.
     func bucket(of item: WorkflowItem) -> ReadingBucket? {
         guard let id = item.threadId else { return nil }
@@ -133,4 +144,10 @@ final class WorkflowSession {
         let minutes = max(1, (left * secondsPerItem + 30) / 60)
         return "\(left) of \(total) left, about \(minutes) minute\(minutes == 1 ? "" : "s")."
     }
+}
+
+/// A Teach Kaluta item on the rail: what it says and what kind it is.
+struct TeachLine: Equatable {
+    let title: String
+    let kind: String
 }

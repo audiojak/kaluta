@@ -9,7 +9,16 @@ import WebKit
 @MainActor
 final class RemoteImageSchemeHandler: NSObject, WKURLSchemeHandler {
     static let scheme = "kaluta-remote"
+    /// The same images once the user loads them: other addresses, so the
+    /// web view's memory cache cannot answer with the blank pixels it was
+    /// given before (it did, and Load Images left the gaps).
+    static let loadedScheme = "kaluta-remote-loaded"
     var allowRemote = false
+
+    /// The document with its images asked for again, for real.
+    static func loading(_ html: String) -> String {
+        html.replacingOccurrences(of: "src=\"\(scheme):", with: "src=\"\(loadedScheme):")
+    }
 
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
@@ -53,10 +62,11 @@ final class RemoteImageSchemeHandler: NSObject, WKURLSchemeHandler {
         tasks.removeValue(forKey: ObjectIdentifier(urlSchemeTask))?.cancel()
     }
 
-    /// `kaluta-remote:https://host/path` → `https://host/path`. Only http(s).
+    /// `kaluta-remote:https://host/path` (or `kaluta-remote-loaded:`) →
+    /// `https://host/path`. Only http(s).
     static func remoteURL(from url: URL?) -> URL? {
-        guard let url, url.scheme == scheme else { return nil }
-        let rest = String(url.absoluteString.dropFirst(scheme.count + 1))
+        guard let url, let own = url.scheme, own == scheme || own == loadedScheme else { return nil }
+        let rest = String(url.absoluteString.dropFirst(own.count + 1))
         guard let remote = URL(string: rest), ["http", "https"].contains(remote.scheme?.lowercased() ?? "") else {
             return nil
         }

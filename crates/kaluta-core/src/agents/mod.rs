@@ -91,6 +91,8 @@ pub(crate) struct AgentHub {
     /// Workflows are on in the app: until then no job runs (they use the
     /// agent, and nothing would show what they made).
     pub(crate) workflow_jobs_on: std::sync::atomic::AtomicBool,
+    /// Triage by priority (spec §14.13), the app's setting: off by default.
+    pub(crate) triage_by_priority: std::sync::atomic::AtomicBool,
     /// Turns the core itself waits on (`watch_turn`), by session.
     turn_waiters: Mutex<HashMap<String, TurnWaiter>>,
     /// The account each session was started on. Its tool calls, transcript

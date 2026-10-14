@@ -193,6 +193,11 @@ final class CoreClient: Sendable {
 
     /// Download header-only bodies now (tiered download, spec §7.4); on
     /// failure the core queues them first instead.
+    /// Bodies cleaned by an older sanitizer, fetched and cleaned again: how many.
+    func refreshStaleBodies(_ threadID: String) async -> UInt32 {
+        (try? await call { try await core.refreshStaleBodies(threadId: threadID) }) ?? 0
+    }
+
     func ensureBodies(_ ids: [String]) async {
         _ = try? await call { try await core.ensureBodies(messageIds: ids) }
     }
@@ -748,6 +753,8 @@ final class CoreClient: Sendable {
 
     /// Background jobs run only while workflows are on.
     func setWorkflowJobsOn(_ on: Bool) { core.setWorkflowJobsOn(on: on) }
+
+    func setTriageByPriority(_ on: Bool) { core.setTriageByPriority(on: on) }
 
     func triageSuggestion(_ threadID: String) async throws(CoreClientError) -> TriageSuggestion? {
         try await call { try await core.triageSuggestion(threadId: threadID) }
@@ -1825,6 +1832,8 @@ typealias GuideMergeDecision = KalutaCore.GuideMergeDecision
 typealias WorkflowKind = KalutaCore.WorkflowKind
 typealias WorkflowOverview = KalutaCore.WorkflowOverview
 typealias WorkflowSummary = KalutaCore.WorkflowSummary
+typealias WorthLook = KalutaCore.WorthLook
+typealias WorthReason = KalutaCore.WorthReason
 typealias WorkflowDay = KalutaCore.WorkflowDay
 typealias WorkflowItem = KalutaCore.WorkflowItem
 typealias WorkflowSet = KalutaCore.WorkflowSet

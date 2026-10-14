@@ -3,7 +3,11 @@
 //! so this is one of two independent layers.
 //!
 //! - Only formatting and table tags survive. Scripts, frames, forms, SVG,
-//!   `<style>`, `<meta>`, `<base>` and comments are removed.
+//!   `<meta>`, `<base>` and comments are removed.
+//! - The email's `<style>` sheets are kept, cleaned as inline styles are
+//!   (only allowed properties, no value that could fetch anything, no
+//!   at-rule but `@media`, no comments or `<`), and wrapped in `@scope`
+//!   so they style that message alone, never the reader or other mail.
 //! - Inline `style` is kept but filtered to properties that cannot load a
 //!   URL or escape the message frame.
 //! - Remote images become `kaluta-remote:<original url>`: the reader's
@@ -21,13 +25,79 @@ use ammonia::{Builder, UrlRelative};
 
 /// Bump when the policy changes; stored bodies with an older version are
 /// re-sanitized lazily.
-pub const SANITIZER_VERSION: u32 = 1;
+pub const SANITIZER_VERSION: u32 = 3;
 
 pub const REMOTE_SCHEME: &str = "kaluta-remote";
 pub const CID_SCHEME: &str = "kaluta-cid";
 
 /// Largest inline `data:` image kept, in bytes of URL.
 const MAX_DATA_URL: usize = 256 * 1024;
+
+/// Properties that cannot fetch a URL or position content outside the
+/// message (no background-image, list-style-image, border-image, content,
+/// position, z-index, cursor): for inline `style` and kept stylesheets.
+const STYLE_PROPERTIES: &[&str] = &[
+    "color",
+    // Colours and gradients only: a value with url() or image-set() is
+    // refused by `safe_declaration`.
+    "background",
+    "background-color",
+    "font",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "font-variant",
+    "text-align",
+    "text-decoration",
+    "text-indent",
+    "text-transform",
+    "line-height",
+    "letter-spacing",
+    "word-spacing",
+    "white-space",
+    "word-break",
+    "word-wrap",
+    "overflow-wrap",
+    "vertical-align",
+    "direction",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-color",
+    "border-style",
+    "border-width",
+    "border-radius",
+    "border-collapse",
+    "border-spacing",
+    "width",
+    "height",
+    "max-width",
+    "min-width",
+    "max-height",
+    "min-height",
+    "display",
+    "float",
+    "clear",
+    "list-style-type",
+    "table-layout",
+    "overflow",
+];
+
+/// A kept stylesheet's largest size, in bytes, before cleaning.
+const MAX_STYLESHEET: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sanitized {
@@ -36,7 +106,15 @@ pub struct Sanitized {
 }
 
 pub fn sanitize_html(html: &str) -> Sanitized {
-    let html = SANITIZER.clean(html).to_string();
+    // The email's own stylesheet, cleaned and kept to the message
+    // (`@scope` with no selector: the element the fragment is put in).
+    // Outside comments only, as a browser reads it: Outlook's conditional
+    // sheets (`<!--[if mso]><style>`) are not for us.
+    let visible = without_html_comments(html);
+    let sheet = kept_stylesheet(&visible).map(|css| format!("<style>@scope{{{css}}}</style>")).unwrap_or_default();
+    // The email's <body>, kept as a div with its classes and style (where
+    // newsletters set their background), as Gmail does.
+    let html = sheet + &SANITIZER.clean(&body_as_div(html)).to_string();
     let has_remote_images = html.contains(&format!("src=\"{REMOTE_SCHEME}:"));
     Sanitized { html, has_remote_images }
 }
@@ -178,71 +256,12 @@ static SANITIZER: LazyLock<Builder<'static>> = LazyLock::new(|| {
         ("li", ["value"].into()),
         ("time", ["datetime"].into()),
     ]);
-    // Properties that cannot fetch a URL or position content outside the
-    // message (no background-image, list-style-image, border-image,
-    // content, position, z-index, cursor).
-    let styles: HashSet<&str> = [
-        "color",
-        "background-color",
-        "font",
-        "font-family",
-        "font-size",
-        "font-style",
-        "font-weight",
-        "font-variant",
-        "text-align",
-        "text-decoration",
-        "text-indent",
-        "text-transform",
-        "line-height",
-        "letter-spacing",
-        "word-spacing",
-        "white-space",
-        "word-break",
-        "word-wrap",
-        "overflow-wrap",
-        "vertical-align",
-        "direction",
-        "margin",
-        "margin-top",
-        "margin-right",
-        "margin-bottom",
-        "margin-left",
-        "padding",
-        "padding-top",
-        "padding-right",
-        "padding-bottom",
-        "padding-left",
-        "border",
-        "border-top",
-        "border-right",
-        "border-bottom",
-        "border-left",
-        "border-color",
-        "border-style",
-        "border-width",
-        "border-radius",
-        "border-collapse",
-        "border-spacing",
-        "width",
-        "height",
-        "max-width",
-        "min-width",
-        "max-height",
-        "min-height",
-        "display",
-        "float",
-        "clear",
-        "list-style-type",
-        "table-layout",
-        "overflow",
-    ]
-    .into();
+    let styles: HashSet<&str> = STYLE_PROPERTIES.iter().copied().collect();
 
     let mut b = Builder::empty();
     b.tags(tags)
         .tag_attributes(tag_attributes)
-        .generic_attributes(["style", "dir", "lang", "title", "align"].into())
+        .generic_attributes(["style", "class", "dir", "lang", "title", "align"].into())
         .filter_style_properties(styles)
         .clean_content_tags(["script", "style", "title", "noscript", "template", "iframe", "object"].into())
         .url_schemes(["http", "https", "mailto", "cid", "data"].into())
@@ -274,6 +293,13 @@ fn filter_attribute<'u>(element: &str, attribute: &str, value: &'u str) -> Optio
             (lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:"))
                 .then_some(Cow::Borrowed(value))
         }
+        // The email's classes, kept for its stylesheet, prefixed so none
+        // can be one of the reader's own.
+        (_, "class") => {
+            let classes: Vec<String> =
+                value.split_whitespace().filter(|c| is_ident(c)).map(|c| format!("e-{c}")).collect();
+            if classes.is_empty() { None } else { Some(Cow::Owned(classes.join(" "))) }
+        }
         (_, "style") => {
             let kept: Vec<&str> =
                 value.split(';').map(str::trim).filter(|d| !d.is_empty() && safe_declaration(d)).collect();
@@ -299,4 +325,249 @@ fn is_safe_data_image(lower: &str, len: usize) -> bool {
         && ["data:image/png", "data:image/gif", "data:image/jpeg", "data:image/webp"]
             .iter()
             .any(|p| lower.starts_with(p))
+}
+
+/// `html` without `<!-- … -->` comments.
+fn without_html_comments(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find("<!--") {
+        out.push_str(&rest[..i]);
+        rest = rest[i + 4..].find("-->").map_or("", |j| &rest[i + 4 + j + 3..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The first `<body …>` as `<div class="kbody …" …>` and its `</body>` as
+/// `</div>`, so its attributes survive (a fragment has no body of its own).
+fn body_as_div(html: &str) -> Cow<'_, str> {
+    let lower = html.to_ascii_lowercase();
+    let Some(start) =
+        lower.find("<body").filter(|&i| lower[i + 5..].starts_with(|c: char| c.is_ascii_whitespace() || c == '>'))
+    else {
+        return Cow::Borrowed(html);
+    };
+    let Some(end) = lower[start..].find('>').map(|i| start + i) else { return Cow::Borrowed(html) };
+    let attrs = &html[start + 5..end];
+    let attrs_lower = &lower[start + 5..end];
+    // Its class list gains "kbody" (stylesheets' `body` selectors become
+    // `.e-kbody`); a class attribute of its own keeps its names.
+    let attrs = match attrs_lower.find("class=") {
+        Some(i) => {
+            let at = i + "class=".len();
+            let quote = attrs[at..].chars().next().filter(|c| *c == '"' || *c == '\'');
+            match quote {
+                Some(q) => format!("{}{q}kbody {}", &attrs[..at], &attrs[at + 1..]),
+                None => format!("{}kbody {}", &attrs[..at], &attrs[at..]),
+            }
+        }
+        None => format!(" class=\"kbody\"{attrs}"),
+    };
+    let close = lower.rfind("</body").unwrap_or(lower.len());
+    let mut out = String::with_capacity(html.len() + 16);
+    out.push_str(&html[..start]);
+    out.push_str("<div");
+    out.push_str(&attrs);
+    out.push_str(&html[end..close]);
+    if close < html.len() {
+        out.push_str("</div>");
+        out.push_str(html[close..].split_once('>').map_or("", |(_, after)| after));
+    }
+    Cow::Owned(out)
+}
+
+/// The email's `<style>` sheets, cleaned: rules and `@media` blocks whose
+/// declarations the inline filter would keep. `None` when nothing is left.
+fn kept_stylesheet(html: &str) -> Option<String> {
+    let lower = html.to_ascii_lowercase();
+    let mut css = String::new();
+    let mut at = 0;
+    while let Some(start) = lower[at..].find("<style").map(|i| at + i) {
+        let Some(open) = lower[start..].find('>').map(|i| start + i + 1) else { break };
+        let close = lower[open..].find("</style").map_or(lower.len(), |i| open + i);
+        css.push_str(&html[open..close]);
+        css.push('\n');
+        at = close;
+        if css.len() > MAX_STYLESHEET {
+            return None;
+        }
+    }
+    let css = without_comments(&css).replace('<', "");
+    let kept = clean_rules(&css, 0);
+    (!kept.is_empty()).then_some(kept)
+}
+
+fn without_comments(css: &str) -> String {
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(i) = rest.find("/*") {
+        out.push_str(&rest[..i]);
+        rest = rest[i + 2..].find("*/").map_or("", |j| &rest[i + 2 + j + 2..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Rules and `@media` blocks (nested at most twice), rebuilt from what is
+/// kept, so braces always balance.
+fn clean_rules(css: &str, depth: usize) -> String {
+    let mut out = String::new();
+    let mut rest = css;
+    while let Some(open) = find_outside_quotes(rest, '{') {
+        let Some(close) = matching_brace(rest, open) else { break };
+        // Anything before the last `;` is a statement at-rule (`@import`,
+        // `@charset`): dropped.
+        let prelude = rest[..open].rsplit(';').next().unwrap_or_default().trim();
+        let inner = &rest[open + 1..close];
+        rest = &rest[close + 1..];
+        if let Some(at_rule) = prelude.strip_prefix('@') {
+            let media = at_rule.to_ascii_lowercase().starts_with("media");
+            if media && depth < 2 && safe_prelude(prelude) {
+                let body = clean_rules(inner, depth + 1);
+                if !body.is_empty() {
+                    out.push_str(prelude);
+                    out.push('{');
+                    out.push_str(&body);
+                    out.push('}');
+                }
+            }
+            continue;
+        }
+        if prelude.is_empty() || !safe_prelude(prelude) {
+            continue;
+        }
+        let prelude = &document_selectors(&prefixed_classes(prelude));
+        let kept: Vec<String> = inner
+            .split(';')
+            .filter_map(|d| {
+                let d = d.trim();
+                let (property, value) = d.split_once(':')?;
+                let property = property.trim().to_ascii_lowercase();
+                (STYLE_PROPERTIES.contains(&property.as_str()) && safe_declaration(d) && !value.contains(['{', '}']))
+                    .then(|| format!("{property}:{}", value.trim()))
+            })
+            .collect();
+        if !kept.is_empty() {
+            out.push_str(prelude);
+            out.push('{');
+            out.push_str(&kept.join(";"));
+            out.push('}');
+        }
+    }
+    out
+}
+
+/// A selector or `@media` condition: nothing that escapes, fetches or
+/// opens another block.
+fn safe_prelude(prelude: &str) -> bool {
+    let lower = prelude.to_ascii_lowercase();
+    !prelude.contains(['\\', '{', '}', ';']) && !lower.contains("url(") && !lower.contains("expression(")
+}
+
+/// A selector's `body` as the email's body (now `.e-kbody`) and its `html`
+/// as the message itself (`:scope`): what Gmail does with them.
+fn document_selectors(selector: &str) -> String {
+    let mut out = String::with_capacity(selector.len() + 8);
+    let chars: Vec<char> = selector.chars().collect();
+    let mut i = 0;
+    let mut quote: Option<char> = None;
+    let mut bracket = false;
+    while i < chars.len() {
+        let c = chars[i];
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '[') => bracket = true,
+            (None, ']') => bracket = false,
+            (None, c) if !bracket && c.is_ascii_alphabetic() => {
+                let before = i.checked_sub(1).map(|j| chars[j]);
+                let starts_type =
+                    !before.is_some_and(|b| b.is_ascii_alphanumeric() || matches!(b, '.' | '#' | ':' | '-' | '_'));
+                let end = (i..chars.len())
+                    .find(|&j| !(chars[j].is_ascii_alphanumeric() || matches!(chars[j], '-' | '_')))
+                    .unwrap_or(chars.len());
+                let word: String = chars[i..end].iter().collect::<String>().to_ascii_lowercase();
+                if starts_type && (word == "body" || word == "html") {
+                    out.push_str(if word == "body" { ".e-kbody" } else { ":scope" });
+                    i = end;
+                    continue;
+                }
+                out.extend(&chars[i..end]);
+                i = end;
+                continue;
+            }
+            _ => {}
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// A class name worth keeping: letters, digits, `-` and `_`.
+fn is_ident(c: &str) -> bool {
+    !c.is_empty() && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+/// A selector's classes as the HTML now has them (`.title` → `.e-title`).
+fn prefixed_classes(selector: &str) -> String {
+    let mut out = String::with_capacity(selector.len() + 8);
+    let mut chars = selector.chars().peekable();
+    let mut quote: Option<char> = None;
+    let mut bracket = false;
+    while let Some(c) = chars.next() {
+        out.push(c);
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '[') => bracket = true,
+            (None, ']') => bracket = false,
+            (None, '.')
+                if !bracket && chars.peek().is_some_and(|n| n.is_ascii_alphabetic() || *n == '_' || *n == '-') =>
+            {
+                out.push_str("e-");
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn find_outside_quotes(s: &str, target: char) -> Option<usize> {
+    let mut quote: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, c) if c == target => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The `}` closing the `{` at `open`.
+fn matching_brace(s: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote: Option<char> = None;
+    for (i, c) in s[open..].char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '{') => depth += 1,
+            (None, '}') => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }

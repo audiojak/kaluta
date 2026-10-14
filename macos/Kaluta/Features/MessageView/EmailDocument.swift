@@ -7,7 +7,7 @@ enum EmailDocument {
     /// Everything but inline styles and our own image schemes is blocked.
     /// Remote images are still gated by the scheme handler.
     static let contentSecurityPolicy =
-        "default-src 'none'; img-src kaluta-cid: kaluta-remote: data:; style-src 'unsafe-inline'"
+        "default-src 'none'; img-src kaluta-cid: kaluta-remote: kaluta-remote-loaded: data:; style-src 'unsafe-inline'"
 
     struct Message: Equatable {
         let id: String

@@ -24,7 +24,11 @@ prefs_stamp() { for p in "${REAL_PREFS[@]}"; do stat -f %m "$p" 2>/dev/null || e
 prefs_before=$(prefs_stamp)
 app_running=$(pgrep -f '(Kaluta|OpenAGC).app/Contents/MacOS/' >/dev/null && echo yes || echo no)
 echo "demo: data in $DATA; mail arrives every ${ARRIVALS}s; quit Kaluta to end"
+# -ApplePersistenceIgnoreState: the demo shares the app's bundle id, so its
+# windows (a composer on a demo draft) would otherwise come back in the
+# real app, where draft ids mean other drafts.
 "$APP" -KalutaDataDirectory "$DATA" -KalutaDemo YES -KalutaFakeAgents YES -KalutaDemoWorkflows YES \
+  -ApplePersistenceIgnoreState YES \
   -KalutaDemoArrivalSeconds "$ARRIVALS" "$@" >/dev/null 2>"${DEMO_LOG:-/dev/null}"
 sleep 2 # cfprefsd writes just after the app quits
 if [[ "$(prefs_stamp)" != "$prefs_before" && $app_running == no ]]; then

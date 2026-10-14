@@ -29,20 +29,29 @@ struct WorkflowWriteView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .id(Self.scrollID)
         .background {
-            // ⌘Return and ⌥⌘Return send from inside the text, too.
-            Button("Send") { perform(.send) } // no-help: hidden
-                .keyboardShortcut(.return, modifiers: .command)
-                .hidden()
-            Button("Send, keep the task open") { perform(.sendKeepTask) } // no-help: hidden
-                .keyboardShortcut(.return, modifiers: [.command, .option])
-                .hidden()
+            // ⌘Return and ⌥⌘Return send from inside the text, too; Enter
+            // as Return.
+            ForEach([KeyEquivalent.return, .enter], id: \.character) { key in
+                Button("Send") { perform(.send) } // no-help: hidden
+                    .keyboardShortcut(key, modifiers: .command)
+                    .hidden()
+                Button("Send, keep the task open") { perform(.sendKeepTask) } // no-help: hidden
+                    .keyboardShortcut(key, modifiers: [.command, .option])
+                    .hidden()
+            }
         }
-        .onChange(of: writer.step, initial: true) { _, step in
-            // The field or the text takes the keys, a turn later (focus set
-            // while a view appears is lost to the one it replaces).
-            Task { @MainActor in
+        .task(id: writer.step) {
+            // The field or the text takes the keys. Focus asked for while
+            // the view is still appearing (it slides in with the item) can
+            // be lost, so ask until a text view has the keyboard.
+            let step = writer.step
+            guard step == .say || step == .final else { return }
+            for _ in 0..<10 {
+                try? await Task.sleep(for: .milliseconds(60))
+                guard !Task.isCancelled else { return }
                 fieldFocused = step == .say
                 textFocused = step == .final
+                if WorkflowHostView.isEditingText { return }
             }
         }
     }
@@ -85,17 +94,35 @@ struct WorkflowWriteView: View {
 
     private var say: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
-            TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
-                .font(TypeRole.workflowContent)
-                .textFieldStyle(.plain)
-                .lineLimit(2...6)
-                .padding(Space.xl)
-                .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-                .focused($fieldFocused)
-                .onSubmit { perform(.primary) }
-                .onExitCommand { perform(.back) }
-                .accessibilityLabel(Self.askTitle(session.kind))
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
+                Text(model.agent.isProviderReady
+                     ? "Kaluta writes the email from it, for you to read and change before it goes."
+                     : "What you type is the email.")
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: Space.m) {
+                TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
+                    .font(TypeRole.workflowContent)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...6)
+                    .focused($fieldFocused)
+                    .onSubmit { perform(.primary) }
+                    .onExitCommand { perform(.back) }
+                    .accessibilityLabel(Self.askTitle(session.kind))
+                // macOS dictation into the field, as Edit › Start Dictation
+                // (or the dictation key) does.
+                Button { startDictation() } label: {
+                    Image(systemName: "mic")
+                        .font(TypeRole.workflowContent)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Dictate (or press the dictation key, by default Fn twice)")
+                .accessibilityLabel("Dictate")
+            }
+            .padding(Space.xl)
+            .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
             if !writer.starters.isEmpty {
                 HStack(spacing: Space.s) {
                     ForEach(writer.starters, id: \.self) { starter in
@@ -154,6 +181,15 @@ struct WorkflowWriteView: View {
     }
 
     // MARK: Acting
+
+    /// Put the cursor in the field and start macOS dictation there.
+    private func startDictation() {
+        fieldFocused = true
+        Task { @MainActor in
+            // A turn later: the field must hold the keyboard first.
+            NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
+        }
+    }
 
     private func perform(_ command: WorkflowCommand) {
         Task { await model.performWorkflow(command) }

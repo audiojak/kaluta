@@ -15,6 +15,24 @@ struct SidebarView: View {
         // foot. The account switcher sits in the sidebar's title bar.
         List(selection: $model.selectedMailboxID) {
             Section("Favorites") {
+                // Home, while the workflows are on (spec §14.13): the start
+                // screen is a click away from any mailbox.
+                if model.workflowsEnabled {
+                    Button { model.showStart() } label: {
+                        Label {
+                            HStack(spacing: Space.s) {
+                                Text("What's Next")
+                                Spacer(minLength: 0)
+                                // Esc here, as Esc there comes back to Mail.
+                                Keycap(key: "Esc")
+                            }
+                        } icon: {
+                            Image(systemName: "sun.max")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .hoverHelp("The start screen: today's workflows (Esc or ⌘0)")
+                }
                 ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)
                         .background(FocusRegionProbe(cycle: model.focus, region: .sidebar))
@@ -93,10 +111,9 @@ struct SidebarView: View {
         .onChange(of: model.routinesRevision) { Task { await model.routines.load() } }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                GuideRunFooter()
-                SyncStatusView()
-            }
+            // On a bar of its own, as in Mail: the folders scroll under it,
+            // never through its text.
+            SidebarFooter()
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -227,6 +244,23 @@ extension MailboxKind {
         case .spam: "xmark.bin"
         case .trash: "trash"
         case .label: "tag"
+        }
+    }
+}
+
+/// The sidebar's footer: the learning run and the sync status, on the bar
+/// material with a hairline above, shown only when either has something
+/// to say.
+private struct SidebarFooter: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            GuideRunFooter()
+            SyncStatusView()
+        }
+        .background {
+            // Sized by the content: nothing to say, no bar.
+            Rectangle().fill(.bar)
+                .overlay(alignment: .top) { InsetRule(inset: 0) }
         }
     }
 }

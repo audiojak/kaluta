@@ -155,6 +155,19 @@ pub fn counts(conn: &Connection) -> StoreResult<(u64, u64)> {
 }
 
 /// Ids of the given ones that are not stored with a full body.
+/// The thread's messages whose HTML was cleaned by a sanitizer older than
+/// `version`: to fetch and clean again.
+pub fn stale_bodies(conn: &Connection, thread: &str, version: u32) -> StoreResult<Vec<MessageId>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT m.gmail_id FROM messages m
+           JOIN threads t ON t.id = m.thread_id
+           JOIN bodies b ON b.message_id = m.id
+          WHERE t.gmail_id = ?1 AND m.is_draft = 0 AND b.html_sanitized IS NOT NULL AND b.sanitizer_version < ?2",
+    )?;
+    let rows = stmt.query_map(params![thread, version], |r| Ok(MessageId(r.get(0)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 pub fn missing(conn: &Connection, ids: &[MessageId]) -> StoreResult<Vec<MessageId>> {
     let mut stmt = conn.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1 AND body_state = 'full'")?;
     let mut out = Vec::new();
@@ -164,4 +177,30 @@ pub fn missing(conn: &Connection, ids: &[MessageId]) -> StoreResult<Vec<MessageI
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Db;
+
+    #[test]
+    fn bodies_cleaned_by_an_older_sanitizer_are_stale() {
+        let dir = std::env::temp_dir().join(format!("kaluta-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(&dir.join("mail.sqlite")).unwrap();
+        crate::demo_workflows::generate(&db, 1_760_000_000_000).unwrap();
+        // The demo writes its bodies with no version: all stale for version 2.
+        let stale = db.read_blocking(|c| stale_bodies(c, "demowf-board-prep", 2)).unwrap();
+        assert!(!stale.is_empty());
+        assert!(db.read_blocking(|c| stale_bodies(c, "demowf-board-prep", 0)).unwrap().is_empty(), "none older than 0");
+        db.write_blocking(|tx| {
+            tx.execute("UPDATE bodies SET sanitizer_version = 2", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(db.read_blocking(|c| stale_bodies(c, "demowf-board-prep", 2)).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

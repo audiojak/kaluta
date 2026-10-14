@@ -25,6 +25,7 @@ struct MessageWebView: NSViewRepresentable {
         config.defaultWebpagePreferences.allowsContentJavaScript = false
         config.preferences.isElementFullscreenEnabled = false
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.scheme)
+        config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.loadedScheme)
         config.setURLSchemeHandler(context.coordinator.inlineImages, forURLScheme: CidSchemeHandler.scheme)
         let webView = WKWebView(frame: .zero, configuration: config)
         onCreated?(webView)
@@ -56,7 +57,8 @@ struct MessageWebView: NSViewRepresentable {
         coordinator.suspiciousLinks = LinkSafety.mismatchedLinks(in: html)
         // A fixed, opaque base URL: nothing in the document can resolve
         // relative to a real origin.
-        webView.loadHTMLString(html, baseURL: URL(string: "about:blank"))
+        let shown = allowRemoteImages ? RemoteImageSchemeHandler.loading(html) : html
+        webView.loadHTMLString(shown, baseURL: URL(string: "about:blank"))
     }
 
     @MainActor

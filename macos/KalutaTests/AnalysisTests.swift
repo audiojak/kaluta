@@ -98,6 +98,23 @@ struct AnalysisTests {
         #expect(model.reviewMode == .rules && model.analysis.selection == tags[1], "the first still waiting is current")
     }
 
+    /// Teach Kaluta (spec §14.13): a decision brings the next one waiting,
+    /// whatever its kind, once.
+    @Test func teachKalutaMovesToTheNextWaitingAfterADecision() async throws {
+        let model = try await reviewed()
+        model.enterReview(.teach)
+        let waiting = model.reviewItems.filter { !$0.watching }.map(\.tag)
+        try #require(waiting.count >= 3)
+        model.reviewSelection = waiting[0]
+        #expect(model.reviewAct(.accept))
+        #expect(model.reviewSelection == waiting[1], "the next one waiting")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(model.reviewSelection == waiting[1], "and only one step, once the decision is made")
+        #expect(model.reviewAct(.reject))
+        #expect(model.reviewSelection == waiting[2])
+        model.leaveReview()
+    }
+
     /// Review mode (spec §14.10): the queue holds what the mode opened on,
     /// decided items stay with their outcome, Undo makes them wait again,
     /// and the run ends in a summary.

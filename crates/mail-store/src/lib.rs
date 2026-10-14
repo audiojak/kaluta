@@ -17,6 +17,7 @@ mod error;
 pub mod facts;
 pub mod guide;
 pub mod outbox;
+pub mod priority;
 pub mod queue;
 pub mod read;
 pub mod reading;

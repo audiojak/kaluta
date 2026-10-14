@@ -33,12 +33,16 @@ struct ComposerView: View {
                     editor(store)
                 }
             } else {
-                Color.clear
+                // Waiting for the account to open (a composer restored at launch).
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 520, minHeight: 380)
         .navigationTitle(store?.windowTitle ?? "New Message")
-        .task {
+        .task(id: model.openAccountID) {
+            // Restored by macOS at launch, a composer can appear before the
+            // account opens: it waits for it rather than failing.
+            guard store == nil, model.openAccountID != nil || model.accountState != .starting else { return }
             let store = ComposerStore(core: model.core, account: model.openAccountID)
             self.store = store
             await store.load(request)
@@ -127,16 +131,18 @@ struct ComposerView: View {
             header(store)
                 .background {
                     // ⌘Return sends too, as in Gmail; with a task, ⌘Return
-                    // finishes it and ⌥⌘Return keeps it open.
-                    Button("Send") { send(store) } // no-help: hidden
-                        .keyboardShortcut(.return, modifiers: .command)
-                        .disabled(!store.canSend)
-                        .hidden()
-                    if request.agentName == nil {
-                        Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
-                            .keyboardShortcut(.return, modifiers: [.command, .option])
-                            .disabled(!store.canSend || store.task == nil)
+                    // finishes it and ⌥⌘Return keeps it open. Enter as Return.
+                    ForEach([KeyEquivalent.return, .enter], id: \.character) { key in
+                        Button("Send") { send(store) } // no-help: hidden
+                            .keyboardShortcut(key, modifiers: .command)
+                            .disabled(!store.canSend)
                             .hidden()
+                        if request.agentName == nil {
+                            Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
+                                .keyboardShortcut(key, modifiers: [.command, .option])
+                                .disabled(!store.canSend || store.task == nil)
+                                .hidden()
+                        }
                     }
                 }
             if let task = store.task, request.agentName == nil {

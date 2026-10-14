@@ -5,7 +5,8 @@ import SwiftUI
 /// VoiceOver's actions and, next, voice all call. The same verb has the
 /// same key in every workflow.
 enum WorkflowCommand: String, CaseIterable, Identifiable {
-    /// Return: the suggested or primary action.
+    /// Return (or Enter) outside an item: go on (start reading, make the
+    /// task, write it). In an item Return is always Reply.
     case primary
     /// ⌘Return: send the email on screen.
     case send
@@ -19,8 +20,17 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case later
     /// S: skip for now; the item moves to the end of the set.
     case skip
-    /// R: reply now, where the suggestion is something else.
+    /// Return (or Enter) and R in an item: reply, wherever there is one
+    /// (a nudge is a reply). Return never does anything else in an item.
     case replyNow
+    /// O: open in full, or back to the summary (Weekly reading); show or
+    /// hide the evidence (Teach Kaluta); the email in its own window, with
+    /// its formatting (Triage).
+    case openInFull
+    /// W: edit before deciding (Teach Kaluta's rules).
+    case edit
+    /// G: the conversation in Gmail, in the browser (Triage, a Gmail account).
+    case openInGmail
     /// I: back to the Inbox (Weekly reading).
     case backToInbox
     /// ⌘E: clear the bucket (Weekly reading): the rest of it read.
@@ -33,6 +43,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case pick1, pick2, pick3
     /// /: tell Kaluta what to say.
     case tellKaluta
+    /// The words typed are the email, as written: no drafting.
+    case ownWords
     /// Esc: back one step; from an item, back to Mail.
     case back
     /// Answers aloud and on screen what is left of the set.
@@ -52,7 +64,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .task: "T"
         case .later: "L"
         case .skip: "S"
-        case .replyNow: "R"
+        case .replyNow: "Return"
+        case .openInFull: "O"
+        case .edit: "W"
+        case .openInGmail: "G"
         case .backToInbox: "I"
         case .clearBucket: "⌘E"
         case .copyCode: "C"
@@ -62,13 +77,14 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .back: "Esc"
-        case .whatsLeft, .whereAmI: nil
+        case .whatsLeft, .whereAmI, .ownWords: nil
         }
     }
 
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
-        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "i": .backToInbox, "c": .copyCode,
+        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail,
+        "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
 
@@ -76,7 +92,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// no modifier held (as in the mail list, design system *Keys*).
     static func command(key: KeyEquivalent, characters: String, modifiers: EventModifiers) -> WorkflowCommand? {
         switch key {
-        case .return:
+        case .return, .enter:
             if modifiers.contains(.command) { return modifiers.contains(.option) ? .sendKeepTask : .send }
             return modifiers.isEmpty ? .primary : nil
         case .delete, .deleteForward: return modifiers.isEmpty ? .reject : nil
@@ -99,8 +115,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .sendKeepTask: "Send, keep the task open"
         case .done:
             switch kind {
-            case .triage: "Archive"
-            case .replies: "No reply needed"
+            case .triage, .replies: "Archive"
             case .tasks, .agents: "Done"
             case .waiting: "Let it go"
             case .reading: "Read, next"
@@ -116,7 +131,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             default: "Later"
             }
         case .skip: "Skip for now"
-        case .replyNow: "Reply now"
+        case .replyNow: kind == .waiting ? "Nudge" : "Reply"
+        case .openInFull: kind == .teach ? "Show the evidence" : kind == .triage ? "Open the email" : "Open in full"
+        case .edit: "Edit…"
+        case .openInGmail: "Open in Gmail"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"
         case .copyCode: "Copy the code"
@@ -125,6 +143,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick2: "Second answer"
         case .pick3: "Third answer"
         case .tellKaluta: "Tell Kaluta what to say"
+        case .ownWords: "Use my words"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"
@@ -140,6 +159,17 @@ struct WorkflowAction: Identifiable, Equatable {
     var style: WorkflowButton.Style = .plain
     /// Shown as a control; hidden ones still answer their key and VoiceOver.
     var shown = true
+    /// Kaluta suggests this one (Triage): marked on its control.
+    var suggested = false
 
     var id: String { command.id }
+}
+
+extension KeyEquivalent {
+    /// The Enter key (the keypad's, or fn-Return): wherever Return acts,
+    /// Enter acts the same.
+    static let enter = KeyEquivalent("\u{3}")
+
+    /// Return or Enter.
+    var isReturn: Bool { self == .return || self == .enter }
 }

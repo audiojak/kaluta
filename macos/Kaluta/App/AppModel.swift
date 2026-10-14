@@ -160,7 +160,8 @@ final class AppModel {
             agentShown: agent.isPresented,
             importantAvailable: !isAgentMailbox,
             inboxCount: Int(mailboxes.mailboxes.first { $0.kind == .inbox }?.totalCount ?? 0),
-            cleanUpAvailable: !isArchive))
+            cleanUpAvailable: !isArchive,
+            workflowsAvailable: workflowsOfferable))
     }
 
     /// Clean Up opened: its Inbox tip has done its work and never shows.
@@ -179,6 +180,7 @@ final class AppModel {
             agent.isPresented = true
             focusAgentPrompt()
         case (.cleanUp, true): openCleanUp?()
+        case (.workflows, true): turnOnWorkflows()
         default: break
         }
         dismissedTips.insert(tip.rawValue)
@@ -628,7 +630,14 @@ final class AppModel {
         guard let core else { return }
         do {
             try await core.openAccount(accountID)
-            if agentStores[accountID] == nil { agentStores[accountID] = makeAgentStore(core: core, accountID: accountID) }
+            if agentStores[accountID] == nil {
+                let store = makeAgentStore(core: core, accountID: accountID)
+                agentStores[accountID] = store
+                // Which agents are ready, found now: the agent bar says
+                // "Looking for Claude…" until it knows, and the workflows
+                // are offered once one is (spec §14.13).
+                Task { await store.loadProviders() }
+            }
             accountState = .open(accountID: accountID)
             await mailboxes.reload()
             await reloadAccounts()
@@ -730,6 +739,8 @@ final class AppModel {
     private(set) var tasksRevision = 0
     /// Bumped when a workflow set starts, changes or finishes (spec §14.13).
     private(set) var workflowsRevision = 0
+    /// Settings › General › Workflows, kept here so views follow it.
+    var workflowsPreference = false
     /// Bumped when the Inbox changes, so the start screen recounts.
     private(set) var inboxRevision = 0
     /// Bumped when the writing guide changed (spec §14.9).
@@ -1110,6 +1121,20 @@ final class AppModel {
     /// The account on screen is an agent's mailbox (spec §7.9).
     var isAgentMailbox: Bool {
         accounts.first { $0.id == openAccountID }?.kind == .agent
+    }
+
+    /// The conversation in Gmail on the web, in the open Gmail account: the
+    /// email exactly as Gmail shows it. Nil for other kinds of mailbox.
+    func gmailURL(threadID: String) -> URL? {
+        guard accounts.first(where: { $0.id == openAccountID })?.kind == .gmail, let email = accountEmail,
+              var url = URLComponents(string: "https://mail.google.com/mail/u/") else { return nil }
+        url.queryItems = [URLQueryItem(name: "authuser", value: email)]
+        url.fragment = "all/\(threadID)"
+        return url.url
+    }
+
+    func openInGmail(threadID: String) {
+        if let url = gmailURL(threadID: threadID) { NSWorkspace.shared.open(url) }
     }
 
     static let cannotSendReason = "This is an imported mailbox; it cannot send mail."

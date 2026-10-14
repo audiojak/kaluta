@@ -65,6 +65,7 @@
 		3DCC485C2355D3EBE4B1402D /* AttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFA53C4A53140C353A2452FD /* AttachmentTests.swift */; };
 		3DE1826AA2FB3C8CB663E85A /* InterviewSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA9760A6C8E44E71696B5A29 /* InterviewSheet.swift */; };
 		3FA6A426DC05AE71FD6290C4 /* WorkflowWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46DBEA9ED7EAAA85096D79A /* WorkflowWriter.swift */; };
+		405225E310153D29F2D42F63 /* TeachItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 739E07DF5DB114C7564F2B06 /* TeachItemView.swift */; };
 		41BB86A57C3BCA20570E3FA1 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36379B6250E1BF92ECBAC872 /* OnboardingView.swift */; };
 		45988270F05261B4C500815B /* AgentSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDA9D7F0CC0478C48AA474EE /* AgentSettingsTests.swift */; };
 		45DABD87E8A8695B7DE32FD0 /* OnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEF1D8E66F0B61940D6115D /* OnboardingTests.swift */; };
@@ -136,6 +137,7 @@
 		A2429D28FF1F1A71612B0F04 /* UpdaterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D366146E28C0759862B596A /* UpdaterTests.swift */; };
 		A5C00504482EDA84E280DDBA /* AgentMailbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3090F1E505CB93D7C04728 /* AgentMailbox.swift */; };
 		A8D81EB54838955E823C40E1 /* Migration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7863C444DC7E8A65EDAD7053 /* Migration.swift */; };
+		AA3A19D66DD7B7E304DEAF9C /* AppModel+Teach.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22D183BDABE35601345873A7 /* AppModel+Teach.swift */; };
 		AB226001A2468CEA8F80071B /* CloudAgentSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D58325F0BAF587E66438F6A /* CloudAgentSettings.swift */; };
 		AC42E93F2837B6E021478A62 /* GuideProposals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34C17BCF2C4AD0FA0E0EDB1E /* GuideProposals.swift */; };
 		AD067C1D9AF5C4B66DFEAB21 /* SerialReadsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D721273CBBF9A9AA9955695F /* SerialReadsTests.swift */; };
@@ -249,6 +251,7 @@
 		1EB18ABFFD524B85E7FCD249 /* MenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuTests.swift; sourceTree = "<group>"; };
 		22854021FB05A977AFB7D501 /* ChangeGuideSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangeGuideSheet.swift; sourceTree = "<group>"; };
 		2290DE6ACB7AF1A311E180E3 /* GuideDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideDetailView.swift; sourceTree = "<group>"; };
+		22D183BDABE35601345873A7 /* AppModel+Teach.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Teach.swift"; sourceTree = "<group>"; };
 		233F7CCB32B5A6AF7F1C0EA9 /* ReviewMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewMode.swift; sourceTree = "<group>"; };
 		23EECBC93DDEB4FB81F0E632 /* ActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionTests.swift; sourceTree = "<group>"; };
 		2601FF67062FD014F26B2F81 /* RichTextCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichTextCommands.swift; sourceTree = "<group>"; };
@@ -295,6 +298,7 @@
 		6CD3FA01672BD6042238B17D /* TaskListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListStore.swift; sourceTree = "<group>"; };
 		6FDF9277113B659B161559FC /* WorkflowSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowSession.swift; sourceTree = "<group>"; };
 		70BC36B42AC599C682BF128D /* ImportMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportMailbox.swift; sourceTree = "<group>"; };
+		739E07DF5DB114C7564F2B06 /* TeachItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeachItemView.swift; sourceTree = "<group>"; };
 		73AE1B2D278C6E738F068E07 /* ThreadReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReaderView.swift; sourceTree = "<group>"; };
 		748FC77E34F53AAB7403B251 /* TaskDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDialog.swift; sourceTree = "<group>"; };
 		74C5A79E4614AC2336D7E050 /* AnalysisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisTests.swift; sourceTree = "<group>"; };
@@ -824,8 +828,10 @@
 		C542E7637DC071704F044DBA /* Workflows */ = {
 			isa = PBXGroup;
 			children = (
+				22D183BDABE35601345873A7 /* AppModel+Teach.swift */,
 				D4E4CDEC85AD87AFD58A21F1 /* AppModel+Workflows.swift */,
 				E83AAF6B20A125F9CFDADC3B /* StartScreenView.swift */,
+				739E07DF5DB114C7564F2B06 /* TeachItemView.swift */,
 				5C3DDA153B2D81B9B9451397 /* WorkflowCommand.swift */,
 				D54C810D6E812DF274D182FF /* WorkflowHostView.swift */,
 				6FDF9277113B659B161559FC /* WorkflowSession.swift */,
@@ -1112,6 +1118,7 @@
 				A0215ADFE4A543AC2B800534 /* AppModel+Facts.swift in Sources */,
 				24032714635137600B01BC71 /* AppModel+Guide.swift in Sources */,
 				D53705EF7BEAF20D93D50F9A /* AppModel+Tasks.swift in Sources */,
+				AA3A19D66DD7B7E304DEAF9C /* AppModel+Teach.swift in Sources */,
 				698F7581CBE587715CE23283 /* AppModel+Workflows.swift in Sources */,
 				534A1CAF328A0B2F7E27F8CD /* AppModel.swift in Sources */,
 				30626B98643525A88EFB647D /* AttachmentStrip.swift in Sources */,
@@ -1196,6 +1203,7 @@
 				896C6E39859548C7CEE6DF06 /* TaskListView.swift in Sources */,
 				A0E331DBB25B7BFB1BE7238F /* TaskSettings.swift in Sources */,
 				2BCF65745E5EB1EADE17645A /* TaskSuggester.swift in Sources */,
+				405225E310153D29F2D42F63 /* TeachItemView.swift in Sources */,
 				7E898954B81AB8FD92BAC3D8 /* ThreadListStore.swift in Sources */,
 				0F7C9E3B28C1432B461603F7 /* ThreadListView.swift in Sources */,
 				313FB149D2C2A68D1C43D351 /* ThreadReaderView.swift in Sources */,
