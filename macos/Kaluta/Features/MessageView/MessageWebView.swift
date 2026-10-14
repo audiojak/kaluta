@@ -20,6 +20,8 @@ struct MessageWebView: NSViewRepresentable {
     /// view that grows to fit the email instead of scrolling it: a
     /// workflow's item, where the workflow keeps the one scroll.
     var onContentHeight: ((CGFloat) -> Void)?
+    /// An attachment's link on its message's card was clicked: its id.
+    var onAttachment: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -61,6 +63,7 @@ struct MessageWebView: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         let coordinator = context.coordinator
         coordinator.onContentHeight = onContentHeight
+        coordinator.onAttachment = onAttachment
         let remoteChanged = coordinator.remoteImages.allowRemote != allowRemoteImages
         coordinator.remoteImages.allowRemote = allowRemoteImages
         let images = inlineImages
@@ -86,6 +89,7 @@ struct MessageWebView: NSViewRepresentable {
         var suspiciousLinks: [String: String] = [:]
         var scrollToLatest = false
         var onContentHeight: ((CGFloat) -> Void)?
+        var onAttachment: ((String) -> Void)?
 
         func measure(_ webView: WKWebView, after delays: [Double]) {
             guard onContentHeight != nil else { return }
@@ -119,7 +123,11 @@ struct MessageWebView: NSViewRepresentable {
                 return .allow
             }
             if action.navigationType == .linkActivated, let url = action.request.url {
-                open(url)
+                if url.scheme == EmailDocument.attachmentScheme {
+                    onAttachment?(String(url.absoluteString.dropFirst(EmailDocument.attachmentScheme.count + 1)))
+                } else {
+                    open(url)
+                }
             }
             return .cancel
         }

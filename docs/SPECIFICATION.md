@@ -3117,6 +3117,14 @@ themselves from anyone the user has sent mail to (Settings › Privacy ›
 the user reads their mail, and their images are rarely trackers. Inline
 images (`cid:`) come with the email and always show, in workflows too; loading them re-renders with `img-src https:`.
 
+*(Amended 2026-10-14.)* Attachments show on the email they came with:
+a collapsed message lists its files (📎), an open one has them under its
+body as links the app opens in Quick Look (`kaluta-attachment:`, a
+scheme mail cannot make: the sanitizer keeps only http, https and
+mailto). The strip above the thread groups them by email ("Jennifer
+Kennedy · Oct 14") and keeps Open, Save As…, Show in Finder and drag. A
+workflow shows its email's own files under it, with the same actions.
+
 Read on view: a thread with unread mail is marked read (a normal change,
 so Gmail sees it too) once it has been shown for 0.8 s and is still the
 selection, so moving through the list with j/k or the arrows does not
