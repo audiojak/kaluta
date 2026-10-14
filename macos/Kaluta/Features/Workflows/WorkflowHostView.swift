@@ -324,7 +324,8 @@ struct WorkflowItemView: View {
                         // The email as it was sent: its own formatting, in
                         // the reader's locked-down web view.
                         WorkflowEmailBody(html: html,
-                                          allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session))
+                                          allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session),
+                                          inlineImages: session.inlineImages[detail.thread.id] ?? [:])
                     } else {
                         // What the email asks, marked where an answer is written.
                         Text(Self.asksAnswer(session.kind)
@@ -872,11 +873,13 @@ extension AppModel {
 struct WorkflowEmailBody: View {
     let html: String
     let allowRemote: Bool
+    var inlineImages: [String: InlineImage] = [:]
     @Environment(\.colorScheme) private var colorScheme
     @State private var height: CGFloat = Self.startHeight
 
     var body: some View {
         MessageWebView(html: EmailDocument.single(html, isDark: colorScheme == .dark), allowRemoteImages: allowRemote,
+                       inlineImages: inlineImages,
                        onContentHeight: { measured in
                            if abs(measured - height) > 1 { height = measured }
                        })

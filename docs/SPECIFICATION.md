@@ -3111,7 +3111,11 @@ confirmation sheet), a `<meta http-equiv="Content-Security-Policy"
 content="default-src 'none'; img-src kaluta-cid: data:; style-src 'unsafe-inline'">`
 injected into every document, `isInspectable = false` in release. Remote
 images: blocked by default, "Load images" per message, "Always for this
-sender" stored in settings; loading them re-renders with `img-src https:`.
+sender" stored in settings, and *(amended 2026-10-14)* loaded by
+themselves from anyone the user has sent mail to (Settings › Privacy ›
+*Load images from people you've written to*, on by default): they know
+the user reads their mail, and their images are rarely trackers. Inline
+images (`cid:`) come with the email and always show, in workflows too; loading them re-renders with `img-src https:`.
 
 Read on view: a thread with unread mail is marked read (a normal change,
 so Gmail sees it too) once it has been shown for 0.8 s and is still the

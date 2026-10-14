@@ -756,6 +756,11 @@ final class CoreClient: Sendable {
 
     func setTriageByPriority(_ on: Bool) { core.setTriageByPriority(on: on) }
 
+    /// Of these addresses, the ones the user has sent mail to (lowercased).
+    func knownSenders(_ emails: [String]) async -> Set<String> {
+        Set((try? await call { try await core.knownSenders(emails: emails) }) ?? [])
+    }
+
     /// The user's latest email to this conversation's sender elsewhere, since their message.
     func writtenSince(_ threadID: String) async -> WrittenSince? {
         (try? await call { try await core.writtenSince(threadId: threadID) }) ?? nil

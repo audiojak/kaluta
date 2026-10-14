@@ -150,6 +150,13 @@ extension AppModel {
             if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),
                let html = body.html {
                 session.rendered[threadID] = body
+                if let from = latest.from?.email {
+                    session.knownSenders.formUnion(await core.knownSenders([from]))
+                }
+                // Pictures pasted into the email come with it (cid:).
+                if html.contains("kaluta-cid:") {
+                    session.inlineImages[threadID] = await ReaderStore.inlineImages(of: latest, core: core)
+                }
                 // Cleaned by an older sanitizer: fetched and cleaned again,
                 // then shown as it was sent.
                 Task { [weak self] in
@@ -166,9 +173,9 @@ extension AppModel {
     /// for its sender (the reader's setting).
     func workflowImagesAllowed(_ threadID: String, session: WorkflowSession) -> Bool {
         if session.imagesLoaded.contains(threadID) { return true }
-        let allowed = Set(defaults.stringArray(forKey: ReaderStore.allowedSendersKey) ?? [])
         let latest = session.threads[threadID].flatMap { Self.shownMessage($0, session.kind) }
-        return latest?.from.map { allowed.contains($0.email.lowercased()) } ?? false
+        guard let sender = latest?.from?.email.lowercased() else { return false }
+        return ReaderStore.imagesAllowed(for: [sender], known: session.knownSenders, defaults: defaults)
     }
 
     /// Plain text for reading at content size: paragraphs apart, the

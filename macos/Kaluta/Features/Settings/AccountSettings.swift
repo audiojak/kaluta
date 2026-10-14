@@ -491,6 +491,7 @@ struct GoogleClientFields: View {
 /// Settings › Privacy: what leaves the Mac, and remote images.
 struct PrivacySettings: View {
     @State private var allowed: [String] = CoreClient.appDefaults().stringArray(forKey: ReaderStore.allowedSendersKey) ?? []
+    @AppStorage(ReaderStore.knownSendersKey, store: CoreClient.appDefaults()) private var fromKnown = true
 
     var body: some View {
         Form {
@@ -501,8 +502,11 @@ struct PrivacySettings: View {
             }
             .font(TypeRole.meta)
             Section {
+                Toggle("Load images from people you've written to", isOn: $fromKnown)
+                    .hoverHelp("Show remote images by themselves in mail from anyone you have sent an email to")
                 if allowed.isEmpty {
-                    Text("Remote images are blocked in every message until you load them.").foregroundStyle(.secondary)
+                    Text(fromKnown ? "Other senders' remote images wait until you load them."
+                         : "Remote images are blocked in every message until you load them.").foregroundStyle(.secondary)
                 }
                 ForEach(allowed, id: \.self) { sender in
                     HStack {

@@ -86,6 +86,25 @@ struct LinkSafetyTests {
 }
 
 @MainActor
+struct RemoteImagePolicyTests {
+    /// Images load by themselves from senders always allowed and, unless
+    /// turned off, from people the user has written to.
+    @Test func imagesLoadFromPeopleTheUserHasWrittenTo() {
+        let defaults = UserDefaults(suiteName: "kaluta-images-\(UUID().uuidString)")!
+        let known: Set<String> = ["ann@example.com"]
+        #expect(ReaderStore.imagesAllowed(for: ["ann@example.com"], known: known, defaults: defaults), "on by default")
+        #expect(!ReaderStore.imagesAllowed(for: ["news@example.com"], known: known, defaults: defaults))
+        #expect(!ReaderStore.imagesAllowed(for: ["ann@example.com", "news@example.com"], known: known, defaults: defaults),
+                "every sender in it")
+        defaults.set(["news@example.com"], forKey: ReaderStore.allowedSendersKey)
+        #expect(ReaderStore.imagesAllowed(for: ["ann@example.com", "news@example.com"], known: known, defaults: defaults))
+        defaults.set(false, forKey: ReaderStore.knownSendersKey)
+        #expect(!ReaderStore.imagesAllowed(for: ["ann@example.com"], known: known, defaults: defaults), "turned off")
+        #expect(!ReaderStore.imagesAllowed(for: [], known: known, defaults: defaults))
+    }
+}
+
+@MainActor
 struct SchemeHandlerTests {
     @Test func remoteURLsAreUnwrappedOnlyForHTTP() {
         #expect(RemoteImageSchemeHandler.remoteURL(from: URL(string: "kaluta-remote:https://img.example.com/a.png?x=1"))
