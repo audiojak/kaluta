@@ -107,6 +107,8 @@ struct WorkflowTests {
         #expect(WorkflowItemView.triageSummary(s, text: "Short and sweet.") == nil)
         #expect(WorkflowItemView.triageSummary(nil, text: long) == nil)
         #expect(WorkflowCommand.openInFull.title(in: .triage) == "Open the email")
+        #expect(WorkflowCommand.openInFull.title(in: .replies) == "Open the email")
+        #expect(WorkflowCommand.openInFull.title(in: .reading) == "Open in full")
     }
 
     /// A workflow's email is one message's page: the reader's policy, its

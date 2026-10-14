@@ -132,7 +132,12 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .skip: "Skip for now"
         case .replyNow: kind == .waiting ? "Nudge" : "Reply"
-        case .openInFull: kind == .teach ? "Show the evidence" : kind == .triage ? "Open the email" : "Open in full"
+        case .openInFull:
+            switch kind {
+            case .teach: "Show the evidence"
+            case .reading: "Open in full"
+            default: "Open the email"
+            }
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
         case .backToInbox: "Back to the Inbox"

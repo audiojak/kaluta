@@ -3094,7 +3094,10 @@ Triage) shows the conversation in the browser exactly as Gmail does.
 are not kept, as a browser would not read them; the email's `<body>` is
 kept as a `div` with its class and style (class `e-kbody` added); a
 sheet's `body` selector becomes `.e-kbody` and `html` becomes `:scope`;
-`background` is allowed for colours and gradients. Loaded remote images are asked for as
+`background` is allowed for colours and gradients. *(Version 4.)* `<!--` and `-->` inside a sheet are CSS's
+own markers, not a comment: Outlook wraps all its CSS in them, and
+skipping it lost `p.MsoNormal{margin:0}` (every paragraph took a blank
+line above and below). Workflows fetch an older body again too. Loaded remote images are asked for as
 `kaluta-remote-loaded:` (allowed by the content policy): under their
 first addresses WebKit's memory cache answered with the blank pixels the
 blocked load got, and *Load Images* left gaps.
@@ -4364,8 +4367,8 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
 | R | reply, as Return |
-| O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta); the email in its own window (Triage) |
-| G | the conversation in Gmail, in the browser (Triage) |
+| O | the email in its own window (Triage, Replies, Tasks, Waiting); open in full, or back to the summary (Reading); show the evidence (Teach Kaluta) |
+| G | the conversation in Gmail, in the browser (every workflow with a conversation, a Gmail account) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |

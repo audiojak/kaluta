@@ -273,7 +273,7 @@ struct WorkflowItemView: View {
                                 .hoverHelp("Show this email's pictures; loading them tells the sender it was opened")
                         }
                         // At the top, where a long email cannot push it out of view.
-                        if session.kind == .triage {
+                        if [.triage, .replies, .tasks, .waiting].contains(session.kind) {
                             Button { Task { await model.performWorkflow(.openInFull) } } label: {
                                 HStack(spacing: Space.s) {
                                     Text("Open the email")
@@ -282,16 +282,17 @@ struct WorkflowItemView: View {
                             }
                             .buttonStyle(.link)
                             .hoverHelp("Open the email in its own window, as it was sent (O)")
-                            if model.gmailURL(threadID: detail.thread.id) != nil {
-                                Button { Task { await model.performWorkflow(.openInGmail) } } label: {
-                                    HStack(spacing: Space.s) {
-                                        Text("Open in Gmail")
-                                        Keycap(key: "G")
-                                    }
+                        }
+                        // In every workflow with a conversation, for a Gmail account.
+                        if model.gmailURL(threadID: detail.thread.id) != nil {
+                            Button { Task { await model.performWorkflow(.openInGmail) } } label: {
+                                HStack(spacing: Space.s) {
+                                    Text("Open in Gmail")
+                                    Keycap(key: "G")
                                 }
-                                .buttonStyle(.link)
-                                .hoverHelp("Open this conversation in Gmail in your browser (G)")
                             }
+                            .buttonStyle(.link)
+                            .hoverHelp("Open this conversation in Gmail in your browser (G)")
                         }
                     }
                     .font(TypeRole.workflowContext)
