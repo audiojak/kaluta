@@ -108,11 +108,20 @@ pub struct MailWriter<'t> {
     dirty: BTreeMap<i64, String>,
     /// A stored message's labels when upserted again.
     stored_labels: StoredLabels,
+    /// The sanitizer's version the bodies written were cleaned with (0:
+    /// unknown), so older ones can be fetched and cleaned again.
+    sanitizer_version: u32,
 }
 
 impl<'t> MailWriter<'t> {
     pub fn new(tx: &'t Transaction<'t>) -> Self {
-        Self { tx, dirty: BTreeMap::new(), stored_labels: StoredLabels::Replace }
+        Self { tx, dirty: BTreeMap::new(), stored_labels: StoredLabels::Replace, sanitizer_version: 0 }
+    }
+
+    /// Bodies written are cleaned with this version of the sanitizer.
+    pub fn with_sanitizer_version(mut self, version: u32) -> Self {
+        self.sanitizer_version = version;
+        self
     }
 
     /// What upserts do with a stored message's labels and flags.
@@ -303,12 +312,19 @@ impl<'t> MailWriter<'t> {
         if let Some(body) = &m.body {
             self.tx
                 .prepare_cached(
-                    "INSERT INTO bodies (message_id, text_plain, html_sanitized, has_remote_images)
-                     VALUES (?1, ?2, ?3, ?4)
+                    "INSERT INTO bodies (message_id, text_plain, html_sanitized, has_remote_images, sanitizer_version)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
                      ON CONFLICT (message_id) DO UPDATE SET text_plain = excluded.text_plain,
-                       html_sanitized = excluded.html_sanitized, has_remote_images = excluded.has_remote_images",
+                       html_sanitized = excluded.html_sanitized, has_remote_images = excluded.has_remote_images,
+                       sanitizer_version = excluded.sanitizer_version",
                 )?
-                .execute(params![message_rowid, body.text_plain, body.html_sanitized, body.has_remote_images])?;
+                .execute(params![
+                    message_rowid,
+                    body.text_plain,
+                    body.html_sanitized,
+                    body.has_remote_images,
+                    self.sanitizer_version
+                ])?;
             self.replace_attachments(message_rowid, &m.attachments)?;
         }
         self.index_message(message_rowid)?;

@@ -3070,11 +3070,26 @@ policy: allowlisted tags (no `script`, `iframe`, `object`, `form`, `input`,
 `meta`, `link`, `base`), `style` attribute allowed but filtered to a
 property allowlist (`color`, `background-color`, `font-*`, `text-*`,
 `margin*`, `padding*`, `border*`, `width`, `height`, `display`, `float`,
-`vertical-align`), `<style>` blocks dropped in MVP, all URLs rewritten:
+`vertical-align`), all URLs rewritten:
 `http(s)` image `src` → `kaluta-blocked://` placeholder unless remote
 images are allowed for that sender, `cid:` → `kaluta-cid://<attachment>`,
-links keep their `href` but get `target="_blank" rel="noopener"`. A
-`sanitizer_version` column lets a policy change re-sanitize lazily.
+links keep their `href` but get `target="_blank" rel="noopener"`.
+
+*(Amended 2026-10-14, sanitizer version 2.)* An email's `<style>` sheets
+are kept, cleaned the way inline styles are: only rules and `@media`
+blocks survive (any other at-rule, `@import` and `@font-face` among them,
+is dropped), only declarations of allowlisted properties whose values
+cannot fetch or execute anything (no `url(`, `image-set(`, `expression(`,
+backslash escapes), no comments and no `<`, rebuilt so braces balance,
+64 KB at most. The sheet is wrapped in `@scope { }` with no selector, so
+it styles its own message's container alone: never the reader, never
+another message in the thread. `class` attributes are kept, each name
+prefixed `e-` (and the sheet's selectors with it), so none can be one of
+the reader's own. Each stored body records the sanitizer version it was
+cleaned with; opening a thread fetches again, once, any of its bodies an
+older version cleaned. *Open in Gmail* (a Gmail account's message window
+toolbar, and Triage) shows the conversation in the browser exactly as
+Gmail does.
 
 `WKWebView` configuration: JavaScript disabled
 (`defaultWebpagePreferences.allowsContentJavaScript = false`), a custom

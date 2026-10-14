@@ -64,6 +64,13 @@ final class ReaderStore {
         // download these bodies now; the thread refreshes when they land.
         let missing = loaded.messages.filter { !$0.hasBody }.map(\.id)
         if !missing.isEmpty { Task { await core.ensureBodies(missing) } }
+        // Cleaned before the reader kept an email's own stylesheet: fetched
+        // and cleaned again, once, then shown as it was sent.
+        Task {
+            guard await core.refreshStaleBodies(threadID) > 0, self.threadID == threadID else { return }
+            for m in loaded.messages { cache[m.id] = nil }
+            await reload()
+        }
         for message in loaded.messages where bodies[message.id] == nil && message.hasBody {
             // `try?` flattens: nil means an error or no body yet.
             guard let body = try? await core.renderedBody(message.id), generation == loadGeneration else { continue }

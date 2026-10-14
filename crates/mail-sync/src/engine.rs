@@ -580,7 +580,7 @@ impl SyncEngine {
                         wanted.push((id, category.clone()));
                     }
                 }
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                 for (id, category) in &wanted {
                     let others: Vec<LabelId> = read::CATEGORIES
                         .iter()
@@ -975,7 +975,9 @@ impl SyncEngine {
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1052,7 +1054,9 @@ impl SyncEngine {
         let (changes, dropped) = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1113,7 +1117,9 @@ impl SyncEngine {
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1124,6 +1130,34 @@ impl SyncEngine {
             .await?;
         self.publish(&changes);
         self.report(SyncPhase::Backfilling).await;
+        Ok(count)
+    }
+
+    /// Fetch again, and clean with today's sanitizer, a thread's bodies an
+    /// older one cleaned (spec §14.4): the email's stylesheet came with
+    /// version 2. The number refreshed.
+    pub async fn refresh_stale_bodies(&self, thread: String) -> SyncResult<usize> {
+        let stale = self.db.read(move |c| queue::stale_bodies(c, &thread, mail_mime::SANITIZER_VERSION)).await?;
+        if stale.is_empty() {
+            return Ok(0);
+        }
+        let fetched = self.fetch_bodies(&stale, Priority::Interactive).await?;
+        let incoming: Vec<_> = fetched.into_iter().filter(|m| m.body.is_some()).map(to_incoming).collect();
+        let count = incoming.len();
+        let stored_labels = self.stored_labels();
+        let changes = self
+            .db
+            .write(move |tx| {
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
+                for m in &incoming {
+                    w.upsert_message(m)?;
+                }
+                w.finish()
+            })
+            .await?;
+        self.publish(&changes);
         Ok(count)
     }
 
@@ -1196,7 +1230,9 @@ impl SyncEngine {
         let changes = self
             .db
             .write(move |tx| {
-                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
                 for m in &incoming {
                     w.upsert_message(m)?;
                 }
@@ -1271,7 +1307,9 @@ impl SyncEngine {
             .db
             .write(move |tx| {
                 let mut report = IncrementalReport::default();
-                let mut w = MailWriter::new(tx).with_stored_labels(stored_labels);
+                let mut w = MailWriter::new(tx)
+                    .with_sanitizer_version(mail_mime::SANITIZER_VERSION)
+                    .with_stored_labels(stored_labels);
                 for m in &incoming {
                     let stored =
                         tx.prepare_cached("SELECT 1 FROM messages WHERE gmail_id = ?1")?.exists([m.id.as_str()])?;
@@ -1398,7 +1436,7 @@ impl SyncEngine {
                     labels.retain(|l| !user.contains(&l.id));
                     keep.extend(user);
                 }
-                let mut w = MailWriter::new(tx);
+                let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                 w.upsert_labels(&labels)?;
                 w.retain_labels(&keep)?;
                 w.finish()

@@ -103,7 +103,7 @@ pub fn import_mbox<R: BufRead>(
 /// different stored message are skipped as duplicates.
 fn write_batch(db: &Db, batch: Vec<IncomingMessage>, labels: BTreeMap<String, Label>) -> StoreResult<(u64, u64)> {
     db.write_blocking(move |tx| {
-        let mut w = MailWriter::new(tx);
+        let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
         if !labels.is_empty() {
             w.upsert_labels(&labels.into_values().collect::<Vec<_>>())?;
         }

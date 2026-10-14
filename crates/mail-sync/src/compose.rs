@@ -270,7 +270,7 @@ pub async fn send_draft(
     };
     Ok(db
         .write(move |tx| {
-            let mut w = MailWriter::new(tx);
+            let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
             w.upsert_message(&copy)?;
             let changes = w.finish()?;
             if queue {

@@ -276,6 +276,11 @@ struct WorkflowItemView: View {
                             }
                             .buttonStyle(.link)
                             .hoverHelp("Open the email in its own window, as it was sent (O)")
+                            if model.gmailURL(threadID: detail.thread.id) != nil {
+                                Button("Open in Gmail") { model.openInGmail(threadID: detail.thread.id) }
+                                    .buttonStyle(.link)
+                                    .hoverHelp("Open this conversation in Gmail in your browser")
+                            }
                         }
                     }
                     .font(TypeRole.workflowContext)

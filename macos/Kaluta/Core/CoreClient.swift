@@ -193,6 +193,11 @@ final class CoreClient: Sendable {
 
     /// Download header-only bodies now (tiered download, spec §7.4); on
     /// failure the core queues them first instead.
+    /// Bodies cleaned by an older sanitizer, fetched and cleaned again: how many.
+    func refreshStaleBodies(_ threadID: String) async -> UInt32 {
+        (try? await call { try await core.refreshStaleBodies(threadId: threadID) }) ?? 0
+    }
+
     func ensureBodies(_ ids: [String]) async {
         _ = try? await call { try await core.ensureBodies(messageIds: ids) }
     }

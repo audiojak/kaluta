@@ -1123,6 +1123,20 @@ final class AppModel {
         accounts.first { $0.id == openAccountID }?.kind == .agent
     }
 
+    /// The conversation in Gmail on the web, in the open Gmail account: the
+    /// email exactly as Gmail shows it. Nil for other kinds of mailbox.
+    func gmailURL(threadID: String) -> URL? {
+        guard accounts.first(where: { $0.id == openAccountID })?.kind == .gmail, let email = accountEmail,
+              var url = URLComponents(string: "https://mail.google.com/mail/u/") else { return nil }
+        url.queryItems = [URLQueryItem(name: "authuser", value: email)]
+        url.fragment = "all/\(threadID)"
+        return url.url
+    }
+
+    func openInGmail(threadID: String) {
+        if let url = gmailURL(threadID: threadID) { NSWorkspace.shared.open(url) }
+    }
+
     static let cannotSendReason = "This is an imported mailbox; it cannot send mail."
 
     func compose(_ request: ComposeRequest) {

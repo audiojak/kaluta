@@ -153,7 +153,7 @@ pub async fn apply_local_change_recorded(
             let (ops, diffs, changes) = match change {
                 LocalChange::Labels { thread_ids, add, remove } => {
                     let affected = outbox::affected_messages(tx, &thread_ids, &add, &remove)?;
-                    let mut w = MailWriter::new(tx);
+                    let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                     for (m, _) in &affected {
                         w.modify_message_labels(m, &add, &remove)?;
                     }
@@ -168,7 +168,7 @@ pub async fn apply_local_change_recorded(
                     let trash = vec![LabelId::new(system_labels::TRASH)];
                     let inbox = vec![LabelId::new(system_labels::INBOX)];
                     let affected = outbox::affected_messages(tx, &thread_ids, &trash, &[])?;
-                    let mut w = MailWriter::new(tx);
+                    let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                     for (m, _) in &affected {
                         w.modify_message_labels(m, &trash, &inbox)?;
                     }
@@ -181,7 +181,7 @@ pub async fn apply_local_change_recorded(
                 }
                 LocalChange::Exact { diffs, batched } => {
                     let ops = if batched { undo::batched_ops(&diffs) } else { undo::provider_ops(tx, &diffs)? };
-                    let mut w = MailWriter::new(tx);
+                    let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                     let mut applied = Vec::with_capacity(diffs.len());
                     for d in diffs {
                         // A message gone since (deleted on the server) is skipped.
@@ -372,7 +372,7 @@ impl SyncEngine {
                                 return Ok(ThreadChanges::default());
                             }
                             outbox::complete(tx, id)?;
-                            let mut w = MailWriter::new(tx);
+                            let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
                             if let Some((local, sent)) = &adopt {
                                 w.adopt_local_copy(local, sent)?;
                             }

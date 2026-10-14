@@ -729,6 +729,17 @@ impl Core {
         .await
     }
 
+    /// Fetch again, and clean with today's sanitizer, the bodies in this
+    /// thread an older one cleaned (spec §14.4): the reader opened it, and
+    /// the email's own stylesheet is kept since version 2. How many.
+    pub async fn refresh_stale_bodies(&self, thread_id: String) -> Result<u32, CoreError> {
+        let Some(service) = self.sync_service() else { return Ok(0) };
+        runtime::run(async move {
+            Ok(service.engine().refresh_stale_bodies(thread_id).await.map_err(CoreError::from)? as u32)
+        })
+        .await
+    }
+
     /// Which transport serves each sync job for an account, why, the
     /// breaker, and recent operations (docs/plans/imap-first-sync.md): for
     /// the Sync Debugger and the sync footer. Empty when not syncing.
