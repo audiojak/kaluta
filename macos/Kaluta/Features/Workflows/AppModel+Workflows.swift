@@ -153,9 +153,26 @@ extension AppModel {
                 if let from = latest.from?.email {
                     session.knownSenders.formUnion(await core.knownSenders([from]))
                 }
-                // Pictures pasted into the email come with it (cid:).
+                // Pictures pasted into the email come with it (cid:). One not
+                // fetched yet (just after launch, before mail can download)
+                // is asked for again a few times while the item is up.
                 if html.contains("kaluta-cid:") {
                     session.inlineImages[threadID] = await ReaderStore.inlineImages(of: latest, core: core)
+                    let expected = ReaderStore.inlineImageCount(of: latest)
+                    if (session.inlineImages[threadID]?.count ?? 0) < expected {
+                        Task { [weak self] in
+                            for delay in [2, 5, 15] {
+                                try? await Task.sleep(for: .seconds(delay))
+                                guard let core = self?.core, session.current.flatMap({ self?.threadID(of: $0) }) == threadID
+                                else { return }
+                                let loaded = await ReaderStore.inlineImages(of: latest, core: core)
+                                if loaded.count > (session.inlineImages[threadID]?.count ?? 0) {
+                                    session.inlineImages[threadID] = loaded
+                                }
+                                if loaded.count >= expected { return }
+                            }
+                        }
+                    }
                 }
                 // Cleaned by an older sanitizer: fetched and cleaned again,
                 // then shown as it was sent.
