@@ -107,8 +107,17 @@ pub fn triage_answer(prompt: &str) -> Option<String> {
             .unwrap_or_default();
         let body = rest.split_once("\n\n").map(|(_, b)| b).unwrap_or_default();
         let esc = |s: &str| s.replace(['\\', '"'], "");
-        items.push(if from.contains("no-reply") || from.contains("noreply") || from.contains("notifications") {
-            format!(r#"{{"thread_id": "{id}", "kind": "archive", "reason": "Nothing is asked of you."}}"#)
+        // A long one is summarised: its first sentence.
+        let summary = if body.len() > 600 {
+            let first = body.split_terminator(['.', '!', '?']).next().unwrap_or_default();
+            esc(&format!("It says: {}.", first.split_whitespace().collect::<Vec<_>>().join(" ")))
+        } else {
+            String::new()
+        };
+        items.push(if from.contains("no-reply") || from.contains("noreply") || from.contains("notifications")
+            || from.contains("newsletter") || from.contains("digest")
+        {
+            format!(r#"{{"thread_id": "{id}", "kind": "archive", "reason": "Nothing is asked of you.", "summary": "{summary}"}}"#)
         } else if body.len() > 600 {
             format!(
                 r#"{{"thread_id": "{id}", "kind": "task", "reason": "It needs more than a quick answer.", "task": {{"title": "Answer {}", "category": "Reply", "due": null, "action": "reply", "why": "A longer answer is needed."}}}}"#,

@@ -4336,7 +4336,7 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
 | R | reply, as Return |
-| O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta) |
+| O | open in full, or back to the summary (Reading); show the evidence (Teach Kaluta); the email in its own window (Triage) |
 | I | back to the Inbox (Reading) |
 | C | copy the code (Agents) |
 | ⌫ | reject, don't send |
@@ -4445,6 +4445,11 @@ one decision with a one-line reason:
   taken with that button's key; Return is only ever Reply. A
   conversation that already has an open task says so, and T shows that
   task instead of making a second.
+- A long email meant for reading (a newsletter, a digest, a report)
+  shows *Kaluta's summary*, two or three sentences made with its
+  suggestion, in place of its text (over 800 characters); every email
+  has *Open the email with its formatting* (O; *Read the whole email*
+  under a summary), which opens it in its own window as it was sent.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
@@ -4643,8 +4648,9 @@ per account), the latest message of each as fenced data with today's
 date and the task categories. Its answer is held to the rules whatever
 the agent says: a quick reply over 30 seconds, or with no answers, is a
 task when it describes one, else *leave*; a task with no task described
-is *leave*; at most three answers. A suggestion is stored for the
-conversation's latest message (`triage_suggestions`) and stops counting
+is *leave*; at most three answers. A long email meant for reading also
+gets a summary of two or three sentences (migration 0031). A suggestion
+is stored for the conversation's latest message (`triage_suggestions`) and stops counting
 when a newer one arrives, so the job suggests again.
 
 | Job | When | Makes |

@@ -270,13 +270,17 @@ struct WorkflowItemView: View {
                             .font(TypeRole.workflowDisplay)
                     }
                     // Weekly reading: Kaluta's summary until it is opened in full.
+                    // Triage: a long email's summary, the email on O.
+                    let full = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
                     let summary = session.kind == .reading && !session.showsInFull
-                        ? session.summaries[detail.thread.id]?.summary : nil
+                        ? session.summaries[detail.thread.id]?.summary
+                        : session.kind == .triage ? Self.triageSummary(session.suggestions[detail.thread.id], text: full)
+                        : nil
                     if summary != nil {
                         Label("Kaluta's summary", systemImage: "sparkle")
                             .font(TypeRole.workflowContext).foregroundStyle(.secondary)
                     }
-                    let text = summary ?? session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
+                    let text = summary ?? full
                     // What the email asks, marked where an answer is written.
                     Text(Self.asksAnswer(session.kind)
                         ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
@@ -287,6 +291,17 @@ struct WorkflowItemView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         // To copy from, for research or into the reply.
                         .textSelection(.enabled)
+                    if session.kind == .triage {
+                        Button { Task { await model.performWorkflow(.openInFull) } } label: {
+                            HStack(spacing: Space.s) {
+                                Text(summary == nil ? "Open the email with its formatting" : "Read the whole email")
+                                Keycap(key: "O")
+                            }
+                        }
+                        .buttonStyle(.link)
+                        .font(TypeRole.workflowContext)
+                        .hoverHelp("Open the email in its own window, as it was sent (O)")
+                    }
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -308,6 +323,16 @@ struct WorkflowItemView: View {
             }
         }
     }
+
+    /// A long email's summary, from its triage suggestion; the text itself
+    /// when it is short enough to read.
+    static func triageSummary(_ suggestion: TriageSuggestion?, text: String) -> String? {
+        guard let summary = suggestion?.summary, !summary.isEmpty, text.count > longEmail else { return nil }
+        return summary
+    }
+
+    /// Longer than this, an email with a summary shows the summary.
+    static let longEmail = 800
 
     /// Workflows where the user answers the email: its questions are marked.
     static func asksAnswer(_ kind: WorkflowKind) -> Bool {

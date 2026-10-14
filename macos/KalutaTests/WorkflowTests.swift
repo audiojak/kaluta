@@ -65,7 +65,7 @@ struct WorkflowTests {
     /// unless it is a reply.
     @Test func aTriageSuggestionIsTakenByItsOwnKey() {
         func suggestion(_ kind: TriageKind) -> TriageSuggestion {
-            TriageSuggestion(threadId: "t", kind: kind, seconds: nil, reason: "", answers: [], task: nil)
+            TriageSuggestion(threadId: "t", kind: kind, seconds: nil, reason: "", answers: [], task: nil, summary: "")
         }
         #expect(AppModel.triageCommand(suggestion(.quickReply)) == .replyNow)
         #expect(AppModel.triageCommand(suggestion(.task)) == .task)
@@ -95,6 +95,17 @@ struct WorkflowTests {
         #expect(TriageCardText.dueWords("2026-10-16", now: now) == now.addingTimeInterval(2 * 86_400)
             .formatted(.dateTime.weekday(.wide)))
         #expect(TriageCardText.reasons([], now: now) == nil)
+    }
+
+    /// Triage shows a long email's summary; a short one reads as it is.
+    @Test func aLongEmailInTriageShowsItsSummary() {
+        let s = TriageSuggestion(threadId: "t", kind: .archive, seconds: nil, reason: "", answers: [], task: nil,
+                                 summary: "Facebook lets you type what your feed shows.")
+        let long = String(repeating: "A newsletter line. ", count: 60)
+        #expect(WorkflowItemView.triageSummary(s, text: long) == s.summary)
+        #expect(WorkflowItemView.triageSummary(s, text: "Short and sweet.") == nil)
+        #expect(WorkflowItemView.triageSummary(nil, text: long) == nil)
+        #expect(WorkflowCommand.openInFull.title(in: .triage) == "Open the email")
     }
 
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
@@ -210,9 +221,10 @@ struct WorkflowTests {
     }
 
     @Test func triageSaysWhatKalutaSuggests() {
-        let reply = TriageSuggestion(threadId: "t", kind: .quickReply, seconds: 18, reason: "", answers: [], task: nil)
+        let reply = TriageSuggestion(threadId: "t", kind: .quickReply, seconds: 18, reason: "", answers: [], task: nil,
+                                     summary: "")
         #expect(TriageSuggestionLine.verb(reply) == "Quick reply · about 20 seconds")
-        let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], task: nil)
+        let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], task: nil, summary: "")
         #expect(TriageSuggestionLine.verb(task) == "Make a task")
     }
 

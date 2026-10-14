@@ -24,7 +24,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// (a nudge is a reply). Return never does anything else in an item.
     case replyNow
     /// O: open in full, or back to the summary (Weekly reading); show or
-    /// hide the evidence (Teach Kaluta).
+    /// hide the evidence (Teach Kaluta); the email in its own window, with
+    /// its formatting (Triage).
     case openInFull
     /// W: edit before deciding (Teach Kaluta's rules).
     case edit
@@ -128,7 +129,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .skip: "Skip for now"
         case .replyNow: kind == .waiting ? "Nudge" : "Reply"
-        case .openInFull: kind == .teach ? "Show the evidence" : "Open in full"
+        case .openInFull: kind == .teach ? "Show the evidence" : kind == .triage ? "Open the email" : "Open in full"
         case .edit: "Edit…"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"

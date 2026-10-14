@@ -360,8 +360,12 @@ extension AppModel {
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
+        // O opens the email with its formatting: a link on the email, not a
+        // button in the bar.
+        var open = a(.openInFull, .plain, nil)
+        open.shown = false
         return [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                a(.skip, .quiet, nil)]
+                a(.skip, .quiet, nil), open]
             .map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
@@ -483,6 +487,8 @@ extension AppModel {
         switch (session.kind, command) {
         case (.triage, .task):
             await openTaskForm(item, session: session)
+        case (.triage, .openInFull):
+            if let id = threadID(of: item) { openThreads([id]) }
         case (_, .skip):
             session.exit = .up
             if let core, let set = try? await core.skipWorkflowItem(set: session.workflowSet.id, key: item.key) {

@@ -222,7 +222,8 @@ fn rank(conn: &mail_store::Connection, found: Vec<store::Candidate>) -> mail_sto
         let due = suggestion
             .and_then(|s| s.task_json)
             .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
-            .and_then(|v| v.get("due_day").and_then(|d| d.as_str()).map(str::to_owned));
+            // As the triage job keeps a task (`StoredTask`).
+            .and_then(|v| v.get("due").and_then(|d| d.as_str()).map(str::to_owned));
         let mut score = 0;
         let mut reasons = Vec::new();
         if s.answers_you {

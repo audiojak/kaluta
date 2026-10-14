@@ -415,14 +415,16 @@ pub struct SuggestionRow {
     pub task_json: Option<String>,
     pub agent: Option<String>,
     pub created_at: Millis,
+    /// A long email's summary, else empty.
+    pub summary: String,
 }
 
 /// Keep a suggestion, replacing the conversation's last.
 pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
     tx.execute(
         "INSERT OR REPLACE INTO triage_suggestions
-           (thread_id, message_id, kind, seconds, reason, answers_json, task_json, agent, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+           (thread_id, message_id, kind, seconds, reason, answers_json, task_json, agent, created_at, summary)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             s.thread_id,
             s.message_id,
@@ -432,7 +434,8 @@ pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
             s.answers_json,
             s.task_json,
             s.agent,
-            s.created_at
+            s.created_at,
+            s.summary
         ],
     )?;
     Ok(())
@@ -444,7 +447,7 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
     Ok(conn
         .query_row(
             "SELECT s.thread_id, s.message_id, s.kind, s.seconds, s.reason, s.answers_json, s.task_json, s.agent,
-                    s.created_at
+                    s.created_at, s.summary
                FROM triage_suggestions s
                JOIN threads t ON t.gmail_id = s.thread_id
                JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
@@ -462,6 +465,7 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
                     task_json: r.get(6)?,
                     agent: r.get(7)?,
                     created_at: r.get(8)?,
+                    summary: r.get(9)?,
                 })
             },
         )
@@ -706,6 +710,7 @@ mod tests {
             task_json: None,
             agent: Some("claude-code".into()),
             created_at: NOW,
+            summary: String::new(),
         };
         db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
         let left = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
