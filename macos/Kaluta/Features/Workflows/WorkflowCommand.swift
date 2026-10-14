@@ -111,8 +111,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .sendKeepTask: "Send, keep the task open"
         case .done:
             switch kind {
-            case .triage: "Archive"
-            case .replies: "No reply needed"
+            case .triage, .replies: "Archive"
             case .tasks, .agents: "Done"
             case .waiting: "Let it go"
             case .reading: "Read, next"

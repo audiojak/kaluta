@@ -4451,7 +4451,8 @@ conversation with a task belongs to Tasks): people's mail that asks the
 user something, not answered in Triage (left in the Inbox, skipped, or
 arrived outside a set). Each item: the email with its questions
 highlighted, *What do you want to say?*, then the editable email; Send
-and archive. Kaluta writes no draft before the user has said something.
+and archive. *Archive* (E), as in Triage, when no reply is needed.
+Kaluta writes no draft before the user has said something.
 
 #### Tasks
 
