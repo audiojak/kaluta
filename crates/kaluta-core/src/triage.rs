@@ -303,6 +303,33 @@ impl Core {
     }
 }
 
+/// The user's latest email to a conversation's sender elsewhere, since
+/// their message: they may have answered there (spec §14.13).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WrittenSince {
+    /// The other conversation, and its subject.
+    pub thread_id: String,
+    pub subject: String,
+    pub at: i64,
+    /// Emails to them since, in other conversations.
+    pub count: u32,
+}
+
+#[uniffi::export]
+impl Core {
+    /// What the user sent the sender of this conversation's latest message
+    /// since it, in other conversations (Triage, Replies). A local lookup.
+    pub async fn written_since(&self, thread_id: String) -> Result<Option<WrittenSince>, CoreError> {
+        let db = self.db()?;
+        let found =
+            runtime::run(
+                async move { Ok(db.read(move |c| mail_store::priority::written_since(c, &thread_id)).await?) },
+            )
+            .await?;
+        Ok(found.map(|w| WrittenSince { thread_id: w.thread_id, subject: w.subject, at: w.at, count: w.count }))
+    }
+}
+
 #[uniffi::export]
 impl Core {
     /// Kaluta's suggestion for a conversation in Triage, if it has one for

@@ -83,6 +83,9 @@ final class WorkflowSession {
     var choosingCheckAgain = false
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
+    /// What the user sent the sender since, in another conversation (Triage,
+    /// Replies): they may have answered there. By thread id.
+    var writtenSince: [String: WrittenSince] = [:]
     /// Teach Kaluta's rail: each item's line and kind, by key, kept from
     /// the start (a decided proposal leaves its store).
     var teachLines: [String: TeachLine] = [:]

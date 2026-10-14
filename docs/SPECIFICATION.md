@@ -4477,6 +4477,12 @@ one decision with a one-line reason:
   taken with that button's key; Return is only ever Reply. A
   conversation that already has an open task says so, and T shows that
   task instead of making a second.
+- *You wrote to Melissa Brown on Oct 5 · Re: ORCA renewal* (Triage and
+  Replies): the user's latest email to the sender of the item's message,
+  sent after it in another conversation (to, cc or bcc), with *Open it*.
+  They may have answered there; nothing is decided for them. A reply in
+  the same conversation drops the item as *Done elsewhere*. One local
+  query (about a millisecond on a real mailbox).
 - A long email meant for reading (a newsletter, a digest, a report)
   shows *Kaluta's summary*, two or three sentences made with its
   suggestion, in place of its text (over 800 characters); every email

@@ -141,6 +141,10 @@ extension AppModel {
            let suggestion = try? await core.triageSuggestion(threadID) {
             session.suggestions[threadID] = suggestion
         }
+        // Answered elsewhere? Looked up each time the item comes up.
+        if session.kind == .triage || session.kind == .replies {
+            session.writtenSince[threadID] = await core.writtenSince(threadID)
+        }
         if session.threads[threadID] == nil, let detail = try? await core.thread(threadID) {
             session.threads[threadID] = detail
             if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),

@@ -121,6 +121,17 @@ struct WorkflowTests {
         #expect(EmailDocument.single(#"<p style="color:#333">x</p>"#, isDark: true).contains(#"class="body paper""#))
     }
 
+    /// Written to the sender since, elsewhere: the line says so.
+    @Test func theWrittenSinceLineSaysWhenAndWhere() {
+        let now = DueDay.date("2026-10-14")!
+        let oct5 = Int64(DueDay.date("2026-10-05")!.timeIntervalSince1970 * 1000)
+        let one = WrittenSince(threadId: "t", subject: "Re: ORCA renewal", at: oct5, count: 1)
+        #expect(WrittenSinceLine.words(one, name: "Melissa Brown", now: now)
+            == "You wrote to Melissa Brown on \(DueDay.date("2026-10-05")!.formatted(.dateTime.month(.abbreviated).day())) · Re: ORCA renewal")
+        let three = WrittenSince(threadId: "t", subject: "", at: oct5, count: 3)
+        #expect(WrittenSinceLine.words(three, name: "Ann", now: now).hasSuffix("· (no subject) and 2 more"))
+    }
+
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
         #expect(WorkflowKind.all.map(\.number) == Array(1...7))
         #expect(WorkflowKind.all.first == .triage && WorkflowKind.all.last == .teach)

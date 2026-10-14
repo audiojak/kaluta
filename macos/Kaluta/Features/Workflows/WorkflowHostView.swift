@@ -259,6 +259,14 @@ struct WorkflowItemView: View {
                 TriageSuggestionLine(suggestion: session.suggestions[threadID],
                                      task: model.openTask(onThread: threadID), kind: session.kind)
             }
+            if session.kind == .triage || session.kind == .replies, let threadID,
+               let written = session.writtenSince[threadID] {
+                WrittenSinceLine(written: written,
+                                 name: detail.flatMap { AppModel.shownMessage($0, session.kind)?.from }
+                                     .map { $0.name?.isEmpty == false ? $0.name! : $0.email } ?? "them") {
+                    model.openThreads([written.threadId])
+                }
+            }
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
                     let latest = AppModel.shownMessage(detail, session.kind)
@@ -877,4 +885,41 @@ struct WorkflowEmailBody: View {
     }
 
     static let startHeight: CGFloat = 160
+}
+
+/// The user wrote to this sender since, in another conversation (spec
+/// §14.13): "You wrote to Melissa Brown on Oct 5 · Re: ORCA Business …",
+/// with that conversation a click away. They may have answered there.
+struct WrittenSinceLine: View {
+    let written: WrittenSince
+    let name: String
+    let open: () -> Void
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Image(systemName: "arrowshape.turn.up.left")
+            Text(Self.words(written, name: name))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Button("Open it", action: open)
+                .buttonStyle(.link)
+                .hoverHelp("Open that conversation in its own window")
+        }
+        .font(TypeRole.workflowContext)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+        .accessibilityAction(named: "Open it", open)
+    }
+
+    /// "You wrote to Melissa Brown on Oct 5 · Actual AI - ORCA Business
+    /// Passport …", "… and 2 more".
+    static func words(_ w: WrittenSince, name: String, now: Date = .now) -> String {
+        let at = Date(timeIntervalSince1970: TimeInterval(w.at) / 1000)
+        let when = Calendar.current.isDate(at, inSameDayAs: now)
+            ? "today at \(at.formatted(date: .omitted, time: .shortened))"
+            : "on \(at.formatted(.dateTime.month(.abbreviated).day()))"
+        let more = w.count > 1 ? " and \(w.count - 1) more" : ""
+        let subject = w.subject.isEmpty ? "(no subject)" : w.subject
+        return "You wrote to \(name) \(when) · \(subject)\(more)"
+    }
 }
