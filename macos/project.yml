@@ -109,6 +109,14 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Actual AI and the Kaluta contributors. MIT License."
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Development builds are another app: their own bundle id, data
+        # folder ("Kaluta Dev"), Keychain service and preferences, so they
+        # never open, sync or sign in as the user's real Kaluta, and Launch
+        # Services never starts one for "Kaluta" (CoreClient.devBuild).
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: org.kaluta.Kaluta.dev
+          INFOPLIST_KEY_CFBundleDisplayName: Kaluta Dev
   KalutaTests:
     # Debug builds may sign with a stable development identity
     # (scripts/dev-signing.sh); Local.xcconfig is gitignored and may be empty.

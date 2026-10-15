@@ -1469,7 +1469,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Kaluta/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Kaluta;
+				INFOPLIST_KEY_CFBundleDisplayName = "Kaluta Dev";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Actual AI and the Kaluta contributors. MIT License.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1477,7 +1477,7 @@
 					"@executable_path/../Frameworks",
 				);
 				OTHER_LDFLAGS = "-lkaluta_core";
-				PRODUCT_BUNDLE_IDENTIFIER = org.kaluta.Kaluta;
+				PRODUCT_BUNDLE_IDENTIFIER = org.kaluta.Kaluta.dev;
 				PRODUCT_NAME = Kaluta;
 				SDKROOT = macosx;
 			};

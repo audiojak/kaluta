@@ -14,7 +14,7 @@ final class KeychainSecretStore: @unchecked Sendable {
 
     /// The user's own items: Kaluta's, and OpenAGC's from before the
     /// project was renamed, which the first launch copies and never changes.
-    static let realServices: Set<String> = ["org.kaluta.Kaluta", "ai.actual.openagc"]
+    static let realServices: Set<String> = ["org.kaluta.Kaluta", "org.kaluta.Kaluta.dev", "ai.actual.openagc"]
 
     init(service: String = "org.kaluta.Kaluta") {
         self.service = service

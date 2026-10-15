@@ -253,8 +253,12 @@ const USAGE: &str = "usage: kaluta-mcp --socket <path> --session <id>\n       ka
                      [--data-dir <dir>]";
 
 /// The app's data directory (spec §6).
+/// The app's data folder: `Kaluta`, or `Kaluta Dev` for a development
+/// build (its bundled server is built with debug assertions, as the app's
+/// Debug configuration builds the core), which never reaches the real one.
 fn default_data_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/Kaluta"))
+    let folder = if cfg!(debug_assertions) { "Kaluta Dev" } else { "Kaluta" };
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support").join(folder))
 }
 
 fn parse_args() -> Result<Args, String> {
