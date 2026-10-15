@@ -423,6 +423,18 @@ fn proposal(found: &Found) -> NewProposal {
     }
 }
 
+/// The account's accepted fact with this label in this category (any
+/// case): there can be only one.
+pub(crate) fn same_label<'f>(
+    facts: &'f [crate::facts::FactInfo],
+    category: &str,
+    label: &str,
+) -> Option<&'f crate::facts::FactInfo> {
+    facts.iter().find(|f| {
+        f.scope == FactScope::Account && f.category == category && f.label.trim().eq_ignore_ascii_case(label.trim())
+    })
+}
+
 impl Core {
     /// The setting: where facts are learned from.
     pub(crate) async fn facts_from(&self) -> Result<FactsFrom, CoreError> {
@@ -577,17 +589,36 @@ impl Core {
             let chosen_use = uses.get(&r.id).copied();
             let default_use = categories.iter().find(|c| c.key == p.category).map_or(FactUse::Free, |c| c.default_use);
             match (p.kind.as_str(), r.op.as_str()) {
-                ("fact", "add") => edits.push(FactEdit::Add {
-                    fields: FactFields {
-                        category: p.category,
-                        label: p.label,
-                        value: p.value,
-                        use_: chosen_use.unwrap_or(default_use),
-                        as_of: p.as_of,
-                    },
-                    status: FactStatus::Accepted,
-                    source: FactSource::Learned,
-                }),
+                ("fact", "add") => {
+                    // The category already has the label (proposed twice, or
+                    // known since): the same words are nothing to add, other
+                    // words change that fact. Only one fact per label.
+                    let facts = self.list_facts(vec![FactStatus::Accepted]).await?;
+                    match same_label(&facts, &p.category, &p.label) {
+                        Some(old) if old.value.trim() == p.value.trim() => {}
+                        Some(old) => edits.push(FactEdit::Update {
+                            id: old.id,
+                            fields: FactFields {
+                                category: old.category.clone(),
+                                label: old.label.clone(),
+                                value: p.value,
+                                use_: chosen_use.unwrap_or(old.use_),
+                                as_of: p.as_of.or(old.as_of),
+                            },
+                        }),
+                        None => edits.push(FactEdit::Add {
+                            fields: FactFields {
+                                category: p.category,
+                                label: p.label,
+                                value: p.value,
+                                use_: chosen_use.unwrap_or(default_use),
+                                as_of: p.as_of,
+                            },
+                            status: FactStatus::Accepted,
+                            source: FactSource::Learned,
+                        }),
+                    }
+                }
                 ("fact", "edit") => {
                     let Some(id) = p.fact_id else { continue };
                     let facts = self.list_facts(vec![FactStatus::Accepted]).await?;
@@ -893,6 +924,50 @@ mod tests {
         rt(core.clone().start_analysis_run(None)).unwrap();
         wait_done(core);
         assert!(block_on(core.analysis_queue()).unwrap().facts.is_empty());
+    }
+
+    #[test]
+    fn a_fact_proposed_twice_or_reworded_is_accepted_without_a_second_label() {
+        let s = scratch("glean-twice");
+        let core = &s.1;
+        pair(core, "Hi Ann,\nI'm the CTO at Acme.\nJ");
+        rt(core.clone().start_analysis_run(None)).unwrap();
+        wait_done(core);
+        let first = block_on(core.analysis_queue()).unwrap().facts[0].clone();
+        block_on(core.decide_fact_analysis_proposals(vec![first.id], true, Default::default())).unwrap();
+        // The review proposes the same label again: once with the same
+        // words, once with others.
+        let db = core.db().unwrap();
+        let now = mail_sync::now_millis();
+        let ids: Vec<i64> = rt(db.write(move |tx| {
+            let mut ids = Vec::new();
+            for (key, value) in [("again", "the CTO"), ("reworded", "the CEO")] {
+                let payload = serde_json::to_string(&FactPayload {
+                    kind: "fact".into(),
+                    category: "work".into(),
+                    label: "occupation or role".into(),
+                    value: value.into(),
+                    ..Default::default()
+                })
+                .unwrap();
+                tx.execute(
+                    "INSERT INTO analysis_proposals (target, op, category, match_key, status, payload_json, created_at, updated_at)
+                     VALUES ('fact', 'add', 'work', ?1, 'proposed', ?2, ?3, ?3)",
+                    (key, payload, now),
+                )?;
+                ids.push(tx.last_insert_rowid());
+            }
+            Ok(ids)
+        }))
+        .unwrap();
+        let q = block_on(core.analysis_queue()).unwrap();
+        let reworded = q.facts.iter().find(|f| f.id == ids[1]).unwrap();
+        assert_eq!(reworded.before_value.as_deref(), Some("the CTO"), "shows what it changes");
+        block_on(core.decide_fact_analysis_proposals(vec![ids[0]], true, Default::default())).expect("already known");
+        block_on(core.decide_fact_analysis_proposals(vec![ids[1]], true, Default::default())).expect("a change");
+        let facts = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
+        assert_eq!(facts.len(), 1, "one fact per label: {facts:#?}");
+        assert_eq!(facts[0].value, "the CEO");
     }
 
     #[test]
