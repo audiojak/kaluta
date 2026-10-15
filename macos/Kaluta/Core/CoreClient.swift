@@ -82,12 +82,29 @@ final class CoreClient: Sendable {
         return seconds > 0 ? UInt32(seconds) : 180
     }
 
+    /// A development (Debug) build: another app, `org.kaluta.Kaluta.dev`,
+    /// with its own data folder, logs, Keychain service and preferences. It
+    /// never opens, syncs or signs in as the user's real Kaluta.
+    static var devBuild: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+
+    /// The real app's Keychain service, or the development build's.
+    static var keychainService: String { devBuild ? "org.kaluta.Kaluta.dev" : "org.kaluta.Kaluta" }
+
+    /// The data and log folders' name: "Kaluta", or "Kaluta Dev".
+    static var folderName: String { devBuild ? "Kaluta Dev" : "Kaluta" }
+
     /// The app's Keychain items, or a separate service when hosting tests
     /// or on a scratch data directory, so neither can read the user's
     /// sign-ins. Everything that touches the Keychain defaults to this.
     static func defaultSecrets() -> KeychainSecretStore {
         if isRunningTests { return KeychainSecretStore(service: testSecretsService) }
-        return KeychainSecretStore(service: isScratchRun ? "org.kaluta.Kaluta.scratch" : "org.kaluta.Kaluta")
+        return KeychainSecretStore(service: isScratchRun ? "org.kaluta.Kaluta.scratch" : keychainService)
     }
 
     /// The test host's Keychain service; emptied when the host starts and
@@ -1639,12 +1656,13 @@ final class CoreClient: Sendable {
 
     /// `~/Library/Logs/Kaluta`, where the core writes `core.log`.
     static func defaultLogDirectory() -> URL {
-        URL.libraryDirectory.appending(path: "Logs/Kaluta", directoryHint: .isDirectory)
+        URL.libraryDirectory.appending(path: "Logs/\(folderName)", directoryHint: .isDirectory)
     }
 
-    /// `~/Library/Application Support/Kaluta`, without creating it.
+    /// `~/Library/Application Support/Kaluta` (`Kaluta Dev` for a
+    /// development build), without creating it.
     static var defaultDataDirectoryURL: URL {
-        URL.applicationSupportDirectory.appending(path: "Kaluta", directoryHint: .isDirectory)
+        URL.applicationSupportDirectory.appending(path: folderName, directoryHint: .isDirectory)
     }
 
     /// `~/Library/Application Support/Kaluta`, created if missing.

@@ -75,6 +75,12 @@ struct ListToolbar: ToolbarContent {
             if model.selectedMailboxID == "INBOX", model.threads.searchQuery == nil {
                 ToolbarItem { ListViewOptionsMenu() }
             }
+            // Mail's Get Mail: ask Gmail now rather than wait for the push.
+            ToolbarItem {
+                Button("Check for New Mail", systemImage: "arrow.clockwise") { model.core?.syncNow() }
+                    .help(ToolbarHelp.text(for: "Check for New Mail", model: model) ?? "")
+                    .disabled(!model.isMailOpen)
+            }
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {
@@ -217,6 +223,7 @@ enum ToolbarHelp {
         switch label {
         case "Attach", "Discard", "Send", "Send and Finish Task": composer(label)
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
+        case "Check for New Mail": "Check for New Mail (⇧⌘N)"
         case "Reply": "Reply (⌘R)"
         case "Reply All": "Reply All (⇧⌘R)"
         case "Forward": "Forward (⇧⌘F)"
