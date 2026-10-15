@@ -31,6 +31,11 @@ echo "demo: data in $DATA; mail arrives every ${ARRIVALS}s; quit Kaluta to end"
   -ApplePersistenceIgnoreState YES \
   -KalutaDemoArrivalSeconds "$ARRIVALS" "$@" >/dev/null 2>"${DEMO_LOG:-/dev/null}"
 sleep 2 # cfprefsd writes just after the app quits
+# Launch Services registered the debug build when it ran; it shares the
+# app's bundle id, so opening Kaluta could start it against the real
+# account. Forget it.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[[ -x "$LSREGISTER" ]] && "$LSREGISTER" -u "$ROOT/build/DerivedData/Build/Products/Debug/Kaluta.app" 2>/dev/null || true
 if [[ "$(prefs_stamp)" != "$prefs_before" && $app_running == no ]]; then
   echo "demo: the run wrote the real preferences (${REAL_PREFS[*]})" >&2
   exit 1
