@@ -117,7 +117,12 @@ pub fn triage_answer(prompt: &str) -> Option<String> {
         items.push(if from.contains("no-reply") || from.contains("noreply") || from.contains("notifications")
             || from.contains("newsletter") || from.contains("digest")
         {
-            format!(r#"{{"thread_id": "{id}", "kind": "archive", "reason": "Nothing is asked of you.", "summary": "{summary}"}}"#)
+            // What kind it is, by its address.
+            let category =
+                if from.contains("newsletter") || from.contains("digest") { "newsletter" } else { "notification" };
+            format!(
+                r#"{{"thread_id": "{id}", "kind": "archive", "reason": "Nothing is asked of you.", "summary": "{summary}", "category": "{category}"}}"#
+            )
         } else if body.len() > 600 {
             format!(
                 r#"{{"thread_id": "{id}", "kind": "task", "reason": "It needs more than a quick answer.", "task": {{"title": "Answer {}", "category": "Reply", "due": null, "action": "reply", "why": "A longer answer is needed."}}}}"#,

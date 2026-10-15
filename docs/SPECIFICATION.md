@@ -4513,6 +4513,11 @@ one decision with a one-line reason:
   suggestion, in place of its text (over 800 characters); every email
   has *Open the email* (O) beside its sender, which opens it in its own
   window as it was sent.
+- **What kind of email it is.** For mail no person wrote to the user, the
+  suggestion names one of a fixed list (Newsletter, Receipt, Notification,
+  Announcement, Invitation, Promotion), shown as a chip beside the sender;
+  mail from a person has none. A summary over its length ends on its last
+  whole sentence.
 - **The rest of the conversation** (Triage, Replies, Tasks, Waiting on
   others): one quiet line at the top of the card, *3 earlier messages ·
   Paul Allen, Paul Sevilla, you* (C), opens a row per other message
