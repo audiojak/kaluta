@@ -905,7 +905,14 @@ struct FactDecisionBody: View {
         switch proposal.kind {
         case "category": "Category"
         case "starter": "Starter set"
-        default: proposal.op == .edit ? "Changed fact" : proposal.op == .remove ? "Fact to remove" : "Fact"
+        // A new fact whose label the category already has changes that fact
+        // (its words now show struck through), or is already there.
+        default:
+            if proposal.op == .remove { "Fact to remove" }
+            else if let before = proposal.beforeValue {
+                before.trimmingCharacters(in: .whitespaces) == proposal.value.trimmingCharacters(in: .whitespaces)
+                    ? "Already in your facts" : "Changed fact"
+            } else { "Fact" }
         }
     }
 

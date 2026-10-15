@@ -3954,6 +3954,12 @@ kept answers (each question carrying a category and label) write facts.
 Settings › Facts lists the global facts with the same editing; its
 changes go on the open account's undo stack.
 
+
+*(Amended 2026-10-14.)* One fact per label in a category, and a proposed
+new fact whose label the category already has is shown as a change (its
+current words struck through) or as *Already in your facts* when the words
+match. Accepting it changes that fact, or adds nothing: the review can
+propose the same fact twice, and accepting the second no longer fails.
 ### 14.12 Clean Up **(Amendment 2026-10-08)**
 
 A window for clearing a mailbox in bulk, used once a quarter or a year

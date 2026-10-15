@@ -221,6 +221,13 @@ impl Core {
                 if p.fact_id.is_some() && current.is_none() {
                     return None;
                 }
+                // A new fact whose label the category already has: accepting
+                // it changes that fact, so it shows what it says now.
+                let current = current.or_else(|| {
+                    (r.op == "add" && p.kind == "fact")
+                        .then(|| crate::analysis_glean::same_label(&facts, &p.category, &p.label))
+                        .flatten()
+                });
                 let use_ = current.map_or_else(
                     || {
                         categories

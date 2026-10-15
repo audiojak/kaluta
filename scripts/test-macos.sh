@@ -45,6 +45,15 @@ cleanup() {
     -regex ".*/\(kaluta-tests-\|kaluta-scratch-\|org\.kaluta\.Kaluta\.tests\.\|openagc-tests-\|openagc-scratch-\|ai\.actual\.openagc\.tests\.\)$UUID_RE\.plist" \
     -delete 2>/dev/null || true
   rm -f "$MARKER" "${prefs_copy:-}"
+  unregister_debug_app
+}
+# The debug build shares the app's bundle id: left registered with Launch
+# Services, opening Kaluta (Dock, Spotlight) could start it instead of the
+# installed app, against the real account. Forget it after every run.
+unregister_debug_app() {
+  local lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  local app="$ROOT/build/DerivedData/Build/Products/Debug/Kaluta.app"
+  [[ -x "$lsregister" && -d "$app" ]] && "$lsregister" -u "$app" 2>/dev/null || true
 }
 trap cleanup EXIT
 
