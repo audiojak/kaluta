@@ -270,6 +270,12 @@ struct WorkflowItemView: View {
             if let detail {
                 VStack(alignment: .leading, spacing: Space.l) {
                     let latest = AppModel.shownMessage(detail, session.kind)
+                    // The rest of the conversation, one line until opened (C).
+                    let others = AppModel.otherMessages(detail, session.kind)
+                    if [.triage, .replies, .tasks, .waiting].contains(session.kind), !others.isEmpty {
+                        ConversationStack(session: session, threadID: detail.thread.id, messages: others,
+                                          earlierOnly: others.allSatisfy { $0.date <= latest?.date ?? .max })
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: Space.l) {
                         Text(Self.contextLine(latest))
                             .foregroundStyle(.secondary)

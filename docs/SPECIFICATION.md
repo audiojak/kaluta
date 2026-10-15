@@ -4513,6 +4513,13 @@ one decision with a one-line reason:
   suggestion, in place of its text (over 800 characters); every email
   has *Open the email* (O) beside its sender, which opens it in its own
   window as it was sent.
+- **The rest of the conversation** (Triage, Replies, Tasks, Waiting on
+  others): one quiet line at the top of the card, *3 earlier messages ·
+  Paul Allen, Paul Sevilla, you* (C), opens a row per other message
+  (sender, date, its first line, its files) above the email; a row opens
+  that message in full on the card. C again or Esc closes it; the next Esc
+  leaves. The email's own quoted history stays folded (•••). In Agents, C
+  copies the code.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and

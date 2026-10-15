@@ -30,6 +30,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// hide the evidence (Teach Kaluta); the email in its own window, with
     /// its formatting (Triage).
     case openInFull
+    /// C: the conversation's other messages, opened on the card above the
+    /// email, or closed again (Triage, Replies, Tasks, Waiting on others).
+    /// Where there is a code (Agents) C copies it.
+    case conversation
     /// W: edit before deciding (Teach Kaluta's rules).
     case edit
     /// G: the conversation in Gmail, in the browser (a Gmail account).
@@ -71,6 +75,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skip: "S"
         case .replyNow: "Return"
         case .openInFull: "O"
+        case .conversation: "C"
         case .replyAll: "A"
         case .edit: "W"
         case .openInGmail: "G"
@@ -145,6 +150,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             case .reading: "Open in full"
             default: "Open the email"
             }
+        case .conversation: "Show the conversation"
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
         case .replyAll: "Reply all"

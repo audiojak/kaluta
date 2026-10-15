@@ -187,10 +187,11 @@ extension AppModel {
     }
 
     /// A workflow's email shows its remote images: loaded here, or always
-    /// for its sender (the reader's setting).
-    func workflowImagesAllowed(_ threadID: String, session: WorkflowSession) -> Bool {
+    /// for its sender (the reader's setting). Another message of the
+    /// conversation goes by its own sender.
+    func workflowImagesAllowed(_ threadID: String, session: WorkflowSession, message: MessageInfo? = nil) -> Bool {
         if session.imagesLoaded.contains(threadID) { return true }
-        let latest = session.threads[threadID].flatMap { Self.shownMessage($0, session.kind) }
+        let latest = message ?? session.threads[threadID].flatMap { Self.shownMessage($0, session.kind) }
         guard let sender = latest?.from?.email.lowercased() else { return false }
         return ReaderStore.imagesAllowed(for: [sender], known: session.knownSenders, defaults: defaults)
     }
@@ -251,6 +252,29 @@ extension AppModel {
     /// they asked), elsewhere the latest from someone else.
     static func shownMessage(_ detail: ThreadDetail, _ kind: WorkflowKind) -> MessageInfo? {
         kind == .waiting ? detail.messages.last { !$0.isDraft } : latestReceived(detail)
+    }
+
+    /// The conversation's messages besides the one the item shows, oldest
+    /// first; drafts are left out.
+    static func otherMessages(_ detail: ThreadDetail, _ kind: WorkflowKind) -> [MessageInfo] {
+        let shown = shownMessage(detail, kind)?.id
+        return detail.messages.filter { !$0.isDraft && $0.id != shown }
+    }
+
+    /// Open or close one of the conversation's messages on the card; its
+    /// body and inline images load the first time.
+    func toggleConversationMessage(_ message: MessageInfo, session: WorkflowSession) async {
+        if session.openMessages.remove(message.id) != nil { return }
+        session.openMessages.insert(message.id)
+        guard let core, session.messageBodies[message.id] == nil,
+              let body = try? await core.renderedBody(message.id) else { return }
+        session.messageBodies[message.id] = body
+        if body.html?.contains("kaluta-cid:") == true {
+            session.messageImages[message.id] = await ReaderStore.inlineImages(of: message, core: core)
+        }
+        if let from = message.from?.email {
+            session.knownSenders.formUnion(await core.knownSenders([from]))
+        }
     }
 
     /// The Agents set's codes, and the text of each proposed send.
@@ -428,6 +452,12 @@ extension AppModel {
             var open = a(.openInFull, .plain, "Open the email")
             open.shown = false
             out.append(open)
+            // The rest of the conversation, on the card (C).
+            if let detail = session.threads[id], !Self.otherMessages(detail, session.kind).isEmpty {
+                var conversation = a(.conversation, .plain, nil)
+                conversation.shown = false
+                out.append(conversation)
+            }
         }
         if gmailURL(threadID: id) != nil {
             var gmail = a(.openInGmail, .plain, nil)
@@ -543,6 +573,11 @@ extension AppModel {
     func performWorkflow(_ command: WorkflowCommand) async {
         guard let session = workflowSession else { return }
         switch command {
+        case .back where session.showsConversation && session.writer == nil && session.taskForm == nil
+            && !session.choosingCheckAgain:
+            // Esc closes the conversation first; the next Esc leaves.
+            withAnimation(Self.itemMotion) { session.showsConversation = false }
+            return
         case .back where session.writer == nil && session.taskForm == nil && !session.choosingCheckAgain:
             leaveWorkflow()
             return
@@ -556,8 +591,10 @@ extension AppModel {
             break
         }
         let actions = workflowActions().map(\.command)
-        // Return in an item is Reply, and nothing where there is none.
-        let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow : command
+        // Return in an item is Reply, and nothing where there is none. C
+        // copies a code where there is one, and is the conversation elsewhere.
+        let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
+            : command == .copyCode && !actions.contains(.copyCode) ? .conversation : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)
@@ -589,6 +626,8 @@ extension AppModel {
             if let id = threadID(of: item) { openThreads([id]) }
         case (_, .openInGmail):
             if let id = threadID(of: item) { openInGmail(threadID: id) }
+        case (_, .conversation):
+            withAnimation(Self.itemMotion) { session.showsConversation.toggle() }
         case (_, .skip):
             session.exit = .up
             if let core, let set = try? await core.skipWorkflowItem(set: session.workflowSet.id, key: item.key) {

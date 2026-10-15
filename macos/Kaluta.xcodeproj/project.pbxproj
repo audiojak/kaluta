@@ -163,6 +163,7 @@
 		D9EEEE448608FD69FC7B8518 /* MessageToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20CF1FD21F167EE4466907F /* MessageToolbar.swift */; };
 		DC0A183F4BA3B97665883DD9 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836B3D70D3275C82E2478551 /* MainWindow.swift */; };
 		DD416F4D2F54860D18CB984B /* LabelTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122C89A288F22719B15CF540 /* LabelTreeTests.swift */; };
+		E099140D1D55B8BC9C15DF72 /* ConversationStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */; };
 		E2CDB58391993EA4870D5D48 /* ConnectAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22FEDF2DAB3F98325D31235 /* ConnectAgent.swift */; };
 		E401F518B7467B5345F5E03E /* LabelTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8128058BC4ACCDB5648187F5 /* LabelTree.swift */; };
 		E58279C3E1F8AF3953F1F217 /* agent-system-prompt.md in Resources */ = {isa = PBXBuildFile; fileRef = 4BA81684911B5A3A24F963AC /* agent-system-prompt.md */; };
@@ -270,6 +271,7 @@
 		3B8839950BDBBD0B6BCFFFDF /* SyncDebuggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerView.swift; sourceTree = "<group>"; };
 		3DD9BF17ACCDEB888B3E2259 /* DraftClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftClient.swift; sourceTree = "<group>"; };
 		41CA094E6C1388B1B4897233 /* FactsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsSettings.swift; sourceTree = "<group>"; };
+		41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStack.swift; sourceTree = "<group>"; };
 		429900E2DBB094C3C8566BDC /* LabelPickerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPickerTests.swift; sourceTree = "<group>"; };
 		457704FFE194239C4B4BA91A /* SyncDebuggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerTests.swift; sourceTree = "<group>"; };
 		4614017187EC60A14EACD4ED /* AccountSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettings.swift; sourceTree = "<group>"; };
@@ -830,6 +832,7 @@
 			children = (
 				22D183BDABE35601345873A7 /* AppModel+Teach.swift */,
 				D4E4CDEC85AD87AFD58A21F1 /* AppModel+Workflows.swift */,
+				41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */,
 				E83AAF6B20A125F9CFDADC3B /* StartScreenView.swift */,
 				739E07DF5DB114C7564F2B06 /* TeachItemView.swift */,
 				5C3DDA153B2D81B9B9451397 /* WorkflowCommand.swift */,
@@ -1137,6 +1140,7 @@
 				1552962986ED41AD39D0DEAE /* ComposerThreadPane.swift in Sources */,
 				822FBBB7EC9A166FE5E0CC5E /* ComposerView.swift in Sources */,
 				E2CDB58391993EA4870D5D48 /* ConnectAgent.swift in Sources */,
+				E099140D1D55B8BC9C15DF72 /* ConversationStack.swift in Sources */,
 				EE1878BD183A42751B874190 /* CoreClient.swift in Sources */,
 				8E33839BE34F8A1D7BC58FB7 /* DateStyle.swift in Sources */,
 				8C82110397521D57DB1A60FD /* DemoWorkflows.swift in Sources */,
