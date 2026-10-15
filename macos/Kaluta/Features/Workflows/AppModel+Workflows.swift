@@ -358,13 +358,15 @@ extension AppModel {
         case .triage:
             return triageActions(session, a)
         case .replies:
-            return [a(.replyNow, .primary), a(.task), a(.done), a(.skip, .quiet)] + emailLinks(session, a, opens: true)
+            return [a(.replyNow, .primary)] + replyAllAction(session, a) + [a(.task), a(.done), a(.skip, .quiet)]
+                + emailLinks(session, a, opens: true)
         case .tasks:
             let replies: Bool = {
                 guard let item = session.current, let task = task(of: item) else { return false }
                 return task.action != .noEmail
             }()
-            return (replies ? [a(.replyNow, .primary)] : []) + [a(.done, replies ? .plain : .primary), a(.later),
+            return (replies ? [a(.replyNow, .primary)] + replyAllAction(session, a) : [])
+                + [a(.done, replies ? .plain : .primary), a(.later),
                                                                          a(.skip, .quiet)]
                 + emailLinks(session, a, opens: true)
         case .waiting:
@@ -408,8 +410,9 @@ extension AppModel {
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
-        return [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
+        return [a(.replyNow, .primary, nil)] + replyAllAction(session, a)
+            + [a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil), a(.skip, .quiet, nil)]
+            + emailLinks(session, a, opens: true)
             .map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
@@ -432,6 +435,31 @@ extension AppModel {
             out.append(gmail)
         }
         return out
+    }
+
+    /// Reply all (A), when the email has anyone besides the user and its sender.
+    private func replyAllAction(_ session: WorkflowSession,
+                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
+        guard let id = session.current.flatMap(threadID(of:)), let detail = session.threads[id],
+              let message = Self.shownMessage(detail, session.kind),
+              !Self.others(on: message, own: ownAddresses).isEmpty else { return [] }
+        return [a(.replyAll, .plain, nil)]
+    }
+
+    /// Everyone on a message but its sender and the user (to and cc).
+    static func others(on message: MessageInfo, own: Set<String>) -> [AddressInfo] {
+        let sender = message.from?.email.lowercased()
+        var seen = Set<String>()
+        return (message.to + message.cc).filter { address in
+            let email = address.email.lowercased()
+            return email != sender && !own.contains(email) && seen.insert(email).inserted
+        }
+    }
+
+    /// Who a reply goes to: the sender, and with Reply all everyone else on it.
+    static func replyRecipients(_ message: MessageInfo, all: Bool, own: Set<String>) -> [AddressInfo] {
+        let sender = message.isSentByMe ? message.to : (message.from.map { [$0] } ?? [])
+        return sender + (all ? others(on: message, own: own) : [])
     }
 
     /// The command that takes a triage suggestion.
@@ -572,6 +600,8 @@ extension AppModel {
             await decide(item, "leave", session: session, notice: "Left in the Inbox")
         case (.triage, .replyNow), (.replies, .replyNow), (.tasks, .replyNow), (.waiting, .replyNow):
             startWriting(item, session: session)
+        case (_, .replyAll):
+            startWriting(item, session: session, all: true)
         case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
@@ -696,7 +726,7 @@ extension AppModel {
     }
 
     /// Reply: *What do you want to say?* under the email (spec §14.13).
-    private func startWriting(_ item: WorkflowItem, session: WorkflowSession) {
+    private func startWriting(_ item: WorkflowItem, session: WorkflowSession, all: Bool = false) {
         guard let id = threadID(of: item), let detail = session.threads[id],
               let message = Self.shownMessage(detail, session.kind) else { return }
         // The item's task, else the conversation's: Send offers to finish it.
@@ -706,7 +736,7 @@ extension AppModel {
         let written = session.kind == .waiting ? session.waits[id]?.nudges : session.suggestions[id]?.answers
         let answers = written?.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
         session.writer = WorkflowWriter(threadID: id, messageID: task?.messageId ?? message.id,
-                                        replyAll: task?.action == .replyAll, taskID: task?.id,
+                                        replyAll: all || task?.action == .replyAll, taskID: task?.id,
                                         email: session.bodies[id] ?? message.snippet, answers: answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
