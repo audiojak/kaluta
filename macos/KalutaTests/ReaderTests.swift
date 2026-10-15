@@ -86,6 +86,25 @@ struct LinkSafetyTests {
 }
 
 @MainActor
+struct MessageAttachmentTests {
+    /// Each email's files are on its own card: listed when collapsed, as
+    /// links the app opens (Quick Look) when open; the link's scheme is the
+    /// app's, which mail cannot make.
+    @Test func eachEmailCarriesItsOwnFiles() {
+        var withFiles = EmailDocument.Message(id: "m2", fromName: "Jenn", fromEmail: "jenn@example.com", recipients: [],
+                                              date: .now, snippet: "attached", isRead: true, html: "<p>see attached</p>")
+        withFiles.attachments = [EmailDocument.Attachment(id: "a1", filename: "Q3 P&L.pdf", size: 13_000)]
+        let plain = EmailDocument.Message(id: "m1", fromName: "Ann", fromEmail: "ann@example.com", recipients: [],
+                                          date: .now, snippet: "hi", isRead: true, html: "<p>hi</p>")
+        let page = EmailDocument.thread([plain, withFiles], isDark: false)
+        #expect(page.contains(#"href="kaluta-attachment:a1""#))
+        #expect(page.contains("Q3 P&amp;L.pdf"), "escaped")
+        #expect(page.components(separatedBy: "kaluta-attachment:").count == 2, "only on the email that has it")
+        #expect(page.contains(#"<div class="clip""#))
+    }
+}
+
+@MainActor
 struct RemoteImagePolicyTests {
     /// Images load by themselves from senders always allowed and, unless
     /// turned off, from people the user has written to.

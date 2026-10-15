@@ -338,6 +338,10 @@ struct WorkflowItemView: View {
                             // To copy from, for research or into the reply.
                             .textSelection(.enabled)
                     }
+                    // The email's own files: preview, open, drag or save.
+                    if let files = latest?.attachments.filter({ !$0.isInline }), !files.isEmpty {
+                        AttachmentStrip(attachments: files, inset: 0)
+                    }
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)

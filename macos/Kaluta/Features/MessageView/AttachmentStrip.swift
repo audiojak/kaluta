@@ -7,7 +7,10 @@ import UniformTypeIdentifiers
 /// downloads until an attachment is used: click to preview with Quick Look,
 /// double-click to open, drag to copy it out, or right-click for more.
 struct AttachmentStrip: View {
-    let attachments: [AttachmentInfo]
+    /// The files by the email they came with; a group's label says whose
+    /// (empty: one email's own files, no label).
+    let groups: [AttachmentGroup]
+    var inset: CGFloat = Space.xxl
     @Environment(AppModel.self) private var model
     @State private var previewURL: URL?
     @State private var loading: Set<String> = []
@@ -17,18 +20,27 @@ struct AttachmentStrip: View {
         VStack(alignment: .leading, spacing: Space.xs) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: Space.m) {
-                    ForEach(attachments, id: \.id) { attachment in
-                        chip(attachment)
+                    ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                        if index > 0 { PaneDivider().frame(height: Self.dividerHeight) }
+                        if !group.label.isEmpty {
+                            Text(group.label)
+                                .font(TypeRole.meta)
+                                .foregroundStyle(.secondary)
+                                .fixedSize()
+                        }
+                        ForEach(group.attachments, id: \.id) { attachment in
+                            chip(attachment)
+                        }
                     }
                 }
-                .padding(.horizontal, Space.xxl)
+                .padding(.horizontal, inset)
                 .padding(.vertical, Space.hair)
             }
             if let error {
                 Text(error)
                     .font(TypeRole.caption)
                     .foregroundStyle(Tone.failure)
-                    .padding(.horizontal, Space.xxl)
+                    .padding(.horizontal, inset)
             }
         }
         .padding(.bottom, Space.s)
@@ -133,6 +145,19 @@ struct AttachmentStrip: View {
         } catch {
             done(nil, false, error)
         }
+    }
+
+    static let dividerHeight: CGFloat = 18
+
+    /// One email's own files, unlabelled.
+    init(attachments: [AttachmentInfo], inset: CGFloat = Space.xxl) {
+        groups = [AttachmentGroup(messageID: "", label: "", attachments: attachments)]
+        self.inset = inset
+    }
+
+    init(groups: [AttachmentGroup], inset: CGFloat = Space.xxl) {
+        self.groups = groups
+        self.inset = inset
     }
 
     private static func icon(for attachment: AttachmentInfo) -> NSImage {

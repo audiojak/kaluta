@@ -163,6 +163,19 @@ final class ReaderStore {
         (detail?.messages ?? []).flatMap { $0.attachments.filter { !$0.isInline } }
     }
 
+    /// The thread's files by the email they came with, oldest first:
+    /// "Jennifer Kennedy · Oct 14" and its files.
+    var attachmentGroups: [AttachmentGroup] {
+        (detail?.messages ?? []).compactMap { m in
+            let files = m.attachments.filter { !$0.isInline }
+            guard !files.isEmpty else { return nil }
+            let who = m.isSentByMe ? "You" : m.from.map { $0.name?.isEmpty == false ? $0.name! : $0.email } ?? "Someone"
+            let when = Date(timeIntervalSince1970: TimeInterval(m.date) / 1000)
+            return AttachmentGroup(messageID: m.id, label: "\(who) · \(when.formatted(.dateTime.month(.abbreviated).day()))",
+                                   attachments: files)
+        }
+    }
+
     func loadRemoteImagesForThread() {
         remoteImagesAllowedForThread = true
     }
@@ -189,7 +202,9 @@ final class ReaderStore {
                 snippet: m.snippet,
                 isRead: m.isRead,
                 html: bodies[m.id]?.html,
-                isDraft: m.isDraft)
+                isDraft: m.isDraft,
+                attachments: m.attachments.filter { !$0.isInline }
+                    .map { EmailDocument.Attachment(id: $0.id, filename: $0.filename, size: $0.size) })
         }
     }
 
@@ -202,4 +217,12 @@ final class ReaderStore {
         }
         cache[body.messageId] = body
     }
+}
+
+/// One email's files in a thread, with who sent them and when.
+struct AttachmentGroup: Identifiable {
+    let messageID: String
+    let label: String
+    let attachments: [AttachmentInfo]
+    var id: String { messageID }
 }

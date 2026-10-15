@@ -6,6 +6,8 @@ import SwiftUI
 struct ThreadReaderView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
+    /// An attachment clicked on its message's card, in Quick Look.
+    @State private var previewURL: URL?
     /// A window of its own: its store and thread (nil: the selection).
     var store: ReaderStore?
     var threadID: String?
@@ -19,7 +21,8 @@ struct ThreadReaderView: View {
             if let detail = reader.detail {
                 header(detail)
                 if !reader.attachments.isEmpty {
-                    AttachmentStrip(attachments: reader.attachments)
+                    // By the email each came with (each card lists its own too).
+                    AttachmentStrip(groups: reader.attachmentGroups)
                 }
                 if reader.hasRemoteImages && !reader.allowsRemoteImages {
                     remoteImagesBanner
@@ -29,7 +32,11 @@ struct ThreadReaderView: View {
                     allowRemoteImages: reader.allowsRemoteImages,
                     // The main window's reader is a stop in its Tab loop.
                     onCreated: store == nil ? { [focus = model.focus] in focus.register($0, as: .reader) } : nil,
-                    inlineImages: reader.inlineImages)
+                    inlineImages: reader.inlineImages,
+                    onAttachment: { id in
+                        Task { previewURL = try? await model.core?.attachmentFile(id).url }
+                    })
+                    .quickLookPreview($previewURL)
             } else {
                 Color.clear
             }

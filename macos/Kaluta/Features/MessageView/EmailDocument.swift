@@ -22,7 +22,20 @@ enum EmailDocument {
         let html: String?
         /// Not sent: drawn as a draft, not like mail that went.
         var isDraft = false
+        /// Its own attachments (not inline images): shown on its card.
+        var attachments: [Attachment] = []
     }
+
+    struct Attachment: Equatable {
+        let id: String
+        let filename: String
+        let size: UInt64
+    }
+
+    /// The scheme of an attachment's link on its message's card: the app
+    /// handles it (Quick Look). Mail cannot make one: the sanitizer keeps
+    /// only http, https and mailto links.
+    static let attachmentScheme = "kaluta-attachment"
 
     /// Each message is a card, as in Mail: an initials avatar, the sender,
     /// the date, a short To line (all of it on hover) and, once open, the
@@ -55,12 +68,27 @@ enum EmailDocument {
                 let full = message.recipients.joined(separator: ", ")
                 out += "<div class=\"to\" title=\"\(escape(full))\">To: \(escape(shortRecipients(message.recipients)))</div>"
             }
+            if !message.attachments.isEmpty {
+                // Collapsed: which files came with this email.
+                let names = message.attachments.map(\.filename).joined(separator: ", ")
+                out += "<div class=\"clip\" title=\"\(escape(names))\">📎 \(escape(names))</div>"
+            }
             out += "<div class=\"snippet\">\(escape(message.snippet))</div></div></summary>"
             if let html = message.html {
                 let paper = isDark && looksStyled(html)
                 out += "<div class=\"body\(paper ? " paper" : "")\">\(html)</div>"
             } else {
                 out += "<div class=\"body pending\">Downloading message…</div>"
+            }
+            if !message.attachments.isEmpty {
+                // Open: its files under it, each opening in Quick Look.
+                out += "<div class=\"files\">"
+                for file in message.attachments {
+                    let size = ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)
+                    out += "<a class=\"file\" href=\"\(attachmentScheme):\(escape(file.id))\" title=\"Preview \(escape(file.filename))\">"
+                    out += "📄 <span class=\"name\">\(escape(file.filename))</span> <span class=\"size\">\(escape(size))</span></a>"
+                }
+                out += "</div>"
             }
             out += "</details>"
         }
@@ -178,6 +206,15 @@ enum EmailDocument {
     .to { margin-top: \(px(Space.hair)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .snippet { margin-top: \(px(Space.hair)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     details[open] .snippet { display: none; }
+    .clip { margin-top: \(px(Space.hair)); font-size: 12px; color: GrayText; white-space: nowrap; overflow: hidden; \
+    text-overflow: ellipsis; }
+    details[open] .clip { display: none; }
+    .files { display: flex; flex-wrap: wrap; gap: \(px(Space.s)); margin: \(px(Space.m)) 0 0 \(px(32 + Space.m)); }
+    .file { display: inline-flex; gap: \(px(Space.s)); align-items: baseline; padding: \(px(Space.xs)) \(px(Space.m)); \
+    border-radius: \(px(Radius.control)); \
+    background: color-mix(in srgb, CanvasText 7%, transparent); color: CanvasText; text-decoration: none; font-size: 12px; }
+    .file:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
+    .file .size { color: GrayText; }
     .body { margin: \(px(Space.l)) 0 \(px(Space.hair)) \(px(32 + Space.m)); overflow-x: auto; }
     .body img { max-width: 100%; height: auto; }
     .body table { max-width: 100%; }
