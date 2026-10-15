@@ -330,34 +330,41 @@ struct WorkflowItemView: View {
                             .font(TypeRole.workflowDisplay)
                     }
                     // Weekly reading: Kaluta's summary until it is opened in full.
-                    // Triage: a long email's summary, the email on O.
+                    // Triage: a long email's summary, the email itself under it.
                     let full = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
                     let summary = session.kind == .reading && !session.showsInFull
                         ? session.summaries[detail.thread.id]?.summary
                         : session.kind == .triage ? Self.triageSummary(session.suggestions[detail.thread.id], text: full)
                         : nil
-                    if summary != nil {
+                    if let summary {
                         Label("Kaluta's summary", systemImage: "sparkle")
                             .font(TypeRole.workflowContext).foregroundStyle(.secondary)
-                    }
-                    let text = summary ?? full
-                    if summary == nil, let html = session.rendered[detail.thread.id]?.html {
-                        // The email as it was sent: its own formatting, in
-                        // the reader's locked-down web view.
-                        WorkflowEmailBody(html: html,
-                                          allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session),
-                                          inlineImages: session.inlineImages[detail.thread.id] ?? [:])
-                    } else {
-                        // What the email asks, marked where an answer is written.
-                        Text(Self.asksAnswer(session.kind)
-                            ? WritingText.highlighted(text, questions: WritingText.questions(in: text),
-                                                      tint: Tone.workflow(session.kind).opacity(0.16))
-                            : AttributedString(text))
+                        Text(summary)
                             .font(TypeRole.workflowContent)
                             .lineSpacing(Space.xs)
                             .fixedSize(horizontal: false, vertical: true)
-                            // To copy from, for research or into the reply.
                             .textSelection(.enabled)
+                    }
+                    if summary == nil || session.kind == .triage {
+                        if let html = session.rendered[detail.thread.id]?.html {
+                            if summary != nil { InsetRule(inset: 0) }
+                            // The email as it was sent: its own formatting, in
+                            // the reader's locked-down web view.
+                            WorkflowEmailBody(html: html,
+                                              allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session),
+                                              inlineImages: session.inlineImages[detail.thread.id] ?? [:])
+                        } else if summary == nil {
+                            // What the email asks, marked where an answer is written.
+                            Text(Self.asksAnswer(session.kind)
+                                ? WritingText.highlighted(full, questions: WritingText.questions(in: full),
+                                                          tint: Tone.workflow(session.kind).opacity(0.16))
+                                : AttributedString(full))
+                                .font(TypeRole.workflowContent)
+                                .lineSpacing(Space.xs)
+                                .fixedSize(horizontal: false, vertical: true)
+                                // To copy from, for research or into the reply.
+                                .textSelection(.enabled)
+                        }
                     }
                     // The email's own files: preview, open, drag or save.
                     if let files = latest?.attachments.filter({ !$0.isInline }), !files.isEmpty {

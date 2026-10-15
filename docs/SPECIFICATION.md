@@ -4510,7 +4510,7 @@ one decision with a one-line reason:
   query (about a millisecond on a real mailbox).
 - A long email meant for reading (a newsletter, a digest, a report)
   shows *Kaluta's summary*, two or three sentences made with its
-  suggestion, in place of its text (over 800 characters); every email
+  suggestion, above the email itself (over 800 characters); every email
   has *Open the email* (O) beside its sender, which opens it in its own
   window as it was sent.
 - **What kind of email it is.** For mail no person wrote to the user, the
