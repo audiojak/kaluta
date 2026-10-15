@@ -152,6 +152,25 @@ struct WorkflowTests {
         #expect(AppModel.others(on: toMe, own: own).isEmpty, "no Reply all")
     }
 
+    /// The conversation's line on the card: how many, and who wrote them.
+    @Test func theConversationLineCountsTheMessagesAndNamesWhoWrote() {
+        func message(_ email: String, _ name: String?, mine: Bool = false) -> MessageInfo {
+            var m = MessageInfo.sample(from: AddressInfo(name: name, email: email), to: [], cc: [])
+            m.isSentByMe = mine
+            return m
+        }
+        let own: Set<String> = ["john@actual.ai"]
+        let paul = message("paul@example.com", "Paul Allen")
+        let me = message("john@actual.ai", "John Kennedy", mine: true)
+        let sevilla = message("ps@example.com", "")
+        #expect(ConversationStack.summary([paul, me, paul, sevilla], earlierOnly: true, own: own)
+            == "4 earlier messages · Paul Allen, you, ps@example.com")
+        #expect(ConversationStack.summary([me], earlierOnly: false, own: own) == "1 other message · you")
+        let many = (1...5).map { message("p\($0)@example.com", "P\($0)") }
+        #expect(ConversationStack.summary(many, earlierOnly: true, own: own).hasSuffix("P1, P2, P3 + 2"))
+        #expect(ConversationStack.sender(me, own: own, capitalized: true) == "You")
+    }
+
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
         #expect(WorkflowKind.all.map(\.number) == Array(1...7))
         #expect(WorkflowKind.all.first == .triage && WorkflowKind.all.last == .teach)

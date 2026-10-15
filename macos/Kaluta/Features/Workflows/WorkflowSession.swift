@@ -71,6 +71,14 @@ final class WorkflowSession {
     var summaries: [String: ReadingSummary] = [:]
     var showsReport = false
     var showsInFull = false
+    /// The conversation's other messages are open on the card (C), and
+    /// which of them are open in full, by message id.
+    var showsConversation = false
+    var openMessages: Set<String> = []
+    /// Those messages as sanitized HTML, and their inline images, by
+    /// message id.
+    var messageBodies: [String: RenderedBody] = [:]
+    var messageImages: [String: [String: InlineImage]] = [:]
     /// Agents: codes and what agent mailboxes sent, and the editable text
     /// of each proposed send, by item key.
     var agentsWork: AgentsWork?
@@ -105,6 +113,8 @@ final class WorkflowSession {
             taskForm = nil
             choosingCheckAgain = false
             showsInFull = false
+            showsConversation = false
+            openMessages = []
         }
         self.workflowSet = set
         itemShownAt = .now
