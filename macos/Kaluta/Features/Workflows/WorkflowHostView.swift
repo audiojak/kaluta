@@ -279,6 +279,14 @@ struct WorkflowItemView: View {
                     HStack(alignment: .firstTextBaseline, spacing: Space.l) {
                         Text(Self.contextLine(latest))
                             .foregroundStyle(.secondary)
+                        // What kind of email it is (Triage): a newsletter, a receipt…
+                        if let category = Self.categoryTitle(session.suggestions[detail.thread.id]) {
+                            Text(category)
+                                .font(TypeRole.workflowKey).fontWeight(.semibold)
+                                .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                                .background(Tone.workflow(session.kind).opacity(0.14), in: Capsule())
+                                .accessibilityLabel("Kind of email: \(category)")
+                        }
                         Spacer(minLength: 0)
                         if session.rendered[detail.thread.id]?.hasRemoteImages == true,
                            !model.workflowImagesAllowed(detail.thread.id, session: session) {
@@ -382,6 +390,13 @@ struct WorkflowItemView: View {
     static func triageSummary(_ suggestion: TriageSuggestion?, text: String) -> String? {
         guard let summary = suggestion?.summary, !summary.isEmpty, text.count > longEmail else { return nil }
         return summary
+    }
+
+    /// The kind of email Kaluta found it to be, as the chip reads
+    /// ("Newsletter"); nil for mail from a person.
+    static func categoryTitle(_ suggestion: TriageSuggestion?) -> String? {
+        guard let category = suggestion?.category, !category.isEmpty else { return nil }
+        return category.prefix(1).uppercased() + category.dropFirst()
     }
 
     /// Longer than this, an email with a summary shows the summary.
