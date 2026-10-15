@@ -4390,6 +4390,7 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | L | later: leave in the Inbox (Triage), tomorrow (Tasks), check again (Waiting), keep for later (Reading) |
 | S | skip for now |
 | R | reply, as Return |
+| A | reply all, when anyone besides the user and the sender is on the email (the card says who: "To: Aniket · Cc: Me"; the written email says who it goes to) |
 | O | the email in its own window (Triage, Replies, Tasks, Waiting); open in full, or back to the summary (Reading); show the evidence (Teach Kaluta) |
 | G | the conversation in Gmail, in the browser (every workflow with a conversation, a Gmail account) |
 | I | back to the Inbox (Reading) |

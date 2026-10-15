@@ -148,6 +148,13 @@ struct WorkflowWriteView: View {
 
     private var finalEmail: some View {
         VStack(alignment: .leading, spacing: Space.m) {
+            if let to = recipients, !to.isEmpty {
+                Text("To: \(to)")
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .accessibilityLabel("It goes to \(to)")
+            }
             HStack(spacing: Space.m) {
                 Text(Self.saidLine(writer.said))
                     .font(TypeRole.workflowContext)
@@ -199,6 +206,15 @@ struct WorkflowWriteView: View {
             // A turn later: the field must hold the keyboard first.
             NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
         }
+    }
+
+    /// Who the email goes to: the sender, and everyone on it with Reply all.
+    private var recipients: String? {
+        guard let detail = session.threads[writer.threadID],
+              let message = AppModel.shownMessage(detail, session.kind) else { return nil }
+        return AppModel.replyRecipients(message, all: writer.replyAll, own: model.ownAddresses)
+            .map { $0.name?.isEmpty == false ? $0.name! : $0.email }
+            .joined(separator: ", ")
     }
 
     private func perform(_ command: WorkflowCommand) {

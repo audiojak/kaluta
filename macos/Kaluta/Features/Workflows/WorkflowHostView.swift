@@ -304,6 +304,13 @@ struct WorkflowItemView: View {
                         }
                     }
                     .font(TypeRole.workflowContext)
+                    // Who else it went to: Reply all (A) reaches them too.
+                    if let latest, let line = Self.recipientsLine(latest, own: model.ownAddresses) {
+                        Text(line)
+                            .font(TypeRole.workflowContext)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
                     if model.task(of: item) == nil {
                         Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
                             .font(TypeRole.workflowDisplay)
@@ -377,6 +384,19 @@ struct WorkflowItemView: View {
     /// Workflows where the user answers the email: its questions are marked.
     static func asksAnswer(_ kind: WorkflowKind) -> Bool {
         kind == .replies || kind == .tasks
+    }
+
+    /// "To: Aniket Shah · Cc: Me"; nil when it went to the user alone.
+    static func recipientsLine(_ m: MessageInfo, own: Set<String>) -> String? {
+        func names(_ list: [AddressInfo]) -> String {
+            list.map { own.contains($0.email.lowercased()) ? "Me" : ($0.name?.isEmpty == false ? $0.name! : $0.email) }
+                .joined(separator: ", ")
+        }
+        let toOnlyMe = m.to.allSatisfy { own.contains($0.email.lowercased()) }
+        guard !(toOnlyMe && m.cc.isEmpty) else { return nil }
+        var parts = ["To: \(names(m.to))"]
+        if !m.cc.isEmpty { parts.append("Cc: \(names(m.cc))") }
+        return parts.joined(separator: " · ")
     }
 
     static func contextLine(_ m: MessageInfo?) -> String {

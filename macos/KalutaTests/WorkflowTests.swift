@@ -26,6 +26,7 @@ struct WorkflowTests {
             (KeyEquivalent("o"), "o", [], .openInFull),
             (KeyEquivalent("w"), "w", [], .edit),
             (KeyEquivalent("g"), "g", [], .openInGmail),
+            (KeyEquivalent("a"), "a", [], .replyAll),
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("2"), "2", [], .pick2),
@@ -131,6 +132,24 @@ struct WorkflowTests {
             == "You wrote to Melissa Brown on \(DueDay.date("2026-10-05")!.formatted(.dateTime.month(.abbreviated).day())) · Re: ORCA renewal")
         let three = WrittenSince(threadId: "t", subject: "", at: oct5, count: 3)
         #expect(WrittenSinceLine.words(three, name: "Ann", now: now).hasSuffix("· (no subject) and 2 more"))
+    }
+
+    /// Reply all reaches everyone on the email but the user; the card says
+    /// who else it went to.
+    @Test func replyAllReachesEveryoneElseOnTheEmail() {
+        func address(_ email: String, _ name: String? = nil) -> AddressInfo { AddressInfo(name: name, email: email) }
+        let peter = MessageInfo.sample(from: address("peter@thinkspace.com", "Peter Chee"),
+                                       to: [address("aniket@skillsheet.me", "Aniket")],
+                                       cc: [address("john@actual.ai")])
+        let own: Set<String> = ["john@actual.ai"]
+        #expect(AppModel.others(on: peter, own: own).map(\.email) == ["aniket@skillsheet.me"])
+        #expect(AppModel.replyRecipients(peter, all: false, own: own).map(\.email) == ["peter@thinkspace.com"])
+        #expect(AppModel.replyRecipients(peter, all: true, own: own).map(\.email)
+            == ["peter@thinkspace.com", "aniket@skillsheet.me"])
+        #expect(WorkflowItemView.recipientsLine(peter, own: own) == "To: Aniket · Cc: Me")
+        let toMe = MessageInfo.sample(from: address("ann@example.com"), to: [address("john@actual.ai")], cc: [])
+        #expect(WorkflowItemView.recipientsLine(toMe, own: own) == nil, "to the user alone: no line")
+        #expect(AppModel.others(on: toMe, own: own).isEmpty, "no Reply all")
     }
 
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
@@ -357,5 +376,14 @@ struct WorkflowTests {
         await writer.write(model: model, asWritten: true)
         #expect(writer.step == .final && writer.text == "Happy to, next Tuesday at 10." && writer.aiText == nil)
         #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == nil)
+    }
+}
+
+extension MessageInfo {
+    /// A received message with these addresses, for tests.
+    static func sample(from: AddressInfo, to: [AddressInfo], cc: [AddressInfo]) -> MessageInfo {
+        MessageInfo(id: "m", threadId: "t", from: from, to: to, cc: cc, replyTo: [], subject: "s", date: 0, snippet: "",
+                    isRead: true, isStarred: false, isDraft: false, isSentByMe: false, labelIds: [], hasBody: true,
+                    attachments: [])
     }
 }

@@ -23,6 +23,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// Return (or Enter) and R in an item: reply, wherever there is one
     /// (a nudge is a reply). Return never does anything else in an item.
     case replyNow
+    /// A: reply to everyone on the email (when anyone else is), as in the
+    /// mail list.
+    case replyAll
     /// O: open in full, or back to the summary (Weekly reading); show or
     /// hide the evidence (Teach Kaluta); the email in its own window, with
     /// its formatting (Triage).
@@ -68,6 +71,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skip: "S"
         case .replyNow: "Return"
         case .openInFull: "O"
+        case .replyAll: "A"
         case .edit: "W"
         case .openInGmail: "G"
         case .discard: "⌘."
@@ -86,7 +90,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
 
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
-        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail,
+        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
         "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
@@ -143,6 +147,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
+        case .replyAll: "Reply all"
         case .discard: "Discard"
         case .backToInbox: "Back to the Inbox"
         case .clearBucket: "Clear the bucket"
