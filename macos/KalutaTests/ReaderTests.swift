@@ -58,6 +58,41 @@ struct EmailDocumentTests {
         #expect(html.contains(#"class="avatar""#))
     }
 
+    /// Each open message answers itself: Reply, Reply all when someone
+    /// else is on it, Forward; drafts and the composer's view have none.
+    @Test func eachMessageHasItsOwnReplyAndForward() {
+        var everyone = message("a/1")
+        everyone.offersReplyAll = true
+        var draft = message("d")
+        draft.isDraft = true
+        let html = EmailDocument.thread([everyone, message("b"), draft], isDark: false, actions: true)
+        #expect(html.contains(#"href="kaluta-action:reply/a%2F1">Reply</a>"#))
+        #expect(html.contains(#"href="kaluta-action:reply-all/a%2F1">Reply all</a>"#))
+        #expect(html.contains(#"href="kaluta-action:forward/b">Forward</a>"#))
+        #expect(!html.contains("kaluta-action:reply-all/b"), "no one else on it")
+        #expect(!html.contains("kaluta-action:reply/d"), "a draft is edited, not answered")
+        #expect(!EmailDocument.thread([message("b")], isDark: false).contains("kaluta-action"))
+        let parsed = EmailDocument.MessageAction.parse(URL(string: "kaluta-action:reply-all/a%2F1")!)
+        #expect(parsed?.0 == .replyAll && parsed?.1 == "a/1")
+        #expect(EmailDocument.MessageAction.parse(URL(string: "kaluta-action:delete/x")!) == nil)
+        #expect(EmailDocument.MessageAction.parse(URL(string: "https://example.com/reply/x")!) == nil)
+    }
+
+    @MainActor @Test func replyAllIsOfferedWhenItReachesMoreThanReply() {
+        func address(_ email: String) -> AddressInfo { AddressInfo(name: nil, email: email) }
+        let own: Set<String> = ["john@actual.ai"]
+        let toMe = MessageInfo.sample(from: address("harish@example.com"), to: [address("john@actual.ai")], cc: [])
+        #expect(!ReaderStore.offersReplyAll(toMe, own: own))
+        let copied = MessageInfo.sample(from: address("harish@example.com"), to: [address("john@actual.ai")],
+                                        cc: [address("simon@example.com")])
+        #expect(ReaderStore.offersReplyAll(copied, own: own))
+        var mine = MessageInfo.sample(from: address("john@actual.ai"), to: [address("brian@example.com")], cc: [])
+        mine.isSentByMe = true
+        #expect(!ReaderStore.offersReplyAll(mine, own: own), "Reply already reaches Brian")
+        mine.cc = [address("austin@example.com")]
+        #expect(ReaderStore.offersReplyAll(mine, own: own))
+    }
+
     @Test func missingBodyShowsAPlaceholder() {
         #expect(EmailDocument.thread([message("p", html: nil)], isDark: false).contains("Downloading message"))
     }

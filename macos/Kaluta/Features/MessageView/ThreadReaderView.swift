@@ -28,13 +28,24 @@ struct ThreadReaderView: View {
                     remoteImagesBanner
                 }
                 MessageWebView(
-                    html: EmailDocument.thread(reader.documentMessages, isDark: colorScheme == .dark),
+                    html: EmailDocument.thread(reader.documentMessages, isDark: colorScheme == .dark,
+                                               actions: !model.isArchive),
                     allowRemoteImages: reader.allowsRemoteImages,
                     // The main window's reader is a stop in its Tab loop.
                     onCreated: store == nil ? { [focus = model.focus] in focus.register($0, as: .reader) } : nil,
                     inlineImages: reader.inlineImages,
                     onAttachment: { id in
                         Task { previewURL = try? await model.core?.attachmentFile(id).url }
+                    },
+                    // Any message answered, not only the latest; in the task
+                    // list the reply answers the task, as the toolbar's does.
+                    onMessageAction: { action, id in
+                        let task = store == nil ? model.answeringTaskID : nil
+                        switch action {
+                        case .reply: model.compose(.reply(messageID: id, all: false, task: task))
+                        case .replyAll: model.compose(.reply(messageID: id, all: true, task: task))
+                        case .forward: model.compose(.forward(messageID: id, task: task))
+                        }
                     })
                     .quickLookPreview($previewURL)
             } else {
