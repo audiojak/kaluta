@@ -24,7 +24,40 @@ enum EmailDocument {
         var isDraft = false
         /// Its own attachments (not inline images): shown on its card.
         var attachments: [Attachment] = []
+        /// Someone besides its sender and the user is on it: Reply all.
+        var offersReplyAll = false
     }
+
+    /// What an open message's own links do: answer or forward that
+    /// message, whichever it is in the thread.
+    enum MessageAction: String, CaseIterable {
+        case reply
+        case replyAll = "reply-all"
+        case forward
+
+        var title: String {
+            switch self {
+            case .reply: "Reply"
+            case .replyAll: "Reply all"
+            case .forward: "Forward"
+            }
+        }
+
+        /// The action and message id behind a link (`kaluta-action:reply/<id>`).
+        static func parse(_ url: URL) -> (MessageAction, String)? {
+            guard url.scheme == actionScheme else { return nil }
+            let rest = url.absoluteString.dropFirst(actionScheme.count + 1)
+            guard let slash = rest.firstIndex(of: "/"), let action = MessageAction(rawValue: String(rest[..<slash])),
+                  let id = String(rest[rest.index(after: slash)...]).removingPercentEncoding, !id.isEmpty
+            else { return nil }
+            return (action, id)
+        }
+    }
+
+    /// The scheme of a message's Reply, Reply all and Forward links: the
+    /// app handles them. Mail cannot make one (the sanitizer keeps only
+    /// http, https and mailto links).
+    static let actionScheme = "kaluta-action"
 
     struct Attachment: Equatable {
         let id: String
@@ -42,8 +75,10 @@ enum EmailDocument {
     /// body. Collapsed cards show one line of the message instead. A draft
     /// is an outlined, unfilled card marked "Draft", its time "Saved …".
     /// `onlyLatestOpen`: the composer's view of the thread being answered,
-    /// where only the latest message starts open.
-    static func thread(_ messages: [Message], isDark: Bool, onlyLatestOpen: Bool = false) -> String {
+    /// where only the latest message starts open. `actions`: each open
+    /// message (not a draft) ends with its own Reply, Reply all and
+    /// Forward, so any of them can be answered, not only the latest.
+    static func thread(_ messages: [Message], isDark: Bool, onlyLatestOpen: Bool = false, actions: Bool = false) -> String {
         var out = """
         <!doctype html><html><head><meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
@@ -87,6 +122,14 @@ enum EmailDocument {
                     let size = ByteCountFormatter.string(fromByteCount: Int64(file.size), countStyle: .file)
                     out += "<a class=\"file\" href=\"\(attachmentScheme):\(escape(file.id))\" title=\"Preview \(escape(file.filename))\">"
                     out += "📄 <span class=\"name\">\(escape(file.filename))</span> <span class=\"size\">\(escape(size))</span></a>"
+                }
+                out += "</div>"
+            }
+            if actions && !message.isDraft {
+                out += "<div class=\"acts\">"
+                for action in MessageAction.allCases where action != .replyAll || message.offersReplyAll {
+                    let id = message.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? message.id
+                    out += "<a class=\"act\" href=\"\(actionScheme):\(action.rawValue)/\(escape(id))\">\(action.title)</a>"
                 }
                 out += "</div>"
             }
@@ -215,6 +258,10 @@ enum EmailDocument {
     background: color-mix(in srgb, CanvasText 7%, transparent); color: CanvasText; text-decoration: none; font-size: 12px; }
     .file:hover { background: color-mix(in srgb, CanvasText 12%, transparent); }
     .file .size { color: GrayText; }
+    .acts { display: flex; gap: \(px(Space.s)); margin: \(px(Space.l)) 0 \(px(Space.xs)) \(px(32 + Space.m)); }
+    .act { padding: \(px(Space.xs)) \(px(Space.l)); border-radius: \(px(Radius.control)); font-size: 12px; \
+    color: CanvasText; text-decoration: none; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
+    .act:hover { background: color-mix(in srgb, CanvasText 7%, transparent); }
     .body { margin: \(px(Space.l)) 0 \(px(Space.hair)) \(px(32 + Space.m)); overflow-x: auto; }
     .body img { max-width: 100%; height: auto; }
     .body table { max-width: 100%; }

@@ -22,6 +22,8 @@ struct MessageWebView: NSViewRepresentable {
     var onContentHeight: ((CGFloat) -> Void)?
     /// An attachment's link on its message's card was clicked: its id.
     var onAttachment: ((String) -> Void)?
+    /// A message's own Reply, Reply all or Forward, with its id.
+    var onMessageAction: ((EmailDocument.MessageAction, String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -64,6 +66,7 @@ struct MessageWebView: NSViewRepresentable {
         let coordinator = context.coordinator
         coordinator.onContentHeight = onContentHeight
         coordinator.onAttachment = onAttachment
+        coordinator.onMessageAction = onMessageAction
         let remoteChanged = coordinator.remoteImages.allowRemote != allowRemoteImages
         coordinator.remoteImages.allowRemote = allowRemoteImages
         let images = inlineImages
@@ -90,6 +93,7 @@ struct MessageWebView: NSViewRepresentable {
         var scrollToLatest = false
         var onContentHeight: ((CGFloat) -> Void)?
         var onAttachment: ((String) -> Void)?
+        var onMessageAction: ((EmailDocument.MessageAction, String) -> Void)?
 
         func measure(_ webView: WKWebView, after delays: [Double]) {
             guard onContentHeight != nil else { return }
@@ -125,6 +129,8 @@ struct MessageWebView: NSViewRepresentable {
             if action.navigationType == .linkActivated, let url = action.request.url {
                 if url.scheme == EmailDocument.attachmentScheme {
                     onAttachment?(String(url.absoluteString.dropFirst(EmailDocument.attachmentScheme.count + 1)))
+                } else if url.scheme == EmailDocument.actionScheme {
+                    if let (action, id) = EmailDocument.MessageAction.parse(url) { onMessageAction?(action, id) }
                 } else {
                     open(url)
                 }

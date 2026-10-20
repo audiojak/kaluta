@@ -204,8 +204,16 @@ final class ReaderStore {
                 html: bodies[m.id]?.html,
                 isDraft: m.isDraft,
                 attachments: m.attachments.filter { !$0.isInline }
-                    .map { EmailDocument.Attachment(id: $0.id, filename: $0.filename, size: $0.size) })
+                    .map { EmailDocument.Attachment(id: $0.id, filename: $0.filename, size: $0.size) },
+                offersReplyAll: Self.offersReplyAll(m, own: ownAddresses))
         }
+    }
+
+    /// Reply all reaches more than Reply: someone else is on a message
+    /// from another person, or the user's own went to more than one.
+    static func offersReplyAll(_ m: MessageInfo, own: Set<String>) -> Bool {
+        let others = AppModel.others(on: m, own: own)
+        return m.isSentByMe ? others.count > 1 : !others.isEmpty
     }
 
     private func remember(_ body: RenderedBody) {
