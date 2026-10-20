@@ -1262,6 +1262,22 @@ final class CoreClient: Sendable {
         await core.listAgentProviders(refresh: refresh)
     }
 
+    /// The model `provider`'s sessions ask for (Settings › Agents); nil:
+    /// the CLI's own setting.
+    func setAgentModel(provider: String, model: String?) {
+        try? core.setAgentModel(provider: provider, model: model)
+    }
+
+    /// The models `provider`'s account can use; empty where it lists none.
+    func agentModels(provider: String) async -> [AgentModelInfo] {
+        (try? await core.listAgentModels(provider: provider)) ?? []
+    }
+
+    /// A model `provider` refused this launch, and the one used instead.
+    func agentModelFallback(provider: String) -> AgentModelFallback? {
+        core.agentModelFallback(provider: provider)
+    }
+
     /// Start a session; with `selection`, the agent sees only those threads.
     func startAgentSession(provider: String, selection: [String]? = nil,
                            resume: String? = nil) async throws(CoreClientError) -> String {
@@ -1723,6 +1739,8 @@ typealias AgentActionInfo = KalutaCore.AgentActionInfo
 typealias AiCompositionInfo = KalutaCore.AiCompositionInfo
 typealias AgentEventInfo = KalutaCore.AgentEventInfo
 typealias AgentProviderInfo = KalutaCore.AgentProviderInfo
+typealias AgentModelInfo = KalutaCore.AgentModelInfo
+typealias AgentModelFallback = KalutaCore.AgentModelFallback
 typealias AgentSessionInfo = KalutaCore.AgentSessionInfo
 typealias AgentTranscriptItem = KalutaCore.AgentTranscriptItem
 typealias AgentStatusInfo = KalutaCore.AgentStatusInfo

@@ -24,12 +24,32 @@ for line in sys.stdin:
     elif method in ("thread/start", "thread/resume"):
         thread = msg["params"].get("threadId", thread)
         send({"id": msg["id"], "result": {"thread": {"id": thread}}})
+    elif method == "model/list":
+        # Two pages, as the real one may answer; a hidden model is left out.
+        if msg["params"].get("cursor") is None:
+            send({"id": msg["id"], "result": {"data": [
+                {"id": "gpt-old", "model": "gpt-old", "displayName": "GPT Old", "isDefault": False, "hidden": True},
+                {"id": "gpt-5.5-mini", "model": "gpt-5.5-mini", "displayName": "GPT-5.5 Mini", "isDefault": False, "hidden": False}],
+                "nextCursor": "page2"}})
+        else:
+            send({"id": msg["id"], "result": {"data": [
+                {"id": "gpt-5.5", "model": "gpt-5.5", "displayName": "GPT-5.5", "isDefault": True, "hidden": False}],
+                "nextCursor": None}})
     elif method == "turn/start":
         turns += 1
         turn = "turn_%d" % turns
         send({"id": msg["id"], "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
         text = msg["params"]["input"][0]["text"]
         if text.endswith("hang"):
+            continue
+        # The model Codex is set to is refused for this account, unless the
+        # turn names another: as a ChatGPT account answers for gpt-6.1-sol.
+        if text.endswith("refuse") and not msg["params"].get("model"):
+            body = json.dumps({"type": "error", "status": 400, "error": {"type": "invalid_request_error",
+                "message": "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."}})
+            send({"method": "error", "params": {"threadId": thread, "turnId": turn, "willRetry": False, "error": {"message": body}}})
+            send({"method": "turn/completed", "params": {"threadId": thread, "turn": {"id": turn, "status": "failed", "items": [],
+                "error": {"message": body}}}})
             continue
         send({"id": 900, "method": "item/commandExecution/requestApproval", "params": {"threadId": thread}})
         # Like Codex, wait for the answer before going on, so it is recorded

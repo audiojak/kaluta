@@ -4952,7 +4952,7 @@ Tracked in beads as `oagc-45c`, `oagc-hcv`, `oagc-ams`, `oagc-gws`,
 | 2 | Bundle identifier prefix | `org.kaluta.Kaluta` (Actual AI's domain). App `org.kaluta.Kaluta`, Keychain service `org.kaluta.Kaluta.oauth`, MCP shim `org.kaluta.Kaluta.mcp`, unified-logging subsystem `org.kaluta.Kaluta` |
 | 3 | Google Cloud project for the shipped OAuth client | Actual AI's Google Cloud org; the consent screen names Actual AI; restricted-scope verification and CASA are Actual AI's cost |
 | 4 | Apple Developer Program team | Actual AI's team signs and notarizes |
-| 5 | Agent model picker | None in MVP; each CLI uses its own configured default |
+| 5 | Agent model picker | Each CLI uses its own configured default unless one is chosen. Amended 2026-10-19: Settings › Agents offers Codex's models (`model/list`: the signed-in account's, hidden ones left out) beside "Codex's own setting"; a model Codex refuses (as a ChatGPT account refuses some) is replaced for that turn by the account's default, remembered for the launch and said in Settings, and its error reads as what to do instead of the API's JSON |
 | 6 | Claude cloud routine publishing via `RemoteTrigger` | Enabled by default; the paste hand-off appears automatically if the tool is missing or the call fails |
 
 ---

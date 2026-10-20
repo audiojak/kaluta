@@ -50,6 +50,24 @@ pub struct AgentProviderInfo {
     pub status: AgentStatusInfo,
 }
 
+/// A model an agent's account can use (Settings › Agents).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AgentModelInfo {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// The model an agent was asked for was refused this launch, and another
+/// was used: the one asked for (none: the CLI's own setting), the one
+/// refused, the one used.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AgentModelFallback {
+    pub requested: Option<String>,
+    pub refused: String,
+    pub used: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, uniffi::Record)]
 pub struct PromptContextInfo {
     pub mailbox_id: Option<String>,
@@ -356,6 +374,43 @@ impl Core {
         .unwrap_or_default()
     }
 
+    /// The model `provider`'s sessions use from now on (Settings › Agents);
+    /// none: the CLI's own setting.
+    pub fn set_agent_model(&self, provider: String, model: Option<String>) -> Result<(), CoreError> {
+        let id = provider_id(&provider)?;
+        let mut models = self.agents.models.write().unwrap_or_else(|e| e.into_inner());
+        match model.filter(|m| !m.trim().is_empty()) {
+            Some(m) => models.insert(id.as_str().to_owned(), m.trim().to_owned()),
+            None => models.remove(id.as_str()),
+        };
+        Ok(())
+    }
+
+    /// The models `provider`'s signed-in account can use; empty where the
+    /// CLI lists none (no choice offered).
+    pub async fn list_agent_models(self: Arc<Self>, provider: String) -> Result<Vec<AgentModelInfo>, CoreError> {
+        let id = provider_id(&provider)?;
+        let core = self.clone();
+        runtime::run(async move {
+            let models = core.agent_runtime().manager.models(id).await?;
+            Ok(models
+                .into_iter()
+                .map(|m| AgentModelInfo { id: m.id, name: m.name, is_default: m.is_default })
+                .collect())
+        })
+        .await
+    }
+
+    /// A model `provider` refused this launch, and what was used instead.
+    pub fn agent_model_fallback(self: Arc<Self>, provider: String) -> Option<AgentModelFallback> {
+        let id = provider_id(&provider).ok()?;
+        self.agent_runtime().manager.model_fallback(id).map(|f| AgentModelFallback {
+            requested: f.requested,
+            refused: f.refused,
+            used: f.used,
+        })
+    }
+
     /// Start a session with `provider`. With `selection`, the agent can only
     /// see those threads (spec §10.3). Returns Kaluta's session id.
     pub async fn start_agent_session(
@@ -554,7 +609,7 @@ impl Core {
             mcp: McpEndpoint { shim_path: resources.shim_path, socket_path },
             system_prompt_file: self.system_prompt_for_session(&resources.system_prompt_path, &working_dir, &guide),
             working_dir,
-            model: None,
+            model: self.agents.models.read().unwrap_or_else(|e| e.into_inner()).get(provider.as_str()).cloned(),
             max_turns: SessionConfig::DEFAULT_MAX_TURNS,
             max_budget_usd: None,
             resume,
@@ -583,3 +638,17 @@ impl Core {
 
 /// Set once per launch.
 pub(crate) type FakeProviders = OnceLock<Vec<Arc<dyn AgentProvider>>>;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_chosen_model_is_kept_per_agent() {
+        let s = crate::guide::tests::demo("agent-model");
+        let core = &s.1;
+        core.set_agent_model("codex".into(), Some(" gpt-5.5 ".into())).unwrap();
+        assert_eq!(core.agents.models.read().unwrap().get("codex").map(String::as_str), Some("gpt-5.5"));
+        core.set_agent_model("codex".into(), Some(String::new())).unwrap();
+        assert!(core.agents.models.read().unwrap().is_empty(), "empty: the CLI's own setting");
+        assert!(core.set_agent_model("other".into(), None).is_err());
+    }
+}

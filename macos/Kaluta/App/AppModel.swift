@@ -483,6 +483,7 @@ final class AppModel {
         }
         listenForEvents(from: core)
         applyAgentPolicy()
+        applyAgentModels()
         core.setSendDelay(seconds: undoSendSeconds)
         notifier.openThread = { [weak self] thread, account in
             guard let self else { return }
@@ -789,6 +790,26 @@ final class AppModel {
             try core?.setAgentPolicy(tools)
         } catch {
             logger.error("agent policy rejected: \(error.message, privacy: .private)")
+        }
+    }
+
+    /// Where each agent's model choice is kept (Settings › Agents).
+    static func agentModelKey(_ provider: String) -> String { "agentModel.\(provider)" }
+
+    /// The model chosen for `provider`; nil: its CLI's own setting.
+    func agentModel(for provider: String) -> String? {
+        defaults.string(forKey: Self.agentModelKey(provider)).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    func setAgentModel(_ model: String?, for provider: String) {
+        defaults.set(model, forKey: Self.agentModelKey(provider))
+        core?.setAgentModel(provider: provider, model: model)
+    }
+
+    /// Push each agent's chosen model to the core (they live in defaults).
+    func applyAgentModels() {
+        for provider in ["claude-code", "codex"] {
+            core?.setAgentModel(provider: provider, model: agentModel(for: provider))
         }
     }
 

@@ -275,11 +275,42 @@ pub enum AgentError {
 
 pub type AgentResult<T> = Result<T, AgentError>;
 
+/// A model an agent's CLI offers the signed-in account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentModel {
+    /// What the CLI is asked for.
+    pub id: String,
+    pub name: String,
+    /// The account's default.
+    pub is_default: bool,
+}
+
+/// The model a session asked for was refused, and another was used: the
+/// one asked for (`None`: the CLI's own setting), the one refused, the
+/// one used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelFallback {
+    pub requested: Option<String>,
+    pub refused: String,
+    pub used: String,
+}
+
 #[async_trait]
 pub trait AgentProvider: Send + Sync {
     fn id(&self) -> ProviderId;
     async fn detect(&self) -> AgentStatus;
     async fn start_session(&self, cfg: SessionConfig, sink: EventSink) -> AgentResult<Box<dyn AgentSession>>;
+
+    /// The models the signed-in account can use, where the CLI lists them
+    /// (empty: no choice offered).
+    async fn models(&self) -> AgentResult<Vec<AgentModel>> {
+        Ok(vec![])
+    }
+
+    /// The last refused model and what was used instead, this launch.
+    fn model_fallback(&self) -> Option<ModelFallback> {
+        None
+    }
 }
 
 /// A conversation with an agent. One turn runs at a time; `send` returns

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::{
-    AgentError, AgentEvent, AgentProvider, AgentResult, AgentSession, AgentStatus, EventSink, ProviderId,
-    SessionConfig, TurnInput,
+    AgentError, AgentEvent, AgentModel, AgentProvider, AgentResult, AgentSession, AgentStatus, EventSink,
+    ModelFallback, ProviderId, SessionConfig, TurnInput,
 };
 
 /// Kaluta's id for a session (not the provider's).
@@ -63,6 +63,19 @@ impl AgentManager {
 
     fn provider(&self, id: ProviderId) -> Option<&Arc<dyn AgentProvider>> {
         self.providers.iter().find(|p| p.id() == id)
+    }
+
+    /// The models a provider's account can use (empty: no choice).
+    pub async fn models(&self, id: ProviderId) -> AgentResult<Vec<AgentModel>> {
+        match self.provider(id) {
+            Some(p) => p.models().await,
+            None => Ok(vec![]),
+        }
+    }
+
+    /// A provider's last refused model and what was used instead.
+    pub fn model_fallback(&self, id: ProviderId) -> Option<ModelFallback> {
+        self.provider(id).and_then(|p| p.model_fallback())
     }
 
     /// Detection results, cached for the app session unless `refresh`.

@@ -55,6 +55,9 @@ pub(crate) struct AgentHub {
     sessions: Mutex<HashMap<String, ToolSession>>,
     socket: Mutex<Option<McpSocket>>,
     pub(crate) policy: RwLock<Policy>,
+    /// The model chosen for each agent in Settings › Agents, by provider
+    /// id; none: the CLI's own setting.
+    pub(crate) models: RwLock<HashMap<String, String>>,
     pub(crate) text: RwLock<Option<Arc<dyn TextExtractor>>>,
     pub(crate) resources: RwLock<sessions::AgentResources>,
     pub(crate) runtime: OnceLock<sessions::AgentRuntime>,
