@@ -443,14 +443,14 @@ extension AppModel {
         case .triage:
             return triageActions(session, a)
         case .replies:
-            return [a(.replyNow, .primary)] + replyAllAction(session, a) + [a(.task), a(.done), a(.skip, .quiet)]
+            return [a(.replyNow, .primary), a(.task), a(.done), a(.skip, .quiet)]
                 + emailLinks(session, a, opens: true)
         case .tasks:
             let replies: Bool = {
                 guard let item = session.current, let task = task(of: item) else { return false }
                 return task.action != .noEmail
             }()
-            return (replies ? [a(.replyNow, .primary)] + replyAllAction(session, a) : [])
+            return (replies ? [a(.replyNow, .primary)] : [])
                 + [a(.done, replies ? .plain : .primary), a(.later),
                                                                          a(.skip, .quiet)]
                 + emailLinks(session, a, opens: true)
@@ -495,10 +495,9 @@ extension AppModel {
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
-        return [a(.replyNow, .primary, nil)] + replyAllAction(session, a)
-            + [a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil), a(.skip, .quiet, nil)]
-            + emailLinks(session, a, opens: true)
-            .map { var action = $0; action.suggested = action.command == mark; return action }
+        let all = [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
+                   a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
+        return all.map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
     /// The keys behind the email's links (spec §14.13): O opens it in its
@@ -513,8 +512,11 @@ extension AppModel {
             var open = a(.openInFull, .plain, "Open the email")
             open.shown = false
             out.append(open)
-            var forward = a(.forward, .plain, nil)
-            forward.shown = false
+            // On the email, at the bar's right: Reply all (greyed out with
+            // no one else on it) and Forward.
+            out.append(replyAllAction(session, a))
+            var forward = a(.forward, .quiet, nil)
+            forward.onEmail = true
             out.append(forward)
             // The rest of the conversation, on the card (C), message by message (P, N).
             if let detail = session.threads[id], !Self.otherMessages(detail, session.kind).isEmpty {
@@ -533,13 +535,17 @@ extension AppModel {
         return out
     }
 
-    /// Reply all (A), when the email has anyone besides the user and its sender.
+    /// Reply all (A), on the email: greyed out unless it has anyone besides
+    /// the user and its sender, so its place never moves.
     private func replyAllAction(_ session: WorkflowSession,
-                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
-        guard let id = session.current.flatMap(threadID(of:)), let detail = session.threads[id],
-              let message = answeringMessage(detail, session: session),
-              ReaderStore.offersReplyAll(message, own: ownAddresses) else { return [] }
-        return [a(.replyAll, .plain, nil)]
+                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> WorkflowAction {
+        var action = a(.replyAll, .quiet, nil)
+        action.onEmail = true
+        let offered = session.current.flatMap(threadID(of:)).flatMap { session.threads[$0] }
+            .flatMap { answeringMessage($0, session: session) }
+            .map { ReaderStore.offersReplyAll($0, own: ownAddresses) } ?? false
+        if !offered { action.unavailable = "No one else is on this email" }
+        return action
     }
 
     /// Everyone on a message but its sender and the user (to and cc).
@@ -662,11 +668,15 @@ extension AppModel {
         default:
             break
         }
-        let actions = workflowActions().map(\.command)
+        // A greyed-out action's key does nothing.
+        let actions = workflowActions().filter { $0.unavailable == nil }.map(\.command)
         // Return in an item is Reply, and nothing where there is none. C
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
-            : command == .copyCode && !actions.contains(.copyCode) ? .conversation : command
+            : command == .copyCode && !actions.contains(.copyCode) ? .conversation
+            // ⌘Return on *What do you want to say?*: the words as written.
+            : command == .send && !actions.contains(.send) && actions.contains(.ownWords) ? .ownWords
+            : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)

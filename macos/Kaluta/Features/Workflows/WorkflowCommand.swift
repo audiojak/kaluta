@@ -102,7 +102,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .back: "Esc"
-        case .whatsLeft, .whereAmI, .ownWords: nil
+        // Where it is offered (*What do you want to say?*), ⌘Return: the
+        // words as written, as ⌘Return sends them on the next step.
+        case .ownWords: "⌘Return"
+        case .whatsLeft, .whereAmI: nil
         }
     }
 
@@ -199,6 +202,12 @@ struct WorkflowAction: Identifiable, Equatable {
     var shown = true
     /// Kaluta suggests this one (Triage): marked on its control.
     var suggested = false
+    /// What it acts on the email with (Reply all, Forward): a quieter
+    /// group at the bar's right, apart from the decisions.
+    var onEmail = false
+    /// Offered but not possible for this email (greyed out, its key does
+    /// nothing), and why: its place in the bar never moves.
+    var unavailable: String?
 
     var id: String { command.id }
 }
