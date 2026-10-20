@@ -17,6 +17,16 @@ struct AgentSettingsTests {
         #expect(!old.isReady && old.detail.contains("2.1.0"))
         #expect(AgentStatusText(info("codex", .error(message: "boom"))).detail.hasSuffix("boom"))
     }
+
+    /// A refused model says what Kaluta used instead.
+    @Test func aRefusedModelSaysWhatWasUsedInstead() {
+        let own = AgentModelFallback(requested: nil, refused: "gpt-6.1-sol", used: "gpt-5.5")
+        #expect(AgentModelSection.fallbackNote(own, agent: "Codex")
+            == "Codex's own setting, gpt-6.1-sol, isn't available to your account, so Kaluta is using gpt-5.5 instead.")
+        let chosen = AgentModelFallback(requested: "gpt-x", refused: "gpt-x", used: "gpt-5.5")
+        #expect(AgentModelSection.fallbackNote(chosen, agent: "Codex")
+            == "gpt-x isn't available to your account, so Kaluta is using gpt-5.5 instead.")
+    }
 }
 
 @MainActor

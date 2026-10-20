@@ -144,3 +144,54 @@ async fn interrupt_resume_and_busy() {
     assert!(got.iter().any(|m| m["method"] == "turn/interrupt" && m["params"]["turnId"] == "turn_1"));
     session.close().await;
 }
+
+/// Codex is set to a model the account cannot use: the turn goes again
+/// on the account's default, the provider remembers it for its next
+/// sessions, and the models it lists leave hidden ones out.
+#[tokio::test]
+async fn a_refused_model_falls_back_to_the_accounts_default() {
+    let d = setup("refused");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let provider = CodexProvider::new(Locator::only(vec![d.clone()]));
+    let mut session =
+        provider.start_session(config(&d, None), EventSink::new(SessionId("agent-3".into()), tx)).await.unwrap();
+    rx.recv().await.unwrap();
+    session.send(turn("please refuse")).await.unwrap();
+    let events = until_done(&mut rx).await;
+    assert!(matches!(events.last(), Some(AgentEvent::TurnCompleted { .. })), "{events:?}");
+    let starts: Vec<Value> = received(&d).into_iter().filter(|m| m["method"] == "turn/start").collect();
+    assert_eq!(starts.len(), 2);
+    assert_eq!(starts[1]["params"]["model"], "gpt-5.5", "the account's default");
+    let fallback = provider.model_fallback().unwrap();
+    assert_eq!(
+        (fallback.requested, fallback.refused.as_str(), fallback.used.as_str()),
+        (None, "gpt-6.1-sol", "gpt-5.5")
+    );
+    session.close().await;
+
+    // The next session starts on the model that worked.
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut next =
+        provider.start_session(config(&d, None), EventSink::new(SessionId("agent-4".into()), tx)).await.unwrap();
+    rx.recv().await.unwrap();
+    let start = received(&d).into_iter().find(|m| m["method"] == "thread/start").unwrap();
+    assert_eq!(start["params"]["model"], "gpt-5.5");
+    next.close().await;
+
+    let models = provider.models().await.unwrap();
+    assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["gpt-5.5-mini", "gpt-5.5"]);
+    assert!(models[1].is_default && models[1].name == "GPT-5.5");
+}
+
+#[test]
+fn a_refused_model_reads_as_what_to_do() {
+    let raw = r#"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."}}"#;
+    assert_eq!(agent_codex::refused_model(raw).as_deref(), Some("gpt-6.1-sol"));
+    let text = agent_codex::readable_error(raw, None);
+    assert!(text.starts_with("Codex is set to use gpt-6.1-sol, which your account can't use."), "{text}");
+    assert!(text.contains("Settings › Agents") && !text.contains('{'));
+    assert!(agent_codex::readable_error(raw, Some("gpt-6.1-sol")).starts_with("The model chosen in Kaluta's Settings"));
+    assert_eq!(agent_codex::readable_error(r#"{"error":{"message":"Rate limited."}}"#, None), "Rate limited.");
+    assert_eq!(agent_codex::readable_error("Codex stopped", None), "Codex stopped");
+    assert!(agent_codex::refused_model("Codex stopped").is_none());
+}

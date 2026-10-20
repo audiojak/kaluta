@@ -39,6 +39,10 @@ struct AgentSettings: View {
                 Text("Kaluta uses the Claude Code or Codex command-line tool you already have, signed in with your own account. It never reads their credentials.")
                     .foregroundStyle(.secondary)
             }
+            // The model Kaluta asks for, where the agent lists its account's.
+            if let codex = providers.first(where: { $0.id == "codex" }), AgentStatusText(codex).isReady {
+                AgentModelSection(provider: codex)
+            }
             Section {
                 Button(checking ? "Checking…" : "Check Again") { Task { await load(refresh: true) } }
                     .hoverHelp("Look again for the Claude Code and Codex command-line tools")
@@ -90,6 +94,64 @@ private struct AgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Which model Kaluta asks an agent for: its own setting (what it uses in
+/// Terminal) or one its account offers. When the one asked for was
+/// refused this launch, says what was used instead.
+struct AgentModelSection: View {
+    @Environment(AppModel.self) private var model
+    let provider: AgentProviderInfo
+    @State private var models: [AgentModelInfo] = []
+    @State private var loading = true
+    @State private var chosen = ""
+    @State private var fallback: AgentModelFallback?
+
+    var body: some View {
+        Section {
+            Picker("Model", selection: $chosen) {
+                Text("\(provider.name)'s own setting").tag("")
+                ForEach(models, id: \.id) { m in
+                    Text(m.isDefault ? "\(m.name) (your account's default)" : m.name).tag(m.id)
+                }
+                // One no longer offered stays shown, so the choice never goes blank.
+                if !chosen.isEmpty && !models.contains(where: { $0.id == chosen }) {
+                    Text(chosen).tag(chosen)
+                }
+            }
+            .disabled(loading)
+            .hoverHelp("The model Kaluta asks \(provider.name) for")
+            .onChange(of: chosen) { _, new in
+                guard !loading else { return }
+                model.setAgentModel(new.isEmpty ? nil : new, for: provider.id)
+                fallback = nil
+            }
+        } header: {
+            Text("\(provider.name) model")
+        } footer: {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                if let fallback {
+                    Label(Self.fallbackNote(fallback, agent: provider.name), systemImage: "exclamationmark.triangle")
+                }
+                Text("\(provider.name)'s own setting is the model it uses in Terminal. If the model asked for isn't available to your account, Kaluta uses your account's default instead.")
+            }
+            .foregroundStyle(.secondary)
+        }
+        .task {
+            chosen = model.agentModel(for: provider.id) ?? ""
+            fallback = model.core?.agentModelFallback(provider: provider.id)
+            models = await model.core?.agentModels(provider: provider.id) ?? []
+            loading = false
+        }
+    }
+
+    /// "Codex's own setting, gpt-6.1-sol, isn't available to your account,
+    /// so Kaluta is using gpt-5.5 instead."
+    static func fallbackNote(_ f: AgentModelFallback, agent: String) -> String {
+        f.requested == nil
+            ? "\(agent)'s own setting, \(f.refused), isn't available to your account, so Kaluta is using \(f.used) instead."
+            : "\(f.refused) isn't available to your account, so Kaluta is using \(f.used) instead."
     }
 }
 
