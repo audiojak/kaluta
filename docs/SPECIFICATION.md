@@ -4537,6 +4537,11 @@ one decision with a one-line reason:
   that message in full on the card. C again or Esc closes it; the next Esc
   leaves. The email's own quoted history stays folded (•••). In Agents, C
   copies the code.
+  The message opened last is the one answered: it ends with Reply (R),
+  Reply all (A, when it reaches more than Reply) and Forward (F), its keys
+  shown, and the bar's Reply names whom it goes to (*Reply to Jordan*);
+  Return, R and A answer it, F forwards it in a composer. Closing the
+  stack answers the card's email again.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and

@@ -34,6 +34,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// email, or closed again (Triage, Replies, Tasks, Waiting on others).
     /// Where there is a code (Agents) C copies it.
     case conversation
+    /// F: forward the email (or the conversation's message opened on the
+    /// card) in a composer.
+    case forward
     /// W: edit before deciding (Teach Kaluta's rules).
     case edit
     /// G: the conversation in Gmail, in the browser (a Gmail account).
@@ -76,6 +79,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .replyNow: "Return"
         case .openInFull: "O"
         case .conversation: "C"
+        case .forward: "F"
         case .replyAll: "A"
         case .edit: "W"
         case .openInGmail: "G"
@@ -96,6 +100,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
         "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
+        "f": .forward,
         "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
@@ -151,6 +156,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             default: "Open the email"
             }
         case .conversation: "Show the conversation"
+        case .forward: "Forward"
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
         case .replyAll: "Reply all"

@@ -211,7 +211,8 @@ struct WorkflowWriteView: View {
     /// Who the email goes to: the sender, and everyone on it with Reply all.
     private var recipients: String? {
         guard let detail = session.threads[writer.threadID],
-              let message = AppModel.shownMessage(detail, session.kind) else { return nil }
+              let message = detail.messages.first(where: { $0.id == writer.messageID })
+                ?? AppModel.shownMessage(detail, session.kind) else { return nil }
         return AppModel.replyRecipients(message, all: writer.replyAll, own: model.ownAddresses)
             .map { $0.name?.isEmpty == false ? $0.name! : $0.email }
             .joined(separator: ", ")

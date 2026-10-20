@@ -261,11 +261,41 @@ extension AppModel {
         return detail.messages.filter { !$0.isDraft && $0.id != shown }
     }
 
+    /// What a reply answers: the conversation's message opened on the card
+    /// last, else the card's email.
+    func answeringMessage(_ detail: ThreadDetail, session: WorkflowSession) -> MessageInfo? {
+        if let id = session.answeringMessageID, let m = detail.messages.first(where: { $0.id == id && !$0.isDraft }) {
+            return m
+        }
+        return Self.shownMessage(detail, session.kind)
+    }
+
+    /// The earlier message being answered, when it is not the card's email.
+    func answeringEarlier(_ session: WorkflowSession) -> MessageInfo? {
+        guard let id = session.current.flatMap(threadID(of:)), let detail = session.threads[id],
+              let m = answeringMessage(detail, session: session),
+              m.id != Self.shownMessage(detail, session.kind)?.id else { return nil }
+        return m
+    }
+
+    /// Who a reply to `m` goes to, by first name: "Jordan" for Jordan
+    /// Timmermann's email; for the user's own, the first it went to.
+    static func firstName(_ m: MessageInfo, own: Set<String>) -> String {
+        guard let to = replyRecipients(m, all: false, own: own).first else { return "them" }
+        guard let name = to.name, !name.isEmpty else { return to.email }
+        return String(name.split(separator: " ").first ?? Substring(name))
+    }
+
     /// Open or close one of the conversation's messages on the card; its
-    /// body and inline images load the first time.
+    /// body and inline images load the first time. The one opened last is
+    /// what Reply, Reply all and Forward answer.
     func toggleConversationMessage(_ message: MessageInfo, session: WorkflowSession) async {
-        if session.openMessages.remove(message.id) != nil { return }
+        if session.openMessages.remove(message.id) != nil {
+            if session.answeringMessageID == message.id { session.answeringMessageID = nil }
+            return
+        }
         session.openMessages.insert(message.id)
+        session.answeringMessageID = message.id
         guard let core, session.messageBodies[message.id] == nil,
               let body = try? await core.renderedBody(message.id) else { return }
         session.messageBodies[message.id] = body
@@ -364,8 +394,11 @@ extension AppModel {
     func workflowActions() -> [WorkflowAction] {
         guard let session = workflowSession, session.current != nil else { return [] }
         let kind = session.kind
+        // Answering an earlier message of the conversation: Reply says whose.
+        let answering = session.writer == nil ? answeringEarlier(session) : nil
         func a(_ c: WorkflowCommand, _ style: WorkflowButton.Style = .plain, _ title: String? = nil) -> WorkflowAction {
-            WorkflowAction(command: c, title: title ?? c.title(in: kind), style: style)
+            let named = c == .replyNow ? answering.map { "Reply to \(Self.firstName($0, own: ownAddresses))" } : nil
+            return WorkflowAction(command: c, title: title ?? named ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
         if session.kind == .reading, session.showsReport {
@@ -452,6 +485,9 @@ extension AppModel {
             var open = a(.openInFull, .plain, "Open the email")
             open.shown = false
             out.append(open)
+            var forward = a(.forward, .plain, nil)
+            forward.shown = false
+            out.append(forward)
             // The rest of the conversation, on the card (C).
             if let detail = session.threads[id], !Self.otherMessages(detail, session.kind).isEmpty {
                 var conversation = a(.conversation, .plain, nil)
@@ -471,8 +507,8 @@ extension AppModel {
     private func replyAllAction(_ session: WorkflowSession,
                                 _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         guard let id = session.current.flatMap(threadID(of:)), let detail = session.threads[id],
-              let message = Self.shownMessage(detail, session.kind),
-              !Self.others(on: message, own: ownAddresses).isEmpty else { return [] }
+              let message = answeringMessage(detail, session: session),
+              ReaderStore.offersReplyAll(message, own: ownAddresses) else { return [] }
         return [a(.replyAll, .plain, nil)]
     }
 
@@ -641,6 +677,11 @@ extension AppModel {
             startWriting(item, session: session)
         case (_, .replyAll):
             startWriting(item, session: session, all: true)
+        case (_, .forward):
+            if let id = threadID(of: item), let detail = session.threads[id],
+               let message = answeringMessage(detail, session: session) {
+                compose(.forward(messageID: message.id, task: nil))
+            }
         case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
@@ -767,16 +808,21 @@ extension AppModel {
     /// Reply: *What do you want to say?* under the email (spec §14.13).
     private func startWriting(_ item: WorkflowItem, session: WorkflowSession, all: Bool = false) {
         guard let id = threadID(of: item), let detail = session.threads[id],
-              let message = Self.shownMessage(detail, session.kind) else { return }
+              let message = answeringMessage(detail, session: session) else { return }
+        // An earlier message of the conversation, opened on the card.
+        let earlier = message.id != Self.shownMessage(detail, session.kind)?.id
         // The item's task, else the conversation's: Send offers to finish it.
         let task = session.kind == .waiting ? nil : self.task(of: item) ?? openTask(onThread: id)
         // Kaluta's answers: a quick reply's (Triage), or the follow-ups
         // written ahead (Waiting).
         let written = session.kind == .waiting ? session.waits[id]?.nudges : session.suggestions[id]?.answers
         let answers = written?.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
-        session.writer = WorkflowWriter(threadID: id, messageID: task?.messageId ?? message.id,
-                                        replyAll: all || task?.action == .replyAll, taskID: task?.id,
-                                        email: session.bodies[id] ?? message.snippet, answers: answers)
+        let email = earlier
+            ? session.messageBodies[message.id]?.html.map { Self.readingText(ComposerAssistant.plainText(fromHTML: $0)) }
+            : session.bodies[id]
+        session.writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
+                                        replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
+                                        email: email ?? message.snippet, answers: earlier ? [] : answers)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
 

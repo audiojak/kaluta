@@ -73,8 +73,14 @@ final class WorkflowSession {
     var showsInFull = false
     /// The conversation's other messages are open on the card (C), and
     /// which of them are open in full, by message id.
-    var showsConversation = false
+    var showsConversation = false {
+        // Closed: replies answer the email on the card again.
+        didSet { if !showsConversation { answeringMessageID = nil } }
+    }
     var openMessages: Set<String> = []
+    /// The conversation's message last opened on the card: what Reply (R,
+    /// Return), Reply all (A) and Forward (F) answer. Nil: the card's email.
+    var answeringMessageID: String?
     /// Those messages as sanitized HTML, and their inline images, by
     /// message id.
     var messageBodies: [String: RenderedBody] = [:]
@@ -115,6 +121,7 @@ final class WorkflowSession {
             showsInFull = false
             showsConversation = false
             openMessages = []
+            answeringMessageID = nil
         }
         self.workflowSet = set
         itemShownAt = .now

@@ -29,6 +29,7 @@ struct WorkflowTests {
             (KeyEquivalent("a"), "a", [], .replyAll),
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
+            (KeyEquivalent("f"), "f", [], .forward),
             (KeyEquivalent("2"), "2", [], .pick2),
             (KeyEquivalent("/"), "/", [], .tellKaluta),
             // ⌘E clears a reading bucket; another modifier makes it a menu key.
@@ -173,6 +174,21 @@ struct WorkflowTests {
         let many = (1...5).map { message("p\($0)@example.com", "P\($0)") }
         #expect(ConversationStack.summary(many, earlierOnly: true, own: own).hasSuffix("P1, P2, P3 + 2"))
         #expect(ConversationStack.sender(me, own: own, capitalized: true) == "You")
+    }
+
+    /// Answering an earlier message, Reply says whose.
+    @Test func replyNamesWhoseEarlierMessageItAnswers() {
+        func message(_ email: String, _ name: String?, mine: Bool = false) -> MessageInfo {
+            var m = MessageInfo.sample(from: AddressInfo(name: name, email: email), to: [], cc: [])
+            m.isSentByMe = mine
+            return m
+        }
+        let own: Set<String> = ["john@actual.ai"]
+        #expect(AppModel.firstName(message("jt@example.com", "Jordan Timmermann"), own: own) == "Jordan")
+        #expect(AppModel.firstName(message("jt@example.com", nil), own: own) == "jt@example.com")
+        var mine = message("john@actual.ai", "John Kennedy", mine: true)
+        mine.to = [AddressInfo(name: "Taylor Chen", email: "taylor@example.com")]
+        #expect(AppModel.firstName(mine, own: own) == "Taylor", "a reply to the user's own goes to whom it went to")
     }
 
     @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
