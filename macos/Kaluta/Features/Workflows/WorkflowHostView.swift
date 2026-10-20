@@ -11,6 +11,8 @@ struct WorkflowHostView: View {
     /// The item's scroll, for reading from the keyboard: ↑ ↓, Space and
     /// ⇧Space, Page Up and Down, Home and End.
     @State private var scroll = ScrollPosition()
+    /// The bar's width as laid out: its decisions keep to the card's edge.
+    @State private var barWidth: CGFloat = 0
     @State private var scrollGeometry: ScrollGeometry?
 
     var body: some View {
@@ -196,16 +198,24 @@ struct WorkflowHostView: View {
         let decisions = actions.filter { $0.shown && !$0.onEmail }
         let onEmail = actions.filter { $0.shown && $0.onEmail }
         // What acts on the email, apart and quieter, at the right: the
-        // decisions never move. Short of room, it shows as icons.
+        // decisions never move, and line up with the card's left edge. The
+        // pair may use the room right of the reading column for its names;
+        // short of room, it shows as icons.
+        let column = Self.readingWidth + Space.page * 2
         return ViewThatFits(in: .horizontal) {
             bar(decisions, onEmail, icons: false)
             bar(decisions, onEmail, icons: true)
         }
+        .padding(.leading, max((barWidth - column) / 2, 0))
         .padding(.horizontal, Space.page)
         .padding(.vertical, Space.xl)
-        .frame(maxWidth: Self.readingWidth + Space.page * 2)
+        .frame(maxWidth: column + Self.emailActionsRoom)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         .frame(maxWidth: .infinity)
     }
+
+    /// Beyond the reading column, what the bar's email actions may take.
+    static let emailActionsRoom: CGFloat = 360
 
     private func bar(_ decisions: [WorkflowAction], _ onEmail: [WorkflowAction], icons: Bool) -> some View {
         HStack(spacing: Space.m) {
@@ -1009,18 +1019,29 @@ struct WorkflowEmailBody: View {
     var inlineImages: [String: InlineImage] = [:]
     @Environment(\.colorScheme) private var colorScheme
     @State private var height: CGFloat = Self.startHeight
+    /// Laid out once: until then the view keeps a small space and is
+    /// unseen, so the card never shows a blank where the email will be.
+    @State private var measured = false
 
     var body: some View {
         MessageWebView(html: EmailDocument.single(html, isDark: colorScheme == .dark), allowRemoteImages: allowRemote,
                        inlineImages: inlineImages,
-                       onContentHeight: { measured in
-                           if abs(measured - height) > 1 { height = measured }
+                       onContentHeight: { size in
+                           if measured {
+                               if abs(size - height) > 1 { height = size }
+                           } else {
+                               withAnimation(AppModel.itemMotion) {
+                                   height = size
+                                   measured = true
+                               }
+                           }
                        })
             .frame(height: height)
+            .opacity(measured ? 1 : 0)
             .accessibilityLabel("The email")
     }
 
-    static let startHeight: CGFloat = 160
+    static let startHeight: CGFloat = 48
 }
 
 /// The user wrote to this sender since, in another conversation (spec

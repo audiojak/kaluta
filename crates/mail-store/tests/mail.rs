@@ -80,6 +80,26 @@ fn inbox_lists_threads_newest_first_with_aggregates() {
     assert_consistent(&db);
 }
 
+/// An email sent without a display name shows the name the same address
+/// wrote with before; one from an address never seen with a name stays bare.
+#[test]
+fn a_sender_without_a_name_gets_the_name_they_wrote_with_before() {
+    let db = open("sender-name");
+    write(&db, |w| {
+        w.upsert_message(&msg("m1", "a", 1_000, &["INBOX"])).unwrap();
+        let mut bare = msg("m2", "b", 2_000, &["INBOX"]);
+        bare.from = Some(EmailAddress::new(Some(""), "a@example.com"));
+        w.upsert_message(&bare).unwrap();
+        let mut unknown = msg("m3", "c", 3_000, &["INBOX"]);
+        unknown.from = Some(addr("nobody@example.com"));
+        w.upsert_message(&unknown).unwrap();
+    });
+    let (_, b) = db.read_blocking(|c| read::get_thread(c, &ThreadId::new("b"))).unwrap().unwrap();
+    assert_eq!(b[0].from.as_ref().unwrap().name.as_deref(), Some("Sender a"));
+    let (_, c) = db.read_blocking(|c| read::get_thread(c, &ThreadId::new("c"))).unwrap().unwrap();
+    assert_eq!(c[0].from.as_ref().unwrap().name, None);
+}
+
 #[test]
 fn archiving_moves_a_thread_from_inbox_to_archive() {
     let db = open("archive");

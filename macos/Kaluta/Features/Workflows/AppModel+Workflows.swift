@@ -495,10 +495,9 @@ extension AppModel {
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
-        return [a(.replyNow, .primary, nil)]
-            + [a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil), a(.skip, .quiet, nil)]
-            + emailLinks(session, a, opens: true)
-            .map { var action = $0; action.suggested = action.command == mark; return action }
+        let all = [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
+                   a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
+        return all.map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
     /// The keys behind the email's links (spec §14.13): O opens it in its

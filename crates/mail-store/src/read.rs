@@ -558,9 +558,16 @@ fn fill_participants(conn: &Connection, message_rowid: i64, m: &mut Message) -> 
         Ok((r.get::<_, String>(0)?, EmailAddress { name: r.get(1)?, email: r.get(2)? }))
     })?;
     for row in rows {
-        let (role, addr) = row?;
+        let (role, mut addr) = row?;
         match role.as_str() {
-            "from" => m.from = Some(addr),
+            "from" => {
+                // An email sent without a display name: the name the same
+                // address wrote with last time, if any.
+                if addr.name.as_deref().unwrap_or("").trim().is_empty() {
+                    addr.name = known_name(conn, &addr.email)?;
+                }
+                m.from = Some(addr);
+            }
             "to" => m.to.push(addr),
             "cc" => m.cc.push(addr),
             "bcc" => m.bcc.push(addr),
@@ -569,6 +576,17 @@ fn fill_participants(conn: &Connection, message_rowid: i64, m: &mut Message) -> 
         }
     }
     Ok(())
+}
+
+/// The display name an address last wrote with, in any message.
+fn known_name(conn: &Connection, email: &str) -> StoreResult<Option<String>> {
+    Ok(conn
+        .prepare_cached(
+            "SELECT name FROM participants WHERE email = ?1 COLLATE NOCASE AND role = 'from'
+               AND name IS NOT NULL AND trim(name) <> '' ORDER BY message_id DESC LIMIT 1",
+        )?
+        .query_row([email], |r| r.get::<_, String>(0))
+        .optional()?)
 }
 
 pub(crate) fn encode_cursor(at: i64, id: i64) -> String {

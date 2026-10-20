@@ -16,7 +16,7 @@ struct WorkflowKeyGroup: Equatable, Identifiable {
 /// offers, so it lists what works here and names each as its button does.
 enum WorkflowKeys {
     private static let conversation: [WorkflowCommand] = [.conversation, .previousMessage, .nextMessage]
-    private static let email: [WorkflowCommand] = [.openInFull, .openInGmail, .forward]
+    private static let email: [WorkflowCommand] = [.openInFull, .openInGmail, .replyAll, .forward]
 
     static func groups(_ actions: [WorkflowAction], writing: Bool, loadImages: Bool) -> [WorkflowKeyGroup] {
         var decide: [WorkflowKey] = []
