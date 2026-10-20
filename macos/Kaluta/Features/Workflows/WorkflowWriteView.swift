@@ -138,7 +138,8 @@ struct WorkflowWriteView: View {
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-            if !writer.starters.isEmpty {
+            // Starters say what to tell Kaluta; writing it oneself, there is none.
+            if !writer.starters.isEmpty, !writer.ownWordsOnly {
                 HStack(spacing: Space.s) {
                     ForEach(writer.starters, id: \.self) { starter in
                         Button(starter) { writer.addStarter(starter) }
