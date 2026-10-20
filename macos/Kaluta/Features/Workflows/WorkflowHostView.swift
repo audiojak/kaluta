@@ -16,7 +16,8 @@ struct WorkflowHostView: View {
     var body: some View {
         let actions = model.workflowActions()
         VStack(spacing: 0) {
-            WorkflowHeader(kind: session.kind, progress: session.progress, pill: model.workflowPill(session)) {
+            WorkflowHeader(kind: session.kind, progress: session.progress, pill: model.workflowPill(session),
+                           keys: session.isFinished ? nil : { session.showsKeys = true }) {
                 model.leaveWorkflow()
             }
             WorkflowProgress(kind: session.kind, decided: session.decided, total: session.total)
@@ -136,6 +137,12 @@ struct WorkflowHostView: View {
             }
             Task { await model.performWorkflow(command) }
             return .handled
+        }
+        // ?: every key this screen answers.
+        .sheet(isPresented: Binding(get: { session.showsKeys }, set: { session.showsKeys = $0 })) {
+            WorkflowKeysView(groups: WorkflowKeys.groups(actions, writing: session.writer != nil,
+                                                         loadImages: model.canLoadImagesOnScreen),
+                             kind: session.kind) { session.showsKeys = false }
         }
         .accessibilityElement(children: .contain)
         .accessibilityActions {

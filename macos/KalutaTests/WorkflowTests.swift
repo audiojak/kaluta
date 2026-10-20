@@ -32,6 +32,7 @@ struct WorkflowTests {
             (KeyEquivalent("f"), "f", [], .forward),
             (KeyEquivalent("p"), "p", [], .previousMessage),
             (KeyEquivalent("n"), "n", [], .nextMessage),
+            (KeyEquivalent("?"), "?", .shift, .showKeys),
             (KeyEquivalent("2"), "2", [], .pick2),
             (KeyEquivalent("/"), "/", [], .tellKaluta),
             // ⌘E clears a reading bucket; another modifier makes it a menu key.
@@ -176,6 +177,24 @@ struct WorkflowTests {
         let many = (1...5).map { message("p\($0)@example.com", "P\($0)") }
         #expect(ConversationStack.summary(many, earlierOnly: true, own: own).hasSuffix("P1, P2, P3 + 2"))
         #expect(ConversationStack.sender(me, own: own, capitalized: true) == "You")
+    }
+
+    /// ? lists what the screen offers, grouped, named as its buttons are.
+    @Test func theKeyListGroupsWhatTheScreenOffers() {
+        func act(_ c: WorkflowCommand, _ title: String? = nil) -> WorkflowAction {
+            WorkflowAction(command: c, title: title ?? c.title(in: .triage))
+        }
+        let actions = [act(.replyNow, "Reply to Jordan"), act(.task), act(.done), act(.skip), act(.openInFull),
+                       act(.forward), act(.nextMessage), act(.conversation), act(.previousMessage), act(.openInGmail)]
+        let groups = WorkflowKeys.groups(actions, writing: false, loadImages: true)
+        #expect(groups.map(\.title) == ["Decide", "The email", "The conversation", "Getting around"])
+        #expect(groups[0].keys.first == WorkflowKey(key: "Return, R", title: "Reply to Jordan"))
+        #expect(groups[1].keys.map(\.key) == ["O", "F", "G", "⇧⌘I"])
+        #expect(groups[2].keys.map(\.key) == ["C", "P", "N"], "in the order the line shows them")
+        #expect(groups[3].keys.first == WorkflowKey(key: "Esc", title: "Back to Mail"))
+        let writing = WorkflowKeys.groups([act(.send), act(.back, "Cancel")], writing: true, loadImages: false)
+        #expect(writing.map(\.title) == ["Decide", "Getting around"])
+        #expect(writing.last?.keys.first?.title == "Cancel")
     }
 
     /// P goes back through the conversation from the card's email, N

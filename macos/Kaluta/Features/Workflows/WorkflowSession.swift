@@ -81,6 +81,8 @@ final class WorkflowSession {
     /// The conversation's message last opened on the card: what Reply (R,
     /// Return), Reply all (A) and Forward (F) answer. Nil: the card's email.
     var answeringMessageID: String?
+    /// The key list (?) is open.
+    var showsKeys = false
     /// Those messages as sanitized HTML, and their inline images, by
     /// message id.
     var messageBodies: [String: RenderedBody] = [:]

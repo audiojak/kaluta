@@ -16,29 +16,34 @@ struct ConversationStack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Button {
-                // A click works while writing too, where C is typing.
-                withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
-            } label: {
-                HStack(spacing: Space.s) {
-                    Image(systemName: session.showsConversation ? "chevron.down" : "chevron.right")
-                        .font(TypeRole.workflowKey)
-                        .frame(width: Space.l)
-                    Text(Self.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Keycap(key: "C")
-                    // Message by message, as in Gmail.
-                    Keycap(key: "P")
-                    Keycap(key: "N")
+            HStack(spacing: Space.l) {
+                Button {
+                    // A click works while writing too, where C is typing.
+                    withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
+                } label: {
+                    HStack(spacing: Space.s) {
+                        Image(systemName: session.showsConversation ? "chevron.down" : "chevron.right")
+                            .font(TypeRole.workflowKey)
+                            .frame(width: Space.l)
+                        Text(Self.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(-1)
+                        hint(session.showsConversation ? "Hide" : "Show", key: "C")
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
+                // Message by message, as in Gmail.
+                Button { Task { await model.performWorkflow(.previousMessage) } } label: { hint("Previous", key: "P") }
+                    .buttonStyle(.plain)
+                    .hoverHelp("Open the message before (P)")
+                Button { Task { await model.performWorkflow(.nextMessage) } } label: { hint("Next", key: "N") }
+                    .buttonStyle(.plain)
+                    .hoverHelp("Open the message after, or back to this email (N)")
             }
-            .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .hoverHelp(session.showsConversation
-                ? "Hide the conversation (C); P and N go to the previous and next message"
-                : "Show the rest of the conversation (C), or go message by message with P and N")
             if session.showsConversation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(messages, id: \.id) { message in
@@ -100,6 +105,15 @@ struct ConversationStack: View {
             }
         }
         .padding(.vertical, Space.m)
+    }
+
+    /// A word for what a key does, and the key.
+    private func hint(_ label: String, key: String) -> some View {
+        HStack(spacing: Space.xs) {
+            Text(label)
+            Keycap(key: key)
+        }
+        .fixedSize()
     }
 
     /// The message's own Reply, Reply all and Forward; on the one being
