@@ -44,6 +44,7 @@ struct WorkflowHostView: View {
                                     .frame(maxWidth: Self.readingWidth, alignment: .leading)
                                     .frame(maxWidth: .infinity)
                             }
+                            .coordinateSpace(.named(ConversationLine.scrollSpace))
                             .scrollPosition($scroll)
                             .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { _, g in scrollGeometry = g }
                             // Each writing step comes into view above the bar.
@@ -57,13 +58,16 @@ struct WorkflowHostView: View {
                             .onChange(of: session.answeringMessageID) { _, id in
                                 guard let id, session.writer == nil else { return }
                                 withAnimation(AppModel.itemMotion) {
-                                    proxy.scrollTo(ConversationStack.rowID(id), anchor: .top)
+                                    proxy.scrollTo(ConversationStack.rowID(id), anchor: Self.selectedAnchor)
                                 }
                             }
                         }
                         .id(item.key)
                         .transition(itemTransition)
                     }
+                    // The conversation's line, pinned once scrolled past, so its
+                    // keys stay in view.
+                    .overlay(alignment: .top) { pinnedConversationLine(item) }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
                     .safeAreaInset(edge: .bottom, spacing: 0) { decisionBar(actions) }
@@ -155,6 +159,28 @@ struct WorkflowHostView: View {
             Button(WorkflowCommand.whereAmI.title(in: session.kind)) { // no-help: VoiceOver action
                 Task { await model.performWorkflow(.whereAmI) }
             }
+        }
+    }
+
+    /// Where P and N bring a message's header: a fifth of the way down.
+    static let selectedAnchor = UnitPoint(x: 0.5, y: 0.2)
+
+    @ViewBuilder
+    private func pinnedConversationLine(_ item: WorkflowItem) -> some View {
+        if session.showsConversation, session.conversationLinePassed, let id = model.threadID(of: item),
+           let detail = session.threads[id] {
+            let others = AppModel.otherMessages(detail, session.kind)
+            let latest = AppModel.shownMessage(detail, session.kind)
+            ConversationLine(session: session, messages: others,
+                             earlierOnly: others.allSatisfy { $0.date <= latest?.date ?? .max })
+                .padding(.horizontal, Space.xxxl)
+                .padding(.vertical, Space.m)
+                .background(Tone.workflowSurface)
+                .overlay(alignment: .bottom) { InsetRule(inset: 0) }
+                .padding(.horizontal, Space.page)
+                .frame(maxWidth: Self.readingWidth)
+                .frame(maxWidth: .infinity)
+                .transition(.opacity)
         }
     }
 
@@ -290,105 +316,111 @@ struct WorkflowItemView: View {
                         ConversationStack(session: session, threadID: detail.thread.id, messages: others,
                                           earlierOnly: others.allSatisfy { $0.date <= latest?.date ?? .max })
                     }
-                    HStack(alignment: .firstTextBaseline, spacing: Space.l) {
-                        Text(Self.contextLine(latest))
-                            .foregroundStyle(.secondary)
-                        // What kind of email it is (Triage): a newsletter, a receipt…
-                        if let category = Self.categoryTitle(session.suggestions[detail.thread.id]) {
-                            Text(category)
-                                .font(TypeRole.workflowKey).fontWeight(.semibold)
-                                .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
-                                .background(Tone.workflow(session.kind).opacity(0.14), in: Capsule())
-                                .accessibilityLabel("Kind of email: \(category)")
-                        }
-                        Spacer(minLength: 0)
-                        if session.rendered[detail.thread.id]?.hasRemoteImages == true,
-                           !model.workflowImagesAllowed(detail.thread.id, session: session) {
-                            Button { session.imagesLoaded.insert(detail.thread.id) } label: {
-                                HStack(spacing: Space.s) {
-                                    Text("Load images")
-                                    Keycap(key: "⇧⌘I")
-                                }
+                    // Stepping through earlier messages (P, N): the card's own email
+                    // steps back until N returns to it.
+                    VStack(alignment: .leading, spacing: Space.l) {
+                        HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                            Text(Self.contextLine(latest))
+                                .foregroundStyle(.secondary)
+                            // What kind of email it is (Triage): a newsletter, a receipt…
+                            if let category = Self.categoryTitle(session.suggestions[detail.thread.id]) {
+                                Text(category)
+                                    .font(TypeRole.workflowKey).fontWeight(.semibold)
+                                    .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                                    .background(Tone.workflow(session.kind).opacity(0.14), in: Capsule())
+                                    .accessibilityLabel("Kind of email: \(category)")
                             }
-                            .buttonStyle(.link)
-                            .hoverHelp("Show this email's pictures; loading them tells the sender it was opened (⇧⌘I)")
-                        }
-                        // At the top, where a long email cannot push it out of view.
-                        if [.triage, .replies, .tasks, .waiting].contains(session.kind) {
-                            Button { Task { await model.performWorkflow(.openInFull) } } label: {
-                                HStack(spacing: Space.s) {
-                                    Text("Open the email")
-                                    Keycap(key: "O")
+                            Spacer(minLength: 0)
+                            if session.rendered[detail.thread.id]?.hasRemoteImages == true,
+                               !model.workflowImagesAllowed(detail.thread.id, session: session) {
+                                Button { session.imagesLoaded.insert(detail.thread.id) } label: {
+                                    HStack(spacing: Space.s) {
+                                        Text("Load images")
+                                        Keycap(key: "⇧⌘I")
+                                    }
                                 }
+                                .buttonStyle(.link)
+                                .hoverHelp("Show this email's pictures; loading them tells the sender it was opened (⇧⌘I)")
                             }
-                            .buttonStyle(.link)
-                            .hoverHelp("Open the email in its own window, as it was sent (O)")
-                        }
-                        // In every workflow with a conversation, for a Gmail account.
-                        if model.gmailURL(threadID: detail.thread.id) != nil {
-                            Button { Task { await model.performWorkflow(.openInGmail) } } label: {
-                                HStack(spacing: Space.s) {
-                                    Text("Open in Gmail")
-                                    Keycap(key: "G")
+                            // At the top, where a long email cannot push it out of view.
+                            if [.triage, .replies, .tasks, .waiting].contains(session.kind) {
+                                Button { Task { await model.performWorkflow(.openInFull) } } label: {
+                                    HStack(spacing: Space.s) {
+                                        Text("Open the email")
+                                        Keycap(key: "O")
+                                    }
                                 }
+                                .buttonStyle(.link)
+                                .hoverHelp("Open the email in its own window, as it was sent (O)")
                             }
-                            .buttonStyle(.link)
-                            .hoverHelp("Open this conversation in Gmail in your browser (G)")
+                            // In every workflow with a conversation, for a Gmail account.
+                            if model.gmailURL(threadID: detail.thread.id) != nil {
+                                Button { Task { await model.performWorkflow(.openInGmail) } } label: {
+                                    HStack(spacing: Space.s) {
+                                        Text("Open in Gmail")
+                                        Keycap(key: "G")
+                                    }
+                                }
+                                .buttonStyle(.link)
+                                .hoverHelp("Open this conversation in Gmail in your browser (G)")
+                            }
                         }
-                    }
-                    .font(TypeRole.workflowContext)
-                    // Who else it went to: Reply all (A) reaches them too.
-                    if let latest, let line = Self.recipientsLine(latest, own: model.ownAddresses) {
-                        Text(line)
-                            .font(TypeRole.workflowContext)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    if model.task(of: item) == nil {
-                        Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
-                            .font(TypeRole.workflowDisplay)
-                    }
-                    // Weekly reading: Kaluta's summary until it is opened in full.
-                    // Triage: a long email's summary, the email itself under it.
-                    let full = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
-                    let summary = session.kind == .reading && !session.showsInFull
-                        ? session.summaries[detail.thread.id]?.summary
-                        : session.kind == .triage ? Self.triageSummary(session.suggestions[detail.thread.id], text: full)
-                        : nil
-                    if let summary {
-                        Label("Kaluta's summary", systemImage: "sparkle")
-                            .font(TypeRole.workflowContext).foregroundStyle(.secondary)
-                        Text(summary)
-                            .font(TypeRole.workflowContent)
-                            .lineSpacing(Space.xs)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                    if summary == nil || session.kind == .triage {
-                        if let html = session.rendered[detail.thread.id]?.html {
-                            if summary != nil { InsetRule(inset: 0) }
-                            // The email as it was sent: its own formatting, in
-                            // the reader's locked-down web view.
-                            WorkflowEmailBody(html: html,
-                                              allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session),
-                                              inlineImages: session.inlineImages[detail.thread.id] ?? [:])
-                        } else if summary == nil {
-                            // What the email asks, marked where an answer is written.
-                            Text(Self.asksAnswer(session.kind)
-                                ? WritingText.highlighted(full, questions: WritingText.questions(in: full),
-                                                          tint: Tone.workflow(session.kind).opacity(0.16))
-                                : AttributedString(full))
+                        .font(TypeRole.workflowContext)
+                        // Who else it went to: Reply all (A) reaches them too.
+                        if let latest, let line = Self.recipientsLine(latest, own: model.ownAddresses) {
+                            Text(line)
+                                .font(TypeRole.workflowContext)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        if model.task(of: item) == nil {
+                            Text(detail.thread.subject.isEmpty ? "(no subject)" : detail.thread.subject)
+                                .font(TypeRole.workflowDisplay)
+                        }
+                        // Weekly reading: Kaluta's summary until it is opened in full.
+                        // Triage: a long email's summary, the email itself under it.
+                        let full = session.bodies[detail.thread.id] ?? latest?.snippet ?? ""
+                        let summary = session.kind == .reading && !session.showsInFull
+                            ? session.summaries[detail.thread.id]?.summary
+                            : session.kind == .triage ? Self.triageSummary(session.suggestions[detail.thread.id], text: full)
+                            : nil
+                        if let summary {
+                            Label("Kaluta's summary", systemImage: "sparkle")
+                                .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                            Text(summary)
                                 .font(TypeRole.workflowContent)
                                 .lineSpacing(Space.xs)
                                 .fixedSize(horizontal: false, vertical: true)
-                                // To copy from, for research or into the reply.
                                 .textSelection(.enabled)
                         }
+                        if summary == nil || session.kind == .triage {
+                            if let html = session.rendered[detail.thread.id]?.html {
+                                if summary != nil { InsetRule(inset: 0) }
+                                // The email as it was sent: its own formatting, in
+                                // the reader's locked-down web view.
+                                WorkflowEmailBody(html: html,
+                                                  allowRemote: model.workflowImagesAllowed(detail.thread.id, session: session),
+                                                  inlineImages: session.inlineImages[detail.thread.id] ?? [:])
+                            } else if summary == nil {
+                                // What the email asks, marked where an answer is written.
+                                Text(Self.asksAnswer(session.kind)
+                                    ? WritingText.highlighted(full, questions: WritingText.questions(in: full),
+                                                              tint: Tone.workflow(session.kind).opacity(0.16))
+                                    : AttributedString(full))
+                                    .font(TypeRole.workflowContent)
+                                    .lineSpacing(Space.xs)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    // To copy from, for research or into the reply.
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        // The email's own files: preview, open, drag or save.
+                        if let files = latest?.attachments.filter({ !$0.isInline }), !files.isEmpty {
+                            AttachmentStrip(attachments: files, inset: 0)
+                        }
                     }
-                    // The email's own files: preview, open, drag or save.
-                    if let files = latest?.attachments.filter({ !$0.isInline }), !files.isEmpty {
-                        AttachmentStrip(attachments: files, inset: 0)
-                    }
+                    .opacity(model.answeringEarlier(session) == nil ? 1 : Self.dimmed)
+                    .animation(AppModel.itemMotion, value: session.answeringMessageID)
                 }
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -424,6 +456,9 @@ struct WorkflowItemView: View {
         guard let category = suggestion?.category, !category.isEmpty else { return nil }
         return category.prefix(1).uppercased() + category.dropFirst()
     }
+
+    /// The card's email while an earlier message is the one answered.
+    static let dimmed = 0.45
 
     /// Longer than this, an email with a summary shows the summary.
     static let longEmail = 800

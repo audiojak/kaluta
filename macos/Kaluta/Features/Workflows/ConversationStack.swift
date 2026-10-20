@@ -16,49 +16,17 @@ struct ConversationStack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.l) {
-                // What the line is about, then who wrote, quieter; the
-                // names give way first when room runs short.
-                Button(action: toggle) {
-                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                        Image(systemName: session.showsConversation ? "chevron.down" : "chevron.right")
-                            .font(TypeRole.workflowKey)
-                            .foregroundStyle(.secondary)
-                            .frame(width: Space.l)
-                        Text(Self.head(messages, earlierOnly: earlierOnly))
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.primary)
-                            .fixedSize()
-                        if let names = Self.names(messages, own: model.ownAddresses) {
-                            Text("· \(names)")
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                    }
-                    .contentShape(Rectangle())
+            ConversationLine(session: session, messages: messages, earlierOnly: earlierOnly)
+                // Scrolled past while open: the line pins under the header.
+                .onGeometryChange(for: Bool.self) { proxy in
+                    proxy.frame(in: .named(ConversationLine.scrollSpace)).maxY < 0
+                } action: { passed in
+                    session.conversationLinePassed = passed
                 }
-                .buttonStyle(.plain)
-                .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
-                .accessibilityLabel(Self.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
-                Spacer(minLength: Space.m)
-                // The keys, as the email's own links below show theirs.
-                link(session.showsConversation ? "Hide" : "Show", key: "C",
-                     help: session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)",
-                     action: toggle)
-                // Message by message, as in Gmail.
-                link("Previous", key: "P", help: "Open the message before (P)") {
-                    Task { await model.performWorkflow(.previousMessage) }
-                }
-                link("Next", key: "N", help: "Open the message after, or back to this email (N)") {
-                    Task { await model.performWorkflow(.nextMessage) }
-                }
-            }
             if session.showsConversation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(messages, id: \.id) { message in
                         row(message)
-                            .id(Self.rowID(message.id))
                         InsetRule(inset: 0)
                     }
                 }
@@ -70,6 +38,9 @@ struct ConversationStack: View {
 
     private func row(_ message: MessageInfo) -> some View {
         let open = session.openMessages.contains(message.id)
+        // The one Reply answers: raised, marked and tagged.
+        let current = open && session.answeringMessageID == message.id
+        let tint = Tone.workflow(session.kind)
         let files = message.attachments.filter { !$0.isInline }
         return VStack(alignment: .leading, spacing: Space.s) {
             Button { Task { await model.toggleConversationMessage(message, session: session) } } label: {
@@ -79,6 +50,19 @@ struct ConversationStack: View {
                             .fontWeight(.semibold)
                         Text(Self.when(message))
                             .foregroundStyle(.secondary)
+                        if current {
+                            HStack(spacing: Space.xs) {
+                                Text("Selected ·")
+                                Keycap(key: "R")
+                                Text("replies to this")
+                            }
+                            .font(TypeRole.workflowKey).fontWeight(.semibold)
+                            .foregroundStyle(tint)
+                            .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                            .background(tint.opacity(0.14), in: Capsule())
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Selected: Reply answers this message")
+                        }
                         Spacer(minLength: 0)
                     }
                     if !open {
@@ -115,25 +99,25 @@ struct ConversationStack: View {
             }
         }
         .padding(.vertical, Space.m)
-    }
-
-    private func toggle() {
-        // A click works while writing too, where C is typing.
-        withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
-    }
-
-    /// A key's link: what it does, and the key, as *Open the email O*.
-    private func link(_ label: String, key: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: Space.s) {
-                Text(label)
-                Keycap(key: key)
+        // Into the card's margin, so the text does not move when selected.
+        .background {
+            if current {
+                RoundedRectangle(cornerRadius: Radius.card)
+                    .fill(tint.opacity(0.06))
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(tint).frame(width: Self.bar).padding(.vertical, Space.m)
+                    }
+                    .padding(.horizontal, -Space.l)
             }
         }
-        .buttonStyle(.link)
-        .fixedSize()
-        .hoverHelp(help)
+        // Where P and N bring the message: its header, a fifth of the way down.
+        .background(alignment: .top) {
+            Color.clear.frame(height: 1).id(Self.rowID(message.id))
+        }
+        .animation(AppModel.itemMotion, value: current)
     }
+
+    static let bar: CGFloat = 3
 
     /// The message's own Reply, Reply all and Forward; on the one being
     /// answered, with their keys.
@@ -205,5 +189,84 @@ struct ConversationStack: View {
 
     static func when(_ message: MessageInfo) -> String {
         Date(timeIntervalSince1970: TimeInterval(message.date) / 1000).formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+/// The conversation's line: "3 earlier messages · 2 of 3 · names" and its
+/// keys as links (Show C, Previous P, Next N). On the card, and pinned
+/// under the header once scrolled past while the conversation is open.
+struct ConversationLine: View {
+    @Environment(AppModel.self) private var model
+    let session: WorkflowSession
+    let messages: [MessageInfo]
+    let earlierOnly: Bool
+
+    /// The workflow's scroll view, for telling when the line has scrolled away.
+    static let scrollSpace = "workflowScroll"
+
+    var body: some View {
+            HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                // What the line is about, then who wrote, quieter; the
+                // names give way first when room runs short.
+                Button(action: toggle) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Image(systemName: session.showsConversation ? "chevron.down" : "chevron.right")
+                            .font(TypeRole.workflowKey)
+                            .foregroundStyle(.secondary)
+                            .frame(width: Space.l)
+                        Text(ConversationStack.head(messages, earlierOnly: earlierOnly))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                            .fixedSize()
+                        // Where P and N are: "2 of 3".
+                        if let at = messages.firstIndex(where: { $0.id == session.answeringMessageID }) {
+                            Text("· \(at + 1) of \(messages.count)")
+                                .foregroundStyle(.primary)
+                                .fixedSize()
+                        }
+                        if let names = ConversationStack.names(messages, own: model.ownAddresses) {
+                            Text("· \(names)")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
+                .accessibilityLabel(ConversationStack.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
+                Spacer(minLength: Space.m)
+                // The keys, as the email's own links below show theirs.
+                link(session.showsConversation ? "Hide" : "Show", key: "C",
+                     help: session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)",
+                     action: toggle)
+                // Message by message, as in Gmail.
+                link("Previous", key: "P", help: "Open the message before (P)") {
+                    Task { await model.performWorkflow(.previousMessage) }
+                }
+                link("Next", key: "N", help: "Open the message after, or back to this email (N)") {
+                    Task { await model.performWorkflow(.nextMessage) }
+                }
+            }
+        .font(TypeRole.workflowContext)
+    }
+
+    private func toggle() {
+        // A click works while writing too, where C is typing.
+        withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
+    }
+
+    /// A key's link: what it does, and the key, as *Open the email O*.
+    private func link(_ label: String, key: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Space.s) {
+                Text(label)
+                Keycap(key: key)
+            }
+        }
+        .buttonStyle(.link)
+        .fixedSize()
+        .hoverHelp(help)
     }
 }
