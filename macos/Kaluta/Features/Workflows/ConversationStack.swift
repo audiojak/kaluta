@@ -38,7 +38,7 @@ struct ConversationStack: View {
 
     private func row(_ message: MessageInfo) -> some View {
         let open = session.openMessages.contains(message.id)
-        // The one Reply answers: raised, marked and tagged.
+        // The one Reply answers: raised and marked.
         let current = open && session.answeringMessageID == message.id
         let tint = Tone.workflow(session.kind)
         let files = message.attachments.filter { !$0.isInline }
@@ -50,19 +50,6 @@ struct ConversationStack: View {
                             .fontWeight(.semibold)
                         Text(Self.when(message))
                             .foregroundStyle(.secondary)
-                        if current {
-                            HStack(spacing: Space.xs) {
-                                Text("Selected ·")
-                                Keycap(key: "R")
-                                Text("replies to this")
-                            }
-                            .font(TypeRole.workflowKey).fontWeight(.semibold)
-                            .foregroundStyle(tint)
-                            .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
-                            .background(tint.opacity(0.14), in: Capsule())
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Selected: Reply answers this message")
-                        }
                         Spacer(minLength: 0)
                     }
                     if !open {
@@ -80,6 +67,8 @@ struct ConversationStack: View {
             }
             .buttonStyle(.plain)
             .hoverHelp(open ? "Close this message" : "Open this message")
+            // The highlight says it on screen; VoiceOver hears it.
+            .accessibilityAddTraits(current ? .isSelected : [])
             .accessibilityHint(open ? "Closes this message" : "Opens this message")
             if open {
                 if let html = session.messageBodies[message.id]?.html {

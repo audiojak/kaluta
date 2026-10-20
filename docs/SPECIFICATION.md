@@ -4549,8 +4549,8 @@ one decision with a one-line reason:
   The stack's line says what its keys do: *Show C* (*Hide C*),
   *Previous P*, *Next N*, the last two clickable too.
   The selected message (the one answered) is raised on a wash of the
-  workflow's colour with a bar down its left edge and a tag, *Selected ·
-  R replies to this*; the line counts where it is (*2 of 3*), and the
+  workflow's colour with a bar down its left edge (VoiceOver hears it as
+  selected); the line counts where it is (*2 of 3*), and the
   card's own email dims until N returns to it. P and N bring the
   message's header a fifth of the way down the screen, not to the very
   top. Scrolled past while the conversation is open, the line pins under
