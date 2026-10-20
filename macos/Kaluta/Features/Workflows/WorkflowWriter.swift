@@ -40,6 +40,9 @@ final class WorkflowWriter {
     let answers: [Answer]
 
     private(set) var step: Step
+    /// *Write it myself* from the answers: what is typed is the email,
+    /// Kaluta writes nothing.
+    private(set) var ownWordsOnly = false
     /// The field: what to say, or (on the final screen) what to change.
     var field = ""
     /// What the user told Kaluta, in order: the first is what to say,
@@ -88,7 +91,26 @@ final class WorkflowWriter {
     /// From the answers to *Tell Kaluta what to say…*.
     func tellKaluta() {
         guard step == .choose else { return }
+        ownWordsOnly = false
         step = .say
+    }
+
+    /// From the answers to *Write it myself* (⌘Return): a field whose
+    /// words are the email.
+    func writeMyself() {
+        guard step == .choose else { return }
+        ownWordsOnly = true
+        step = .say
+    }
+
+    /// Esc on *What do you want to say?*: back to the answers, when there
+    /// are any. False: nothing to go back to (the writer closes).
+    func backToAnswers() -> Bool {
+        guard step == .say, !answers.isEmpty else { return false }
+        field = ""
+        ownWordsOnly = false
+        step = .choose
+        return true
     }
 
     /// Back from the final email to what the user said, to change it.
@@ -96,7 +118,7 @@ final class WorkflowWriter {
         guard step == .final else { return }
         field = directions.first.map { $0.hasPrefix("Chose: ") ? "" : $0 } ?? ""
         directions = []
-        step = answers.isEmpty ? .say : .choose
+        step = answers.isEmpty || ownWordsOnly ? .say : .choose
     }
 
     /// Return on *What do you want to say?*: Kaluta writes it, or, with no
@@ -106,8 +128,9 @@ final class WorkflowWriter {
         guard step == .say, !said.isEmpty else { return }
         directions = [said]
         field = ""
-        // Use my words, or no agent ready: what the user typed is the email.
-        guard model.agent.isProviderReady, !asWritten else {
+        // Use my words, Write it myself, or no agent ready: what the user
+        // typed is the email.
+        guard model.agent.isProviderReady, !asWritten, !ownWordsOnly else {
             text = said
             aiText = nil
             step = .final

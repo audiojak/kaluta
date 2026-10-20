@@ -4470,8 +4470,12 @@ are looked for as each account opens.
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
   highlighted in it); Kaluta writes after that (Return). *Use my words*
-  (⌘Return) takes what was typed as the email, unrewritten, to the same
-  editable screen, where ⌘Return sends it.
+  (⇧⌘M; not ⌘Return, which sends) takes what was typed as the email,
+  unrewritten, to the same editable screen. The answers screen offers
+  *Write it myself* (⇧⌘M) too: a field whose words are the email
+  (Return), Kaluta writing nothing. Esc on the field goes back
+  to the answers where there are any; *Change what I said* on the email
+  goes back to the words.
 - **Every AI-written email from the user's own accounts ends on an
   editable screen**: the text that will be sent, at content size, with
   what the user said (or chose) above it and *Change*, quick changes

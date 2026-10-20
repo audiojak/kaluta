@@ -45,6 +45,10 @@ struct WorkflowWriteView: View {
                 Button("Back") { perform(.back) } // no-help: hidden
                     .keyboardShortcut(.escape, modifiers: [])
                     .hidden()
+                // ⇧⌘M from inside the field: the words as written.
+                Button("Use my words") { perform(.ownWords) } // no-help: hidden
+                    .keyboardShortcut("m", modifiers: [.command, .shift])
+                    .hidden()
                 Button("Discard") { perform(.discard) } // no-help: hidden
                     .keyboardShortcut(".", modifiers: .command)
                     .hidden()
@@ -105,8 +109,9 @@ struct WorkflowWriteView: View {
     private var say: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text(Self.askTitle(session.kind)).font(TypeRole.workflowHeading)
-                Text(model.agent.isProviderReady
+                Text(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
+                    .font(TypeRole.workflowHeading)
+                Text(model.agent.isProviderReady && !writer.ownWordsOnly
                      ? "Kaluta writes the email from it, for you to read and change before it goes."
                      : "What you type is the email.")
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
@@ -119,7 +124,7 @@ struct WorkflowWriteView: View {
                     .focused($fieldFocused)
                     .onSubmit { perform(.primary) }
                     .onExitCommand { perform(.back) }
-                    .accessibilityLabel(Self.askTitle(session.kind))
+                    .accessibilityLabel(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
                 // macOS dictation into the field, as Edit › Start Dictation
                 // (or the dictation key) does.
                 Button { startDictation() } label: {
@@ -133,7 +138,8 @@ struct WorkflowWriteView: View {
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-            if !writer.starters.isEmpty {
+            // Starters say what to tell Kaluta; writing it oneself, there is none.
+            if !writer.starters.isEmpty, !writer.ownWordsOnly {
                 HStack(spacing: Space.s) {
                     ForEach(writer.starters, id: \.self) { starter in
                         Button(starter) { writer.addStarter(starter) }
