@@ -582,17 +582,25 @@ extension AppModel {
             let picks: [WorkflowCommand] = [.pick1, .pick2, .pick3]
             return picks.prefix(writer.answers.count).map { var x = a($0, .plain, nil); x.shown = false; return x }
                 // The answers' own row says "None of these? Tell Kaluta…".
-                + [{ var x = a(.tellKaluta, .plain, nil); x.shown = false; return x }(), a(.back, .quiet, "Cancel")]
+                + [{ var x = a(.tellKaluta, .plain, nil); x.shown = false; return x }(),
+                   a(.ownWords, .plain, "Write it myself"), a(.back, .quiet, "Cancel")]
         case .say:
             // Kaluta drafts from what the user said; or their words go as
             // written. ⌘. discards here too, as Cancel does.
             var discard = a(.discard, .quiet, nil)
             discard.shown = false
-            guard agent.isProviderReady else {
-                return [a(.primary, .primary, "Write it yourself"), a(.back, .quiet, "Cancel"), discard]
+            // From the answers, Esc goes back to them.
+            let back = a(.back, .quiet, writer.answers.isEmpty ? "Cancel" : "Back to the answers")
+            if writer.ownWordsOnly {
+                // Return and ⌘Return both take the words as they are.
+                var words = a(.ownWords, .plain, nil)
+                words.shown = false
+                return [a(.primary, .primary, "Use my words"), words, back, discard]
             }
-            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), a(.back, .quiet, "Cancel"),
-                    discard]
+            guard agent.isProviderReady else {
+                return [a(.primary, .primary, "Write it yourself"), back, discard]
+            }
+            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), back, discard]
         case .final:
             let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
@@ -611,7 +619,10 @@ extension AppModel {
         case (.choose, .pick2): writer.pick(1)
         case (.choose, .pick3): writer.pick(2)
         case (.choose, .tellKaluta): writer.tellKaluta()
-        case (.choose, .back), (.say, .back), (_, .discard):
+        case (.choose, .ownWords): writer.writeMyself()
+        case (.say, .back):
+            if !writer.backToAnswers() { session.writer = nil }
+        case (.choose, .back), (_, .discard):
             session.writer = nil
         case (.say, .primary):
             await writer.write(model: self)
@@ -673,10 +684,7 @@ extension AppModel {
         // Return in an item is Reply, and nothing where there is none. C
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
-            : command == .copyCode && !actions.contains(.copyCode) ? .conversation
-            // ⌘Return on *What do you want to say?*: the words as written.
-            : command == .send && !actions.contains(.send) && actions.contains(.ownWords) ? .ownWords
-            : command
+            : command == .copyCode && !actions.contains(.copyCode) ? .conversation : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)

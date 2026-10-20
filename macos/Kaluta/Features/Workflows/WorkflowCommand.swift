@@ -102,9 +102,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .back: "Esc"
-        // Where it is offered (*What do you want to say?*), ⌘Return: the
-        // words as written, as ⌘Return sends them on the next step.
-        case .ownWords: "⌘Return"
+        // Where it is offered (the answers, *What do you want to say?*):
+        // the words as written. Not ⌘Return, which sends.
+        case .ownWords: "⇧⌘M"
         case .whatsLeft, .whereAmI: nil
         }
     }
@@ -129,6 +129,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         default: break
         }
         if modifiers == .command, characters.lowercased() == "e" { return .clearBucket }
+        if modifiers == [.command, .shift], characters.lowercased() == "m" { return .ownWords }
         guard modifiers.isDisjoint(with: [.command, .control, .option]),
               let c = characters.lowercased().first, characters.count == 1 else { return nil }
         return Self.characters[c]

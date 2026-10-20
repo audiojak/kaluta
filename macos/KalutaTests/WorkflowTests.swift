@@ -38,6 +38,8 @@ struct WorkflowTests {
             // ⌘E clears a reading bucket; another modifier makes it a menu key.
             (KeyEquivalent("e"), "e", .command, .clearBucket),
             (KeyEquivalent("e"), "e", [.command, .shift], nil),
+            (KeyEquivalent("m"), "m", [.command, .shift], .ownWords),
+            (KeyEquivalent("m"), "m", [], nil),
             (KeyEquivalent("x"), "x", [], nil),
         ]
         for (key, characters, modifiers, expected) in keys {
@@ -447,7 +449,23 @@ struct WorkflowTests {
         writer.field = "Happy to, next Tuesday at 10."
         await writer.write(model: model, asWritten: true)
         #expect(writer.step == .final && writer.text == "Happy to, next Tuesday at 10." && writer.aiText == nil)
-        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == "⌘Return")
+        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == "⇧⌘M")
+
+        // From the answers, Write it myself: the field's words are the email,
+        // whatever agent is ready; Esc goes back to the answers.
+        let answers = [WorkflowWriter.Answer(label: "Yes", text: "Yes."), WorkflowWriter.Answer(label: "No", text: "No.")]
+        let mine = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?",
+                                  answers: answers)
+        #expect(mine.step == .choose)
+        mine.writeMyself()
+        #expect(mine.step == .say && mine.ownWordsOnly)
+        #expect(mine.backToAnswers() && mine.step == .choose && !mine.ownWordsOnly)
+        mine.writeMyself()
+        mine.field = "Tuesday is fine."
+        await mine.write(model: model)
+        #expect(mine.step == .final && mine.text == "Tuesday is fine." && mine.aiText == nil)
+        mine.changeWhatISaid()
+        #expect(mine.step == .say && mine.field == "Tuesday is fine.", "back to the words, not the answers")
     }
 }
 
