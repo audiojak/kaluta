@@ -16,34 +16,44 @@ struct ConversationStack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            HStack(spacing: Space.l) {
-                Button {
-                    // A click works while writing too, where C is typing.
-                    withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
-                } label: {
-                    HStack(spacing: Space.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.l) {
+                // What the line is about, then who wrote, quieter; the
+                // names give way first when room runs short.
+                Button(action: toggle) {
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                         Image(systemName: session.showsConversation ? "chevron.down" : "chevron.right")
                             .font(TypeRole.workflowKey)
+                            .foregroundStyle(.secondary)
                             .frame(width: Space.l)
-                        Text(Self.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .layoutPriority(-1)
-                        hint(session.showsConversation ? "Hide" : "Show", key: "C")
+                        Text(Self.head(messages, earlierOnly: earlierOnly))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.primary)
+                            .fixedSize()
+                        if let names = Self.names(messages, own: model.ownAddresses) {
+                            Text("· \(names)")
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
+                .accessibilityLabel(Self.summary(messages, earlierOnly: earlierOnly, own: model.ownAddresses))
+                Spacer(minLength: Space.m)
+                // The keys, as the email's own links below show theirs.
+                link(session.showsConversation ? "Hide" : "Show", key: "C",
+                     help: session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)",
+                     action: toggle)
                 // Message by message, as in Gmail.
-                Button { Task { await model.performWorkflow(.previousMessage) } } label: { hint("Previous", key: "P") }
-                    .buttonStyle(.plain)
-                    .hoverHelp("Open the message before (P)")
-                Button { Task { await model.performWorkflow(.nextMessage) } } label: { hint("Next", key: "N") }
-                    .buttonStyle(.plain)
-                    .hoverHelp("Open the message after, or back to this email (N)")
+                link("Previous", key: "P", help: "Open the message before (P)") {
+                    Task { await model.performWorkflow(.previousMessage) }
+                }
+                link("Next", key: "N", help: "Open the message after, or back to this email (N)") {
+                    Task { await model.performWorkflow(.nextMessage) }
+                }
             }
-            .foregroundStyle(.secondary)
             if session.showsConversation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(messages, id: \.id) { message in
@@ -107,13 +117,22 @@ struct ConversationStack: View {
         .padding(.vertical, Space.m)
     }
 
-    /// A word for what a key does, and the key.
-    private func hint(_ label: String, key: String) -> some View {
-        HStack(spacing: Space.xs) {
-            Text(label)
-            Keycap(key: key)
+    private func toggle() {
+        // A click works while writing too, where C is typing.
+        withAnimation(AppModel.itemMotion) { session.showsConversation.toggle() }
+    }
+
+    /// A key's link: what it does, and the key, as *Open the email O*.
+    private func link(_ label: String, key: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: Space.s) {
+                Text(label)
+                Keycap(key: key)
+            }
         }
+        .buttonStyle(.link)
         .fixedSize()
+        .hoverHelp(help)
     }
 
     /// The message's own Reply, Reply all and Forward; on the one being
@@ -154,16 +173,25 @@ struct ConversationStack: View {
     /// messages · …" when some came after the email on the card. Up to
     /// three senders, in the order they first wrote, then "+ 2".
     static func summary(_ messages: [MessageInfo], earlierOnly: Bool, own: Set<String>) -> String {
+        let head = head(messages, earlierOnly: earlierOnly)
+        return names(messages, own: own).map { "\(head) · \($0)" } ?? head
+    }
+
+    /// "3 earlier messages"; "2 other messages" when some came after.
+    static func head(_ messages: [MessageInfo], earlierOnly: Bool) -> String {
         let noun = messages.count == 1 ? "message" : "messages"
-        let head = "\(messages.count) \(earlierOnly ? "earlier" : "other") \(noun)"
+        return "\(messages.count) \(earlierOnly ? "earlier" : "other") \(noun)"
+    }
+
+    /// "Paul Allen, Paul Sevilla, you", then "+ 2"; nil with no senders.
+    static func names(_ messages: [MessageInfo], own: Set<String>) -> String? {
         var names: [String] = []
         for message in messages {
             let name = sender(message, own: own, capitalized: false)
             if !names.contains(name) { names.append(name) }
         }
-        guard !names.isEmpty else { return head }
-        let shown = names.prefix(3).joined(separator: ", ")
-        return "\(head) · \(shown)\(names.count > 3 ? " + \(names.count - 3)" : "")"
+        guard !names.isEmpty else { return nil }
+        return names.prefix(3).joined(separator: ", ") + (names.count > 3 ? " + \(names.count - 3)" : "")
     }
 
     /// The sender's name, or "you" for the user.
