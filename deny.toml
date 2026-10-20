@@ -7,6 +7,13 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # basic-toml is archived (unmaintained, no successor release). It reaches
+  # Kaluta only at build time, through uniffi_bindgen's askama templates;
+  # it never runs in the app or reads mail. Drop this when uniffi moves off
+  # it. Accepted 2026-10-20.
+  { id = "RUSTSEC-2026-0374", reason = "build-time only, via uniffi_bindgen; no maintained release" },
+]
 
 [licenses]
 version = 2
