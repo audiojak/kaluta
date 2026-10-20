@@ -63,6 +63,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case ownWords
     /// Esc: back one step; from an item, back to Mail.
     case back
+    /// ?: every key the screen answers, grouped (as Gmail's ?).
+    case showKeys
     /// Answers aloud and on screen what is left of the set.
     case whatsLeft
     /// Answers which workflow and item this is.
@@ -85,6 +87,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .conversation: "C"
         case .forward: "F"
         case .previousMessage: "P"
+        case .showKeys: "?"
         case .nextMessage: "N"
         case .replyAll: "A"
         case .edit: "W"
@@ -106,7 +109,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
         "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
-        "f": .forward, "p": .previousMessage, "n": .nextMessage,
+        "f": .forward, "p": .previousMessage, "n": .nextMessage, "?": .showKeys,
         "i": .backToInbox, "c": .copyCode,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
@@ -163,8 +166,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             }
         case .conversation: "Show the conversation"
         case .forward: "Forward"
-        case .previousMessage: "Earlier message"
-        case .nextMessage: "Later message"
+        case .previousMessage: "Previous message"
+        case .showKeys: "Show or hide these keys"
+        case .nextMessage: "Next message"
         case .edit: "Edit…"
         case .openInGmail: "Open in Gmail"
         case .replyAll: "Reply all"

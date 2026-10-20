@@ -185,6 +185,8 @@ struct WorkflowHeader: View {
     let progress: String
     var backTitle = "Mail"
     var pill: String?
+    /// Opens the key list (?).
+    var keys: (() -> Void)?
     let back: () -> Void
 
     var body: some View {
@@ -200,6 +202,19 @@ struct WorkflowHeader: View {
             }
             .buttonStyle(.plain)
             .hoverHelp("\(backTitle) (Esc)")
+            if let keys {
+                Button(action: keys) {
+                    HStack(spacing: Space.xs) {
+                        Image(systemName: "keyboard")
+                        Text("Keys")
+                        Keycap(key: "?")
+                    }
+                    .font(TypeRole.workflowKey)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Every key on this screen (?)")
+            }
             Spacer(minLength: Space.m)
             HStack(spacing: Space.xs) {
                 Text(kind.title).fontWeight(.semibold)

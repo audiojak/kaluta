@@ -639,6 +639,12 @@ extension AppModel {
     func performWorkflow(_ command: WorkflowCommand) async {
         guard let session = workflowSession else { return }
         switch command {
+        case .showKeys:
+            session.showsKeys.toggle()
+            return
+        case .back where session.showsKeys:
+            session.showsKeys = false
+            return
         case .back where session.showsConversation && session.writer == nil && session.taskForm == nil
             && !session.choosingCheckAgain:
             // Esc closes the conversation first; the next Esc leaves.

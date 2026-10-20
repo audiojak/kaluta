@@ -4546,6 +4546,13 @@ one decision with a one-line reason:
   stack if needed and the message before, alone and answered; N the one
   after, and past the last, the card's email with the stack closed. The
   message comes into view.
+  The stack's line says what its keys do: *Show C* (*Hide C*),
+  *Previous P*, *Next N*, the last two clickable too.
+- **The key list (?).** ? (or *Keys ?* beside *Mail Esc* in the header)
+  opens every key the screen answers, grouped — Decide, The email, The
+  conversation, Getting around — each named as its button is here
+  (*Reply to Jordan*). Built from the screen's own commands, so it never
+  lists one that does nothing. Esc, ? or Done closes it.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and
