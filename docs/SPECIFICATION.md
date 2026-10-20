@@ -4469,7 +4469,9 @@ are looked for as each account opens.
   Kaluta what to say…* (/, with dictation). Otherwise the screen leads
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
-  highlighted in it); Kaluta writes after that.
+  highlighted in it); Kaluta writes after that (Return). *Use my words*
+  (⌘Return) takes what was typed as the email, unrewritten, to the same
+  editable screen, where ⌘Return sends it.
 - **Every AI-written email from the user's own accounts ends on an
   editable screen**: the text that will be sent, at content size, with
   what the user said (or chose) above it and *Change*, quick changes

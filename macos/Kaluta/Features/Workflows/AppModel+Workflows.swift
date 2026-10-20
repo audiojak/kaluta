@@ -674,7 +674,10 @@ extension AppModel {
         // Return in an item is Reply, and nothing where there is none. C
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
-            : command == .copyCode && !actions.contains(.copyCode) ? .conversation : command
+            : command == .copyCode && !actions.contains(.copyCode) ? .conversation
+            // ⌘Return on *What do you want to say?*: the words as written.
+            : command == .send && !actions.contains(.send) && actions.contains(.ownWords) ? .ownWords
+            : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)

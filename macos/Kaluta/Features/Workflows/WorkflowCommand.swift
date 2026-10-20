@@ -102,7 +102,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .back: "Esc"
-        case .whatsLeft, .whereAmI, .ownWords: nil
+        // Where it is offered (*What do you want to say?*), ⌘Return: the
+        // words as written, as ⌘Return sends them on the next step.
+        case .ownWords: "⌘Return"
+        case .whatsLeft, .whereAmI: nil
         }
     }
 

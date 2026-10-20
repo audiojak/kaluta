@@ -447,7 +447,7 @@ struct WorkflowTests {
         writer.field = "Happy to, next Tuesday at 10."
         await writer.write(model: model, asWritten: true)
         #expect(writer.step == .final && writer.text == "Happy to, next Tuesday at 10." && writer.aiText == nil)
-        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == nil)
+        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == "⌘Return")
     }
 }
 
