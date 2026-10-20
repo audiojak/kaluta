@@ -43,6 +43,15 @@ enum EmailDocument {
             }
         }
 
+        /// The Message menu's key for it, shown on the current message.
+        var shortcut: String {
+            switch self {
+            case .reply: "⌘R"
+            case .replyAll: "⇧⌘R"
+            case .forward: "⇧⌘F"
+            }
+        }
+
         /// The action and message id behind a link (`kaluta-action:reply/<id>`).
         static func parse(_ url: URL) -> (MessageAction, String)? {
             guard url.scheme == actionScheme else { return nil }
@@ -85,10 +94,13 @@ enum EmailDocument {
         <meta name="color-scheme" content="light dark">
         <style>\(stylesheet)</style></head><body>
         """
+        // Until another is clicked, the keys answer the latest message.
+        let latest = actions ? messages.last { !$0.isDraft }?.id : nil
         for (index, message) in messages.enumerated() {
             let expanded = onlyLatestOpen ? index == messages.count - 1
                 : isExpanded(message, index: index, count: messages.count)
-            out += "<details class=\"msg\(message.isDraft ? " draft" : "")\"\(expanded ? " open" : "") id=\"m-\(escape(message.id))\"><summary>"
+            let classes = "msg" + (message.isDraft ? " draft" : "") + (message.id == latest ? " current" : "")
+            out += "<details class=\"\(classes)\"\(expanded ? " open" : "") id=\"m-\(escape(message.id))\"><summary>"
             out += "<div class=\"avatar\" style=\"background:\(avatarColor(message.fromEmail))\" aria-hidden=\"true\">"
             out += "\(escape(initials(name: message.fromName, email: message.fromEmail)))</div>"
             out += "<div class=\"meta\"><div class=\"hdr\">"
@@ -129,7 +141,8 @@ enum EmailDocument {
                 out += "<div class=\"acts\">"
                 for action in MessageAction.allCases where action != .replyAll || message.offersReplyAll {
                     let id = message.id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? message.id
-                    out += "<a class=\"act\" href=\"\(actionScheme):\(action.rawValue)/\(escape(id))\">\(action.title)</a>"
+                    out += "<a class=\"act\" href=\"\(actionScheme):\(action.rawValue)/\(escape(id))\">\(action.title)"
+                    out += "<kbd>\(action.shortcut)</kbd></a>"
                 }
                 out += "</div>"
             }
@@ -262,6 +275,9 @@ enum EmailDocument {
     .act { padding: \(px(Space.xs)) \(px(Space.l)); border-radius: \(px(Radius.control)); font-size: 12px; \
     color: CanvasText; text-decoration: none; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
     .act:hover { background: color-mix(in srgb, CanvasText 7%, transparent); }
+    .act kbd { display: none; margin-left: \(px(Space.s)); font: 11px -apple-system, system-ui; color: GrayText; }
+    .msg.current .act kbd { display: inline; }
+    .msg.current.clicked { box-shadow: 0 0 0 1px color-mix(in srgb, AccentColor 55%, transparent); }
     .body { margin: \(px(Space.l)) 0 \(px(Space.hair)) \(px(32 + Space.m)); overflow-x: auto; }
     .body img { max-width: 100%; height: auto; }
     .body table { max-width: 100%; }

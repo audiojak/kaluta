@@ -290,9 +290,14 @@ struct WorkflowItemView: View {
                         Spacer(minLength: 0)
                         if session.rendered[detail.thread.id]?.hasRemoteImages == true,
                            !model.workflowImagesAllowed(detail.thread.id, session: session) {
-                            Button("Load images") { session.imagesLoaded.insert(detail.thread.id) }
-                                .buttonStyle(.link)
-                                .hoverHelp("Show this email's pictures; loading them tells the sender it was opened")
+                            Button { session.imagesLoaded.insert(detail.thread.id) } label: {
+                                HStack(spacing: Space.s) {
+                                    Text("Load images")
+                                    Keycap(key: "⇧⌘I")
+                                }
+                            }
+                            .buttonStyle(.link)
+                            .hoverHelp("Show this email's pictures; loading them tells the sender it was opened (⇧⌘I)")
                         }
                         // At the top, where a long email cannot push it out of view.
                         if [.triage, .replies, .tasks, .waiting].contains(session.kind) {

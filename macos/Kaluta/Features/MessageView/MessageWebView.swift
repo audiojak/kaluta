@@ -2,9 +2,10 @@ import AppKit
 import SwiftUI
 import WebKit
 
-/// The locked-down web view that renders a thread (spec §14.4): no
-/// JavaScript, no persistent storage, no navigation, links opened in the
-/// user's browser after a phishing check, images only through our schemes.
+/// The locked-down web view that renders a thread (spec §14.4): the email
+/// runs no JavaScript (only the app's own, in a separate world), no
+/// persistent storage, no navigation, links opened in the user's browser
+/// after a phishing check, images only through our schemes.
 struct MessageWebView: NSViewRepresentable {
     let html: String
     let allowRemoteImages: Bool
@@ -24,6 +25,12 @@ struct MessageWebView: NSViewRepresentable {
     var onAttachment: ((String) -> Void)?
     /// A message's own Reply, Reply all or Forward, with its id.
     var onMessageAction: ((EmailDocument.MessageAction, String) -> Void)?
+    /// The message the user clicked (marked on the page across reloads),
+    /// and the call when they click one. Given when the view is made, a
+    /// small script of the app's own, in its own world, reports the click;
+    /// the email itself still runs no script.
+    var currentMessageID: String?
+    var onCurrentMessage: ((String) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -35,6 +42,13 @@ struct MessageWebView: NSViewRepresentable {
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.scheme)
         config.setURLSchemeHandler(context.coordinator.remoteImages, forURLScheme: RemoteImageSchemeHandler.loadedScheme)
         config.setURLSchemeHandler(context.coordinator.inlineImages, forURLScheme: CidSchemeHandler.scheme)
+        if onCurrentMessage != nil {
+            let controller = config.userContentController
+            controller.addUserScript(WKUserScript(source: Self.clickScript, injectionTime: .atDocumentEnd,
+                                                  forMainFrameOnly: true, in: .defaultClient))
+            controller.add(WeakScriptHandler(context.coordinator), contentWorld: .defaultClient,
+                           name: Self.clickHandler)
+        }
         // Sized to its content, it hands the scroll wheel to the view around it.
         let webView: WKWebView
         if onContentHeight == nil {
@@ -67,6 +81,11 @@ struct MessageWebView: NSViewRepresentable {
         coordinator.onContentHeight = onContentHeight
         coordinator.onAttachment = onAttachment
         coordinator.onMessageAction = onMessageAction
+        coordinator.onCurrentMessage = onCurrentMessage
+        if coordinator.currentMessageID != currentMessageID {
+            coordinator.currentMessageID = currentMessageID
+            coordinator.markCurrent(webView)
+        }
         let remoteChanged = coordinator.remoteImages.allowRemote != allowRemoteImages
         coordinator.remoteImages.allowRemote = allowRemoteImages
         let images = inlineImages
@@ -84,7 +103,7 @@ struct MessageWebView: NSViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let remoteImages = RemoteImageSchemeHandler()
         let inlineImages = CidSchemeHandler()
         var loadedHTML = ""
@@ -94,6 +113,29 @@ struct MessageWebView: NSViewRepresentable {
         var onContentHeight: ((CGFloat) -> Void)?
         var onAttachment: ((String) -> Void)?
         var onMessageAction: ((EmailDocument.MessageAction, String) -> Void)?
+        var onCurrentMessage: ((String) -> Void)?
+        var currentMessageID: String?
+
+        /// The clicked message, outlined and carrying the key hints; the
+        /// page is rebuilt as bodies arrive, so this runs after each load.
+        func markCurrent(_ webView: WKWebView) {
+            guard let id = currentMessageID,
+                  let data = try? JSONSerialization.data(withJSONObject: ["m-" + id], options: .fragmentsAllowed),
+                  let quoted = String(data: data, encoding: .utf8) else { return }
+            webView.evaluateJavaScript("""
+                var id = \(quoted)[0], m = document.getElementById(id);
+                if (m) {
+                  document.querySelectorAll('details.msg.current').forEach(function (x) { x.classList.remove('current', 'clicked'); });
+                  m.classList.add('current', 'clicked');
+                }
+                """, in: nil, in: .defaultClient)
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let id = message.body as? String, !id.isEmpty else { return }
+            currentMessageID = id
+            onCurrentMessage?(id)
+        }
 
         func measure(_ webView: WKWebView, after delays: [Double]) {
             guard onContentHeight != nil else { return }
@@ -107,6 +149,7 @@ struct MessageWebView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            markCurrent(webView)
             // Measured by the app (the page runs no script), now and as its
             // images arrive.
             measure(webView, after: [0.0, 0.3, 1.0, 2.5, 5.0])
@@ -188,5 +231,34 @@ final class FittedWebView: WKWebView {
             lastWidth = newSize.width
             widthChanged?()
         }
+    }
+}
+
+extension MessageWebView {
+    static let clickHandler = "kalutaCurrent"
+
+    /// A click inside a message (not a draft) makes it the current one.
+    static let clickScript = """
+    document.addEventListener('click', function (e) {
+      var m = e.target && e.target.closest ? e.target.closest('details.msg') : null;
+      if (!m || m.classList.contains('draft')) return;
+      document.querySelectorAll('details.msg.current').forEach(function (x) { x.classList.remove('current', 'clicked'); });
+      m.classList.add('current', 'clicked');
+      window.webkit.messageHandlers.\(clickHandler).postMessage(m.id.slice(2));
+    }, true);
+    """
+}
+
+/// The content controller keeps its handlers: this one holds the
+/// coordinator weakly, so the web view can go.
+private final class WeakScriptHandler: NSObject, WKScriptMessageHandler {
+    weak var target: (any WKScriptMessageHandler)?
+
+    init(_ target: any WKScriptMessageHandler) {
+        self.target = target
+    }
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        target?.userContentController(controller, didReceive: message)
     }
 }

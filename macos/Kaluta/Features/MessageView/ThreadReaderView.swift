@@ -8,6 +8,9 @@ struct ThreadReaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// An attachment clicked on its message's card, in Quick Look.
     @State private var previewURL: URL?
+    /// Another conversation has been loading a moment: the one still on
+    /// screen is dimmed, not passed off as the selection.
+    @State private var showsLoading = false
     /// A window of its own: its store and thread (nil: the selection).
     var store: ReaderStore?
     var threadID: String?
@@ -46,13 +49,27 @@ struct ThreadReaderView: View {
                         case .replyAll: model.compose(.reply(messageID: id, all: true, task: task))
                         case .forward: model.compose(.forward(messageID: id, task: task))
                         }
-                    })
+                    },
+                    // A click makes a message the one ⌘R, ⇧⌘R and ⇧⌘F answer.
+                    currentMessageID: reader.currentMessageID,
+                    onCurrentMessage: { id in reader.currentMessageID = id })
                     .quickLookPreview($previewURL)
             } else {
                 Color.clear
             }
         }
+        .opacity(stale && showsLoading ? 0.35 : 1)
+        .overlay {
+            if stale && showsLoading { ProgressView().controlSize(.small) }
+        }
         .task(id: shownID) {
+            // Quick loads swap without a flash; a slow one dims the last.
+            showsLoading = false
+            let pending = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                if !Task.isCancelled { showsLoading = true }
+            }
+            defer { pending.cancel() }
             await reader.show(threadID: shownID)
             // Looking at it marks it read (spec §14.4).
             if let id = shownID, let detail = reader.detail, detail.thread.id == id {
@@ -60,6 +77,9 @@ struct ThreadReaderView: View {
             }
         }
     }
+
+    /// The reader still holds another conversation than the one selected.
+    private var stale: Bool { shownID != nil && reader.detail?.thread.id != shownID }
 
     private func header(_ detail: ThreadDetail) -> some View {
         HStack(alignment: .firstTextBaseline) {
@@ -88,8 +108,13 @@ struct ThreadReaderView: View {
     private var remoteImagesBanner: some View {
         Banner("Remote images are hidden to protect your privacy.", systemImage: "photo.badge.exclamationmark",
                intent: .neutral, inset: Space.xxl) {
-            Button("Load Images") { reader.loadRemoteImagesForThread() }
-                .hoverHelp("Show remote images in this conversation only (⇧⌘I)")
+            Button { reader.loadRemoteImagesForThread() } label: {
+                HStack(spacing: Space.s) {
+                    Text("Load Images")
+                    Text("⇧⌘I").foregroundStyle(.secondary)
+                }
+            }
+            .hoverHelp("Show remote images in this conversation only (⇧⌘I)")
             Button("Always from Sender") { reader.alwaysLoadRemoteImagesFromSenders() }
                 .hoverHelp("Always show remote images from these senders (change in Settings › Privacy)")
         }

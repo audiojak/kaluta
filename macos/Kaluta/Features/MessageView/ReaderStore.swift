@@ -35,6 +35,9 @@ final class ReaderStore {
     private(set) var inlineImages: [String: InlineImage] = [:]
     /// Remote images were requested for this thread in this session.
     private(set) var remoteImagesAllowedForThread = false
+    /// The message clicked in the thread: what Reply, Reply All and Forward
+    /// (⌘R, ⇧⌘R, ⇧⌘F) answer. Nil: the latest.
+    var currentMessageID: String?
 
     @ObservationIgnored private let core: CoreClient?
     /// The user's addresses, so To lines say "Me" (set by the model).
@@ -62,6 +65,7 @@ final class ReaderStore {
     func show(threadID: String?) async {
         guard threadID != self.threadID else { return }
         self.threadID = threadID
+        currentMessageID = nil
         remoteImagesAllowedForThread = false
         inlineImages = [:]
         loadGeneration += 1
@@ -71,14 +75,31 @@ final class ReaderStore {
             bodies = [:]
             return
         }
-        guard let loaded = try? await core.thread(threadID), generation == loadGeneration else { return }
-        knownSenders = await core.knownSenders(Array(Set(loaded.messages.compactMap { $0.from?.email })))
+        // A read that fails (the store busy) is tried again; a thread that
+        // is gone shows nothing rather than the one before it.
+        var found: ThreadDetail??
+        for attempt in 0..<3 {
+            if attempt > 0 { try? await Task.sleep(for: .milliseconds(300)) }
+            guard generation == loadGeneration else { return }
+            do {
+                found = .some(try await core.thread(threadID))
+                break
+            } catch {}
+        }
         guard generation == loadGeneration else { return }
-        // Show cached bodies immediately, then fill the rest.
+        guard let loaded = found ?? nil else {
+            detail = nil
+            bodies = [:]
+            return
+        }
+        // Shown at once with the bodies already cached; who the user knows
+        // (for images) and the rest of the bodies follow.
         detail = loaded
         bodies = loaded.messages.reduce(into: [:]) { acc, m in
             if let cached = cache[m.id] { acc[m.id] = cached }
         }
+        knownSenders = await core.knownSenders(Array(Set(loaded.messages.compactMap { $0.from?.email })))
+        guard generation == loadGeneration else { return }
         // Headers only so far (headers-first sync, tiered download):
         // download these bodies now; the thread refreshes when they land.
         let missing = loaded.messages.filter { !$0.hasBody }.map(\.id)
