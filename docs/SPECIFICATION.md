@@ -4547,7 +4547,8 @@ one decision with a one-line reason:
   quieter, what acts on the email: *Reply all* (A), greyed out when no
   one but the user and the sender is on it (its key does nothing then and
   the key list leaves it out), and *Forward* (F), always there. Neither
-  moves a decision.
+  moves a decision. Short of room, the two show as icons with their keys
+  (their names on hover).
   **P** and **N** (Gmail's keys) go message by message: P opens the
   stack if needed and the message before, alone and answered; N the one
   after, and past the last, the card's email with the stack closed. The
