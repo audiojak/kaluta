@@ -28,16 +28,22 @@ struct ConversationStack: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Keycap(key: "C")
+                    // Message by message, as in Gmail.
+                    Keycap(key: "P")
+                    Keycap(key: "N")
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
+            .hoverHelp(session.showsConversation
+                ? "Hide the conversation (C); P and N go to the previous and next message"
+                : "Show the rest of the conversation (C), or go message by message with P and N")
             if session.showsConversation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(messages, id: \.id) { message in
                         row(message)
+                            .id(Self.rowID(message.id))
                         InsetRule(inset: 0)
                     }
                 }
@@ -90,10 +96,45 @@ struct ConversationStack: View {
                 if !files.isEmpty {
                     AttachmentStrip(attachments: files, inset: 0)
                 }
+                actions(message)
             }
         }
         .padding(.vertical, Space.m)
     }
+
+    /// The message's own Reply, Reply all and Forward; on the one being
+    /// answered, with their keys.
+    private func actions(_ message: MessageInfo) -> some View {
+        let current = session.answeringMessageID == message.id
+        return HStack(spacing: Space.m) {
+            action("Reply", key: "R", current: current) { answer(message, .replyNow) }
+            if ReaderStore.offersReplyAll(message, own: model.ownAddresses) {
+                action("Reply all", key: "A", current: current) { answer(message, .replyAll) }
+            }
+            action("Forward", key: "F", current: current) { answer(message, .forward) }
+        }
+        .padding(.top, Space.xs)
+    }
+
+    private func action(_ title: String, key: String, current: Bool, perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            HStack(spacing: Space.s) {
+                Text(title)
+                if current { Keycap(key: key) }
+            }
+        }
+        .buttonStyle(.bordered)
+        .hoverHelp(current ? "\(title) to this message (\(key))" : "\(title) to this message")
+    }
+
+    /// This message, then the command, as its key would.
+    private func answer(_ message: MessageInfo, _ command: WorkflowCommand) {
+        session.answeringMessageID = message.id
+        Task { await model.performWorkflow(command) }
+    }
+
+    /// A row's scroll target: P and N bring it into view.
+    static func rowID(_ messageID: String) -> String { "conversation-\(messageID)" }
 
     /// "3 earlier messages · Paul Allen, Paul Sevilla, you"; "2 other
     /// messages · …" when some came after the email on the card. Up to
