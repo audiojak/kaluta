@@ -269,9 +269,10 @@ struct MailCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(!mailKey)
             Divider() // menu
-            Button("Load Remote Images") { model.reader.loadRemoteImagesForThread() }
+            // The reader's conversation, or a workflow's email.
+            Button("Load Remote Images") { model.loadImagesOnScreen() }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
-                .disabled(!mailKey || !model.reader.hasRemoteImages || model.reader.allowsRemoteImages)
+                .disabled(!mailKey || !model.canLoadImagesOnScreen)
         }
         TextFormattingCommands()
     }

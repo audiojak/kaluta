@@ -1096,11 +1096,33 @@ final class AppModel {
 
     // MARK: Compose
 
-    /// The message Reply and Forward act on: the latest one in the thread
-    /// being read that is not a draft.
+    /// The message Reply and Forward act on: the one clicked in the thread
+    /// being read, else the latest that is not a draft.
     var replyTargetMessageID: String? {
         guard let detail = reader.detail, detail.thread.id == selectedThreadID else { return nil }
+        if let current = reader.currentMessageID, detail.messages.contains(where: { $0.id == current && !$0.isDraft }) {
+            return current
+        }
         return detail.messages.last { !$0.isDraft }?.id
+    }
+
+    /// Load Remote Images (⇧⌘I) has something to load: the workflow's
+    /// email on screen, or the conversation in the reader.
+    var canLoadImagesOnScreen: Bool {
+        if showsWorkflows {
+            guard let session = workflowSession, let id = session.current.flatMap(threadID(of:)) else { return false }
+            return session.rendered[id]?.hasRemoteImages == true && !workflowImagesAllowed(id, session: session)
+        }
+        return reader.hasRemoteImages && !reader.allowsRemoteImages
+    }
+
+    func loadImagesOnScreen() {
+        if showsWorkflows {
+            guard let session = workflowSession, let id = session.current.flatMap(threadID(of:)) else { return }
+            session.imagesLoaded.insert(id)
+        } else {
+            reader.loadRemoteImagesForThread()
+        }
     }
 
     /// The account on screen is an imported mailbox (spec §7.8): it cannot

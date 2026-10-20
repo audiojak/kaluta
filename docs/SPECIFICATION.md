@@ -3022,6 +3022,18 @@ put it beside the title). The reader's toolbar starts at its leading edge
 with Reply / Reply All / Forward, Archive / Trash / Mark as Junk, a Label
 menu, Star and the agent toggle, with search at the trailing edge.
 
+**Amendment (2026-10-19): any message answered.** Each open message in
+the reader ends with its own *Reply*, *Reply all* (when it reaches more
+than Reply) and *Forward* (`kaluta-action:` links the app handles; mail
+cannot make one). Clicking in a message makes it the current one,
+outlined: ⌘R, ⇧⌘R and ⇧⌘F answer it, and its links show those keys.
+Until one is clicked, the keys answer the latest message. The click is
+reported by a script of the app's own in a separate content world; the
+email still runs none. *Load Remote Images* (⇧⌘I) also loads a
+workflow's email, and both *Load images* buttons show the key. While the
+next conversation is still loading (over 200 ms), the reader dims the
+one on screen rather than passing it off as the selection.
+
 **Amendment (2026-09-28): Gmail categories.** Implemented 2026-09-28.
 When the account uses Gmail's categories, the Inbox shows Mail-style tabs
 above the list: Primary, Promotions, Social, Updates, Forums (Primary

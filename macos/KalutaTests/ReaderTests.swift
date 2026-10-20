@@ -66,12 +66,15 @@ struct EmailDocumentTests {
         var draft = message("d")
         draft.isDraft = true
         let html = EmailDocument.thread([everyone, message("b"), draft], isDark: false, actions: true)
-        #expect(html.contains(#"href="kaluta-action:reply/a%2F1">Reply</a>"#))
-        #expect(html.contains(#"href="kaluta-action:reply-all/a%2F1">Reply all</a>"#))
-        #expect(html.contains(#"href="kaluta-action:forward/b">Forward</a>"#))
+        #expect(html.contains(#"href="kaluta-action:reply/a%2F1">Reply<kbd>⌘R</kbd></a>"#))
+        #expect(html.contains(#"href="kaluta-action:reply-all/a%2F1">Reply all<kbd>⇧⌘R</kbd></a>"#))
+        #expect(html.contains(#"href="kaluta-action:forward/b">Forward<kbd>⇧⌘F</kbd></a>"#))
         #expect(!html.contains("kaluta-action:reply-all/b"), "no one else on it")
         #expect(!html.contains("kaluta-action:reply/d"), "a draft is edited, not answered")
         #expect(!EmailDocument.thread([message("b")], isDark: false).contains("kaluta-action"))
+        // The keys answer the latest until another is clicked: its links say so.
+        #expect(html.contains(#"<details class="msg current" id="m-b""#))
+        #expect(html.contains("Reply<kbd>⌘R</kbd>") && html.contains("Forward<kbd>⇧⌘F</kbd>"))
         let parsed = EmailDocument.MessageAction.parse(URL(string: "kaluta-action:reply-all/a%2F1")!)
         #expect(parsed?.0 == .replyAll && parsed?.1 == "a/1")
         #expect(EmailDocument.MessageAction.parse(URL(string: "kaluta-action:delete/x")!) == nil)
