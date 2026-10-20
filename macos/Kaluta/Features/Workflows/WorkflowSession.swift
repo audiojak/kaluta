@@ -83,6 +83,8 @@ final class WorkflowSession {
     var answeringMessageID: String?
     /// The key list (?) is open.
     var showsKeys = false
+    /// The conversation's line has scrolled above the top: it pins there.
+    var conversationLinePassed = false
     /// Those messages as sanitized HTML, and their inline images, by
     /// message id.
     var messageBodies: [String: RenderedBody] = [:]
@@ -124,6 +126,7 @@ final class WorkflowSession {
             showsConversation = false
             openMessages = []
             answeringMessageID = nil
+            conversationLinePassed = false
         }
         self.workflowSet = set
         itemShownAt = .now
