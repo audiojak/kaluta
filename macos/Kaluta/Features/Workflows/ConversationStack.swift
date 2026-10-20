@@ -28,16 +28,22 @@ struct ConversationStack: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Keycap(key: "C")
+                    // Message by message, as in Gmail.
+                    Keycap(key: "P")
+                    Keycap(key: "N")
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .hoverHelp(session.showsConversation ? "Hide the conversation (C)" : "Show the rest of the conversation (C)")
+            .hoverHelp(session.showsConversation
+                ? "Hide the conversation (C); P and N go to the previous and next message"
+                : "Show the rest of the conversation (C), or go message by message with P and N")
             if session.showsConversation {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(messages, id: \.id) { message in
                         row(message)
+                            .id(Self.rowID(message.id))
                         InsetRule(inset: 0)
                     }
                 }
@@ -126,6 +132,9 @@ struct ConversationStack: View {
         session.answeringMessageID = message.id
         Task { await model.performWorkflow(command) }
     }
+
+    /// A row's scroll target: P and N bring it into view.
+    static func rowID(_ messageID: String) -> String { "conversation-\(messageID)" }
 
     /// "3 earlier messages · Paul Allen, Paul Sevilla, you"; "2 other
     /// messages · …" when some came after the email on the card. Up to

@@ -4542,6 +4542,10 @@ one decision with a one-line reason:
   shown, and the bar's Reply names whom it goes to (*Reply to Jordan*);
   Return, R and A answer it, F forwards it in a composer. Closing the
   stack answers the card's email again.
+  **P** and **N** (Gmail's keys) go message by message: P opens the
+  stack if needed and the message before, alone and answered; N the one
+  after, and past the last, the card's email with the stack closed. The
+  message comes into view.
 - Suggestions are made ahead, when mail arrives, by the triage job (below).
   Above the email: the suggestion ("Quick reply · about 20 seconds",
   "Make a task", "Archive", "Leave in Inbox") with Kaluta's reason, and

@@ -30,6 +30,8 @@ struct WorkflowTests {
             (KeyEquivalent("i"), "i", [], .backToInbox),
             (KeyEquivalent("c"), "c", [], .copyCode),
             (KeyEquivalent("f"), "f", [], .forward),
+            (KeyEquivalent("p"), "p", [], .previousMessage),
+            (KeyEquivalent("n"), "n", [], .nextMessage),
             (KeyEquivalent("2"), "2", [], .pick2),
             (KeyEquivalent("/"), "/", [], .tellKaluta),
             // ⌘E clears a reading bucket; another modifier makes it a menu key.
@@ -174,6 +176,17 @@ struct WorkflowTests {
         let many = (1...5).map { message("p\($0)@example.com", "P\($0)") }
         #expect(ConversationStack.summary(many, earlierOnly: true, own: own).hasSuffix("P1, P2, P3 + 2"))
         #expect(ConversationStack.sender(me, own: own, capitalized: true) == "You")
+    }
+
+    /// P goes back through the conversation from the card's email, N
+    /// forward to it again; neither goes past the ends.
+    @Test func pAndNStepThroughTheConversation() {
+        #expect(AppModel.steppedIndex(nil, by: -1, count: 3) == 2, "P from the card: the message before it")
+        #expect(AppModel.steppedIndex(2, by: -1, count: 3) == 1)
+        #expect(AppModel.steppedIndex(0, by: -1, count: 3) == 0, "the first stays")
+        #expect(AppModel.steppedIndex(1, by: 1, count: 3) == 2)
+        #expect(AppModel.steppedIndex(2, by: 1, count: 3) == nil, "N past the last: the card's email")
+        #expect(AppModel.steppedIndex(nil, by: 1, count: 3) == nil)
     }
 
     /// Answering an earlier message, Reply says whose.

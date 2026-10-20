@@ -52,6 +52,13 @@ struct WorkflowHostView: View {
                                     proxy.scrollTo(WorkflowWriteView.scrollID, anchor: .bottom)
                                 }
                             }
+                            // P and N: the message they open comes into view.
+                            .onChange(of: session.answeringMessageID) { _, id in
+                                guard let id, session.writer == nil else { return }
+                                withAnimation(AppModel.itemMotion) {
+                                    proxy.scrollTo(ConversationStack.rowID(id), anchor: .top)
+                                }
+                            }
                         }
                         .id(item.key)
                         .transition(itemTransition)

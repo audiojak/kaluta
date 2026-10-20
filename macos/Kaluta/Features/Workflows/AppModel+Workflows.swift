@@ -261,6 +261,34 @@ extension AppModel {
         return detail.messages.filter { !$0.isDraft && $0.id != shown }
     }
 
+    /// P and N: one message earlier or later in the conversation, opened
+    /// alone and answered by Reply; past the last, the card's email again.
+    func stepConversation(by delta: Int, item: WorkflowItem, session: WorkflowSession) async {
+        guard let id = threadID(of: item), let detail = session.threads[id] else { return }
+        let others = Self.otherMessages(detail, session.kind)
+        guard !others.isEmpty else { return }
+        let position = session.answeringMessageID.flatMap { a in others.firstIndex { $0.id == a } }
+        guard let to = Self.steppedIndex(position, by: delta, count: others.count) else {
+            withAnimation(Self.itemMotion) {
+                session.openMessages = []
+                session.showsConversation = false
+            }
+            return
+        }
+        withAnimation(Self.itemMotion) {
+            session.showsConversation = true
+            session.openMessages = []
+        }
+        await toggleConversationMessage(others[to], session: session)
+    }
+
+    /// Where P (-1) or N (+1) goes among `count` messages, the card's email
+    /// after them (`nil`, also where it starts); never before the first.
+    static func steppedIndex(_ position: Int?, by delta: Int, count: Int) -> Int? {
+        let to = min(max((position ?? count) + delta, 0), count)
+        return to == count ? nil : to
+    }
+
     /// What a reply answers: the conversation's message opened on the card
     /// last, else the card's email.
     func answeringMessage(_ detail: ThreadDetail, session: WorkflowSession) -> MessageInfo? {
@@ -488,11 +516,13 @@ extension AppModel {
             var forward = a(.forward, .plain, nil)
             forward.shown = false
             out.append(forward)
-            // The rest of the conversation, on the card (C).
+            // The rest of the conversation, on the card (C), message by message (P, N).
             if let detail = session.threads[id], !Self.otherMessages(detail, session.kind).isEmpty {
-                var conversation = a(.conversation, .plain, nil)
-                conversation.shown = false
-                out.append(conversation)
+                for command in [WorkflowCommand.conversation, .previousMessage, .nextMessage] {
+                    var action = a(command, .plain, nil)
+                    action.shown = false
+                    out.append(action)
+                }
             }
         }
         if gmailURL(threadID: id) != nil {
@@ -677,6 +707,10 @@ extension AppModel {
             startWriting(item, session: session)
         case (_, .replyAll):
             startWriting(item, session: session, all: true)
+        case (_, .previousMessage):
+            await stepConversation(by: -1, item: item, session: session)
+        case (_, .nextMessage):
+            await stepConversation(by: 1, item: item, session: session)
         case (_, .forward):
             if let id = threadID(of: item), let detail = session.threads[id],
                let message = answeringMessage(detail, session: session) {
