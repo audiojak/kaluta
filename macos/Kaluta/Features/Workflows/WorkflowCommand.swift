@@ -199,6 +199,12 @@ struct WorkflowAction: Identifiable, Equatable {
     var shown = true
     /// Kaluta suggests this one (Triage): marked on its control.
     var suggested = false
+    /// What it acts on the email with (Reply all, Forward): a quieter
+    /// group at the bar's right, apart from the decisions.
+    var onEmail = false
+    /// Offered but not possible for this email (greyed out, its key does
+    /// nothing), and why: its place in the bar never moves.
+    var unavailable: String?
 
     var id: String { command.id }
 }

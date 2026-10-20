@@ -130,19 +130,25 @@ struct WorkflowButton: View {
     /// Kaluta suggests this action: a ring in the colour and a sparkle on
     /// the corner.
     var suggested = false
+    /// Greyed out, and why (its help says so).
+    var unavailable: String?
+    /// Smaller, for what acts on the email beside the decisions; with an
+    /// icon, the icon in place of the title when the bar is short of room.
+    var compact = false
+    var icon: String?
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: Space.m) {
-                Text(title).lineLimit(1)
+                if let icon { Image(systemName: icon).accessibilityHidden(true) } else { Text(title).lineLimit(1) }
                 if let key { Keycap(key: key, onFill: style == .primary) }
             }
             .fixedSize(horizontal: true, vertical: false)
-            .font(TypeRole.workflowControl)
+            .font(compact ? TypeRole.workflowContext : TypeRole.workflowControl)
             .foregroundStyle(style == .primary ? AnyShapeStyle(.white)
                              : style == .quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-            .padding(.horizontal, Space.xxl)
+            .padding(.horizontal, compact ? Space.l : Space.xxl)
             .frame(minHeight: Self.height)
             .background(background, in: Capsule())
             .overlay { if suggested { Capsule().strokeBorder(Tone.workflow(kind), lineWidth: Self.ring) } }
@@ -161,7 +167,9 @@ struct WorkflowButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .hoverHelp((suggested ? "Kaluta suggests: " : "") + (key.map { "\(title) (\($0))" } ?? title))
+        .disabled(unavailable != nil)
+        .opacity(unavailable == nil ? 1 : Self.unavailableOpacity)
+        .hoverHelp(unavailable ?? (suggested ? "Kaluta suggests: " : "") + (key.map { "\(title) (\($0))" } ?? title))
         .accessibilityLabel(suggested ? "\(title), suggested" : title)
     }
 
@@ -175,6 +183,7 @@ struct WorkflowButton: View {
 
     /// Touch-target height (44 pt and more).
     static let height: CGFloat = 48
+    static let unavailableOpacity = 0.4
     static let ring: CGFloat = 2
 }
 

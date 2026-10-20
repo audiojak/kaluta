@@ -4537,11 +4537,17 @@ one decision with a one-line reason:
   that message in full on the card. C again or Esc closes it; the next Esc
   leaves. The email's own quoted history stays folded (•••). In Agents, C
   copies the code.
-  The message opened last is the one answered: it ends with Reply (R),
-  Reply all (A, when it reaches more than Reply) and Forward (F), its keys
-  shown, and the bar's Reply names whom it goes to (*Reply to Jordan*);
-  Return, R and A answer it, F forwards it in a composer. Closing the
-  stack answers the card's email again.
+  The message opened last is the one answered: the bar's Reply names
+  whom it goes to (*Reply to Jordan*), and Return, R and A answer it, F
+  forwards it in a composer. Closing the stack answers the card's email
+  again. Amended 2026-10-20: the messages have no buttons of their own;
+  everything that acts is in the bar.
+- **The bar's two parts.** The decisions (Reply, Make a task, Archive,
+  Leave in Inbox, Skip) stay put at the left. At the right, apart and
+  quieter, what acts on the email: *Reply all* (A), greyed out when no
+  one but the user and the sender is on it (its key does nothing then and
+  the key list leaves it out), and *Forward* (F), always there. Neither
+  moves a decision.
   **P** and **N** (Gmail's keys) go message by message: P opens the
   stack if needed and the message before, alone and answered; N the one
   after, and past the last, the card's email with the stack closed. The

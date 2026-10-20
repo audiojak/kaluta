@@ -23,7 +23,7 @@ enum WorkflowKeys {
         var mail: [WorkflowKey] = []
         var talk: [WorkflowKey] = []
         var seen = Set<String>()
-        for action in actions {
+        for action in actions where action.unavailable == nil {
             guard let key = keys(action.command), seen.insert(key).inserted else { continue }
             let row = WorkflowKey(key: key, title: action.title)
             if conversation.contains(action.command) {

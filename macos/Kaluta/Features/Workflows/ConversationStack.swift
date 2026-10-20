@@ -84,7 +84,6 @@ struct ConversationStack: View {
                 if !files.isEmpty {
                     AttachmentStrip(attachments: files, inset: 0)
                 }
-                actions(message)
             }
         }
         .padding(.vertical, Space.m)
@@ -107,37 +106,6 @@ struct ConversationStack: View {
     }
 
     static let bar: CGFloat = 3
-
-    /// The message's own Reply, Reply all and Forward; on the one being
-    /// answered, with their keys.
-    private func actions(_ message: MessageInfo) -> some View {
-        let current = session.answeringMessageID == message.id
-        return HStack(spacing: Space.m) {
-            action("Reply", key: "R", current: current) { answer(message, .replyNow) }
-            if ReaderStore.offersReplyAll(message, own: model.ownAddresses) {
-                action("Reply all", key: "A", current: current) { answer(message, .replyAll) }
-            }
-            action("Forward", key: "F", current: current) { answer(message, .forward) }
-        }
-        .padding(.top, Space.xs)
-    }
-
-    private func action(_ title: String, key: String, current: Bool, perform: @escaping () -> Void) -> some View {
-        Button(action: perform) {
-            HStack(spacing: Space.s) {
-                Text(title)
-                if current { Keycap(key: key) }
-            }
-        }
-        .buttonStyle(.bordered)
-        .hoverHelp(current ? "\(title) to this message (\(key))" : "\(title) to this message")
-    }
-
-    /// This message, then the command, as its key would.
-    private func answer(_ message: MessageInfo, _ command: WorkflowCommand) {
-        session.answeringMessageID = message.id
-        Task { await model.performWorkflow(command) }
-    }
 
     /// A row's scroll target: P and N bring it into view.
     static func rowID(_ messageID: String) -> String { "conversation-\(messageID)" }

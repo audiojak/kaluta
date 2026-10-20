@@ -193,19 +193,46 @@ struct WorkflowHostView: View {
     }
 
     private func decisionBar(_ actions: [WorkflowAction]) -> some View {
-        HStack(spacing: Space.m) {
-            ForEach(actions.filter(\.shown)) { action in
-                WorkflowButton(title: action.title, key: action.command.keyLabel, style: action.style,
-                               kind: session.kind, suggested: action.suggested) {
-                    Task { await model.performWorkflow(action.command) }
-                }
-            }
-            Spacer(minLength: 0)
+        let decisions = actions.filter { $0.shown && !$0.onEmail }
+        let onEmail = actions.filter { $0.shown && $0.onEmail }
+        // What acts on the email, apart and quieter, at the right: the
+        // decisions never move. Short of room, it shows as icons.
+        return ViewThatFits(in: .horizontal) {
+            bar(decisions, onEmail, icons: false)
+            bar(decisions, onEmail, icons: true)
         }
         .padding(.horizontal, Space.page)
         .padding(.vertical, Space.xl)
         .frame(maxWidth: Self.readingWidth + Space.page * 2)
         .frame(maxWidth: .infinity)
+    }
+
+    private func bar(_ decisions: [WorkflowAction], _ onEmail: [WorkflowAction], icons: Bool) -> some View {
+        HStack(spacing: Space.m) {
+            ForEach(decisions) { button($0) }
+            Spacer(minLength: 0)
+            if !onEmail.isEmpty {
+                PaneDivider().frame(height: Space.xxl)
+                ForEach(onEmail) { button($0, icon: icons ? Self.icon(for: $0.command) : nil) }
+            }
+        }
+    }
+
+    private func button(_ action: WorkflowAction, icon: String? = nil) -> some View {
+        WorkflowButton(title: action.title, key: action.command.keyLabel, style: action.style,
+                       kind: session.kind, suggested: action.suggested, unavailable: action.unavailable,
+                       compact: action.onEmail, icon: icon) {
+            Task { await model.performWorkflow(action.command) }
+        }
+    }
+
+    /// What acts on the email, as an icon when the bar is short of room.
+    static func icon(for command: WorkflowCommand) -> String? {
+        switch command {
+        case .replyAll: "arrowshape.turn.up.left.2"
+        case .forward: "arrowshape.turn.up.right"
+        default: nil
+        }
     }
 
     /// Where a reading key moves the item to (the top edge's offset), or
