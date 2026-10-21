@@ -19,6 +19,8 @@ final class WorkflowWriter {
         /// The email that will be sent, editable.
         case final
         case sending
+        /// Forward (F): whom to, and a note; the email goes below it.
+        case forward
     }
 
     /// One of Kaluta's answers: a one-line label and the email.
@@ -34,6 +36,11 @@ final class WorkflowWriter {
     let replyAll: Bool
     /// The task the reply answers, if any: Send finishes it or keeps it open.
     let taskID: Int64?
+    /// Forwarding the message rather than answering it.
+    let forwarding: Bool
+    /// Whom a forward goes to, and the name or address being typed.
+    private(set) var recipients: [AddressInfo] = []
+    var recipientText = ""
     /// The email being answered, as read on screen.
     let email: String
     let questions: [String]
@@ -57,15 +64,85 @@ final class WorkflowWriter {
     private(set) var problem: String?
 
     init(threadID: String, messageID: String, replyAll: Bool, taskID: Int64?, email: String,
-         answers: [Answer] = []) {
+         answers: [Answer] = [], forwarding: Bool = false) {
         self.threadID = threadID
         self.messageID = messageID
         self.replyAll = replyAll
         self.taskID = taskID
         self.email = email
+        self.forwarding = forwarding
         questions = WritingText.questions(in: email)
         self.answers = Array(answers.prefix(3))
-        step = answers.isEmpty ? .say : .choose
+        step = forwarding ? .forward : answers.isEmpty ? .say : .choose
+    }
+
+    // MARK: Forwarding
+
+    /// An address as typed: "Ann Lee <ann@example.com>" or "ann@example.com".
+    static func address(from text: String) -> AddressInfo? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var name: String?
+        var email = text
+        if let open = text.lastIndex(of: "<"), text.hasSuffix(">") {
+            name = String(text[..<open]).trimmingCharacters(in: .whitespaces)
+            email = String(text[text.index(after: open)..<text.index(before: text.endIndex)])
+        }
+        email = email.trimmingCharacters(in: .whitespaces)
+        guard let at = email.firstIndex(of: "@"), at != email.startIndex,
+              email[email.index(after: at)...].contains("."), !email.contains(" "), !email.hasSuffix(".")
+        else { return nil }
+        return AddressInfo(name: name?.isEmpty == false ? name : nil, email: email)
+    }
+
+    /// Add one to whom the forward goes (once per address).
+    func addRecipient(_ address: AddressInfo) {
+        guard !recipients.contains(where: { $0.email.lowercased() == address.email.lowercased() }) else { return }
+        recipients.append(address)
+        problem = nil
+    }
+
+    func removeRecipient(_ email: String) {
+        recipients.removeAll { $0.email.lowercased() == email.lowercased() }
+    }
+
+    /// What was typed, as a recipient; false when it is not an address.
+    func takeTypedRecipient() -> Bool {
+        guard let address = Self.address(from: recipientText) else { return !recipientText.trimmingCharacters(in: .whitespaces).isEmpty ? false : true }
+        addRecipient(address)
+        recipientText = ""
+        return true
+    }
+
+    /// Send the forward: the note, then the email as it was sent, to the
+    /// recipients. Whether it went; a held send (Undo Send) says so.
+    private(set) var sentHeld = false
+    func sendForward(model: AppModel) async -> Bool {
+        guard forwarding, step == .forward, let core = model.core, let account = model.openAccountID else { return false }
+        guard takeTypedRecipient() else {
+            problem = "“\(recipientText.trimmingCharacters(in: .whitespaces))” is not an email address."
+            return false
+        }
+        guard !recipients.isEmpty else {
+            problem = "Who should it go to?"
+            return false
+        }
+        step = .sending
+        do {
+            var draft = try await core.forwardDraft(of: messageID)
+            draft.to = recipients
+            let note = field.trimmingCharacters(in: .whitespacesAndNewlines)
+            draft.bodyHtml = note.isEmpty ? ""
+                : ComposerHTML.html(from: NSAttributedString(string: note, attributes: [.font: ComposerHTML.bodyFont]))
+            let id = try await core.saveDraft(draft)
+            let held = try await core.sendDraft(id)
+            sentHeld = held
+            await model.messageSent(heldDraftID: held ? id : nil, taskID: nil, finishTask: false, accountID: account)
+            return true
+        } catch {
+            problem = (error as? CoreClientError)?.message ?? error.localizedDescription
+            step = .forward
+            return false
+        }
     }
 
     var starters: [String] { WritingText.starters(for: questions) }
