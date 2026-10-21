@@ -111,11 +111,9 @@ struct WorkflowWriteView: View {
                         .onSubmit {
                             // The first name offered, else what was typed.
                             if let first = suggestions.first {
-                                writer.addRecipient(first)
-                                writer.recipientText = ""
-                                fieldFocused = true
+                                take(first)
                             } else if writer.takeTypedRecipient() {
-                                fieldFocused = true
+                                focusNote()
                             }
                         }
                         .onExitCommand { perform(.back) }
@@ -125,16 +123,16 @@ struct WorkflowWriteView: View {
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
                 if !suggestions.isEmpty {
                     HStack(spacing: Space.s) {
+                        // Names, with the address on hover; the address when
+                        // names repeat or there is none.
+                        let names = Dictionary(grouping: suggestions, by: { $0.name ?? "" })
                         ForEach(suggestions, id: \.email) { s in
-                            Button {
-                                writer.addRecipient(s)
-                                writer.recipientText = ""
-                                fieldFocused = true
-                            } label: {
-                                Text(s.name?.isEmpty == false ? "\(s.name!) · \(s.email)" : s.email).lineLimit(1)
+                            let name = s.name ?? ""
+                            Button { take(s) } label: {
+                                Text(name.isEmpty || names[name]?.count ?? 0 > 1 ? s.email : name).lineLimit(1)
                             }
                             .buttonStyle(.bordered)
-                            .hoverHelp("Forward to \(s.email)")
+                            .hoverHelp("Forward to \(name.isEmpty ? s.email : "\(name) (\(s.email))")")
                         }
                     }
                     .font(TypeRole.workflowContext)
@@ -158,6 +156,25 @@ struct WorkflowWriteView: View {
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+        }
+    }
+
+    /// A recipient chosen: added, and the note takes the keys.
+    private func take(_ address: AddressInfo) {
+        writer.addRecipient(address)
+        writer.recipientText = ""
+        focusNote()
+    }
+
+    /// The suggestions row goes as the name is taken, so the focus asked
+    /// for in the same turn can be lost: ask until the note has it.
+    private func focusNote() {
+        Task { @MainActor in
+            for _ in 0..<8 {
+                fieldFocused = true
+                try? await Task.sleep(for: .milliseconds(50))
+                if fieldFocused { return }
+            }
         }
     }
 
