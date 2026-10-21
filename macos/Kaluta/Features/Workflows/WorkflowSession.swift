@@ -151,7 +151,7 @@ final class WorkflowSession {
     var isTyping: Bool {
         if taskForm != nil { return true }
         guard let step = writer?.step else { return false }
-        return step == .say || step == .final
+        return step == .say || step == .final || step == .forward
     }
 
     /// The reading bucket an item is in.
