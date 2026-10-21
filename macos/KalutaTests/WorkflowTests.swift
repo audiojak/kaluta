@@ -443,6 +443,29 @@ struct WorkflowTests {
         #expect(!model.agent.providers.isEmpty)
     }
 
+    /// Forward (F) in a workflow: whom to, parsed as typed, each once.
+    @Test func aForwardTakesItsRecipientsAsTyped() {
+        #expect(WorkflowWriter.address(from: " ann@example.com ")?.email == "ann@example.com")
+        let named = WorkflowWriter.address(from: "Ann Lee <ann@example.com>")
+        #expect(named?.name == "Ann Lee" && named?.email == "ann@example.com")
+        #expect(WorkflowWriter.address(from: "ann") == nil)
+        #expect(WorkflowWriter.address(from: "ann@") == nil)
+        #expect(WorkflowWriter.address(from: "ann lee@example.com") == nil)
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "",
+                                    forwarding: true)
+        #expect(writer.step == .forward)
+        writer.recipientText = "Ann@Example.com"
+        #expect(writer.takeTypedRecipient() && writer.recipients.map(\.email) == ["Ann@Example.com"])
+        writer.addRecipient(AddressInfo(name: "Ann", email: "ann@example.com"))
+        #expect(writer.recipients.count == 1, "once per address")
+        writer.recipientText = "not an address"
+        #expect(!writer.takeTypedRecipient())
+        writer.recipientText = ""
+        #expect(writer.takeTypedRecipient(), "nothing typed is fine")
+        writer.removeRecipient("ANN@example.com")
+        #expect(writer.recipients.isEmpty)
+    }
+
     @Test func useMyWordsSendsWhatWasTyped() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")

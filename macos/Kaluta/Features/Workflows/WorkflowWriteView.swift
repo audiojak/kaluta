@@ -10,6 +10,7 @@ struct WorkflowWriteView: View {
     @Bindable var writer: WorkflowWriter
     @FocusState private var fieldFocused: Bool
     @FocusState private var textFocused: Bool
+    @FocusState private var toFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
@@ -19,6 +20,7 @@ struct WorkflowWriteView: View {
             case .writing: working(writer.directions.count > 1 ? "Kaluta is changing it…" : "Kaluta is writing…")
             case .final: finalEmail
             case .sending: working("Sending…")
+            case .forward: forward
             }
             if let problem = writer.problem {
                 Label(problem, systemImage: "exclamationmark.circle")
@@ -41,7 +43,7 @@ struct WorkflowWriteView: View {
             }
             // Esc goes back a step and ⌘. discards, from inside the text too
             // (the field would otherwise keep Esc for itself).
-            if writer.step == .say || writer.step == .final {
+            if writer.step == .say || writer.step == .final || writer.step == .forward {
                 Button("Back") { perform(.back) } // no-help: hidden
                     .keyboardShortcut(.escape, modifiers: [])
                     .hidden()
@@ -59,18 +61,105 @@ struct WorkflowWriteView: View {
             // the view is still appearing (it slides in with the item) can
             // be lost, so ask until a text view has the keyboard.
             let step = writer.step
-            guard step == .say || step == .final else { return }
+            guard step == .say || step == .final || step == .forward else { return }
             for _ in 0..<10 {
                 try? await Task.sleep(for: .milliseconds(60))
                 guard !Task.isCancelled else { return }
                 fieldFocused = step == .say
                 textFocused = step == .final
+                toFocused = step == .forward
                 if WorkflowHostView.isEditingText { return }
             }
         }
     }
 
     // MARK: Steps
+
+    /// Forward: whom to (names from the mailbox as they are typed), and a
+    /// note; the email as it was sent goes below the note.
+    private var forward: some View {
+        let typed = writer.recipientText.trimmingCharacters(in: .whitespaces)
+        let suggestions = typed.isEmpty ? [] : (model.core?.suggestContactsNow(typed, limit: 5) ?? [])
+            .filter { s in !writer.recipients.contains { $0.email.lowercased() == s.email.lowercased() } }
+        return VStack(alignment: .leading, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Forward").font(TypeRole.workflowHeading)
+                Text("The email goes as it was sent, under your note if you add one.")
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                    Text("To").font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                    ForEach(writer.recipients, id: \.email) { r in
+                        HStack(spacing: Space.xs) {
+                            Text(r.name?.isEmpty == false ? r.name! : r.email).lineLimit(1)
+                            Button { writer.removeRecipient(r.email) } label: {
+                                Image(systemName: "xmark").font(TypeRole.workflowKey)
+                            }
+                            .buttonStyle(.plain)
+                            .hoverHelp("Remove \(r.email)")
+                            .accessibilityLabel("Remove \(r.email)")
+                        }
+                        .font(TypeRole.workflowContext)
+                        .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
+                        .background(Tone.workflow(session.kind).opacity(0.14), in: Capsule())
+                    }
+                    TextField(writer.recipients.isEmpty ? "Name or address" : "Add another", text: $writer.recipientText)
+                        .font(TypeRole.workflowContent)
+                        .textFieldStyle(.plain)
+                        .focused($toFocused)
+                        .onSubmit {
+                            // The first name offered, else what was typed.
+                            if let first = suggestions.first {
+                                writer.addRecipient(first)
+                                writer.recipientText = ""
+                                fieldFocused = true
+                            } else if writer.takeTypedRecipient() {
+                                fieldFocused = true
+                            }
+                        }
+                        .onExitCommand { perform(.back) }
+                        .accessibilityLabel("To")
+                }
+                .padding(Space.xl)
+                .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+                if !suggestions.isEmpty {
+                    HStack(spacing: Space.s) {
+                        ForEach(suggestions, id: \.email) { s in
+                            Button {
+                                writer.addRecipient(s)
+                                writer.recipientText = ""
+                                fieldFocused = true
+                            } label: {
+                                Text(s.name?.isEmpty == false ? "\(s.name!) · \(s.email)" : s.email).lineLimit(1)
+                            }
+                            .buttonStyle(.bordered)
+                            .hoverHelp("Forward to \(s.email)")
+                        }
+                    }
+                    .font(TypeRole.workflowContext)
+                }
+            }
+            HStack(alignment: .top, spacing: Space.m) {
+                TextField("Add a note (optional)", text: $writer.field, axis: .vertical)
+                    .font(TypeRole.workflowContent)
+                    .textFieldStyle(.plain)
+                    .lineLimit(2...6)
+                    .focused($fieldFocused)
+                    .onSubmit { perform(.primary) }
+                    .onExitCommand { perform(.back) }
+                    .accessibilityLabel("Note")
+                Button { startDictation() } label: {
+                    Image(systemName: "mic").font(TypeRole.workflowContent).foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Dictate the note")
+                .accessibilityLabel("Dictate")
+            }
+            .padding(Space.xl)
+            .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+        }
+    }
 
     private var choose: some View {
         VStack(alignment: .leading, spacing: Space.m) {

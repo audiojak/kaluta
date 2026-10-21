@@ -606,6 +606,13 @@ extension AppModel {
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
             // Esc goes back a step; Discard drops the email, back to the item.
             return send + [a(.back, .quiet, "Change what I said"), a(.discard, .quiet, nil)]
+        case .forward:
+            // Return in the note sends too; ⌘. drops it.
+            var send = a(.primary, .primary, "Send")
+            send.shown = false
+            var discard = a(.discard, .quiet, nil)
+            discard.shown = false
+            return [a(.send, .primary, "Send"), send, a(.back, .quiet, "Cancel"), discard]
         case .writing, .sending:
             return []
         }
@@ -622,8 +629,16 @@ extension AppModel {
         case (.choose, .ownWords): writer.writeMyself()
         case (.say, .back):
             if !writer.backToAnswers() { session.writer = nil }
-        case (.choose, .back), (_, .discard):
+        case (.choose, .back), (.forward, .back), (_, .discard):
             session.writer = nil
+        case (.forward, .send), (.forward, .primary):
+            guard await writer.sendForward(model: self) else { return }
+            let names = writer.recipients.map { $0.name?.isEmpty == false ? $0.name! : $0.email }.joined(separator: ", ")
+            session.writer = nil
+            // A held send shows Undo Send; otherwise say it went.
+            if !writer.sentHeld, let account = openAccountID {
+                undo.show("Forwarded to \(names)", accountID: account, offersUndo: false)
+            }
         case (.say, .primary):
             await writer.write(model: self)
         case (.say, .ownWords):
@@ -736,10 +751,7 @@ extension AppModel {
         case (_, .nextMessage):
             await stepConversation(by: 1, item: item, session: session)
         case (_, .forward):
-            if let id = threadID(of: item), let detail = session.threads[id],
-               let message = answeringMessage(detail, session: session) {
-                compose(.forward(messageID: message.id, task: nil))
-            }
+            startForwarding(item, session: session)
         case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
@@ -861,6 +873,15 @@ extension AppModel {
         await decide(item, "archive", session: session, notice: subject.isEmpty ? "Archived" : "Archived “\(subject)”",
                      undoMail: { if let token { _ = try? await core.undo(token) } },
                      redoMail: { if let token { _ = try? await core.redo(token) } })
+    }
+
+    /// Forward (F): whom to and a note, under the email; the item stays
+    /// for its decision once it has gone (spec §14.13).
+    private func startForwarding(_ item: WorkflowItem, session: WorkflowSession) {
+        guard let id = threadID(of: item), let detail = session.threads[id],
+              let message = answeringMessage(detail, session: session) else { return }
+        session.writer = WorkflowWriter(threadID: id, messageID: message.id, replyAll: false, taskID: nil, email: "",
+                                        forwarding: true)
     }
 
     /// Reply: *What do you want to say?* under the email (spec §14.13).

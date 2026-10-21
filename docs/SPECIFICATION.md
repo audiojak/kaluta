@@ -4554,7 +4554,12 @@ one decision with a one-line reason:
   one but the user and the sender is on it (its key does nothing then and
   the key list leaves it out), and *Forward* (F), always there. Neither
   moves a decision. Short of room, the two show as icons with their keys
-  (their names on hover).
+  (their names on hover). Amended 2026-10-21: *Forward* writes under the
+  card, as Reply does, not in a window: *To* (names from the mailbox
+  offered as they are typed; Return takes the first, or the address
+  typed) and a note, optional; Send (⌘Return, or Return in the note)
+  sends the note with the email as it was sent below it. Once it has
+  gone the item stays, for its decision.
   **P** and **N** (Gmail's keys) go message by message: P opens the
   stack if needed and the message before, alone and answered; N the one
   after, and past the last, the card's email with the stack closed. The
