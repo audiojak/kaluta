@@ -4557,7 +4557,8 @@ one decision with a one-line reason:
   (their names on hover). Amended 2026-10-21: *Forward* writes under the
   card, as Reply does, not in a window: *To* (names from the mailbox
   offered as they are typed; ↑ and ↓ reach one, Return takes it, the
-  first to start, or the address typed) and a note, optional; Send (⌘Return, or Return in the note)
+  first to start, or the address typed; Tab moves on to the note and
+  ⇧Tab back) and a note, optional; Send (⌘Return, or Return in the note)
   sends the note with the email as it was sent below it. Once it has
   gone the item stays, for its decision.
   **P** and **N** (Gmail's keys) go message by message: P opens the

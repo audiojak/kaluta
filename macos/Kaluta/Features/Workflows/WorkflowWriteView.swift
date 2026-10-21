@@ -130,6 +130,13 @@ struct WorkflowWriteView: View {
                             return .handled
                         }
                         .onChange(of: writer.recipientText) { pick = 0 }
+                        // Tab: on to the note, taking an address typed.
+                        .onKeyPress(.tab, phases: .down) { press in
+                            guard !press.modifiers.contains(.shift) else { return .ignored }
+                            _ = writer.takeTypedRecipient()
+                            focusNote()
+                            return .handled
+                        }
                         .onExitCommand { perform(.back) }
                         .accessibilityLabel("To")
                 }
@@ -163,6 +170,12 @@ struct WorkflowWriteView: View {
                     .lineLimit(2...6)
                     .focused($fieldFocused)
                     .onSubmit { perform(.primary) }
+                    // ⇧Tab: back to To.
+                    .onKeyPress(.tab, phases: .down) { press in
+                        guard press.modifiers.contains(.shift) else { return .ignored }
+                        toFocused = true
+                        return .handled
+                    }
                     .onExitCommand { perform(.back) }
                     .accessibilityLabel("Note")
                 Button { startDictation() } label: {
