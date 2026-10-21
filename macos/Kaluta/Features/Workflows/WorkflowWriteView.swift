@@ -11,6 +11,8 @@ struct WorkflowWriteView: View {
     @FocusState private var fieldFocused: Bool
     @FocusState private var textFocused: Bool
     @FocusState private var toFocused: Bool
+    /// Which of the names offered ↑ and ↓ have reached; Return takes it.
+    @State private var pick = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
@@ -109,13 +111,25 @@ struct WorkflowWriteView: View {
                         .textFieldStyle(.plain)
                         .focused($toFocused)
                         .onSubmit {
-                            // The first name offered, else what was typed.
-                            if let first = suggestions.first {
-                                take(first)
+                            // The name reached with ↑ and ↓ (the first, to
+                            // start), else what was typed.
+                            if !suggestions.isEmpty {
+                                take(suggestions[min(pick, suggestions.count - 1)])
                             } else if writer.takeTypedRecipient() {
                                 focusNote()
                             }
                         }
+                        .onKeyPress(.downArrow) {
+                            guard !suggestions.isEmpty else { return .ignored }
+                            pick = (pick + 1) % suggestions.count
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            guard !suggestions.isEmpty else { return .ignored }
+                            pick = (pick + suggestions.count - 1) % suggestions.count
+                            return .handled
+                        }
+                        .onChange(of: writer.recipientText) { pick = 0 }
                         .onExitCommand { perform(.back) }
                         .accessibilityLabel("To")
                 }
@@ -126,14 +140,18 @@ struct WorkflowWriteView: View {
                         // Names, with the address on hover; the address when
                         // names repeat or there is none.
                         let names = Dictionary(grouping: suggestions, by: { $0.name ?? "" })
-                        ForEach(suggestions, id: \.email) { s in
+                        ForEach(Array(suggestions.enumerated()), id: \.element.email) { i, s in
                             let name = s.name ?? ""
+                            let reached = i == min(pick, suggestions.count - 1)
                             Button { take(s) } label: {
                                 Text(name.isEmpty || names[name]?.count ?? 0 > 1 ? s.email : name).lineLimit(1)
                             }
                             .buttonStyle(.bordered)
-                            .hoverHelp("Forward to \(name.isEmpty ? s.email : "\(name) (\(s.email))")")
+                            .tint(reached ? Tone.workflow(session.kind) : nil)
+                            .hoverHelp("Forward to \(name.isEmpty ? s.email : "\(name) (\(s.email))") (↑↓ then Return)")
+                            .accessibilityAddTraits(reached ? .isSelected : [])
                         }
+                        Text("↑↓ then Return").foregroundStyle(.secondary).fixedSize()
                     }
                     .font(TypeRole.workflowContext)
                 }
@@ -313,9 +331,14 @@ struct WorkflowWriteView: View {
 
     /// Put the cursor in the field and start macOS dictation there.
     private func startDictation() {
-        fieldFocused = true
         Task { @MainActor in
-            // A turn later: the field must hold the keyboard first.
+            // The field must hold the keyboard first: asked for until it
+            // does (the host gives the keys up a turn later).
+            for _ in 0..<8 {
+                fieldFocused = true
+                try? await Task.sleep(for: .milliseconds(50))
+                if WorkflowHostView.isEditingText { break }
+            }
             NSApp.sendAction(Selector(("startDictation:")), to: nil, from: nil)
         }
     }
