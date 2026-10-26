@@ -727,6 +727,15 @@ extension AppModel {
         case .whereAmI:
             announce(whereAmI(session))
             return
+        // The card's links stay while writing or making a task: they work
+        // there too (the keys type meanwhile).
+        case .openInGmail where session.writer != nil || session.taskForm != nil:
+            if let item = session.current, let id = threadID(of: item) { openInGmail(threadID: id) }
+            return
+        case .openInFull where (session.writer != nil || session.taskForm != nil)
+            && [.triage, .replies, .tasks, .waiting].contains(session.kind):
+            if let item = session.current, let id = threadID(of: item) { openThreads([id]) }
+            return
         default:
             break
         }

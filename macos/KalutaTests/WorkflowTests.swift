@@ -607,6 +607,27 @@ struct WorkflowTests {
         #expect(writer.step == .say && writer.field.isEmpty)
     }
 
+    @Test func theCardsLinksWorkWhileWriting() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        var opened: [String] = []
+        model.openThreadWindow = { opened.append($0.threadID) }
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .triage, items: [item], startedAt: 0, resumed: false))
+        session.threads[row.id] = detail
+        model.workflowSession = session
+        await model.performWorkflow(.replyNow)
+        #expect(session.writer != nil && session.isTyping, "the words field has the keys")
+        // O is a letter in the field; the link still opens the email.
+        await model.performWorkflow(.openInFull)
+        #expect(opened == [row.id])
+        #expect(session.writer != nil, "and the writing goes on")
+    }
+
     @Test func aFileGoesWithTheReply() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
