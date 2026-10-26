@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// A composer window's content (spec §14.5): header fields, the rich-text
 /// body, the message being answered (shown by default, in a pane that can
@@ -216,17 +215,7 @@ struct ComposerView: View {
                 .help(ToolbarHelp.composer(store.task == nil || request.agentName != nil ? "Send" : "Send and Finish Task")) // toolbar
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-            guard case let .success(urls) = result else { return }
-            let scoped = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
-            store.attach(urls)
-            for (url, started) in scoped where started { url.stopAccessingSecurityScopedResource() }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            store.attach(files)
-            return !files.isEmpty
-        }
+        .attachingFiles(choosing: $importing, attach: store.attach)
     }
 
     private func header(_ store: ComposerStore) -> some View {
@@ -502,29 +491,10 @@ struct ComposerView: View {
     }
 
     private func attachmentStrip(_ store: ComposerStore) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Space.m) {
-                ForEach(store.attachments, id: \.path) { attachment in
-                    HStack(spacing: Space.s) {
-                        Image(systemName: "doc")
-                        Text(attachment.filename).lineLimit(1)
-                        Text(ByteCountFormatter.string(fromByteCount: Int64(attachment.size), countStyle: .file))
-                            .foregroundStyle(.secondary)
-                        Button("Remove", systemImage: "xmark.circle.fill") { store.removeAttachment(attachment) }
-                            .hoverHelp("Remove \(attachment.filename) from the message")
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
-                    }
-                    .font(TypeRole.meta)
-                    .padding(.horizontal, Space.m)
-                    .padding(.vertical, Space.xs)
-                    .background(.quaternary, in: .capsule)
-                }
-            }
+        DraftAttachmentChips(attachments: store.attachments, remove: store.removeAttachment)
             .padding(.horizontal, Space.l)
             .padding(.vertical, Space.m)
-        }
-        .overlay(alignment: .top) { InsetRule() }
+            .overlay(alignment: .top) { InsetRule() }
     }
 
     /// The quote was sanitized by the core; show it under the reader's CSP.

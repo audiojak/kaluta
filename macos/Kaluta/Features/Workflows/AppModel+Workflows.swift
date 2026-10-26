@@ -616,7 +616,10 @@ extension AppModel {
             let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
             // Esc goes back a step; Discard drops the email, back to the item.
-            return send + [a(.back, .quiet, "Change what I said"), a(.discard, .quiet, nil)]
+            // Attach is the paperclip by the email; its key still answers.
+            var attach = a(.attach, .plain, nil)
+            attach.shown = false
+            return send + [a(.back, .quiet, "Change what I said"), attach, a(.discard, .quiet, nil)]
         case .forward:
             // Return in the note sends too; ⌘. drops it.
             var send = a(.primary, .primary, "Send")
@@ -665,6 +668,8 @@ extension AppModel {
             await writer.write(model: self, asWritten: true)
         case (.final, .back):
             writer.changeWhatISaid()
+        case (.final, .attach):
+            writer.choosingFiles = true
         case (.final, .send), (.final, .sendKeepTask):
             let keep = command == .sendKeepTask
             guard await writer.send(model: self, keepTask: keep) else { return }

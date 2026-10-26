@@ -4495,9 +4495,12 @@ are looked for as each account opens.
   goes back to the words.
 - **Every AI-written email from the user's own accounts ends on an
   editable screen**: the text that will be sent, at content size, with
-  what the user said (or chose) above it and *Change*, quick changes
-  (Shorter, Warmer, *Tell Kaluta what to change…*), and Send. The same
-  holds outside workflows (§10.4, amended).
+  what the user said (or chose) above it and *Change*; under it, at its
+  width, a paperclip for files to go with it (⇧⌘A, or dropped on the
+  email; shown as chips, each removable, copied as the composer copies
+  them) and quick changes (Shorter, Warmer, *Tell Kaluta what to
+  change…*); and Send. The same holds outside workflows (§10.4,
+  amended; files amended 2026-10-26).
 - **What the user tells Kaluta is evidence.** A direction ("fine on the
   cap, keep 30 days") is recorded with the composition (ADR 0013, the
   user's instruction) and read by the daily review (§14.10) as it reads

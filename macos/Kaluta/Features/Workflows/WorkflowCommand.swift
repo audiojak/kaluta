@@ -61,6 +61,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case tellKaluta
     /// ⇧Return: skip the question Kaluta asked (a [blank] stands for it).
     case skipQuestion
+    /// A file to go with the email (the final screen).
+    case attach
     /// The words typed are the email, as written: no drafting.
     case ownWords
     /// Esc: back one step; from an item, back to Mail.
@@ -104,6 +106,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "3"
         case .tellKaluta: "/"
         case .skipQuestion: "⇧Return"
+        case .attach: "⇧⌘A"
         case .back: "Esc"
         // Where it is offered (the answers, *What do you want to say?*):
         // the words as written. Not ⌘Return, which sends.
@@ -134,6 +137,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         }
         if modifiers == .command, characters.lowercased() == "e" { return .clearBucket }
         if modifiers == [.command, .shift], characters.lowercased() == "m" { return .ownWords }
+        if modifiers == [.command, .shift], characters.lowercased() == "a" { return .attach }
         guard modifiers.isDisjoint(with: [.command, .control, .option]),
               let c = characters.lowercased().first, characters.count == 1 else { return nil }
         return Self.characters[c]
@@ -190,6 +194,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick3: "Third answer"
         case .tellKaluta: "Tell Kaluta what to say"
         case .skipQuestion: "Skip the question"
+        case .attach: "Attach a file"
         case .ownWords: "Use my words"
         case .back: "Back"
         case .whatsLeft: "What's left?"

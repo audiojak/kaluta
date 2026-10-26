@@ -161,6 +161,7 @@
 		D4E26385A991C6FE0271663B /* FormattingBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18471FF36210396425FC901 /* FormattingBar.swift */; };
 		D53705EF7BEAF20D93D50F9A /* AppModel+Tasks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE8EAC48F6FB6D137485077F /* AppModel+Tasks.swift */; };
 		D58FEAEE53576E1CFAC26DB2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C938B617F286D41BAF303A47 /* Assets.xcassets */; };
+		D6CF455A8A687D1D368D5D68 /* DraftAttachments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D2F52B5B98BC21051EAE77C /* DraftAttachments.swift */; };
 		D9EEEE448608FD69FC7B8518 /* MessageToolbar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20CF1FD21F167EE4466907F /* MessageToolbar.swift */; };
 		DC0A183F4BA3B97665883DD9 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 836B3D70D3275C82E2478551 /* MainWindow.swift */; };
 		DD416F4D2F54860D18CB984B /* LabelTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122C89A288F22719B15CF540 /* LabelTreeTests.swift */; };
@@ -324,6 +325,7 @@
 		86964E804AD95264DC58853D /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		8B3BF2CC2A9A282EC02642B1 /* ComposerHTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerHTML.swift; sourceTree = "<group>"; };
 		8BCD4D57392C74C2D62E1447 /* ComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTests.swift; sourceTree = "<group>"; };
+		8D2F52B5B98BC21051EAE77C /* DraftAttachments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftAttachments.swift; sourceTree = "<group>"; };
 		8D366146E28C0759862B596A /* UpdaterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterTests.swift; sourceTree = "<group>"; };
 		8FBA136006AAD53312889305 /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		94D009E48E568579CC59D26E /* AppModel+Facts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+Facts.swift"; sourceTree = "<group>"; };
@@ -653,6 +655,7 @@
 				D3023B7D3FA4C3001F558146 /* ComposerStore.swift */,
 				4777049647CB7B61DE86A127 /* ComposerThreadPane.swift */,
 				8FBA136006AAD53312889305 /* ComposerView.swift */,
+				8D2F52B5B98BC21051EAE77C /* DraftAttachments.swift */,
 				3DD9BF17ACCDEB888B3E2259 /* DraftClient.swift */,
 				A18471FF36210396425FC901 /* FormattingBar.swift */,
 				BED381521B150F07DE226178 /* RecipientField.swift */,
@@ -1147,6 +1150,7 @@
 				EE1878BD183A42751B874190 /* CoreClient.swift in Sources */,
 				8E33839BE34F8A1D7BC58FB7 /* DateStyle.swift in Sources */,
 				8C82110397521D57DB1A60FD /* DemoWorkflows.swift in Sources */,
+				D6CF455A8A687D1D368D5D68 /* DraftAttachments.swift in Sources */,
 				1CEFD2FCD113EFE642381D18 /* DraftClient.swift in Sources */,
 				63774F8849375BFDE5C94B14 /* DueDay.swift in Sources */,
 				607C2669A5499024AFBA19EA /* EmailDocument.swift in Sources */,

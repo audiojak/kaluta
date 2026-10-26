@@ -78,7 +78,8 @@ final class WorkflowWriter {
     private var askedFrom: (step: Step, instruction: String) = (.say, "")
 
     init(threadID: String, messageID: String, replyAll: Bool, taskID: Int64?, email: String,
-         answers: [Answer] = [], forwarding: Bool = false) {
+         answers: [Answer] = [], forwarding: Bool = false, attachmentsDirectory: URL? = nil) {
+        files = DraftAttachments(directory: attachmentsDirectory)
         self.threadID = threadID
         self.messageID = messageID
         self.replyAll = replyAll
@@ -88,6 +89,23 @@ final class WorkflowWriter {
         questions = WritingText.questions(in: email)
         self.answers = Array(answers.prefix(3))
         step = forwarding ? .forward : answers.isEmpty ? .say : .choose
+    }
+
+    // MARK: Attachments
+
+    /// Files to go with the email, copied so they are kept (spec §14.13).
+    private(set) var attachments: [DraftAttachmentInfo] = []
+    private let files: DraftAttachments
+    /// The file chooser is open (⇧⌘A).
+    var choosingFiles = false
+
+    func attach(_ urls: [URL]) {
+        attachments += files.copy(urls)
+    }
+
+    func removeAttachment(_ attachment: DraftAttachmentInfo) {
+        attachments.removeAll { $0.path == attachment.path }
+        files.remove(attachment)
     }
 
     // MARK: Forwarding
@@ -305,10 +323,12 @@ final class WorkflowWriter {
         step = askedFrom.step
     }
 
-    /// Dropped before Kaluta wrote: its session goes too.
+    /// Dropped: Kaluta's session goes, and the copies of files not sent.
     func close() {
         chat?.close()
         chat = nil
+        attachments.forEach(files.remove)
+        attachments = []
     }
 
     /// After the last question: the answers go to Kaluta in the session
@@ -401,6 +421,7 @@ final class WorkflowWriter {
             var draft = try await core.replyDraft(to: messageID, all: replyAll)
             draft.bodyHtml = ComposerHTML.html(from: NSAttributedString(string: body,
                                                                          attributes: [.font: ComposerHTML.bodyFont]))
+            draft.attachments = attachments
             let id = try await core.saveDraft(draft)
             if let aiText {
                 if let guideVersion { try? await core.setDraftGuideVersion(id, guideVersion) }
@@ -409,6 +430,8 @@ final class WorkflowWriter {
                                                   guideVersion: guideVersion, audiences: [])
             }
             let held = try await core.sendDraft(id)
+            // The draft has the copies now: they go with it, held or sent.
+            attachments = []
             await model.messageSent(heldDraftID: held ? id : nil, taskID: taskID, finishTask: taskID != nil && !keepTask,
                                     accountID: account)
             return true
