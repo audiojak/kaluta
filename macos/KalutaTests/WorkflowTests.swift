@@ -466,6 +466,76 @@ struct WorkflowTests {
         #expect(writer.recipients.isEmpty)
     }
 
+    /// Kaluta asks before it writes (spec §14.9, §14.13): one question at
+    /// a time; Return answers, ⇧Return skips, 1–3 pick an answer offered,
+    /// Esc goes to the question before and then back to the words.
+    @Test func kalutaAsksOneQuestionAtATime() {
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Details?")
+        let questions = [
+            ComposerAssistant.FactQuestion(question: "Which niches?", fact: "Creator niches", category: "work",
+                                           options: ["Tech", "Lifestyle"]),
+            ComposerAssistant.FactQuestion(question: "Will you attach the logo?", fact: "Logo", category: "other"),
+            ComposerAssistant.FactQuestion(question: "What is the budget?", fact: "Budget", category: "work"),
+        ]
+        writer.beginAsking(questions)
+        #expect(writer.step == .asking && writer.question?.question == "Which niches?" && !writer.onLastQuestion)
+        #expect(!writer.pickChoice(2), "no third answer offered")
+        #expect(!writer.pickChoice(1) && writer.questionIndex == 1 && writer.factAnswers[0] == "Lifestyle")
+        #expect(writer.question?.choices == ["Yes", "No"])
+        #expect(!writer.skipQuestion() && writer.questionIndex == 2 && writer.onLastQuestion)
+        writer.field = " 2,000 "
+        writer.backFromAsking()
+        #expect(writer.questionIndex == 1 && writer.field == "", "the question before, with its (empty) answer")
+        writer.field = "Yes"
+        #expect(!writer.answerQuestion() && writer.field == "2,000", "the answer typed before is kept")
+        #expect(writer.answerQuestion(), "the last answer: Kaluta writes")
+        #expect(writer.factAnswers == ["Lifestyle", "Yes", "2,000"])
+        #expect(WorkflowCommand.skipQuestion.keyLabel == "⇧Return")
+        #expect(WorkflowCommand.command(key: .return, characters: "\r", modifiers: .shift) == .skipQuestion)
+
+        // From the first question, Esc drops the questions and goes back.
+        writer.beginAsking(questions)
+        writer.backFromAsking()
+        #expect(writer.step == .say && writer.factQuestions.isEmpty)
+    }
+
+    /// Kaluta's questions answered: what the user said stays the first
+    /// direction, the answers follow it, and the field is clear for
+    /// what to change next.
+    @Test func answersJoinWhatWasSaid() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Can you come?")
+        writer.field = "Yes, with facts about me"
+        await writer.write(model: model)
+        #expect(writer.step == .asking && writer.factQuestions.count == 2, "the fake asks on 'facts about me'")
+        #expect(writer.said == "Yes, with facts about me")
+        #expect(writer.pickChoice(1) == false)
+        writer.field = "Mail software"
+        #expect(writer.answerQuestion())
+        await writer.writeWithAnswers(model: model)
+        #expect(writer.step == .final && writer.field.isEmpty)
+        #expect(writer.said == "Yes, with facts about me", "the words, not the first answer")
+        #expect(writer.text.contains("CTO") && writer.text.contains("Mail software"), "the answers reached Kaluta")
+        let proposed = try #require(try await model.core?.analysisQueue().facts)
+        #expect(proposed.map(\.value).sorted() == ["CTO", "Mail software"], "proposed in Facts, not added")
+        #expect(try await model.core?.facts().isEmpty == true)
+    }
+
+    @Test func kalutaAsksBackFromTheFirstQuestion() {
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Details?")
+        writer.beginAsking([ComposerAssistant.FactQuestion(question: "Which niches?", fact: "Creator niches", category: "work")])
+        #expect(writer.onLastQuestion)
+        writer.backFromAsking()
+        #expect(writer.step == .say)
+    }
+
     @Test func useMyWordsSendsWhatWasTyped() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")

@@ -601,6 +601,17 @@ extension AppModel {
                 return [a(.primary, .primary, "Write it yourself"), back, discard]
             }
             return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), back, discard]
+        case .asking:
+            // Return answers (the last answer writes); ⇧Return skips; 1–3
+            // pick an answer offered; Esc goes to the question before.
+            var discard = a(.discard, .quiet, nil)
+            discard.shown = false
+            let picks: [WorkflowCommand] = [.pick1, .pick2, .pick3]
+            let choices = picks.prefix(writer.question?.choices.count ?? 0).map { var x = a($0, .plain, nil); x.shown = false; return x }
+            let last = writer.onLastQuestion
+            return [a(.primary, .primary, last ? "Write it with Kaluta" : "Next")] + choices
+                + [a(.skipQuestion, .plain, last ? "Skip and write" : "Skip"),
+                   a(.back, .quiet, writer.questionIndex > 0 ? "Back" : "Back to my words"), discard]
         case .final:
             let send = writer.taskID == nil ? [a(.send, .primary, "Send")]
                 : [a(.send, .primary, "Send and finish the task"), a(.sendKeepTask, .plain, nil)]
@@ -641,6 +652,15 @@ extension AppModel {
             }
         case (.say, .primary):
             await writer.write(model: self)
+        case (.asking, .primary):
+            if writer.answerQuestion() { await writer.writeWithAnswers(model: self) }
+        case (.asking, .skipQuestion):
+            if writer.skipQuestion() { await writer.writeWithAnswers(model: self) }
+        case (.asking, .pick1), (.asking, .pick2), (.asking, .pick3):
+            let index = [WorkflowCommand.pick1, .pick2, .pick3].firstIndex(of: command) ?? 0
+            if writer.pickChoice(index) { await writer.writeWithAnswers(model: self) }
+        case (.asking, .back):
+            writer.backFromAsking()
         case (.say, .ownWords):
             await writer.write(model: self, asWritten: true)
         case (.final, .back):

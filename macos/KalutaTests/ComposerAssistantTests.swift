@@ -34,6 +34,28 @@ struct ComposerAssistantTests {
         #expect(fresh.contains("(nobody yet)") && !fresh.contains("being answered"))
     }
 
+    /// The agent's questions before it writes (spec §14.9): each with its
+    /// fact label and category, and answers to pick from where the thread
+    /// offers them; a yes-or-no question offers Yes and No by itself.
+    @Test func questionsCarryTheirOptions() {
+        let text = """
+        {"questions": [
+          {"question": "Which niches do you want?", "category": "work", "label": "Creator niches",
+           "options": ["Tech", " Lifestyle ", "tech", "Food", "Wellness"]},
+          {"question": "Will you attach the logo?", "category": "preferences"},
+          {"question": "What is the budget?", "label": "Budget", "category": "Work", "options": [""]}
+        ]}
+        """
+        let questions = try! #require(ComposerAssistant.questions(in: text))
+        #expect(questions.map(\.choices) == [["Tech", "Lifestyle", "Food"], ["Yes", "No"], []],
+                "three at most, each once; yes and no for a question that takes them")
+        #expect(questions.map(\.fact) == ["Creator niches", "Will you attach the logo?", "Budget"])
+        #expect(questions.map(\.category) == ["work", "preferences", "work"])
+        #expect(ComposerAssistant.questions(in: "Happy to help.") == nil)
+        #expect(ComposerAssistant.prompt(instruction: "x", from: "me", to: [], subject: "s", draft: "", original: "")
+            .contains("\"options\": [\"Tech\", \"Lifestyle\"]"))
+    }
+
     @Test func answersLoseTheirFenceAndSpace() {
         #expect(ComposerAssistant.cleaned("\n  Sounds good.\n") == "Sounds good.")
         #expect(ComposerAssistant.cleaned("```text\nSounds good.\n```") == "Sounds good.")

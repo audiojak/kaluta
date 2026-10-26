@@ -18,7 +18,6 @@ struct ComposerView: View {
     @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
     @State private var factAnswers: [String: String] = [:]
-    @State private var saveFacts = true
 
     var body: some View {
         Group {
@@ -429,8 +428,9 @@ struct ComposerView: View {
         .overlay(alignment: .top) { InsetRule() }
     }
 
-    /// The facts the agent needs before it drafts: a field for each, and
-    /// whether to keep the answers in the writing guide.
+    /// The facts the agent needs before it drafts: a field for each, with
+    /// the answers the thread offers to pick from. The answers are
+    /// proposed in Facts for review (spec §14.9).
     private func factQuestions(_ questions: [ComposerAssistant.FactQuestion]) -> some View {
         let name = model.agent.providerName
         return VStack(alignment: .leading, spacing: Space.s) {
@@ -445,12 +445,20 @@ struct ComposerView: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(1...4)
                         .accessibilityLabel(q.question)
+                    if !q.choices.isEmpty {
+                        HStack(spacing: Space.s) {
+                            ForEach(q.choices, id: \.self) { choice in
+                                Button(choice) { factAnswers[q.id] = choice }
+                                    .hoverHelp("Answer “\(choice)”")
+                            }
+                        }
+                    }
                 }
             }
             HStack(spacing: Space.m) {
-                Toggle("Keep these facts", isOn: $saveFacts)
-                    .toggleStyle(.checkbox)
-                    .hoverHelp("Later drafts use them without asking; each can be changed or removed in Facts")
+                Text("Your answers are proposed in Facts, for you to review.")
+                    .font(TypeRole.caption)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: Space.m)
                 CancelButton(help: "Stop; the message stays as it is (Esc)") {
                     assistant.cancel()
@@ -466,9 +474,8 @@ struct ComposerView: View {
     }
 
     private func answerFacts(_ answers: [String: String]) {
-        let save = saveFacts
         factAnswers = [:]
-        Task { await assistant.answer(answers, save: save) }
+        Task { await assistant.answer(answers) }
     }
 
     /// "Written for Customers": another audience writes a new draft under

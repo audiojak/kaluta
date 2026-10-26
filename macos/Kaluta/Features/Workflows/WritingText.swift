@@ -30,7 +30,7 @@ enum WritingText {
             let body = q.trimmingCharacters(in: CharacterSet(charactersIn: "?").union(.whitespaces))
             if let choices = choices(in: body) {
                 choices.forEach(add)
-            } else if yesNo(body) {
+            } else if isYesNo(body) {
                 add("Yes")
                 add("No")
             }
@@ -51,7 +51,8 @@ enum WritingText {
     private static let yesNoStarts = ["can", "could", "would", "will", "do", "does", "did", "are", "is", "should",
                                       "shall", "may", "have", "has", "any chance", "ok", "okay", "happy to"]
 
-    private static func yesNo(_ q: String) -> Bool {
+    /// A question that takes yes or no ("Can you do Thursday?").
+    static func isYesNo(_ q: String) -> Bool {
         let lower = q.lowercased()
         let words = lower.split(whereSeparator: { !$0.isLetter && $0 != "'" })
         // "Are we go for Tuesday": the question's own first word, after a
