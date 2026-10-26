@@ -24,6 +24,13 @@ struct WorkflowWriteView: View {
             case .sending: working("Sending…")
             case .forward: forward
             }
+            // A question is not a failure: it reads as one, in the
+            // workflow's colour, and the field says what to do.
+            if let asked = writer.asked {
+                Label("Kaluta asks: \(asked)", systemImage: "questionmark.circle")
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(Tone.workflow(session.kind))
+            }
             if let problem = writer.problem {
                 Label(problem, systemImage: "exclamationmark.circle")
                     .font(TypeRole.workflowContext)
@@ -254,7 +261,8 @@ struct WorkflowWriteView: View {
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: Space.m) {
-                TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
+                TextField(writer.asked == nil ? "Type it, or dictate it" : "Add what Kaluta asked, then Return",
+                          text: $writer.field, axis: .vertical)
                     .font(TypeRole.workflowContent)
                     .textFieldStyle(.plain)
                     .lineLimit(2...6)
