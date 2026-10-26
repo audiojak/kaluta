@@ -441,6 +441,7 @@ mod tests {
         let c = Connection::open(&path).unwrap();
         c.execute_batch(
             "DROP TABLE inbox_category_stats;
+             ALTER TABLE bodies DROP COLUMN hidden_json;
              ALTER TABLE outbox DROP COLUMN claimed_by; ALTER TABLE outbox DROP COLUMN lease_until;
              ALTER TABLE facts DROP COLUMN share_with_cloud;
              DROP TABLE cloud_reports;

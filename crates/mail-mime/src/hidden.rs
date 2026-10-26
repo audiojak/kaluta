@@ -103,7 +103,8 @@ pub fn visible(html: &str) -> Visible {
 }
 
 /// Elements with no end tag.
-const VOID: &[&str] = &["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
+const VOID: &[&str] =
+    &["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"];
 
 #[derive(Default)]
 struct Walk {
@@ -178,11 +179,13 @@ impl State {
             }
             return;
         }
-        if self.buf.is_some() {
-            if matches!(name.as_str(), "p" | "div" | "li" | "tr" | "td" | "th" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
-                if let Some(buf) = &mut self.buf {
-                    buf.push(' ');
-                }
+        if let Some(buf) = &mut self.buf {
+            // A block's end is a break between words.
+            if matches!(
+                name.as_str(),
+                "p" | "div" | "li" | "tr" | "td" | "th" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+            ) {
+                buf.push(' ');
             }
             return;
         }
@@ -274,13 +277,19 @@ fn hides(style: &str, dark: bool) -> bool {
 /// A background that is not white or see-through: text of any colour shows on it.
 fn sets_dark_background(style: &str) -> bool {
     declarations(style).any(|(p, v)| {
-        (p == "background" || p == "background-color") && !v.is_empty() && !is_transparent(&v) && !is_white(&v) && v != "none"
+        (p == "background" || p == "background-color")
+            && !v.is_empty()
+            && !is_transparent(&v)
+            && !is_white(&v)
+            && v != "none"
     })
 }
 
 fn is_transparent(v: &str) -> bool {
     let v = v.replace(' ', "");
-    v == "transparent" || (v.starts_with("rgba(") || v.starts_with("hsla(")) && v.trim_end_matches(')').rsplit(',').next().is_some_and(|a| a.parse::<f32>().is_ok_and(|a| a <= 0.0))
+    v == "transparent"
+        || (v.starts_with("rgba(") || v.starts_with("hsla("))
+            && v.trim_end_matches(')').rsplit(',').next().is_some_and(|a| a.parse::<f32>().is_ok_and(|a| a <= 0.0))
 }
 
 /// White, or as near as makes no difference.

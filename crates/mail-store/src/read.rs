@@ -2,8 +2,8 @@
 //! the network (spec §13 rule 1).
 
 use mail_domain::{
-    Attachment, AttachmentId, Body, BodyState, EmailAddress, HiddenText, Label, LabelColor, LabelId, LabelKind, Mailbox,
-    MailboxKind, Message, MessageId, ThreadId, ThreadSummary,
+    Attachment, AttachmentId, Body, BodyState, EmailAddress, HiddenText, Label, LabelColor, LabelId, LabelKind,
+    Mailbox, MailboxKind, Message, MessageId, ThreadId, ThreadSummary,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Deserialize;
@@ -419,7 +419,9 @@ pub fn message_for_rfc822(conn: &Connection, rfc822_id: &str) -> StoreResult<Opt
 /// worth telling.
 pub fn get_hidden(conn: &Connection, id: &MessageId) -> StoreResult<Option<HiddenText>> {
     let json: Option<String> = conn
-        .prepare_cached("SELECT b.hidden_json FROM bodies b JOIN messages m ON m.id = b.message_id WHERE m.gmail_id = ?1")?
+        .prepare_cached(
+            "SELECT b.hidden_json FROM bodies b JOIN messages m ON m.id = b.message_id WHERE m.gmail_id = ?1",
+        )?
         .query_row([id.as_str()], |r| r.get(0))
         .optional()?
         .flatten();
