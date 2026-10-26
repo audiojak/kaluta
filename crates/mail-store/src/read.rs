@@ -2,7 +2,7 @@
 //! the network (spec §13 rule 1).
 
 use mail_domain::{
-    Attachment, AttachmentId, Body, BodyState, EmailAddress, Label, LabelColor, LabelId, LabelKind, Mailbox,
+    Attachment, AttachmentId, Body, BodyState, EmailAddress, HiddenText, Label, LabelColor, LabelId, LabelKind, Mailbox,
     MailboxKind, Message, MessageId, ThreadId, ThreadSummary,
 };
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -413,6 +413,17 @@ pub fn message_for_rfc822(conn: &Connection, rfc822_id: &str) -> StoreResult<Opt
         .prepare_cached("SELECT gmail_id FROM messages WHERE rfc822_message_id = ?1 AND NOT is_draft")?
         .query_row([rfc822_id], |r| r.get(0))
         .optional()?)
+}
+
+/// What a message's body hides from its reader (spec §14.4), if anything
+/// worth telling.
+pub fn get_hidden(conn: &Connection, id: &MessageId) -> StoreResult<Option<HiddenText>> {
+    let json: Option<String> = conn
+        .prepare_cached("SELECT b.hidden_json FROM bodies b JOIN messages m ON m.id = b.message_id WHERE m.gmail_id = ?1")?
+        .query_row([id.as_str()], |r| r.get(0))
+        .optional()?
+        .flatten();
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
 }
 
 pub fn get_body(conn: &Connection, id: &MessageId) -> StoreResult<Option<Body>> {

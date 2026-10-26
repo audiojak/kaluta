@@ -59,6 +59,7 @@
 		32DFB5234A57AFB042F9535B /* Updater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99C1935B7BD9CC46286E0927 /* Updater.swift */; };
 		33A31EE689761F56BCF6B09A /* AccountSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4614017187EC60A14EACD4ED /* AccountSettings.swift */; };
 		3660B0ADA4889555D2EA9454 /* KalutaCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = AE4141EE00ACAC2429BD55BD /* KalutaCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		3ACEE4AA71C6E0A2568B5618 /* HiddenTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54E5A4E647E271F202B94754 /* HiddenTextTests.swift */; };
 		3AF0AF10080DFD879700E8F3 /* GuideEntryEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C395B7D68089EBB416AEC421 /* GuideEntryEditor.swift */; };
 		3D10005D58D1A329376E5AA4 /* WorkflowTaskForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297977E7C2BB58CB399414A2 /* WorkflowTaskForm.swift */; };
 		3D7FFF7F9E4ADA2536C904E5 /* ThreadRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7E71765F96C406D27B4E854 /* ThreadRowView.swift */; };
@@ -177,6 +178,7 @@
 		EA91A23092BE860D9ABE78E7 /* TaskKeysTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8585C78E4256FF9D5378DFB1 /* TaskKeysTests.swift */; };
 		EAF8B6ABD8AB249EF3E8D87D /* GuideTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B76AF570B019D3910BDD5420 /* GuideTests.swift */; };
 		ED24D21C181CC74851D53894 /* StartScreenView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83AAF6B20A125F9CFDADC3B /* StartScreenView.swift */; };
+		EDE87E23731350DE2E5BF3DA /* HiddenTextNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9F0288A6250492A3A8AD81D /* HiddenTextNote.swift */; };
 		EDFE012C01C2ED946BAEBA2E /* GuideDecisionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8499A573E6FF9960DFDB8D /* GuideDecisionCard.swift */; };
 		EE1878BD183A42751B874190 /* CoreClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F493DFFD9856A686BE331FC7 /* CoreClient.swift */; };
 		EFA2A992B4DBEF4224B9C592 /* WordDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6581CBC0627233B8B1854239 /* WordDiff.swift */; };
@@ -292,6 +294,7 @@
 		52E988919B5BB4B277A9B3CB /* GoogleOAuth.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = GoogleOAuth.plist; sourceTree = "<group>"; };
 		53A10F82D2BDD36DFC965DB3 /* DesignTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTests.swift; sourceTree = "<group>"; };
 		54D963AEFD130EF7FB2A946E /* AccountAvatar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountAvatar.swift; sourceTree = "<group>"; };
+		54E5A4E647E271F202B94754 /* HiddenTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenTextTests.swift; sourceTree = "<group>"; };
 		55C4D0037FD95A32B795A4EB /* AppShellTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellTests.swift; sourceTree = "<group>"; };
 		58B0869A0CF8F488398A2CCE /* KeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTests.swift; sourceTree = "<group>"; };
 		5C3DDA153B2D81B9B9451397 /* WorkflowCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowCommand.swift; sourceTree = "<group>"; };
@@ -367,6 +370,7 @@
 		C70CC60E951AC406AC6102E9 /* Kaluta.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kaluta.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C938B617F286D41BAF303A47 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C9402C291F60008AF1B7D873 /* InboxCategories.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxCategories.swift; sourceTree = "<group>"; };
+		C9F0288A6250492A3A8AD81D /* HiddenTextNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HiddenTextNote.swift; sourceTree = "<group>"; };
 		CC3090F1E505CB93D7C04728 /* AgentMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMailbox.swift; sourceTree = "<group>"; };
 		CC52E3F0BAAA632A75C55A49 /* FactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsView.swift; sourceTree = "<group>"; };
 		CE458C3041561605DDCD563D /* AgentSuggestionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestionTests.swift; sourceTree = "<group>"; };
@@ -572,6 +576,7 @@
 				1A16569109508207AFC34434 /* FactsTests.swift */,
 				4867308667F24D4AB7B9B456 /* FormattingTests.swift */,
 				B76AF570B019D3910BDD5420 /* GuideTests.swift */,
+				54E5A4E647E271F202B94754 /* HiddenTextTests.swift */,
 				58B0869A0CF8F488398A2CCE /* KeychainTests.swift */,
 				429900E2DBB094C3C8566BDC /* LabelPickerTests.swift */,
 				122C89A288F22719B15CF540 /* LabelTreeTests.swift */,
@@ -636,6 +641,7 @@
 			children = (
 				270EA7FF62555DF87314CDDE /* AttachmentStrip.swift */,
 				16CB7C5D00F8E0661C292EF4 /* EmailDocument.swift */,
+				C9F0288A6250492A3A8AD81D /* HiddenTextNote.swift */,
 				2AD5AD309FC75125E8B5FCB8 /* LinkSafety.swift */,
 				A20CF1FD21F167EE4466907F /* MessageToolbar.swift */,
 				BD65AAA17530F1FCA5EBDEE5 /* MessageWebView.swift */,
@@ -1070,6 +1076,7 @@
 				101CE0E2A2621543F93CAE5C /* FactsTests.swift in Sources */,
 				947BDA1D89F2D3C2811EB2C5 /* FormattingTests.swift in Sources */,
 				EAF8B6ABD8AB249EF3E8D87D /* GuideTests.swift in Sources */,
+				3ACEE4AA71C6E0A2568B5618 /* HiddenTextTests.swift in Sources */,
 				FB3EF9FE4BF274C779D24684 /* KeychainTests.swift in Sources */,
 				08CF58EA24473A4613949956 /* LabelPickerTests.swift in Sources */,
 				DD416F4D2F54860D18CB984B /* LabelTreeTests.swift in Sources */,
@@ -1170,6 +1177,7 @@
 				AC42E93F2837B6E021478A62 /* GuideProposals.swift in Sources */,
 				AE9EE55A42671DDA75A53222 /* GuideStore.swift in Sources */,
 				48975953BB82EAA133747FE5 /* GuideView.swift in Sources */,
+				EDE87E23731350DE2E5BF3DA /* HiddenTextNote.swift in Sources */,
 				6E79D67D5DA8906466F66E2B /* ImportMailbox.swift in Sources */,
 				4A39F8DF2A1399C4E97DAD42 /* InboxCategories.swift in Sources */,
 				3DE1826AA2FB3C8CB663E85A /* InterviewSheet.swift in Sources */,

@@ -7,7 +7,7 @@ mod time;
 
 pub use ids::{AccountId, AttachmentId, DraftId, LabelId, MessageId, Millis, ThreadId};
 pub use model::{
-    Attachment, Body, BodyState, Draft, EmailAddress, Label, LabelColor, LabelKind, ListHeaders, Mailbox, MailboxKind,
+    Attachment, Body, BodyState, Draft, EmailAddress, HiddenText, Label, LabelColor, LabelKind, ListHeaders, Mailbox, MailboxKind,
     Message, ThreadSummary, system_labels,
 };
 pub use redacted::Redacted;

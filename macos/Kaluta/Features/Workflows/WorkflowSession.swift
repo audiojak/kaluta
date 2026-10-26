@@ -87,6 +87,8 @@ final class WorkflowSession {
     var answeringMessageID: String?
     /// The key list (?) is open.
     var showsKeys = false
+    /// Conversations whose hidden text (spec §14.4) is shown on the card.
+    var hiddenTextShown: Set<String> = []
     /// The conversation's line has scrolled above the top: it pins there.
     var conversationLinePassed = false
     /// Those messages as sanitized HTML, and their inline images, by

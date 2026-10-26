@@ -30,6 +30,15 @@ struct ThreadReaderView: View {
                 if reader.hasRemoteImages && !reader.allowsRemoteImages {
                     remoteImagesBanner
                 }
+                // Text no one was meant to see (spec §14.4): told, and shown on request.
+                if !reader.hiddenText.isEmpty {
+                    hiddenTextBanner
+                    if reader.showsHiddenText {
+                        HiddenTextNote(hidden: reader.hiddenText)
+                            .padding(.horizontal, Space.xxl)
+                            .padding(.bottom, Space.m)
+                    }
+                }
                 MessageWebView(
                     html: EmailDocument.thread(reader.documentMessages, isDark: colorScheme == .dark,
                                                actions: !model.isArchive),
@@ -103,6 +112,13 @@ struct ThreadReaderView: View {
         .padding(.horizontal, Space.xxl)
         .padding(.top, Space.xl)
         .padding(.bottom, Space.s)
+    }
+
+    private var hiddenTextBanner: some View {
+        Banner(HiddenTextNote.summary(reader.hiddenText), systemImage: "eye.slash", intent: .caution, inset: Space.xxl) {
+            Button(reader.showsHiddenText ? "Hide It" : "Show It") { reader.showsHiddenText.toggle() }
+                .hoverHelp(reader.showsHiddenText ? "Put the hidden text away" : "See what the email hides")
+        }
     }
 
     private var remoteImagesBanner: some View {

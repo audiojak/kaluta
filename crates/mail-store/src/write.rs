@@ -8,7 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mail_domain::{
-    Body, EmailAddress, Label, LabelId, LabelKind, ListHeaders, MessageId, Millis, ThreadId, system_labels,
+    Body, EmailAddress, HiddenText, Label, LabelId, LabelKind, ListHeaders, MessageId, Millis, ThreadId, system_labels,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
@@ -48,6 +48,8 @@ pub struct IncomingMessage {
     pub size_estimate: u64,
     /// `None` for a metadata-only fetch; an existing body is then kept.
     pub body: Option<Body>,
+    /// What the body hides from its reader (spec §14.4), stored with it.
+    pub hidden: Option<HiddenText>,
     /// Replaced only when `body` is `Some` (a full fetch).
     pub attachments: Vec<IncomingAttachment>,
     /// Mailing-list headers; a fetch without them keeps stored ones.
@@ -312,18 +314,20 @@ impl<'t> MailWriter<'t> {
         if let Some(body) = &m.body {
             self.tx
                 .prepare_cached(
-                    "INSERT INTO bodies (message_id, text_plain, html_sanitized, has_remote_images, sanitizer_version)
-                     VALUES (?1, ?2, ?3, ?4, ?5)
+                    "INSERT INTO bodies (message_id, text_plain, html_sanitized, has_remote_images, sanitizer_version,
+                       hidden_json)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                      ON CONFLICT (message_id) DO UPDATE SET text_plain = excluded.text_plain,
                        html_sanitized = excluded.html_sanitized, has_remote_images = excluded.has_remote_images,
-                       sanitizer_version = excluded.sanitizer_version",
+                       sanitizer_version = excluded.sanitizer_version, hidden_json = excluded.hidden_json",
                 )?
                 .execute(params![
                     message_rowid,
                     body.text_plain,
                     body.html_sanitized,
                     body.has_remote_images,
-                    self.sanitizer_version
+                    self.sanitizer_version,
+                    m.hidden.as_ref().and_then(|h| serde_json::to_string(h).ok()),
                 ])?;
             self.replace_attachments(message_rowid, &m.attachments)?;
         }

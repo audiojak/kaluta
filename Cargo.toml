@@ -44,6 +44,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 mail-parser = "0.11"
 mail-builder = "1"
 ammonia = "4"
+html5ever = "0.40"
 async-trait = "0.1"
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

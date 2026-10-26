@@ -1591,6 +1591,7 @@ name = "mail-mime"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "html5ever",
  "mail-builder",
  "mail-domain",
  "mail-parser",

@@ -38,6 +38,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0019_cleanup_progress.sql"),
     include_str!("../migrations/0020_inbox_category_stats.sql"),
     include_str!("../migrations/0021_outbox_claims.sql"),
+    include_str!("../migrations/0022_hidden_text.sql"),
     include_str!("../migrations/0022_fact_share_with_cloud.sql"),
     include_str!("../migrations/0023_cloud_reports.sql"),
     include_str!("../migrations/0024_workflows.sql"),

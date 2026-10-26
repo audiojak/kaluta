@@ -2,6 +2,7 @@
 //! §7.5, §14.4). Every parser bug fix adds a fixture under `fixtures/`.
 
 mod build;
+mod hidden;
 pub mod mbox;
 mod parse;
 mod quotes;
@@ -16,5 +17,6 @@ pub use parse::{
     ParseError, ParsedAttachment, ParsedHeaders, ParsedMessage, decode_text_part, html_to_text, parse, parse_headers,
 };
 pub use quotes::{fold_quoted_html, html_to_quoted_text, split_quoted_text, text_to_reader_html, without_quoted_html};
-pub use sanitize::{CID_SCHEME, REMOTE_SCHEME, SANITIZER_VERSION, Sanitized, sanitize_html, text_to_html};
+pub use hidden::{Invisible, Visible, strip_invisible, visible};
+pub use sanitize::{CID_SCHEME, REMOTE_SCHEME, Readable, SANITIZER_VERSION, Sanitized, readable, sanitize_html, text_to_html};
 pub use text::{ExtractError, extract_attachment_text, is_pdf, markdown_to_html, strip_quoted, truncate_chars};

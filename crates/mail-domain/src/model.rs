@@ -218,6 +218,18 @@ pub struct Body {
     pub has_remote_images: bool,
 }
 
+/// Text in a message that its reader does not show but an agent would
+/// have read (spec §14.4): invisible code points, and elements styled
+/// not to show. Left out of the message's text; kept for the user to see.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HiddenText {
+    /// Invisible code points left out of the text.
+    pub invisible: u32,
+    /// What each hidden element said, and what invisible characters
+    /// spelled, in order.
+    pub texts: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Draft {
     pub id: DraftId,

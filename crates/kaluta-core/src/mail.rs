@@ -166,6 +166,8 @@ impl Core {
         runtime::run(async move {
             let id = MessageId(message_id.clone());
             let body = db.read(move |c| read::get_body(c, &id)).await?;
+            let id = MessageId(message_id.clone());
+            let hidden = db.read(move |c| read::get_hidden(c, &id)).await?;
             // Plain-text mail renders through the same reader as HTML.
             Ok(body.map(|b| RenderedBody {
                 message_id,
@@ -178,6 +180,7 @@ impl Core {
                     .or_else(|| b.text_plain.as_deref().map(mail_mime::text_to_reader_html)),
                 text: b.text_plain,
                 has_remote_images: b.has_remote_images,
+                hidden: hidden.map(Into::into),
             }))
         })
         .await

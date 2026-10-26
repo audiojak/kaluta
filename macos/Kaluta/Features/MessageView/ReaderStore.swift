@@ -35,6 +35,8 @@ final class ReaderStore {
     private(set) var inlineImages: [String: InlineImage] = [:]
     /// Remote images were requested for this thread in this session.
     private(set) var remoteImagesAllowedForThread = false
+    /// What the conversation's emails hide (spec §14.4) is shown.
+    var showsHiddenText = false
     /// The message clicked in the thread: what Reply, Reply All and Forward
     /// (⌘R, ⇧⌘R, ⇧⌘F) answer. Nil: the latest.
     var currentMessageID: String?
@@ -54,6 +56,9 @@ final class ReaderStore {
 
     var hasRemoteImages: Bool { bodies.values.contains { $0.hasRemoteImages } }
 
+    /// What each email hides from its reader, oldest first.
+    var hiddenText: [HiddenTextInfo] { detail?.messages.compactMap { bodies[$0.id]?.hidden } ?? [] }
+
     /// Remote images load if allowed for this thread or for every sender in it.
     var allowsRemoteImages: Bool {
         if remoteImagesAllowedForThread { return true }
@@ -67,6 +72,7 @@ final class ReaderStore {
         self.threadID = threadID
         currentMessageID = nil
         remoteImagesAllowedForThread = false
+        showsHiddenText = false
         inlineImages = [:]
         loadGeneration += 1
         let generation = loadGeneration

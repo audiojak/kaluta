@@ -1821,6 +1821,7 @@ typealias MailboxScan = KalutaCore.MailboxScan
 typealias MailboxKind = KalutaCore.MailboxKind
 typealias MessageInfo = KalutaCore.MessageInfo
 typealias RenderedBody = KalutaCore.RenderedBody
+typealias HiddenTextInfo = KalutaCore.HiddenTextInfo
 typealias ThreadDetail = KalutaCore.ThreadDetail
 typealias ThreadPage = KalutaCore.ThreadPage
 typealias ThreadRow = KalutaCore.ThreadRow
