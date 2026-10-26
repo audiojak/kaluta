@@ -273,6 +273,13 @@ struct WorkflowWriteView: View {
                     .focused($fieldFocused)
                     .onSubmit { perform(.primary) }
                     .onExitCommand { perform(.back) }
+                    // 1–3 say an answer, while nothing is typed.
+                    .onKeyPress(characters: .decimalDigits) { press in
+                        guard writer.field.isEmpty, let digit = press.characters.first?.wholeNumberValue,
+                              (1...writer.starters.count).contains(digit), !writer.ownWordsOnly else { return .ignored }
+                        perform([.pick1, .pick2, .pick3][digit - 1])
+                        return .handled
+                    }
                     .accessibilityLabel(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
                 // macOS dictation into the field, as Edit › Start Dictation
                 // (or the dictation key) does.
@@ -287,16 +294,29 @@ struct WorkflowWriteView: View {
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-            // Starters say what to tell Kaluta; writing it oneself, there is none.
+            // The answers the email takes (1–3): say one and Kaluta writes
+            // from it. Writing it oneself, there are none.
             if !writer.starters.isEmpty, !writer.ownWordsOnly {
-                HStack(spacing: Space.s) {
-                    ForEach(writer.starters, id: \.self) { starter in
-                        Button(starter) { writer.addStarter(starter) }
+                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                    Text("Or just say")
+                        .font(TypeRole.workflowContext)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: Space.s) {
+                        ForEach(Array(writer.starters.enumerated()), id: \.element) { i, starter in
+                            Button { perform([.pick1, .pick2, .pick3][i]) } label: {
+                                HStack(spacing: Space.s) {
+                                    Keycap(key: "\(i + 1)")
+                                    Text(starter)
+                                }
+                            }
                             .buttonStyle(.bordered)
-                            .hoverHelp("Start with “\(starter)”")
+                            .hoverHelp(model.agent.isProviderReady
+                                       ? "Say “\(starter)”: Kaluta writes the reply from it (\(i + 1))"
+                                       : "Start with “\(starter)” (\(i + 1))")
+                        }
                     }
+                    .controlSize(.large)
                 }
-                .controlSize(.large)
             }
         }
     }
@@ -476,6 +496,7 @@ struct WorkflowWriteView: View {
     /// Above the final email: what the user said, or which answer they chose.
     static func saidLine(_ said: String) -> String {
         if said.isEmpty { return "Written by you" }
+        if said == WorkflowWriter.firstPassInstruction { return "Kaluta's first pass" }
         if said.hasPrefix("Chose: ") { return "You chose: " + said.dropFirst("Chose: ".count) }
         return "You said: \(said)"
     }

@@ -562,6 +562,72 @@ struct WorkflowTests {
         #expect(mine.step == .say && mine.field == "Tuesday is fine.", "back to the words, not the answers")
     }
 
+    @Test func anAnswerToTheEmailIsSaidByItsKey() async throws {
+        let email = "Can you do Thursday at 2pm for the board prep with Avery?"
+        // No agent ready: the answer seeds the words, which are the email.
+        let plain = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        let seeded = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: email)
+        #expect(seeded.starters == ["Yes", "No"])
+        #expect(await seeded.pickStarter(2, model: plain) == false, "no third answer")
+        #expect(await seeded.pickStarter(0, model: plain) && seeded.step == .say && seeded.field == "Yes, ")
+
+        // Kaluta ready: saying Yes is what the user says, and it writes from it.
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: email)
+        writer.field = "but only until 3"
+        #expect(await writer.pickStarter(0, model: model))
+        #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
+        #expect(writer.said == "Yes, but only until 3", "the answer, then the words typed")
+        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Kaluta's first pass")
+        #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's first pass")
+    }
+
+    @Test func kalutaTakesAFirstPassWithNothingSaid() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Can you come?")
+        await writer.firstPass(model: model)
+        #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
+        #expect(writer.said == WorkflowWriter.firstPassInstruction)
+        // Change what I said: the words are the user's to write, not Kaluta's.
+        writer.changeWhatISaid()
+        #expect(writer.step == .say && writer.field.isEmpty)
+    }
+
+    @Test func theCardsLinksWorkWhileWriting() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        var opened: [String] = []
+        model.openThreadWindow = { opened.append($0.threadID) }
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .triage, items: [item], startedAt: 0, resumed: false))
+        session.threads[row.id] = detail
+        model.workflowSession = session
+        await model.performWorkflow(.replyNow)
+        #expect(session.writer != nil && session.isTyping, "the words field has the keys")
+        // O is a letter in the field; the link still opens the email.
+        await model.performWorkflow(.openInFull)
+        #expect(opened == [row.id])
+        #expect(session.writer != nil, "and the writing goes on")
+    }
+
     @Test func aFileGoesWithTheReply() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))

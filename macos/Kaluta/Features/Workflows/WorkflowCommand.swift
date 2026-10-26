@@ -65,6 +65,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case attach
     /// The words typed are the email, as written: no drafting.
     case ownWords
+    /// Kaluta writes the likely reply with nothing said (⌘Return on the
+    /// words); it may still ask.
+    case firstPass
     /// Esc: back one step; from an item, back to Mail.
     case back
     /// ?: every key the screen answers, grouped (as Gmail's ?).
@@ -111,6 +114,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         // Where it is offered (the answers, *What do you want to say?*):
         // the words as written. Not ⌘Return, which sends.
         case .ownWords: "⇧⌘M"
+        case .firstPass: "⌘Return"
         case .whatsLeft, .whereAmI: nil
         }
     }
@@ -196,6 +200,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skipQuestion: "Skip the question"
         case .attach: "Attach a file"
         case .ownWords: "Use my words"
+        case .firstPass: "Kaluta's first pass"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"

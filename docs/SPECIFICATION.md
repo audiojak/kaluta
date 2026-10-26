@@ -4476,7 +4476,14 @@ are looked for as each account opens.
   Kaluta what to say…* (/, with dictation). Otherwise the screen leads
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
-  highlighted in it); Kaluta writes after that (Return). When Kaluta
+  highlighted in it: *Or just say* and up to three answers the email
+  takes, Yes and No or its choices, with their keys, 1–3 while nothing
+  is typed; saying one is what the user says, and Kaluta writes the
+  reply from it, asking first when it must, §14.9; words already typed
+  follow the answer); Kaluta writes after that (Return). ***Kaluta's first pass***
+  (⌘Return) has Kaluta write the reply it finds likely with nothing
+  said, recorded as "Write a reply" (no direction) and shown as *Kaluta's
+  first pass* above the email (amended 2026-10-26). When Kaluta
   would have to invent a fact, it asks instead (§14.9), in the session
   it was asked in, **one question at a time** on its own screen: *Kaluta
   asks* in the workflow's colour, "1 of 2", the question, a field

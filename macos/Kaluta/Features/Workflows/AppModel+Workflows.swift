@@ -597,10 +597,16 @@ extension AppModel {
                 words.shown = false
                 return [a(.primary, .primary, "Use my words"), words, back, discard]
             }
-            guard agent.isProviderReady else {
-                return [a(.primary, .primary, "Write it yourself"), back, discard]
+            // 1–3 say an answer the email takes (hidden: the chips show them).
+            let starters = zip([WorkflowCommand.pick1, .pick2, .pick3], writer.starters).map { command, starter in
+                var x = a(command, .plain, "Say “\(starter)”"); x.shown = false; return x
             }
-            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), back, discard]
+            guard agent.isProviderReady else {
+                return [a(.primary, .primary, "Write it yourself")] + starters + [back, discard]
+            }
+            // ⌘Return: Kaluta writes with nothing said.
+            return [a(.primary, .primary, "Write it with Kaluta"), a(.firstPass, .plain, nil), a(.ownWords, .plain, nil)]
+                + starters + [back, discard]
         case .asking:
             // Return answers (the last answer writes); ⇧Return skips; 1–3
             // pick an answer offered; Esc goes to the question before.
@@ -666,6 +672,11 @@ extension AppModel {
             writer.backFromAsking()
         case (.say, .ownWords):
             await writer.write(model: self, asWritten: true)
+        case (.say, .firstPass), (.say, .send):
+            await writer.firstPass(model: self)
+        case (.say, .pick1): await writer.pickStarter(0, model: self)
+        case (.say, .pick2): await writer.pickStarter(1, model: self)
+        case (.say, .pick3): await writer.pickStarter(2, model: self)
         case (.final, .back):
             writer.changeWhatISaid()
         case (.final, .attach):
@@ -715,6 +726,15 @@ extension AppModel {
             return
         case .whereAmI:
             announce(whereAmI(session))
+            return
+        // The card's links stay while writing or making a task: they work
+        // there too (the keys type meanwhile).
+        case .openInGmail where session.writer != nil || session.taskForm != nil:
+            if let item = session.current, let id = threadID(of: item) { openInGmail(threadID: id) }
+            return
+        case .openInFull where (session.writer != nil || session.taskForm != nil)
+            && [.triage, .replies, .tasks, .waiting].contains(session.kind):
+            if let item = session.current, let id = threadID(of: item) { openThreads([id]) }
             return
         default:
             break

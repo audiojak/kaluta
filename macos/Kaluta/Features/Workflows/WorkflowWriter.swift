@@ -177,7 +177,45 @@ final class WorkflowWriter {
         }
     }
 
-    var starters: [String] { WritingText.starters(for: questions) }
+    /// Short answers to the email's questions (Yes, No; its choices): 1–3
+    /// say one, and Kaluta writes the reply from it.
+    var starters: [String] { Array(WritingText.starters(for: questions).prefix(3)) }
+
+    /// Say that answer: Kaluta writes the reply from it, asking first if
+    /// it must (spec §14.9); words already typed follow it. With no agent
+    /// ready the answer seeds the field, the words being the email.
+    @discardableResult
+    func pickStarter(_ index: Int, model: AppModel) async -> Bool {
+        guard step == .say, !ownWordsOnly, starters.indices.contains(index) else { return false }
+        let typed = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard model.agent.isProviderReady else {
+            addStarter(starters[index])
+            return true
+        }
+        field = typed.isEmpty ? starters[index] : "\(starters[index]), \(typed)"
+        await write(model: model)
+        return true
+    }
+
+    /// What Kaluta is told when the user says nothing: the review reads it
+    /// as no direction at all (spec §14.13).
+    static let firstPassInstruction = "Write a reply"
+
+    /// ⌘Return on the words: Kaluta writes the reply it finds likely, with
+    /// nothing said; it asks first if it must (spec §14.9).
+    func firstPass(model: AppModel) async {
+        guard step == .say, !ownWordsOnly, model.agent.isProviderReady else { return }
+        // Words typed are what to say: they are not thrown away.
+        guard field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return await write(model: model) }
+        directions = [Self.firstPassInstruction]
+        field = ""
+        await ask(model: model, instruction: Self.firstPassInstruction, draft: "")
+    }
+
+    /// The words to put back in the field: none for a first pass.
+    private static func words(_ instruction: String) -> String {
+        instruction == firstPassInstruction ? "" : instruction
+    }
 
     /// What the user said (or chose), shown above the final email.
     var said: String { directions.first ?? "" }
@@ -225,7 +263,7 @@ final class WorkflowWriter {
     /// Back from the final email to what the user said, to change it.
     func changeWhatISaid() {
         guard step == .final else { return }
-        field = directions.first.map { $0.hasPrefix("Chose: ") ? "" : $0 } ?? ""
+        field = directions.first.map { $0.hasPrefix("Chose: ") ? "" : Self.words($0) } ?? ""
         directions = []
         step = answers.isEmpty || ownWordsOnly ? .say : .choose
     }
@@ -319,7 +357,7 @@ final class WorkflowWriter {
         factQuestions = []
         // The request stays with the words, not as a direction.
         _ = directions.popLast()
-        field = askedFrom.instruction
+        field = Self.words(askedFrom.instruction)
         step = askedFrom.step
     }
 
@@ -404,7 +442,7 @@ final class WorkflowWriter {
         } catch {
             chat?.close()
             problem = (error as? CoreClientError)?.message ?? error.localizedDescription
-            field = instruction
+            field = Self.words(instruction)
             directions.removeLast()
             step = back
         }

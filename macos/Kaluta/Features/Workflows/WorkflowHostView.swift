@@ -384,22 +384,25 @@ struct WorkflowItemView: View {
                                 Button { Task { await model.performWorkflow(.openInFull) } } label: {
                                     HStack(spacing: Space.s) {
                                         Text("Open the email")
-                                        Keycap(key: "O")
+                                        // Typing, the key types: the link alone.
+                                        if !session.isTyping { Keycap(key: "O") }
                                     }
                                 }
                                 .buttonStyle(.link)
-                                .hoverHelp("Open the email in its own window, as it was sent (O)")
+                                .hoverHelp(session.isTyping ? "Open the email in its own window, as it was sent"
+                                           : "Open the email in its own window, as it was sent (O)")
                             }
                             // In every workflow with a conversation, for a Gmail account.
                             if model.gmailURL(threadID: detail.thread.id) != nil {
                                 Button { Task { await model.performWorkflow(.openInGmail) } } label: {
                                     HStack(spacing: Space.s) {
                                         Text("Open in Gmail")
-                                        Keycap(key: "G")
+                                        if !session.isTyping { Keycap(key: "G") }
                                     }
                                 }
                                 .buttonStyle(.link)
-                                .hoverHelp("Open this conversation in Gmail in your browser (G)")
+                                .hoverHelp(session.isTyping ? "Open this conversation in Gmail in your browser"
+                                           : "Open this conversation in Gmail in your browser (G)")
                             }
                         }
                         .font(TypeRole.workflowContext)
