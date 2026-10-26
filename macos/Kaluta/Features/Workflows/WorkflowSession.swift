@@ -59,7 +59,11 @@ final class WorkflowSession {
     /// Which way the item on screen leaves when it is decided.
     var exit = WorkflowExit.left
     /// Kaluta's writing for the item on screen, once the user answers it.
-    var writer: WorkflowWriter?
+    /// Dropped (Cancel, Discard, the item decided), it lets Kaluta's
+    /// session go.
+    var writer: WorkflowWriter? {
+        didSet { if oldValue !== writer { oldValue?.close() } }
+    }
     /// A task being made on the item's screen (Triage).
     var taskForm: WorkflowTaskForm?
     /// Every task in a Tasks set, finished ones too, by id: the rail.
@@ -151,7 +155,7 @@ final class WorkflowSession {
     var isTyping: Bool {
         if taskForm != nil { return true }
         guard let step = writer?.step else { return false }
-        return step == .say || step == .final || step == .forward
+        return step == .say || step == .asking || step == .final || step == .forward
     }
 
     /// The reading bucket an item is in.

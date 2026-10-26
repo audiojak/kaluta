@@ -14,6 +14,8 @@ final class WorkflowWriter {
         case choose
         /// *What do you want to say?*
         case say
+        /// Kaluta asks before it writes (spec §14.9): one question at a time.
+        case asking
         /// Kaluta is writing (or changing) the email.
         case writing
         /// The email that will be sent, editable.
@@ -62,9 +64,18 @@ final class WorkflowWriter {
     private(set) var guideVersion: Int64?
     /// Why the last request did not work.
     private(set) var problem: String?
-    /// What Kaluta asked before it would write: facts it does not have,
-    /// for the user to add to what they said.
-    private(set) var asked: String?
+    /// What Kaluta asked before it would write (spec §14.9): facts it does
+    /// not have, one question at a time, with answers to pick from where
+    /// the thread offers them.
+    private(set) var factQuestions: [ComposerAssistant.FactQuestion] = []
+    /// The question on screen.
+    private(set) var questionIndex = 0
+    /// The answers so far, by question; "" for one skipped.
+    private(set) var factAnswers: [String] = []
+    /// The session Kaluta asked in, kept for the answers.
+    private var chat: KalutaChat?
+    /// Where the request that was asked about came from, to go back to.
+    private var askedFrom: (step: Step, instruction: String) = (.say, "")
 
     init(threadID: String, messageID: String, replyAll: Bool, taskID: Int64?, email: String,
          answers: [Answer] = [], forwarding: Bool = false) {
@@ -102,7 +113,6 @@ final class WorkflowWriter {
         guard !recipients.contains(where: { $0.email.lowercased() == address.email.lowercased() }) else { return }
         recipients.append(address)
         problem = nil
-        asked = nil
     }
 
     func removeRecipient(_ email: String) {
@@ -229,12 +239,115 @@ final class WorkflowWriter {
         await ask(model: model, instruction: request, draft: text)
     }
 
+    // MARK: Kaluta's questions
+
+    /// The question on screen, while Kaluta asks.
+    var question: ComposerAssistant.FactQuestion? {
+        factQuestions.indices.contains(questionIndex) ? factQuestions[questionIndex] : nil
+    }
+
+    var onLastQuestion: Bool { questionIndex >= factQuestions.count - 1 }
+
+    /// Kaluta asked instead of writing: its questions, from the first,
+    /// with the session they were asked in (kept for the answers).
+    func beginAsking(_ questions: [ComposerAssistant.FactQuestion], chat: KalutaChat? = nil) {
+        guard !questions.isEmpty else { return }
+        self.chat?.close()
+        self.chat = chat
+        factQuestions = questions
+        factAnswers = Array(repeating: "", count: questions.count)
+        questionIndex = 0
+        field = ""
+        step = .asking
+    }
+
+    /// Return: the field answers the question (nothing typed skips it),
+    /// and the next one comes up. True once every question has been
+    /// answered: Kaluta writes.
+    func answerQuestion() -> Bool {
+        guard step == .asking, question != nil else { return false }
+        factAnswers[questionIndex] = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !onLastQuestion else { return true }
+        questionIndex += 1
+        field = factAnswers[questionIndex]
+        return false
+    }
+
+    /// 1–3: one of the answers offered, as the answer.
+    func pickChoice(_ index: Int) -> Bool {
+        guard let question, question.choices.indices.contains(index) else { return false }
+        field = question.choices[index]
+        return answerQuestion()
+    }
+
+    /// ⇧Return: no answer; Kaluta leaves a [blank] for it.
+    func skipQuestion() -> Bool {
+        field = ""
+        return answerQuestion()
+    }
+
+    /// Esc: the question before; from the first, back to the words, the
+    /// questions dropped.
+    func backFromAsking() {
+        guard step == .asking else { return }
+        if questionIndex > 0 {
+            factAnswers[questionIndex] = field.trimmingCharacters(in: .whitespacesAndNewlines)
+            questionIndex -= 1
+            field = factAnswers[questionIndex]
+            return
+        }
+        chat?.close()
+        chat = nil
+        factQuestions = []
+        field = askedFrom.instruction
+        step = askedFrom.step
+    }
+
+    /// Dropped before Kaluta wrote: its session goes too.
+    func close() {
+        chat?.close()
+        chat = nil
+    }
+
+    /// After the last question: the answers go to Kaluta in the session
+    /// it asked in, and to Facts as proposals (spec §14.9), never added
+    /// outright. Each is recorded with the draft's directions.
+    func writeWithAnswers(model: AppModel) async {
+        guard step == .asking, let chat else { return }
+        let given = zip(factQuestions, factAnswers).filter { !$1.isEmpty }.map { ($0, $1) }
+        step = .writing
+        factQuestions = []
+        if !given.isEmpty, let core = model.core {
+            _ = try? await core.proposeWritingHelpFacts(given.map { q, a in
+                WritingHelpAnswer(category: q.category, label: q.fact, value: a, messageId: messageID)
+            })
+        }
+        self.chat = nil
+        defer { chat.close() }
+        do {
+            let answer = ComposerAssistant.cleaned(
+                try await chat.ask(ComposerAssistant.answersPrompt(given.map { ($0.question, $1) })))
+            if let more = ComposerAssistant.questions(in: answer), !more.isEmpty {
+                throw CoreClientError(kind: .agent, message: "Kaluta still asks: " + more.map(\.question).joined(separator: " "))
+            }
+            guard !answer.isEmpty else { throw CoreClientError(kind: .agent, message: "Kaluta did not write anything.") }
+            directions.append(contentsOf: given.map { "\($0.question) \($1)" })
+            text = answer
+            aiText = answer
+            step = .final
+        } catch {
+            problem = (error as? CoreClientError)?.message ?? error.localizedDescription
+            field = askedFrom.instruction
+            step = askedFrom.step
+        }
+    }
+
     private func ask(model: AppModel, instruction: String, draft: String) async {
         guard let core = model.core else { return }
         let back: Step = draft.isEmpty ? .say : .final
         step = .writing
         problem = nil
-        asked = nil
+        var chat: KalutaChat?
         do {
             guard let detail = try await core.thread(threadID) else {
                 throw CoreClientError(kind: .notFound, message: "This conversation is no longer here.")
@@ -248,20 +361,24 @@ final class WorkflowWriter {
                 instruction: instruction, from: (try? await core.accountAddress()) ?? "", to: to,
                 subject: Self.replySubject(detail.thread.subject), draft: draft, original: email,
                 guide: guide?.text ?? "")
-            let answer = ComposerAssistant.cleaned(try await model.askKaluta(prompt, about: [threadID]))
+            let opened = try await KalutaChat.open(model: model, about: [threadID])
+            chat = opened
+            let answer = ComposerAssistant.cleaned(try await opened.ask(prompt))
             if let questions = ComposerAssistant.questions(in: answer), !questions.isEmpty {
-                // Facts Kaluta does not have: the user says them too.
-                asked = questions.map { $0.question }.joined(separator: " ")
-                field = instruction
+                // Facts Kaluta does not have: it asks, one question at a
+                // time, in the session it asked in.
                 directions.removeLast()
-                step = back
+                askedFrom = (back, instruction)
+                beginAsking(questions, chat: opened)
                 return
             }
+            opened.close()
             guard !answer.isEmpty else { throw CoreClientError(kind: .agent, message: "Kaluta did not write anything.") }
             text = answer
             aiText = answer
             step = .final
         } catch {
+            chat?.close()
             problem = (error as? CoreClientError)?.message ?? error.localizedDescription
             field = instruction
             directions.removeLast()
@@ -308,22 +425,51 @@ extension AppModel {
     /// `threads`, and wait for the whole answer. Anything it proposes that
     /// would change mail is refused: it writes text, nothing else.
     func askKaluta(_ prompt: String, about threads: [String]) async throws -> String {
-        guard let core else { throw CoreClientError(kind: .internalError, message: "The core is not running.") }
-        let session = try await core.startReadOnlyAgentSession(provider: agent.providerID, selection: threads)
-        defer {
-            agentSinks[session] = nil
-            Task { try? await core.closeAgentSession(session) }
-        }
+        let chat = try await KalutaChat.open(model: self, about: threads)
+        defer { chat.close() }
+        return try await chat.ask(prompt)
+    }
+}
+
+/// A conversation with Kaluta in a read-only session that sees only some
+/// threads: ask, then ask again with the answer in mind (its questions
+/// answered), and close when done. Anything it proposes that would change
+/// mail is refused: it writes text, nothing else.
+@MainActor
+final class KalutaChat {
+    private weak var model: AppModel?
+    private let core: CoreClient
+    let session: String
+    private var closed = false
+
+    private init(model: AppModel, core: CoreClient, session: String) {
+        self.model = model
+        self.core = core
+        self.session = session
+    }
+
+    static func open(model: AppModel, about threads: [String]) async throws -> KalutaChat {
+        guard let core = model.core else { throw CoreClientError(kind: .internalError, message: "The core is not running.") }
+        let session = try await core.startReadOnlyAgentSession(provider: model.agent.providerID, selection: threads)
+        return KalutaChat(model: model, core: core, session: session)
+    }
+
+    /// One turn: the prompt, and the whole answer.
+    func ask(_ prompt: String) async throws -> String {
+        guard !closed, let model else { throw CoreClientError(kind: .internalError, message: "Kaluta's session is closed.") }
         let turn = KalutaTurn()
+        let core = core
+        let session = session
+        defer { model.agentSinks[session] = nil }
         return try await withCheckedThrowingContinuation { continuation in
             turn.continuation = continuation
-            agentSinks[session] = { [weak self] events in
+            model.agentSinks[session] = { [weak core] events in
                 for event in events {
                     switch event {
                     case let .textDelta(text):
                         turn.reply += text
                     case let .actionProposed(actionID, _, _, _):
-                        try? self?.core?.resolveAgentAction(actionID, approve: false)
+                        try? core?.resolveAgentAction(actionID, approve: false)
                     case .turnCompleted:
                         turn.finish(.success(turn.reply))
                     case let .turnFailed(message):
@@ -341,6 +487,15 @@ extension AppModel {
                 }
             }
         }
+    }
+
+    func close() {
+        guard !closed else { return }
+        closed = true
+        model?.agentSinks[session] = nil
+        let core = core
+        let session = session
+        Task { try? await core.closeAgentSession(session) }
     }
 }
 

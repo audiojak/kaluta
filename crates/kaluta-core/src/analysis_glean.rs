@@ -13,6 +13,9 @@ use crate::facts::{FactCategoryInfo, FactEdit, FactFields, FactInfo, FactScope, 
 use crate::guide_ai::{fenced, loose};
 use crate::{Core, CoreError, runtime};
 
+/// `FactPayload::source` for an answer the user gave writing help.
+pub const WRITING_HELP: &str = "writing_help";
+
 /// The first line of every gleaning prompt: how the fake agent knows one.
 pub const GLEAN_MARKER: &str = "Kaluta facts glean";
 /// Messages read for facts in one review, at most.
@@ -83,6 +86,11 @@ pub struct FactPayload {
     pub fact_id: Option<i64>,
     pub message_id: String,
     pub quote: String,
+    /// Where the fact came from once accepted: empty for a fact gleaned
+    /// from sent mail (*Learned*), `writing_help` for the user's answer to
+    /// a question writing help asked (spec §14.9).
+    #[serde(default)]
+    pub source: String,
     /// A new category: its name and description, and the facts in Other
     /// it would take.
     pub name: String,
@@ -564,6 +572,45 @@ impl Core {
         Ok(())
     }
 
+    /// The user's answers to the questions writing help asked before it
+    /// wrote (spec §14.9, §14.13), as proposed facts for Facts' review:
+    /// never added outright. An answer that states what a fact already
+    /// says is nothing to propose; one that must never be stored is
+    /// dropped; a question's category unknown here goes to Other. The
+    /// same answer twice raises the proposal's support, and a rejected
+    /// one is not raised again.
+    pub(crate) async fn propose_writing_help_answers(&self, answers: Vec<WritingHelpAnswer>) -> Result<u32, CoreError> {
+        let categories = self.fact_categories().await?;
+        let facts = self.list_facts(vec![FactStatus::Accepted]).await?;
+        let mut found = Vec::new();
+        for a in answers {
+            let (label, value) = (a.label.trim(), a.value.trim());
+            if label.is_empty() || value.is_empty() || never_store(&a.category, label, value) {
+                continue;
+            }
+            let category = categories
+                .iter()
+                .find(|c| c.key == a.category.trim().to_lowercase())
+                .map_or_else(|| "other".to_owned(), |c| c.key.clone());
+            if same_label(&facts, &category, label).is_some_and(|f| f.value.trim().eq_ignore_ascii_case(value)) {
+                continue;
+            }
+            found.push(Found::Add(FactPayload {
+                kind: "fact".into(),
+                category,
+                label: label.into(),
+                value: value.into(),
+                message_id: a.message_id,
+                quote: a.value.trim().into(),
+                source: WRITING_HELP.into(),
+                ..Default::default()
+            }));
+        }
+        let n = found.len() as u32;
+        self.merge_glean(found).await?;
+        Ok(n)
+    }
+
     /// Accept or reject fact proposals (spec §14.11): one change on the
     /// account's facts stack, undone with `undo_fact_change`.
     pub(crate) async fn decide_fact_proposals(
@@ -615,7 +662,11 @@ impl Core {
                                 as_of: p.as_of,
                             },
                             status: FactStatus::Accepted,
-                            source: FactSource::Learned,
+                            source: if p.source == WRITING_HELP {
+                                FactSource::WritingHelp
+                            } else {
+                                FactSource::Learned
+                            },
                         }),
                     }
                 }
@@ -709,6 +760,25 @@ impl Core {
 }
 
 /// The one parameter of the reviewed-since query, and the cap.
+/// One answer the user gave writing help: the question's fact label and
+/// category, the answer, and the message being answered (if any).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WritingHelpAnswer {
+    pub category: String,
+    pub label: String,
+    pub value: String,
+    pub message_id: String,
+}
+
+#[uniffi::export]
+impl Core {
+    /// Propose the user's answers to writing help's questions as facts,
+    /// for review in Facts (spec §14.9). How many were proposed.
+    pub async fn propose_writing_help_facts(&self, answers: Vec<WritingHelpAnswer>) -> Result<u32, CoreError> {
+        self.propose_writing_help_answers(answers).await
+    }
+}
+
 fn rusqlite_params(started: i64) -> [i64; 2] {
     [started, GLEAN_CAP as i64]
 }
@@ -924,6 +994,68 @@ mod tests {
         rt(core.clone().start_analysis_run(None)).unwrap();
         wait_done(core);
         assert!(block_on(core.analysis_queue()).unwrap().facts.is_empty());
+    }
+
+    /// What the user answers writing help is proposed, never added
+    /// outright: Facts' review decides, and an accepted one says it came
+    /// from writing help.
+    #[test]
+    fn an_answer_to_writing_help_is_a_proposed_fact() {
+        let s = scratch("glean-answers");
+        let core = &s.1;
+        let answer = |label: &str, value: &str, category: &str| WritingHelpAnswer {
+            category: category.into(),
+            label: label.into(),
+            value: value.into(),
+            message_id: "m1".into(),
+        };
+        let n = block_on(core.propose_writing_help_facts(vec![
+            answer("Creator niches", "tech and lifestyle", "work"),
+            answer("Wifi password", "hunter2", "other"),
+            answer("Pronouns", "they/them", "no-such-category"),
+            answer("", "nothing", "work"),
+        ]))
+        .unwrap();
+        assert_eq!(n, 2, "the password is never stored; a blank label is nothing");
+        let q = block_on(core.analysis_queue()).unwrap();
+        assert_eq!(q.facts.len(), 2);
+        let niches = q.facts.iter().find(|p| p.label == "Creator niches").unwrap();
+        assert_eq!(
+            (niches.category.as_str(), niches.quote.as_str(), niches.message_id.as_str()),
+            ("work", "tech and lifestyle", "m1")
+        );
+        assert_eq!(
+            q.facts.iter().find(|p| p.label == "Pronouns").unwrap().category,
+            "other",
+            "an unknown category goes to Other"
+        );
+        assert!(block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap().is_empty(), "nothing added outright");
+
+        // The same answer again: more support, not a second proposal.
+        block_on(core.propose_writing_help_facts(vec![answer("Creator niches", "tech and lifestyle", "work")]))
+            .unwrap();
+        let q = block_on(core.analysis_queue()).unwrap();
+        assert_eq!(q.facts.len(), 2);
+        assert_eq!(q.facts.iter().find(|p| p.label == "Creator niches").unwrap().support, 2);
+
+        // Accepted: a fact from writing help. Answering what it says is nothing new.
+        block_on(core.decide_fact_analysis_proposals(vec![niches.id], true, Default::default())).unwrap();
+        let facts = block_on(core.list_facts(vec![FactStatus::Accepted])).unwrap();
+        assert_eq!((facts[0].value.as_str(), facts[0].source), ("tech and lifestyle", FactSource::WritingHelp));
+        let n = block_on(core.propose_writing_help_facts(vec![answer("Creator niches", "Tech and lifestyle", "work")]))
+            .unwrap();
+        assert_eq!(n, 0);
+        // A different answer proposes a change to it.
+        block_on(core.propose_writing_help_facts(vec![answer("Creator niches", "fashion", "work")])).unwrap();
+        let q = block_on(core.analysis_queue()).unwrap();
+        let changed = q.facts.iter().find(|p| p.label == "Creator niches").unwrap();
+        assert_eq!(changed.before_value.as_deref(), Some("tech and lifestyle"));
+
+        // Rejected: not raised again.
+        let pronouns = q.facts.iter().find(|p| p.label == "Pronouns").unwrap().id;
+        block_on(core.decide_fact_analysis_proposals(vec![pronouns], false, Default::default())).unwrap();
+        block_on(core.propose_writing_help_facts(vec![answer("Pronouns", "they/them", "other")])).unwrap();
+        assert!(block_on(core.analysis_queue()).unwrap().facts.iter().all(|p| p.label != "Pronouns"));
     }
 
     #[test]

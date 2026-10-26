@@ -3643,9 +3643,16 @@ facts the agent does not have (about the user, their company, figures,
 dates, names) and they are not in the thread or the guide, it asks first:
 the composer shows its questions (at most five) as fields, and the agent
 writes once they are answered or skipped, leaving a [bracket] for anything
-still unknown. Answers are kept as facts (§14.11, source *Writing help*) unless the
-user unticks *Keep these facts*; each question carries a category and a
-label, and adding them is undoable (amended 2026-10-02, 2026-10-05).
+still unknown. Where the thread offers the answers (a list to choose from,
+a yes or no) a question carries up to three *options*, shown as choices
+beside its field; a question that takes yes or no offers them by itself.
+Answers are **never added to Facts outright**: each becomes a proposed
+fact (§14.11, source *Writing help* once accepted) with the answer as
+its evidence, decided in Facts' Review mode like a gleaned one; the same
+answer again raises the proposal's support, a rejected one is not
+proposed again, and one that states what a fact already says proposes
+nothing. Each question carries a category and a label (amended
+2026-10-02, 2026-10-05, 2026-10-26).
 
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
@@ -4470,9 +4477,15 @@ are looked for as each account opens.
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
   highlighted in it); Kaluta writes after that (Return). When Kaluta
-  would have to invent a fact, it asks instead: *Kaluta asks: …* in the
-  workflow's colour under the field (not as a failure), the words kept
-  in the field and its prompt *Add what Kaluta asked, then Return*.
+  would have to invent a fact, it asks instead (§14.9), in the session
+  it was asked in, **one question at a time** on its own screen: *Kaluta
+  asks* in the workflow's colour, "1 of 2", the question, a field
+  (Return answers and goes on, the last answer writes; ⇧Return skips,
+  leaving a [blank]) and, where the thread offers them, up to three
+  answers to pick from (1–3 with nothing typed). Esc goes to the
+  question before, then back to the words. The answers go to Kaluta as
+  its second turn and with the draft's directions; each is proposed in
+  Facts, never added outright (amended 2026-10-26).
   *Use my words*
   (⇧⌘M; not ⌘Return, which sends) takes what was typed as the email,
   unrewritten, to the same editable screen. The answers screen offers

@@ -19,17 +19,11 @@ struct WorkflowWriteView: View {
             switch writer.step {
             case .choose: choose
             case .say: say
+            case .asking: asking
             case .writing: working(writer.directions.count > 1 ? "Kaluta is changing it…" : "Kaluta is writing…")
             case .final: finalEmail
             case .sending: working("Sending…")
             case .forward: forward
-            }
-            // A question is not a failure: it reads as one, in the
-            // workflow's colour, and the field says what to do.
-            if let asked = writer.asked {
-                Label("Kaluta asks: \(asked)", systemImage: "questionmark.circle")
-                    .font(TypeRole.workflowContext)
-                    .foregroundStyle(Tone.workflow(session.kind))
             }
             if let problem = writer.problem {
                 Label(problem, systemImage: "exclamationmark.circle")
@@ -52,10 +46,16 @@ struct WorkflowWriteView: View {
             }
             // Esc goes back a step and ⌘. discards, from inside the text too
             // (the field would otherwise keep Esc for itself).
-            if writer.step == .say || writer.step == .final || writer.step == .forward {
+            if writer.step == .say || writer.step == .asking || writer.step == .final || writer.step == .forward {
                 Button("Back") { perform(.back) } // no-help: hidden
                     .keyboardShortcut(.escape, modifiers: [])
                     .hidden()
+                // ⇧Return from inside the answer: skip the question.
+                if writer.step == .asking {
+                    Button("Skip the question") { perform(.skipQuestion) } // no-help: hidden
+                        .keyboardShortcut(.return, modifiers: .shift)
+                        .hidden()
+                }
                 // ⇧⌘M from inside the field: the words as written.
                 Button("Use my words") { perform(.ownWords) } // no-help: hidden
                     .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -70,11 +70,11 @@ struct WorkflowWriteView: View {
             // the view is still appearing (it slides in with the item) can
             // be lost, so ask until a text view has the keyboard.
             let step = writer.step
-            guard step == .say || step == .final || step == .forward else { return }
+            guard step == .say || step == .asking || step == .final || step == .forward else { return }
             for _ in 0..<10 {
                 try? await Task.sleep(for: .milliseconds(60))
                 guard !Task.isCancelled else { return }
-                fieldFocused = step == .say
+                fieldFocused = step == .say || step == .asking
                 textFocused = step == .final
                 toFocused = step == .forward
                 if WorkflowHostView.isEditingText { return }
@@ -261,8 +261,7 @@ struct WorkflowWriteView: View {
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: Space.m) {
-                TextField(writer.asked == nil ? "Type it, or dictate it" : "Add what Kaluta asked, then Return",
-                          text: $writer.field, axis: .vertical)
+                TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
                     .font(TypeRole.workflowContent)
                     .textFieldStyle(.plain)
                     .lineLimit(2...6)
@@ -290,6 +289,76 @@ struct WorkflowWriteView: View {
                         Button(starter) { writer.addStarter(starter) }
                             .buttonStyle(.bordered)
                             .hoverHelp("Start with “\(starter)”")
+                    }
+                }
+                .controlSize(.large)
+            }
+        }
+    }
+
+    /// Kaluta asks before it writes (spec §14.9): one question at a time,
+    /// in the workflow's colour, with the answers the thread offers to
+    /// pick from (1–3 with nothing typed). Return answers, ⇧Return skips.
+    private var asking: some View {
+        let question = writer.question
+        let choices = question?.choices ?? []
+        let tint = Tone.workflow(session.kind)
+        return VStack(alignment: .leading, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                    Label("Kaluta asks", systemImage: "questionmark.circle")
+                        .font(TypeRole.workflowContext.weight(.semibold))
+                        .foregroundStyle(tint)
+                    if writer.factQuestions.count > 1 {
+                        Text("\(writer.questionIndex + 1) of \(writer.factQuestions.count)")
+                            .font(TypeRole.workflowContext)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(question?.question ?? "")
+                    .font(TypeRole.workflowHeading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Kaluta never makes a fact up. Skip what you would rather not say; it leaves a [blank] for it.")
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
+            HStack(alignment: .top, spacing: Space.m) {
+                TextField(choices.isEmpty ? "Your answer, then Return" : "Pick one, or type your answer", text: $writer.field, axis: .vertical)
+                    .font(TypeRole.workflowContent)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .focused($fieldFocused)
+                    .onSubmit { perform(.primary) }
+                    .onExitCommand { perform(.back) }
+                    // 1–3 pick an answer offered, while nothing is typed.
+                    .onKeyPress(characters: .decimalDigits) { press in
+                        guard writer.field.isEmpty, let digit = press.characters.first?.wholeNumberValue,
+                              (1...choices.count).contains(digit) else { return .ignored }
+                        perform([.pick1, .pick2, .pick3][digit - 1])
+                        return .handled
+                    }
+                    .accessibilityLabel(question?.question ?? "Kaluta's question")
+                Button { startDictation() } label: {
+                    Image(systemName: "mic")
+                        .font(TypeRole.workflowContent)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Dictate (or press the dictation key, by default Fn twice)")
+                .accessibilityLabel("Dictate")
+            }
+            .padding(Space.xl)
+            .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+            if !choices.isEmpty {
+                HStack(spacing: Space.s) {
+                    ForEach(Array(choices.enumerated()), id: \.element) { i, choice in
+                        Button { perform([.pick1, .pick2, .pick3][i]) } label: {
+                            HStack(spacing: Space.s) {
+                                Keycap(key: "\(i + 1)")
+                                Text(choice)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .hoverHelp("Answer “\(choice)” (\(i + 1))")
                     }
                 }
                 .controlSize(.large)

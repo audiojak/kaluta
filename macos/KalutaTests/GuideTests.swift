@@ -520,15 +520,18 @@ struct MissingFactsTests {
         }
         #expect(questions.map(\.fact) == ["Occupation or role", "What the company does"])
         #expect(questions.map(\.category) == ["work", "work"])
+        #expect(questions.map(\.choices) == [["Founder", "CTO", "Engineer"], []], "answers offered to pick from")
         #expect(store.body.string == before, "nothing written yet")
 
-        await assistant.answer([questions[0].id: "CEO of Actual AI"], save: true)
+        await assistant.answer([questions[0].id: "CEO of Actual AI"])
         for _ in 0..<250 where assistant.state == .working { try await Task.sleep(for: .milliseconds(20)) }
         #expect(assistant.state == .done)
         #expect(store.body.string.contains("CEO of Actual AI"), "the answers reached the agent")
-        let facts = try await core.facts()
-        #expect(facts.map { "\($0.category)/\($0.label): \($0.value)" } == ["work/Occupation or role: CEO of Actual AI"],
-                "kept in Facts; the unanswered one is not")
-        #expect(facts.first?.source == .writingHelp)
+        // Proposed in Facts for review (spec §14.9), never added outright;
+        // the unanswered one is not.
+        #expect(try await core.facts().isEmpty)
+        let proposed = try await core.analysisQueue().facts
+        #expect(proposed.map { "\($0.category)/\($0.label): \($0.value)" } == ["work/Occupation or role: CEO of Actual AI"])
+        #expect(proposed.first?.quote == "CEO of Actual AI")
     }
 }

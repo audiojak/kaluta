@@ -59,6 +59,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case pick1, pick2, pick3
     /// /: tell Kaluta what to say.
     case tellKaluta
+    /// ⇧Return: skip the question Kaluta asked (a [blank] stands for it).
+    case skipQuestion
     /// The words typed are the email, as written: no drafting.
     case ownWords
     /// Esc: back one step; from an item, back to Mail.
@@ -101,6 +103,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick2: "2"
         case .pick3: "3"
         case .tellKaluta: "/"
+        case .skipQuestion: "⇧Return"
         case .back: "Esc"
         // Where it is offered (the answers, *What do you want to say?*):
         // the words as written. Not ⌘Return, which sends.
@@ -123,6 +126,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         switch key {
         case .return, .enter:
             if modifiers.contains(.command) { return modifiers.contains(.option) ? .sendKeepTask : .send }
+            if modifiers == .shift { return .skipQuestion }
             return modifiers.isEmpty ? .primary : nil
         case .delete, .deleteForward: return modifiers.isEmpty ? .reject : nil
         case .escape: return .back
@@ -185,6 +189,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick2: "Second answer"
         case .pick3: "Third answer"
         case .tellKaluta: "Tell Kaluta what to say"
+        case .skipQuestion: "Skip the question"
         case .ownWords: "Use my words"
         case .back: "Back"
         case .whatsLeft: "What's left?"

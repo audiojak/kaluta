@@ -25,7 +25,13 @@ final class ComposerAssistant {
         let fact: String
         /// Where it goes in Facts (spec §14.11): a category key.
         var category = "other"
+        /// Answers the thread offers ("Tech", "Lifestyle"), at most three.
+        var options: [String] = []
         var id: String { question }
+
+        /// Answers to pick from: the agent's options, else Yes and No for
+        /// a question that takes them.
+        var choices: [String] { options.isEmpty ? (WritingText.isYesNo(question) ? ["Yes", "No"] : []) : options }
     }
 
     private(set) var state: State = .idle
@@ -260,33 +266,19 @@ final class ComposerAssistant {
     }
 
     /// The user's answers to the agent's questions (empty: skipped), sent
-    /// in the same session; with `save`, each answer is kept as a fact in the
-    /// writing guide (undoable) so later drafts have it.
-    func answer(_ answers: [String: String], save: Bool) async {
+    /// in the same session. Each answer is proposed in Facts for review
+    /// (spec §14.9), never added outright.
+    func answer(_ answers: [String: String]) async {
         guard case let .asking(questions) = state, let sessionID, let core = model?.core else { return }
         let given = questions.compactMap { q -> (FactQuestion, String)? in
             let a = (answers[q.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return a.isEmpty ? nil : (q, a)
         }
-        if save, !given.isEmpty, let model {
-            // Kept in Facts (spec §14.11), where later drafts find them.
-            await model.facts.load()
-            let known = Set(model.facts.categories.map(\.key))
-            let edits: [FactEdit] = given.map { q, a in
-                let category = known.contains(q.category) ? q.category : "other"
-                // A fact by that label already: the answer replaces its value.
-                if let old = model.facts.facts.first(where: {
-                    $0.scope == .account && $0.status == .accepted && $0.category == category
-                        && $0.label.lowercased() == q.fact.lowercased()
-                }) {
-                    return .update(id: old.id, fields: FactFields(category: category, label: old.label, value: a,
-                                                                  use: old.use, asOf: old.asOf))
-                }
-                return .add(fields: FactFields(category: category, label: q.fact, value: a, use: .free, asOf: nil),
-                            status: .accepted, source: .writingHelp)
-            }
-            await model.applyFactEdits(edits, actionName: given.count == 1 ? "Add Fact" : "Add Facts",
-                                       notice: given.count == 1 ? "Added a fact" : "Added \(given.count) facts")
+        if !given.isEmpty {
+            let messageID = store?.inReplyTo ?? ""
+            _ = try? await core.proposeWritingHelpFacts(given.map {
+                WritingHelpAnswer(category: $0.category, label: $0.fact, value: $1, messageId: messageID)
+            })
         }
         givenFacts += given.map { "\($0.0.fact): \($0.1)" }
         state = .working
@@ -313,8 +305,15 @@ final class ComposerAssistant {
                   !question.isEmpty else { return nil }
             let label = ((item["label"] ?? item["fact"]) as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let category = (item["category"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            var options: [String] = []
+            for option in (item["options"] as? [String]) ?? [] {
+                let option = option.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !option.isEmpty, option.count <= 40, options.count < 3,
+                      !options.contains(where: { $0.caseInsensitiveCompare(option) == .orderedSame }) else { continue }
+                options.append(option)
+            }
             return FactQuestion(question: question, fact: label.isEmpty ? question : label,
-                                category: category.isEmpty ? "other" : category)
+                                category: category.isEmpty ? "other" : category, options: options)
         }
         return questions
     }
@@ -384,7 +383,8 @@ final class ComposerAssistant {
             the message yet: answer with only a JSON object, {"questions": [{"question": "What does your \
             company do?", "category": "work", "label": "What the company does"}]}, with at most five \
             questions; the category is one of identity, contact, availability, people, work, preferences \
-            or other. The user answers, then you write it.
+            or other. Where the thread offers the answers (a list to choose from, a yes or no), add them as \
+            "options": ["Tech", "Lifestyle"], at most three short ones. The user answers, then you write it.
             """,
             "From: \(from)\nTo: \(to.isEmpty ? "(nobody yet)" : to.joined(separator: ", "))\nSubject: \(subject)",
             "The message so far:\n<<<\n\(draft.trimmingCharacters(in: .whitespacesAndNewlines))\n>>>",

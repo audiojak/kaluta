@@ -466,6 +466,39 @@ struct WorkflowTests {
         #expect(writer.recipients.isEmpty)
     }
 
+    /// Kaluta asks before it writes (spec §14.9, §14.13): one question at
+    /// a time; Return answers, ⇧Return skips, 1–3 pick an answer offered,
+    /// Esc goes to the question before and then back to the words.
+    @Test func kalutaAsksOneQuestionAtATime() {
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Details?")
+        let questions = [
+            ComposerAssistant.FactQuestion(question: "Which niches?", fact: "Creator niches", category: "work",
+                                           options: ["Tech", "Lifestyle"]),
+            ComposerAssistant.FactQuestion(question: "Will you attach the logo?", fact: "Logo", category: "other"),
+            ComposerAssistant.FactQuestion(question: "What is the budget?", fact: "Budget", category: "work"),
+        ]
+        writer.beginAsking(questions)
+        #expect(writer.step == .asking && writer.question?.question == "Which niches?" && !writer.onLastQuestion)
+        #expect(!writer.pickChoice(2), "no third answer offered")
+        #expect(!writer.pickChoice(1) && writer.questionIndex == 1 && writer.factAnswers[0] == "Lifestyle")
+        #expect(writer.question?.choices == ["Yes", "No"])
+        #expect(!writer.skipQuestion() && writer.questionIndex == 2 && writer.onLastQuestion)
+        writer.field = " 2,000 "
+        writer.backFromAsking()
+        #expect(writer.questionIndex == 1 && writer.field == "", "the question before, with its (empty) answer")
+        writer.field = "Yes"
+        #expect(!writer.answerQuestion() && writer.field == "2,000", "the answer typed before is kept")
+        #expect(writer.answerQuestion(), "the last answer: Kaluta writes")
+        #expect(writer.factAnswers == ["Lifestyle", "Yes", "2,000"])
+        #expect(WorkflowCommand.skipQuestion.keyLabel == "⇧Return")
+        #expect(WorkflowCommand.command(key: .return, characters: "\r", modifiers: .shift) == .skipQuestion)
+
+        // From the first question, Esc drops the questions and goes back.
+        writer.beginAsking(questions)
+        writer.backFromAsking()
+        #expect(writer.step == .say && writer.factQuestions.isEmpty)
+    }
+
     @Test func useMyWordsSendsWhatWasTyped() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")

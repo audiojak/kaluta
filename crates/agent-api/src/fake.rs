@@ -403,15 +403,16 @@ pub fn glean_answer(prompt: &str) -> Option<String> {
 }
 
 /// The fake's answer to the composer's writing help when the request asks
-/// for "facts about me": the questions for facts it does not have (the
-/// first turn only; the answers come in a turn of their own).
+/// for "facts about me": the questions for facts it does not have, the
+/// first with answers to pick from (the first turn only; the answers
+/// come in a turn of their own).
 pub fn writing_help_answer(prompt: &str) -> Option<String> {
     let first = prompt.lines().next()?;
     if !first.starts_with("You are helping write an email in Kaluta's composer.") || !first.contains("facts about me") {
         return None;
     }
     Some(
-        r#"{"questions": [{"question": "What is your role?", "category": "work", "label": "Occupation or role"}, {"question": "What does your company do?", "category": "work", "label": "What the company does"}]}"#
+        r#"{"questions": [{"question": "What is your role?", "category": "work", "label": "Occupation or role", "options": ["Founder", "CTO", "Engineer"]}, {"question": "What does your company do?", "category": "work", "label": "What the company does"}]}"#
             .into(),
     )
 }

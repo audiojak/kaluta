@@ -1177,6 +1177,12 @@ final class CoreClient: Sendable {
         try await call { try await core.applyFactEdits(edits: edits, reason: reason) }
     }
 
+    /// The user's answers to writing help's questions, as proposed facts
+    /// for review in Facts (spec §14.9). How many were proposed.
+    func proposeWritingHelpFacts(_ answers: [WritingHelpAnswer]) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.proposeWritingHelpFacts(answers: answers) }
+    }
+
     func editFactCategories(_ edits: [CategoryEdit]) async throws(CoreClientError) -> FactChange {
         try await call { try await core.editFactCategories(edits: edits) }
     }
@@ -1846,6 +1852,7 @@ typealias FactScope = KalutaCore.FactScope
 typealias FactMergeResult = KalutaCore.FactMergeResult
 typealias FactFields = KalutaCore.FactFields
 typealias FactEdit = KalutaCore.FactEdit
+typealias WritingHelpAnswer = KalutaCore.WritingHelpAnswer
 typealias FactUse = KalutaCore.FactUse
 typealias FactSource = KalutaCore.FactSource
 typealias FactStatus = KalutaCore.FactStatus
