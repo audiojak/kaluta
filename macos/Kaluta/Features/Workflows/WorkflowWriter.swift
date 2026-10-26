@@ -299,6 +299,8 @@ final class WorkflowWriter {
         chat?.close()
         chat = nil
         factQuestions = []
+        // The request stays with the words, not as a direction.
+        _ = directions.popLast()
         field = askedFrom.instruction
         step = askedFrom.step
     }
@@ -317,6 +319,7 @@ final class WorkflowWriter {
         let given = zip(factQuestions, factAnswers).filter { !$1.isEmpty }.map { ($0, $1) }
         step = .writing
         factQuestions = []
+        field = ""
         if !given.isEmpty, let core = model.core {
             _ = try? await core.proposeWritingHelpFacts(given.map { q, a in
                 WritingHelpAnswer(category: q.category, label: q.fact, value: a, messageId: messageID)
@@ -337,6 +340,7 @@ final class WorkflowWriter {
             step = .final
         } catch {
             problem = (error as? CoreClientError)?.message ?? error.localizedDescription
+            _ = directions.popLast()
             field = askedFrom.instruction
             step = askedFrom.step
         }
@@ -366,8 +370,8 @@ final class WorkflowWriter {
             let answer = ComposerAssistant.cleaned(try await opened.ask(prompt))
             if let questions = ComposerAssistant.questions(in: answer), !questions.isEmpty {
                 // Facts Kaluta does not have: it asks, one question at a
-                // time, in the session it asked in.
-                directions.removeLast()
+                // time, in the session it asked in. The request stays the
+                // first direction; the answers join it once it writes.
                 askedFrom = (back, instruction)
                 beginAsking(questions, chat: opened)
                 return

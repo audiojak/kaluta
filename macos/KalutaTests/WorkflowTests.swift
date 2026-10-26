@@ -499,6 +499,43 @@ struct WorkflowTests {
         #expect(writer.step == .say && writer.factQuestions.isEmpty)
     }
 
+    /// Kaluta's questions answered: what the user said stays the first
+    /// direction, the answers follow it, and the field is clear for
+    /// what to change next.
+    @Test func answersJoinWhatWasSaid() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Can you come?")
+        writer.field = "Yes, with facts about me"
+        await writer.write(model: model)
+        #expect(writer.step == .asking && writer.factQuestions.count == 2, "the fake asks on 'facts about me'")
+        #expect(writer.said == "Yes, with facts about me")
+        #expect(writer.pickChoice(1) == false)
+        writer.field = "Mail software"
+        #expect(writer.answerQuestion())
+        await writer.writeWithAnswers(model: model)
+        #expect(writer.step == .final && writer.field.isEmpty)
+        #expect(writer.said == "Yes, with facts about me", "the words, not the first answer")
+        #expect(writer.text.contains("CTO") && writer.text.contains("Mail software"), "the answers reached Kaluta")
+        let proposed = try #require(try await model.core?.analysisQueue().facts)
+        #expect(proposed.map(\.value).sorted() == ["CTO", "Mail software"], "proposed in Facts, not added")
+        #expect(try await model.core?.facts().isEmpty == true)
+    }
+
+    @Test func kalutaAsksBackFromTheFirstQuestion() {
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Details?")
+        writer.beginAsking([ComposerAssistant.FactQuestion(question: "Which niches?", fact: "Creator niches", category: "work")])
+        #expect(writer.onLastQuestion)
+        writer.backFromAsking()
+        #expect(writer.step == .say)
+    }
+
     @Test func useMyWordsSendsWhatWasTyped() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")
