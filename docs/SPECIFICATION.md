@@ -4469,7 +4469,11 @@ are looked for as each account opens.
   Kaluta what to say…* (/, with dictation). Otherwise the screen leads
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
-  highlighted in it); Kaluta writes after that (Return). *Use my words*
+  highlighted in it); Kaluta writes after that (Return). When Kaluta
+  would have to invent a fact, it asks instead: *Kaluta asks: …* in the
+  workflow's colour under the field (not as a failure), the words kept
+  in the field and its prompt *Add what Kaluta asked, then Return*.
+  *Use my words*
   (⇧⌘M; not ⌘Return, which sends) takes what was typed as the email,
   unrewritten, to the same editable screen. The answers screen offers
   *Write it myself* (⇧⌘M) too: a field whose words are the email

@@ -60,8 +60,11 @@ final class WorkflowWriter {
     /// Kaluta's last text, and the guide version it followed.
     private(set) var aiText: String?
     private(set) var guideVersion: Int64?
-    /// Why the last request did not work, or what Kaluta needs to know.
+    /// Why the last request did not work.
     private(set) var problem: String?
+    /// What Kaluta asked before it would write: facts it does not have,
+    /// for the user to add to what they said.
+    private(set) var asked: String?
 
     init(threadID: String, messageID: String, replyAll: Bool, taskID: Int64?, email: String,
          answers: [Answer] = [], forwarding: Bool = false) {
@@ -99,6 +102,7 @@ final class WorkflowWriter {
         guard !recipients.contains(where: { $0.email.lowercased() == address.email.lowercased() }) else { return }
         recipients.append(address)
         problem = nil
+        asked = nil
     }
 
     func removeRecipient(_ email: String) {
@@ -230,6 +234,7 @@ final class WorkflowWriter {
         let back: Step = draft.isEmpty ? .say : .final
         step = .writing
         problem = nil
+        asked = nil
         do {
             guard let detail = try await core.thread(threadID) else {
                 throw CoreClientError(kind: .notFound, message: "This conversation is no longer here.")
@@ -244,9 +249,9 @@ final class WorkflowWriter {
                 subject: Self.replySubject(detail.thread.subject), draft: draft, original: email,
                 guide: guide?.text ?? "")
             let answer = ComposerAssistant.cleaned(try await model.askKaluta(prompt, about: [threadID]))
-            if let asked = ComposerAssistant.questions(in: answer), !asked.isEmpty {
+            if let questions = ComposerAssistant.questions(in: answer), !questions.isEmpty {
                 // Facts Kaluta does not have: the user says them too.
-                problem = "Kaluta needs to know: " + asked.map { $0.question }.joined(separator: " ")
+                asked = questions.map { $0.question }.joined(separator: " ")
                 field = instruction
                 directions.removeLast()
                 step = back
