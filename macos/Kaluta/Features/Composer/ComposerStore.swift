@@ -2,7 +2,6 @@ import AppKit
 import Foundation
 import Observation
 import os
-import UniformTypeIdentifiers
 
 /// What a composer window was opened for. Codable so SwiftUI can restore
 /// composer windows across launches.
@@ -89,7 +88,7 @@ final class ComposerStore {
     private let core: DraftClient?
     /// For the recipient field's completions, pinned like everything else.
     var drafts: DraftClient? { core }
-    private let attachmentsDirectory: URL
+    private let files: DraftAttachments
     private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "composer")
     private var autosaveTask: Task<Void, Never>?
     private var loading = true
@@ -98,9 +97,7 @@ final class ComposerStore {
     /// follows the window's current account.
     init(core: CoreClient?, account: String? = nil, attachmentsDirectory: URL? = nil) {
         self.core = core.map { DraftClient(core: $0, account: account) }
-        self.attachmentsDirectory = attachmentsDirectory
-            ?? ((try? CoreClient.defaultDataDirectory()) ?? FileManager.default.temporaryDirectory)
-                .appending(path: "DraftAttachments", directoryHint: .isDirectory)
+        files = DraftAttachments(directory: attachmentsDirectory)
     }
 
     var canSend: Bool {
@@ -216,34 +213,14 @@ final class ComposerStore {
     /// Copies files into the app's data directory so the draft keeps them
     /// even if the originals move.
     func attach(_ urls: [URL]) {
-        for url in urls {
-            do {
-                let folder = attachmentsDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let copy = folder.appending(path: url.lastPathComponent)
-                try FileManager.default.copyItem(at: url, to: copy)
-                let size = (try? copy.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(UInt64.init) ?? 0
-                let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-                attachments.append(DraftAttachmentInfo(path: copy.path, filename: url.lastPathComponent,
-                                                       mimeType: type, size: size))
-            } catch {
-                logger.error("attach failed: \(error.localizedDescription, privacy: .private)")
-            }
-        }
+        attachments += files.copy(urls)
         edited()
     }
 
     func removeAttachment(_ attachment: DraftAttachmentInfo) {
         attachments.removeAll { $0.path == attachment.path }
-        removeCopy(attachment)
+        files.remove(attachment)
         edited()
-    }
-
-    private func removeCopy(_ attachment: DraftAttachmentInfo) {
-        let url = URL(filePath: attachment.path)
-        // Only ever delete our own copies.
-        guard url.path.hasPrefix(attachmentsDirectory.path) else { return }
-        try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
     }
 
     // MARK: Send and discard
@@ -297,7 +274,7 @@ final class ComposerStore {
         autosaveTask?.cancel()
         isDirty = false
         if draftID != 0 { try? await core?.deleteDraft(draftID) }
-        attachments.forEach(removeCopy)
+        attachments.forEach(files.remove)
         phase = .sent
     }
 }

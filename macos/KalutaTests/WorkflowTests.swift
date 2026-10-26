@@ -39,6 +39,7 @@ struct WorkflowTests {
             (KeyEquivalent("e"), "e", .command, .clearBucket),
             (KeyEquivalent("e"), "e", [.command, .shift], nil),
             (KeyEquivalent("m"), "m", [.command, .shift], .ownWords),
+            (KeyEquivalent("a"), "a", [.command, .shift], .attach),
             (KeyEquivalent("m"), "m", [], nil),
             (KeyEquivalent("x"), "x", [], nil),
         ]
@@ -559,6 +560,61 @@ struct WorkflowTests {
         #expect(mine.step == .final && mine.text == "Tuesday is fine." && mine.aiText == nil)
         mine.changeWhatISaid()
         #expect(mine.step == .say && mine.field == "Tuesday is fine.", "back to the words, not the answers")
+    }
+
+    @Test func aFileGoesWithTheReply() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let root = CoreClient.testScratch()
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let original = root.appending(path: "logo.txt")
+        try Data("logo".utf8).write(to: original)
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Logo?", attachmentsDirectory: root.appending(path: "copies"))
+        writer.field = "Attached."
+        await writer.write(model: model, asWritten: true)
+        #expect(writer.step == .final)
+        #expect(WorkflowCommand.attach.keyLabel == "⇧⌘A" && WorkflowCommand.attach.title(in: .triage) == "Attach a file")
+
+        // Attached: a copy of its own; removed, the copy goes, the original stays.
+        writer.attach([original])
+        let copy = try #require(writer.attachments.first)
+        #expect(copy.filename == "logo.txt" && copy.path.hasPrefix(root.appending(path: "copies").path))
+        writer.removeAttachment(copy)
+        #expect(writer.attachments.isEmpty && !FileManager.default.fileExists(atPath: copy.path))
+        #expect(FileManager.default.fileExists(atPath: original.path))
+
+        // The draft carries the file: with its copy gone behind the writer's
+        // back, nothing is sent and the email stays on screen.
+        writer.attach([original])
+        let lost = try #require(writer.attachments.first)
+        try FileManager.default.removeItem(atPath: lost.path)
+        #expect(await writer.send(model: model) == false)
+        #expect(writer.step == .final && writer.problem?.contains("logo.txt") == true)
+        writer.removeAttachment(lost)
+
+        // Sent: the file goes with the email, and its copy stays for the draft.
+        writer.attach([original])
+        let kept = try #require(writer.attachments.first)
+        #expect(await writer.send(model: model))
+        #expect(writer.attachments.isEmpty, "the draft has them now")
+        #expect(FileManager.default.fileExists(atPath: kept.path), "kept for a held send")
+        writer.close()
+        #expect(FileManager.default.fileExists(atPath: kept.path), "closing after sending drops nothing")
+        let sent = try await core.threads(in: "SENT", limit: 50).rows
+        #expect(sent.contains { $0.id == row.id }, "the reply is in Sent")
+
+        // Dropped before sending: the copy goes with it.
+        let dropped = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                     taskID: nil, email: "Logo?", attachmentsDirectory: root.appending(path: "copies"))
+        dropped.attach([original])
+        let gone = try #require(dropped.attachments.first)
+        dropped.close()
+        #expect(dropped.attachments.isEmpty && !FileManager.default.fileExists(atPath: gone.path))
     }
 }
 

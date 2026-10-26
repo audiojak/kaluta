@@ -60,6 +60,11 @@ struct WorkflowWriteView: View {
                 Button("Use my words") { perform(.ownWords) } // no-help: hidden
                     .keyboardShortcut("m", modifiers: [.command, .shift])
                     .hidden()
+                if writer.step == .final {
+                    Button("Attach a file") { perform(.attach) } // no-help: hidden
+                        .keyboardShortcut("a", modifiers: [.command, .shift])
+                        .hidden()
+                }
                 Button("Discard") { perform(.discard) } // no-help: hidden
                     .keyboardShortcut(".", modifiers: .command)
                     .hidden()
@@ -392,21 +397,32 @@ struct WorkflowWriteView: View {
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
                 .focused($textFocused)
                 .accessibilityLabel("The email that will be sent")
-            if model.agent.isProviderReady {
-                HStack(spacing: Space.s) {
+            // Under the email, its width: a file to go with it, quick changes,
+            // and what else to change (Return asks).
+            HStack(spacing: Space.s) {
+                Button("Attach a file", systemImage: "paperclip") { writer.choosingFiles = true }
+                    .labelStyle(.iconOnly)
+                    .hoverHelp("Attach a file, or drop one on the email (⇧⌘A)")
+                if model.agent.isProviderReady {
                     Button("Shorter") { revise("Make it shorter") }
                         .hoverHelp("Ask Kaluta to make it shorter")
                     Button("Warmer") { revise("Make it warmer") }
                         .hoverHelp("Ask Kaluta to make it warmer")
                     TextField("Tell Kaluta what to change…", text: $writer.field)
+                        .font(TypeRole.workflowContext)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { revise(writer.field) }
-                        .frame(maxWidth: Self.changeWidth)
+                        .frame(maxWidth: .infinity)
+                        .accessibilityLabel("Tell Kaluta what to change")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            if !writer.attachments.isEmpty {
+                DraftAttachmentChips(attachments: writer.attachments, remove: writer.removeAttachment)
             }
         }
+        .attachingFiles(choosing: $writer.choosingFiles, attach: writer.attach)
     }
 
     private func working(_ title: String) -> some View {
@@ -471,5 +487,4 @@ struct WorkflowWriteView: View {
 
     static let editorHeight: CGFloat = 180
     static let scrollID = "workflow-writing"
-    static let changeWidth: CGFloat = 320
 }
