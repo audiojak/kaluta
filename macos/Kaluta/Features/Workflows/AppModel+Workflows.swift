@@ -597,10 +597,16 @@ extension AppModel {
                 words.shown = false
                 return [a(.primary, .primary, "Use my words"), words, back, discard]
             }
-            guard agent.isProviderReady else {
-                return [a(.primary, .primary, "Write it yourself"), back, discard]
+            // 1–3 begin the answer with a starter (hidden: the chips show them).
+            let starters = zip([WorkflowCommand.pick1, .pick2, .pick3], writer.starters).map { command, starter in
+                var x = a(command, .plain, "Start with “\(starter)”"); x.shown = false; return x
             }
-            return [a(.primary, .primary, "Write it with Kaluta"), a(.ownWords, .plain, nil), back, discard]
+            guard agent.isProviderReady else {
+                return [a(.primary, .primary, "Write it yourself")] + starters + [back, discard]
+            }
+            // ⌘Return: Kaluta writes with nothing said.
+            return [a(.primary, .primary, "Write it with Kaluta"), a(.firstPass, .plain, nil), a(.ownWords, .plain, nil)]
+                + starters + [back, discard]
         case .asking:
             // Return answers (the last answer writes); ⇧Return skips; 1–3
             // pick an answer offered; Esc goes to the question before.
@@ -666,6 +672,11 @@ extension AppModel {
             writer.backFromAsking()
         case (.say, .ownWords):
             await writer.write(model: self, asWritten: true)
+        case (.say, .firstPass), (.say, .send):
+            await writer.firstPass(model: self)
+        case (.say, .pick1): _ = writer.pickStarter(0)
+        case (.say, .pick2): _ = writer.pickStarter(1)
+        case (.say, .pick3): _ = writer.pickStarter(2)
         case (.final, .back):
             writer.changeWhatISaid()
         case (.final, .attach):

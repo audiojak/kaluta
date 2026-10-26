@@ -562,6 +562,35 @@ struct WorkflowTests {
         #expect(mine.step == .say && mine.field == "Tuesday is fine.", "back to the words, not the answers")
     }
 
+    @Test func startersSeedTheAnswerByTheirKeys() {
+        let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil,
+                                    email: "Can you do Thursday at 2pm for the board prep with Avery?")
+        #expect(writer.starters == ["Yes", "No"])
+        #expect(writer.pickStarter(2) == false, "no third starter")
+        #expect(writer.pickStarter(0) && writer.field == "Yes, ", "a seed to go on from")
+        #expect(writer.pickStarter(1) == false, "typed: the keys type")
+        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Kaluta's first pass")
+        #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's first pass")
+    }
+
+    @Test func kalutaTakesAFirstPassWithNothingSaid() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Can you come?")
+        await writer.firstPass(model: model)
+        #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
+        #expect(writer.said == WorkflowWriter.firstPassInstruction)
+        // Change what I said: the words are the user's to write, not Kaluta's.
+        writer.changeWhatISaid()
+        #expect(writer.step == .say && writer.field.isEmpty)
+    }
+
     @Test func aFileGoesWithTheReply() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
