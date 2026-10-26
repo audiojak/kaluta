@@ -273,7 +273,7 @@ struct WorkflowWriteView: View {
                     .focused($fieldFocused)
                     .onSubmit { perform(.primary) }
                     .onExitCommand { perform(.back) }
-                    // 1–3 begin with a starter, while nothing is typed.
+                    // 1–3 say an answer, while nothing is typed.
                     .onKeyPress(characters: .decimalDigits) { press in
                         guard writer.field.isEmpty, let digit = press.characters.first?.wholeNumberValue,
                               (1...writer.starters.count).contains(digit), !writer.ownWordsOnly else { return .ignored }
@@ -294,22 +294,25 @@ struct WorkflowWriteView: View {
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-            // Starters seed the answer (1–3); writing it oneself, there are none.
+            // The answers the email takes (1–3): say one and Kaluta writes
+            // from it. Writing it oneself, there are none.
             if !writer.starters.isEmpty, !writer.ownWordsOnly {
                 HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                    Text("Start with")
+                    Text("Or just say")
                         .font(TypeRole.workflowContext)
                         .foregroundStyle(.secondary)
                     HStack(spacing: Space.s) {
                         ForEach(Array(writer.starters.enumerated()), id: \.element) { i, starter in
-                            Button { writer.addStarter(starter) } label: {
+                            Button { perform([.pick1, .pick2, .pick3][i]) } label: {
                                 HStack(spacing: Space.s) {
                                     Keycap(key: "\(i + 1)")
                                     Text(starter)
                                 }
                             }
                             .buttonStyle(.bordered)
-                            .hoverHelp("Start the answer with “\(starter)” (\(i + 1))")
+                            .hoverHelp(model.agent.isProviderReady
+                                       ? "Say “\(starter)”: Kaluta writes the reply from it (\(i + 1))"
+                                       : "Start with “\(starter)” (\(i + 1))")
                         }
                     }
                     .controlSize(.large)

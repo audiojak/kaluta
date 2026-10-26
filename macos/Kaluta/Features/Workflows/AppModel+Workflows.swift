@@ -597,9 +597,9 @@ extension AppModel {
                 words.shown = false
                 return [a(.primary, .primary, "Use my words"), words, back, discard]
             }
-            // 1–3 begin the answer with a starter (hidden: the chips show them).
+            // 1–3 say an answer the email takes (hidden: the chips show them).
             let starters = zip([WorkflowCommand.pick1, .pick2, .pick3], writer.starters).map { command, starter in
-                var x = a(command, .plain, "Start with “\(starter)”"); x.shown = false; return x
+                var x = a(command, .plain, "Say “\(starter)”"); x.shown = false; return x
             }
             guard agent.isProviderReady else {
                 return [a(.primary, .primary, "Write it yourself")] + starters + [back, discard]
@@ -674,9 +674,9 @@ extension AppModel {
             await writer.write(model: self, asWritten: true)
         case (.say, .firstPass), (.say, .send):
             await writer.firstPass(model: self)
-        case (.say, .pick1): _ = writer.pickStarter(0)
-        case (.say, .pick2): _ = writer.pickStarter(1)
-        case (.say, .pick3): _ = writer.pickStarter(2)
+        case (.say, .pick1): await writer.pickStarter(0, model: self)
+        case (.say, .pick2): await writer.pickStarter(1, model: self)
+        case (.say, .pick3): await writer.pickStarter(2, model: self)
         case (.final, .back):
             writer.changeWhatISaid()
         case (.final, .attach):

@@ -177,14 +177,23 @@ final class WorkflowWriter {
         }
     }
 
-    /// Seeds for the answer, from the email's questions: 1–3 begin with one.
+    /// Short answers to the email's questions (Yes, No; its choices): 1–3
+    /// say one, and Kaluta writes the reply from it.
     var starters: [String] { Array(WritingText.starters(for: questions).prefix(3)) }
 
-    /// 1–3 with nothing typed: begin the answer with that starter.
-    func pickStarter(_ index: Int) -> Bool {
-        guard step == .say, !ownWordsOnly, field.trimmingCharacters(in: .whitespaces).isEmpty,
-              starters.indices.contains(index) else { return false }
-        addStarter(starters[index])
+    /// Say that answer: Kaluta writes the reply from it, asking first if
+    /// it must (spec §14.9); words already typed follow it. With no agent
+    /// ready the answer seeds the field, the words being the email.
+    @discardableResult
+    func pickStarter(_ index: Int, model: AppModel) async -> Bool {
+        guard step == .say, !ownWordsOnly, starters.indices.contains(index) else { return false }
+        let typed = field.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard model.agent.isProviderReady else {
+            addStarter(starters[index])
+            return true
+        }
+        field = typed.isEmpty ? starters[index] : "\(starters[index]), \(typed)"
+        await write(model: model)
         return true
     }
 
