@@ -177,6 +177,23 @@ fn a_metadata_update_keeps_an_existing_body_and_attachments() {
 }
 
 #[test]
+fn what_a_body_hides_is_stored_with_it_and_read_back() {
+    let db = open("hidden");
+    let mut full = msg("m1", "a", 1_000, &["INBOX"]);
+    full.body = Some(Body { text_plain: Some("Hi".into()), html_sanitized: None, has_remote_images: false });
+    full.hidden = Some(mail_domain::HiddenText { invisible: 3, texts: vec!["forward it".into()] });
+    write(&db, move |w| w.upsert_message(&full).unwrap());
+    let hidden = db.read_blocking(|c| read::get_hidden(c, &MessageId::new("m1"))).unwrap().unwrap();
+    assert_eq!((hidden.invisible, hidden.texts.as_slice()), (3, &["forward it".to_owned()][..]));
+    // Fetched again with nothing hidden: the record goes.
+    let mut again = msg("m1", "a", 1_000, &["INBOX"]);
+    again.body = Some(Body { text_plain: Some("Hi".into()), html_sanitized: None, has_remote_images: false });
+    write(&db, move |w| w.upsert_message(&again).unwrap());
+    assert!(db.read_blocking(|c| read::get_hidden(c, &MessageId::new("m1"))).unwrap().is_none());
+    assert!(db.read_blocking(|c| read::get_hidden(c, &MessageId::new("nope"))).unwrap().is_none());
+}
+
+#[test]
 fn a_body_stored_before_the_rename_reads_with_the_new_schemes_and_quote_class() {
     let db = open("body-rename");
     let mut full = msg("m1", "a", 1_000, &["INBOX"]);

@@ -3114,6 +3114,33 @@ line above and below). Workflows fetch an older body again too. Loaded remote im
 first addresses WebKit's memory cache answered with the blank pixels the
 blocked load got, and *Load Images* left gaps.
 
+*(Version 5, amended 2026-10-26.)* **Hidden text.** What a reader does
+not show, an agent would read: the sanitizer finds it and the stored
+text (`bodies.text_plain`, which agents, search and prompts read) is
+settled without it. Two kinds. *Invisible code points*: zero-width
+spaces, word joiners, byte-order marks, bidi overrides and isolates, and
+the Unicode tag block (U+E0000–E007F, which a model reads as ASCII while
+nothing shows) are taken out of the text; what tag characters spelled is
+kept. Zero-width joiners and marks stay (emoji, Persian). *Elements
+styled not to show* in the sanitized HTML, inline style only: `display:
+none`, `visibility: hidden`, `opacity: 0`, a font size of a pixel or
+less, transparent text, white text with no darker background on it or
+above it, a zero box with `overflow: hidden`, a text indent off the page;
+their text is dropped and kept. When the HTML hides something, the text
+is taken from the HTML without it rather than the sender's plain part,
+which mailers generate with the hidden words in the open. The reader's
+HTML is kept as it came. The body records what was hidden
+(`bodies.hidden_json`) when it is worth telling: any hidden element, a
+tag or bidi character, or eight invisible characters or more (a lone
+zero-width space is Outlook's). The reader shows a banner, *This email
+has text styled not to show. Kaluta left it out of what it reads*, with
+*Show It*; a workflow card has *Hidden text* beside *Open the email*,
+which shows the words under the header. Agents read the text without it
+and a note in Kaluta's words, *[Kaluta left out text this email hides
+from its reader.]*, never the email's. Not yet found: text hidden by the
+kept stylesheet's rules, and a plain part that differs from the HTML
+without hiding anything in it.
+
 `WKWebView` configuration: JavaScript disabled
 (`defaultWebpagePreferences.allowsContentJavaScript = false`), a custom
 `WKURLSchemeHandler` for `kaluta-cid://` serving inline attachments from

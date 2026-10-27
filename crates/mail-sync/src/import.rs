@@ -171,9 +171,8 @@ fn convert(raw: &[u8], mine: &HashSet<String>) -> Option<(IncomingMessage, Vec<L
         }
     };
 
-    let text = parsed.text.clone().or_else(|| parsed.html.as_deref().map(mail_mime::html_to_text));
-    let sanitized = parsed.html.as_deref().map(mail_mime::sanitize_html);
-    let snippet = snippet(text.as_deref().unwrap_or(""));
+    let readable = mail_mime::readable(parsed.text.clone(), parsed.html.as_deref());
+    let snippet = snippet(readable.text.as_deref().unwrap_or(""));
     let date = headers.date.unwrap_or(0);
     let attachments = parsed
         .attachments
@@ -209,10 +208,11 @@ fn convert(raw: &[u8], mine: &HashSet<String>) -> Option<(IncomingMessage, Vec<L
         label_ids,
         size_estimate: raw.len() as u64,
         body: Some(Body {
-            text_plain: text,
-            has_remote_images: sanitized.as_ref().is_some_and(|s| s.has_remote_images),
-            html_sanitized: sanitized.map(|s| s.html),
+            text_plain: readable.text,
+            has_remote_images: readable.html.as_ref().is_some_and(|s| s.has_remote_images),
+            html_sanitized: readable.html.map(|s| s.html),
         }),
+        hidden: readable.hidden,
         attachments,
         list: headers.list.clone(),
         headers_json: None,

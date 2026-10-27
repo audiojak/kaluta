@@ -420,11 +420,18 @@ async fn ensure_bodies(core: &Core, ids: Vec<MessageId>) {
     }
 }
 
+/// What hidden text is replaced with in what an agent reads (spec §14.4).
+pub(crate) const HIDDEN_NOTE: &str = "[Kaluta left out text this email hides from its reader.]";
+
 async fn body_text(core: &Core, id: &MessageId) -> Result<Option<String>, Outcome> {
     let db = core.db().map_err(failed)?;
-    let id = id.clone();
-    let body = db.read(move |c| read::get_body(c, &id)).await.map_err(|e| failed(e.into()))?;
-    Ok(body.and_then(|b| b.text_plain))
+    let mid = id.clone();
+    let body = db.read(move |c| read::get_body(c, &mid)).await.map_err(|e| failed(e.into()))?;
+    let mid = id.clone();
+    let hidden = db.read(move |c| read::get_hidden(c, &mid)).await.map_err(|e| failed(e.into()))?;
+    // Hidden text was left out at sync; the agent is told, in Kaluta's
+    // words, not the email's.
+    Ok(body.and_then(|b| b.text_plain).map(|t| if hidden.is_some() { format!("{t}\n\n{HIDDEN_NOTE}") } else { t }))
 }
 
 #[derive(Deserialize)]

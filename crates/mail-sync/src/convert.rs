@@ -6,13 +6,13 @@ use mail_store::{IncomingAttachment, IncomingMessage};
 use provider_api::FetchedMessage;
 
 pub fn to_incoming(m: FetchedMessage) -> IncomingMessage {
-    let (body, attachments) = match m.body {
+    let (body, attachments, hidden) = match m.body {
         Some(b) => {
-            let sanitized = b.html.as_deref().map(mail_mime::sanitize_html);
+            let readable = mail_mime::readable(b.text, b.html.as_deref());
             let body = Body {
-                text_plain: b.text.or_else(|| b.html.as_deref().map(mail_mime::html_to_text)),
-                has_remote_images: sanitized.as_ref().is_some_and(|s| s.has_remote_images),
-                html_sanitized: sanitized.map(|s| s.html),
+                text_plain: readable.text,
+                has_remote_images: readable.html.as_ref().is_some_and(|s| s.has_remote_images),
+                html_sanitized: readable.html.map(|s| s.html),
             };
             let attachments = b
                 .attachments
@@ -28,9 +28,9 @@ pub fn to_incoming(m: FetchedMessage) -> IncomingMessage {
                     data: a.data,
                 })
                 .collect();
-            (Some(body), attachments)
+            (Some(body), attachments, readable.hidden)
         }
-        None => (None, vec![]),
+        None => (None, vec![], None),
     };
     IncomingMessage {
         id: m.id,
@@ -50,6 +50,7 @@ pub fn to_incoming(m: FetchedMessage) -> IncomingMessage {
         label_ids: m.label_ids,
         size_estimate: m.size_estimate,
         body,
+        hidden,
         attachments,
         list: m.list,
         headers_json: None,

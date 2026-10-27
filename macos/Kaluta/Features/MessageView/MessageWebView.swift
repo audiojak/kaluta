@@ -49,6 +49,14 @@ struct MessageWebView: NSViewRepresentable {
             controller.add(WeakScriptHandler(context.coordinator), contentWorld: .defaultClient,
                            name: Self.clickHandler)
         }
+        if onContentHeight != nil {
+            // Sized to its content: told when that changes (a quote opened).
+            let controller = config.userContentController
+            controller.addUserScript(WKUserScript(source: Self.resizeScript, injectionTime: .atDocumentEnd,
+                                                  forMainFrameOnly: true, in: .defaultClient))
+            controller.add(WeakScriptHandler(context.coordinator), contentWorld: .defaultClient,
+                           name: Self.resizeHandler)
+        }
         // Sized to its content, it hands the scroll wheel to the view around it.
         let webView: WKWebView
         if onContentHeight == nil {
@@ -132,6 +140,10 @@ struct MessageWebView: NSViewRepresentable {
         }
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == MessageWebView.resizeHandler {
+                if let height = message.body as? Double { onContentHeight?(CGFloat(height)) }
+                return
+            }
             guard let id = message.body as? String, !id.isEmpty else { return }
             currentMessageID = id
             onCurrentMessage?(id)
@@ -236,6 +248,19 @@ final class FittedWebView: WKWebView {
 
 extension MessageWebView {
     static let clickHandler = "kalutaCurrent"
+    static let resizeHandler = "kalutaResized"
+
+    /// The page's height, each time it changes: a quote (•••) opened, an
+    /// image arrived. The page runs no script of its own; this is the app's.
+    static let resizeScript = """
+    (function () {
+      var post = function () {
+        window.webkit.messageHandlers.\(resizeHandler).postMessage(document.documentElement.scrollHeight);
+      };
+      if (window.ResizeObserver) { new ResizeObserver(post).observe(document.documentElement); }
+      document.addEventListener('toggle', post, true);
+    })();
+    """
 
     /// A click inside a message (not a draft) makes it the current one.
     static let clickScript = """

@@ -379,6 +379,20 @@ struct WorkflowItemView: View {
                                 .buttonStyle(.link)
                                 .hoverHelp("Show this email's pictures; loading them tells the sender it was opened (⇧⌘I)")
                             }
+                            // Text no one was meant to see (spec §14.4): said, shown on request.
+                            if let hidden = session.rendered[detail.thread.id]?.hidden {
+                                let shown = session.hiddenTextShown.contains(detail.thread.id)
+                                Button {
+                                    withAnimation(AppModel.itemMotion) {
+                                        if shown { session.hiddenTextShown.remove(detail.thread.id) }
+                                        else { session.hiddenTextShown.insert(detail.thread.id) }
+                                    }
+                                } label: {
+                                    Label(shown ? "Hide the hidden text" : "Hidden text", systemImage: "eye.slash")
+                                }
+                                .buttonStyle(.link)
+                                .hoverHelp(HiddenTextNote.summary([hidden]))
+                            }
                             // At the top, where a long email cannot push it out of view.
                             if [.triage, .replies, .tasks, .waiting].contains(session.kind) {
                                 Button { Task { await model.performWorkflow(.openInFull) } } label: {
@@ -406,6 +420,10 @@ struct WorkflowItemView: View {
                             }
                         }
                         .font(TypeRole.workflowContext)
+                        if let hidden = session.rendered[detail.thread.id]?.hidden,
+                           session.hiddenTextShown.contains(detail.thread.id) {
+                            HiddenTextNote(hidden: [hidden])
+                        }
                         // Who else it went to: Reply all (A) reaches them too.
                         if let latest, let line = Self.recipientsLine(latest, own: model.ownAddresses) {
                             Text(line)

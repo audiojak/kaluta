@@ -255,6 +255,26 @@ pub struct RenderedBody {
     pub html: Option<String>,
     pub text: Option<String>,
     pub has_remote_images: bool,
+    /// What the email hides from its reader (spec §14.4): left out of
+    /// what agents read, kept for the user to see. `None` when nothing
+    /// worth telling.
+    pub hidden: Option<HiddenTextInfo>,
+}
+
+/// Text in an email that shows to no one: invisible characters, and
+/// elements styled not to show (spec §14.4).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HiddenTextInfo {
+    /// Invisible characters left out of the text.
+    pub invisible: u32,
+    /// What each hidden element said, and what invisible characters spelled.
+    pub texts: Vec<String>,
+}
+
+impl From<mail_domain::HiddenText> for HiddenTextInfo {
+    fn from(h: mail_domain::HiddenText) -> Self {
+        HiddenTextInfo { invisible: h.invisible, texts: h.texts }
+    }
 }
 
 #[cfg(test)]
