@@ -38,7 +38,6 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0019_cleanup_progress.sql"),
     include_str!("../migrations/0020_inbox_category_stats.sql"),
     include_str!("../migrations/0021_outbox_claims.sql"),
-    include_str!("../migrations/0022_hidden_text.sql"),
     include_str!("../migrations/0022_fact_share_with_cloud.sql"),
     include_str!("../migrations/0023_cloud_reports.sql"),
     include_str!("../migrations/0024_workflows.sql"),
@@ -50,6 +49,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0030_routine_proposals.sql"),
     include_str!("../migrations/0031_triage_summaries.sql"),
     include_str!("../migrations/0032_triage_categories.sql"),
+    include_str!("../migrations/0033_hidden_text.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -386,6 +386,25 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A migration's number is its place in the list: one slotted in
+    /// earlier would shift every later one and run them again on a
+    /// store that already has them (v33: duplicate column name).
+    #[test]
+    fn migrations_are_numbered_in_order_with_none_missing() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut names: Vec<String> =
+            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names.len(), MIGRATIONS.len(), "every file is in the list once: {names:?}");
+        for (i, (name, sql)) in names.iter().zip(MIGRATIONS).enumerate() {
+            assert_eq!(&name[..4], format!("{:04}", i + 1), "{name} is number {}", i + 1);
+            let file =
+                std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations").join(name))
+                    .unwrap();
+            assert_eq!(&file, sql, "{name} is at its number in the list");
+        }
     }
 
     #[test]
