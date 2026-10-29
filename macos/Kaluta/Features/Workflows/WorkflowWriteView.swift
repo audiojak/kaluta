@@ -223,7 +223,11 @@ struct WorkflowWriteView: View {
 
     private var choose: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Kaluta's answers").font(TypeRole.workflowHeading)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Kaluta's answers").font(TypeRole.workflowHeading)
+                Text(Self.answersNote(byWriter: writer.answersByWriter))
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
             ForEach(Array(writer.answers.enumerated()), id: \.element.id) { i, answer in
                 Button { perform([.pick1, .pick2, .pick3][i]) } label: {
                     HStack(alignment: .top, spacing: Space.l) {
@@ -491,6 +495,12 @@ struct WorkflowWriteView: View {
     static func preview(_ text: String) -> String {
         text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Under *Kaluta's answers*: how they were written.
+    static func answersNote(byWriter: Bool) -> String {
+        byWriter ? "Written ahead with your writing guide. Pick one to read and change before it goes."
+            : "Pick one to read and change before it goes."
     }
 
     /// Above the final email: what the user said, or which answer they chose.

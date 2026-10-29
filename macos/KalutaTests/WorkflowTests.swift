@@ -607,6 +607,45 @@ struct WorkflowTests {
         #expect(writer.step == .say && writer.field.isEmpty)
     }
 
+    @Test func answersWrittenAheadOpenTheReplyInReplies() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let rows = try await core.threads(in: "INBOX", limit: 2).rows
+        let (ready, plain) = (try #require(rows.first), try #require(rows.last))
+        #expect(ready.id != plain.id)
+        let items = [ready, plain].map { WorkflowItem(key: "thread:\($0.id)", threadId: $0.id, taskId: nil, decision: nil) }
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: items, startedAt: 0, resumed: false))
+        for row in [ready, plain] { session.threads[row.id] = try await core.thread(row.id) }
+        let answers = [TriageAnswer(label: "Yes", text: "Hi Sam,\n\nYes, Thursday works.\n\nJo"),
+                       TriageAnswer(label: "No", text: "Hi Sam,\n\nNot Thursday, sorry.\n\nJo")]
+        session.suggestions[ready.id] = TriageSuggestion(
+            threadId: ready.id, kind: .leave, seconds: nil, reason: "", answers: answers, answersByWriter: true,
+            needsReply: true, options: ["Yes", "No"], task: nil, summary: "", category: "")
+        model.workflowSession = session
+
+        // The bar says they are ready; Reply opens on them.
+        #expect(model.workflowActions().first?.title == "Reply · 2 answers ready")
+        await model.performWorkflow(.replyNow)
+        let writer = try #require(session.writer)
+        #expect(writer.step == .choose && writer.answers.map(\.label) == ["Yes", "No"] && writer.answersByWriter)
+        #expect(WorkflowWriteView.answersNote(byWriter: true).hasPrefix("Written ahead with your writing guide"))
+        // A whole answer, picked: the email that will be sent, to read and change.
+        await model.performWorkflow(.pick2)
+        #expect(writer.step == .final && writer.text == "Hi Sam,\n\nNot Thursday, sorry.\n\nJo")
+        await model.performWorkflow(.back)
+        #expect(writer.step == .choose, "Esc goes back to the answers")
+
+        // A conversation with none: the words, and Reply as it is.
+        session.writer = nil
+        session.replace(WorkflowSet(id: 1, kind: .replies, items: [items[1]], startedAt: 0, resumed: false))
+        #expect(model.workflowActions().first?.title == "Reply")
+        await model.performWorkflow(.replyNow)
+        #expect(session.writer?.step == .say)
+        #expect(AppModel.readyTitle(1) == "Reply · 1 answer ready")
+    }
+
     @Test func theCardsLinksWorkWhileWriting() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))

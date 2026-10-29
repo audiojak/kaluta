@@ -77,9 +77,15 @@ final class WorkflowWriter {
     /// Where the request that was asked about came from, to go back to.
     private var askedFrom: (step: Step, instruction: String) = (.say, "")
 
+    /// The answers were written ahead with the writing guide and facts,
+    /// one per option (spec §14.13), not the triage prompt's quick ones.
+    let answersByWriter: Bool
+
     init(threadID: String, messageID: String, replyAll: Bool, taskID: Int64?, email: String,
-         answers: [Answer] = [], forwarding: Bool = false, attachmentsDirectory: URL? = nil) {
+         answers: [Answer] = [], answersByWriter: Bool = false, forwarding: Bool = false,
+         attachmentsDirectory: URL? = nil) {
         files = DraftAttachments(directory: attachmentsDirectory)
+        self.answersByWriter = answersByWriter
         self.threadID = threadID
         self.messageID = messageID
         self.replyAll = replyAll

@@ -130,6 +130,12 @@ facts), and Replies never sees them.
    the answers; picking one lands on the editable screen with the
    whole email; Esc goes back; a conversation with none opens on the
    words as today.
+   *(as built: the bar's Reply says "Reply · 2 answers ready"; the
+   answers screen's note says "Written ahead with your writing guide"
+   for the writer's. A task's reply gets them only when the task
+   answers the conversation's latest message, which they were written
+   for. No snapshot: the self-snapshot has no workflow option and the
+   screen was locked overnight; the app test drives the same path.)*
 4. **Spec §14.13** (oagc-d04c.4): *Jobs* table (the new row and
    the cap), the reply screen in Triage, Replies and Tasks, the
    decisions above; §14.9 (a question means no ready answer).

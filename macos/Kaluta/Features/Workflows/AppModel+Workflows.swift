@@ -137,7 +137,9 @@ extension AppModel {
             return
         }
         guard let core, let threadID = threadID(of: item) else { return }
-        if session.kind == .triage, session.suggestions[threadID] == nil,
+        // Kaluta's suggestion, with the answers it wrote ahead (Triage,
+        // Replies, and a task's reply).
+        if [.triage, .replies, .tasks].contains(session.kind), session.suggestions[threadID] == nil,
            let suggestion = try? await core.triageSuggestion(threadID) {
             session.suggestions[threadID] = suggestion
         }
@@ -424,8 +426,11 @@ extension AppModel {
         let kind = session.kind
         // Answering an earlier message of the conversation: Reply says whose.
         let answering = session.writer == nil ? answeringEarlier(session) : nil
+        // Answers written ahead: Reply says how many are ready.
+        let ready = answering == nil ? readyAnswers(session).count : 0
         func a(_ c: WorkflowCommand, _ style: WorkflowButton.Style = .plain, _ title: String? = nil) -> WorkflowAction {
-            let named = c == .replyNow ? answering.map { "Reply to \(Self.firstName($0, own: ownAddresses))" } : nil
+            let named = c == .replyNow ? answering.map { "Reply to \(Self.firstName($0, own: ownAddresses))" }
+                ?? (ready > 0 ? Self.readyTitle(ready) : nil) : nil
             return WorkflowAction(command: c, title: title ?? named ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
@@ -486,6 +491,19 @@ extension AppModel {
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
+    }
+
+    /// The current item's answers written ahead (spec §14.13): Triage,
+    /// Replies and Tasks; Waiting has its nudges.
+    func readyAnswers(_ session: WorkflowSession) -> [TriageAnswer] {
+        guard [.triage, .replies, .tasks].contains(session.kind),
+              let id = session.current.flatMap(threadID(of:)) else { return [] }
+        return session.suggestions[id]?.answers ?? []
+    }
+
+    /// Reply's title with answers ready: "Reply · 3 answers ready".
+    static func readyTitle(_ count: Int) -> String {
+        "Reply · \(count) \(count == 1 ? "answer" : "answers") ready"
     }
 
     /// Triage (spec §14.13): the same buttons in the same order for every
@@ -937,16 +955,21 @@ extension AppModel {
         let earlier = message.id != Self.shownMessage(detail, session.kind)?.id
         // The item's task, else the conversation's: Send offers to finish it.
         let task = session.kind == .waiting ? nil : self.task(of: item) ?? openTask(onThread: id)
-        // Kaluta's answers: a quick reply's (Triage), or the follow-ups
-        // written ahead (Waiting).
+        // Kaluta's answers written ahead: one per option (Triage, Replies,
+        // Tasks), or the follow-ups (Waiting).
         let written = session.kind == .waiting ? session.waits[id]?.nudges : session.suggestions[id]?.answers
         let answers = written?.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
+        // Written for the conversation's latest message: not for a task
+        // that answers an earlier one.
+        let forTask = task?.messageId.map { $0 == message.id } ?? true
+        let byWriter = session.kind != .waiting && session.suggestions[id]?.answersByWriter == true
         let email = earlier
             ? session.messageBodies[message.id]?.html.map { Self.readingText(ComposerAssistant.plainText(fromHTML: $0)) }
             : session.bodies[id]
         session.writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
                                         replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
-                                        email: email ?? message.snippet, answers: earlier ? [] : answers)
+                                        email: email ?? message.snippet, answers: earlier || !forTask ? [] : answers,
+                                        answersByWriter: byWriter)
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
 
