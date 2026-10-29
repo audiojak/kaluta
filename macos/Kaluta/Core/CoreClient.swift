@@ -1462,6 +1462,45 @@ final class CoreClient: Sendable {
         core.cancelGmailSignIn(sessionId: sessionID)
     }
 
+    // MARK: Calendar (spec §14.9)
+
+    /// Start connecting the open account's Google Calendar; finish with
+    /// `completeGmailSignIn`, which records what was granted.
+    func beginCalendarConnect() async throws(CoreClientError) -> SignInStart {
+        let start = try await call { try await core.beginCalendarConnect() }
+        guard let url = URL(string: start.authorizationUrl) else {
+            throw CoreClientError(kind: .internalError, message: "invalid authorization URL")
+        }
+        return SignInStart(sessionID: start.sessionId, authorizationURL: url)
+    }
+
+    func calendarStatus() async throws(CoreClientError) -> CalendarStatus {
+        try await call { try await core.calendarStatus() }
+    }
+
+    func calendarFreeSlots(minutes: UInt32 = 30, days: UInt32 = 10) async throws(CoreClientError) -> CalendarSlots {
+        try await call { try await core.calendarFreeSlots(minutes: minutes, days: days) }
+    }
+
+    func calendarHold(startMs: Int64, minutes: UInt32, title: String,
+                      threadID: String?) async throws(CoreClientError) -> CalendarHoldInfo {
+        try await call { try await core.calendarHold(startMs: startMs, minutes: minutes, title: title, threadId: threadID) }
+    }
+
+    func calendarRelease(_ holdID: Int64) async throws(CoreClientError) {
+        try await call { try await core.calendarRelease(holdId: holdID) }
+    }
+
+    func calendarHolds() async throws(CoreClientError) -> [CalendarHoldInfo] {
+        try await call { try await core.calendarHolds() }
+    }
+
+    func disconnectCalendar() async throws(CoreClientError) {
+        try await call { try await core.disconnectCalendar() }
+    }
+
+    func useFakeCalendar() { core.debugUseFakeCalendar() }
+
     func accountHasCredentials(_ accountID: String) throws(CoreClientError) -> Bool {
         do {
             return try core.accountHasCredentials(accountId: accountID)
@@ -1895,6 +1934,10 @@ typealias WorkflowSet = KalutaCore.WorkflowSet
 typealias WorkflowScore = KalutaCore.WorkflowScore
 typealias TriageSuggestion = KalutaCore.TriageSuggestion
 typealias TriageAnswer = KalutaCore.TriageAnswer
+typealias CalendarStatus = KalutaCore.CalendarStatus
+typealias CalendarSlot = KalutaCore.CalendarSlot
+typealias CalendarSlots = KalutaCore.CalendarSlots
+typealias CalendarHoldInfo = KalutaCore.CalendarHoldInfo
 typealias TriageKind = KalutaCore.TriageKind
 typealias WaitingInfo = KalutaCore.WaitingInfo
 typealias ReadingReport = KalutaCore.ReadingReport

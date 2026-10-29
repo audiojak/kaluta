@@ -123,6 +123,8 @@ async fn run(core: &Arc<Core>, session: &str, tool: Tool, arguments: Value) -> O
         Tool::AddLabel => label_threads(core, arguments, true).await,
         Tool::RemoveLabel => label_threads(core, arguments, false).await,
         Tool::CreateLabel => create_label(core, arguments).await,
+        Tool::CalendarFreeSlots => calendar_free_slots(core, arguments).await,
+        Tool::CalendarHold => calendar_hold(core, arguments).await,
         // External tools only ever run after approval.
         Tool::Send | Tool::Forward | Tool::Delete => {
             Err(Outcome::error("failed", "external actions run only after approval"))
@@ -732,6 +734,49 @@ async fn facts_lookup(core: &Arc<Core>, arguments: Value) -> Result<Outcome, Out
     let facts = core.list_facts(vec![crate::facts::FactStatus::Accepted]).await.map_err(failed)?;
     let categories = core.fact_categories().await.map_err(failed)?;
     Ok(Outcome::json(crate::facts::lookup_json(&facts, &categories, a.category.as_deref(), a.query.as_deref())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FreeSlotsArgs {
+    minutes: Option<u32>,
+    days: Option<u32>,
+}
+
+/// Free times to offer (spec §14.9): slots only, in the user's zone.
+async fn calendar_free_slots(core: &Arc<Core>, arguments: Value) -> Result<Outcome, Outcome> {
+    let a: FreeSlotsArgs = args(arguments)?;
+    let found = core.free_slots(a.minutes.unwrap_or(30), a.days.unwrap_or(10)).await.map_err(failed)?;
+    let Some(found) = found else { return Err(Outcome::error("not_connected", crate::calendar::NOT_CONNECTED)) };
+    let zone: chrono_tz::Tz = found.time_zone.parse().unwrap_or(chrono_tz::Tz::UTC);
+    let at = |ms: i64| {
+        chrono::DateTime::from_timestamp_millis(ms).map(|t| t.with_timezone(&zone).to_rfc3339()).unwrap_or_default()
+    };
+    let slots: Vec<Value> =
+        found.slots.iter().map(|s| json!({ "start": at(s.start_ms), "end": at(s.end_ms), "label": s.label })).collect();
+    Ok(Outcome::json(json!({ "time_zone": found.time_zone, "slots": slots })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HoldArgs {
+    start: String,
+    minutes: u32,
+    title: String,
+}
+
+/// One tentative hold, no attendees (spec §14.9).
+async fn calendar_hold(core: &Arc<Core>, arguments: Value) -> Result<Outcome, Outcome> {
+    let a: HoldArgs = args(arguments)?;
+    let start = chrono::DateTime::parse_from_rfc3339(a.start.trim())
+        .map_err(|_| Outcome::error("invalid_arguments", "start is an RFC 3339 time, as calendar_free_slots gives it"))?
+        .with_timezone(&chrono::Utc);
+    match core.hold_time(start, a.minutes, &a.title, None).await {
+        Ok(h) => Ok(Outcome::json(json!({ "hold_id": h.id, "label": h.label, "title": h.title }))),
+        Err(e) if e.kind() == crate::ErrorKind::InvalidInput => Err(Outcome::error("invalid_arguments", e.to_string())),
+        Err(e) if e.kind() == crate::ErrorKind::PermissionDenied => Err(Outcome::error("not_connected", e.to_string())),
+        Err(e) => Err(failed(e)),
+    }
 }
 
 #[derive(Deserialize)]

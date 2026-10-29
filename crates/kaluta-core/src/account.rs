@@ -478,7 +478,7 @@ impl Core {
     }
 
     /// The account's Google token source, from its stored sign-in.
-    fn token_source(&self, account_id: &str) -> Result<Arc<GoogleTokenSource>, CoreError> {
+    pub(crate) fn token_source(&self, account_id: &str) -> Result<Arc<GoogleTokenSource>, CoreError> {
         let refresh = secrets::get_redacted(self.secrets.as_ref(), &keys::refresh_token(account_id))?
             .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this account needs to sign in again"))?;
         let client_json = self
@@ -603,6 +603,8 @@ impl Core {
             })?;
             let identity = tokens.id_token.as_deref().and_then(oauth::identity_from_id_token).unwrap_or_default();
             let grants_imap = tokens.grants_imap();
+            let free_busy = tokens.grants(provider_gcal::FREEBUSY_SCOPE);
+            let holds = tokens.grants(provider_gcal::EVENTS_SCOPE);
             let source = GoogleTokenSource::new(client, Redacted::new(refresh.clone()));
             source.prime(tokens.access_token, tokens.expires_in).await;
             let gmail = GmailProvider::new(source)?;
@@ -614,6 +616,7 @@ impl Core {
             let existing = tokio::task::spawn_blocking(move || existing_account_id(&data_dir, &email))
                 .await
                 .map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+            let signed_in_before = existing.is_some();
             let account_id = match existing {
                 Some(id) => id,
                 None => random_id()?,
@@ -641,12 +644,67 @@ impl Core {
                 service: None,
             })
             .await?;
-            tracing::info!(account = %account_id, "gmail account connected");
+            // What the token grants of the calendar (spec §14.9, ADR 0018):
+            // connected when it grants free/busy; signing in again without
+            // it leaves the calendar unconnected.
+            if free_busy || signed_in_before {
+                let db = core.store_for(&account_id).await?;
+                let now = mail_sync::now_millis();
+                db.write(move |tx| {
+                    if free_busy {
+                        mail_store::calendar::set_access(tx, free_busy, holds, now)
+                    } else {
+                        mail_store::calendar::clear_access(tx)
+                    }
+                })
+                .await?;
+            }
+            tracing::info!(account = %account_id, calendar = free_busy, "gmail account connected");
             Ok(ConnectedAccount { account_id, email: profile.email })
         })
         .await;
         self.accounts.cancels.lock().unwrap_or_else(|e| e.into_inner()).remove(&session);
         result
+    }
+
+    /// Connect the open account's Google Calendar (spec §14.9, ADR 0018):
+    /// the browser asks for calendar access on top of mail, with the
+    /// account's own sign-in client; finish with
+    /// [`Self::complete_gmail_sign_in`], which records what was granted.
+    pub async fn begin_calendar_connect(&self) -> Result<SignInStart, CoreError> {
+        let account_id =
+            self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
+        let data = self.data_path();
+        let entry = crate::registry::load_index(&data)
+            .into_iter()
+            .find(|e| e.id == account_id)
+            .filter(|e| e.kind == crate::registry::AccountKind::Gmail)
+            .ok_or_else(|| {
+                CoreError::new(ErrorKind::InvalidInput, "only a Google account has a calendar to connect")
+            })?;
+        let client_json = self
+            .secrets
+            .get(client_key(&account_id))?
+            .ok_or_else(|| CoreError::new(ErrorKind::Auth, "this account needs to sign in again"))?;
+        let stored: StoredClient =
+            serde_json::from_str(&client_json).map_err(|e| CoreError::new(ErrorKind::Internal, e.to_string()))?;
+        let config =
+            OAuthClientConfig { client_id: stored.client_id.clone(), client_secret: stored.client_secret.clone() };
+        let client =
+            OAuthClient { client_id: stored.client_id, client_secret: stored.client_secret.map(Redacted::new) };
+        let mail = if entry.imap == Some(true) { oauth::SCOPE_WITH_IMAP } else { oauth::SCOPE };
+        let scope = format!("{mail} {} {}", provider_gcal::FREEBUSY_SCOPE, provider_gcal::EVENTS_SCOPE);
+        let email = entry.email;
+        let pending = runtime::run(async move { Ok(oauth::begin_adding(&client, &email, &scope).await?) }).await?;
+        let session_id = random_id()?;
+        let url = pending.url.clone();
+        self.accounts.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(session_id.clone(), (pending, config));
+        self.accounts
+            .cancels
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(session_id.clone(), Arc::new(tokio::sync::Notify::new()));
+        Ok(SignInStart { session_id, authorization_url: url })
     }
 
     /// Stop a sign-in, whether or not the app is already waiting on it.

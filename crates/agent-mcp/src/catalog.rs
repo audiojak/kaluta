@@ -201,6 +201,35 @@ fn spec(tool: Tool) -> ToolSpec {
             "Ask to move threads to Trash (never deleted permanently). The user approves first.",
             object(json!({ "thread_ids": thread_ids("Threads to trash.") }), &["thread_ids"]),
         ),
+        Tool::CalendarFreeSlots => (
+            "Free times on the user's calendar to offer for a meeting: up to eight slots within their usual \
+             hours, in their time zone, two a day at most, none in the next two hours. Returns slots (start, end \
+             and a label such as \"Thu Oct 30, 2–3 pm\") and the time zone; never what the user is doing. \
+             Fails with not_connected when the user has not connected their calendar: then offer their calendar \
+             link (facts_lookup) or ask them which times work.",
+            object(
+                json!({
+                    "minutes": { "type": "integer", "minimum": 15, "maximum": 240, "default": 30,
+                                 "description": "How long the meeting is." },
+                    "days": { "type": "integer", "minimum": 1, "maximum": 21, "default": 10,
+                              "description": "How many days ahead to look." },
+                }),
+                &[],
+            ),
+        ),
+        Tool::CalendarHold => (
+            "Hold one time on the user's calendar while they wait for an answer: a tentative, private event with \
+             no attendees, titled \"Hold: <title>\". One hold per call, at most four hours, within the next 60 \
+             days. Nobody is invited; the user can release it.",
+            object(
+                json!({
+                    "start": { "type": "string", "description": "RFC 3339 start, as calendar_free_slots gave it." },
+                    "minutes": { "type": "integer", "minimum": 15, "maximum": 240 },
+                    "title": { "type": "string", "description": "What the meeting is about, a few words." },
+                }),
+                &["start", "minutes", "title"],
+            ),
+        ),
     };
     ToolSpec { tool, description, input_schema }
 }
@@ -357,7 +386,8 @@ mod tests {
             }
             assert!(spec.name().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'), "{}", spec.name());
         }
-        assert!(catalog().iter().filter(|s| s.read_only()).count() == 7);
+        // The seven mail and facts reads, and the calendar's free slots.
+        assert!(catalog().iter().filter(|s| s.read_only()).count() == 8);
     }
 
     #[test]

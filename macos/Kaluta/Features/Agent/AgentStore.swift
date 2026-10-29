@@ -433,6 +433,8 @@ final class AgentStore {
         case "mail_send": "Asked to send"
         case "mail_forward": "Asked to forward"
         case "mail_delete": "Asked to delete"
+        case "calendar_free_slots": "Looked for free times"
+        case "calendar_hold": "Held a time on your calendar"
         default: name
         }
     }

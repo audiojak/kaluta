@@ -18,6 +18,7 @@ mod analysis_run;
 mod analysis_settings;
 mod archive;
 mod attachments;
+mod calendar;
 mod cleanup;
 mod cloud_routines;
 mod compose;
@@ -130,6 +131,8 @@ pub struct Core {
     headless: bool,
     /// Publishing agent mailboxes to rules servers (spec §10.6).
     rules: rules_publish::RulesState,
+    /// Offering times from the user's calendar (spec §14.9).
+    calendar: calendar::CalendarState,
     /// This core, for work it starts on its own (the rules publisher).
     me: std::sync::Weak<Core>,
 }
@@ -212,6 +215,7 @@ impl Core {
             send_delay_ms: Default::default(),
             headless,
             rules: Default::default(),
+            calendar: Default::default(),
             me: me.clone(),
         }))
     }

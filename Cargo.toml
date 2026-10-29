@@ -67,6 +67,7 @@ insta = "1"
 rrule = "0.14"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
+iana-time-zone = "0.1"
 # Connect an Agent… edits Codex's config.toml (spec §10.1).
 toml = "1"
 # The shim's own uid, to check the app's socket (no `unsafe` getuid).

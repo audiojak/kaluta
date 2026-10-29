@@ -116,6 +116,7 @@ struct AgentPanelTests {
     @Test func toolTitlesAreFriendly() {
         #expect(AgentStore.toolTitle("mail_search") == "Searched mail")
         #expect(AgentStore.toolTitle("mail_future_tool") == "mail_future_tool")
+        #expect(AgentStore.toolTitle("calendar_hold") == "Held a time on your calendar")
         #expect(AgentStore.usageText(input: 10, output: 5, cost: 0.0123) == "15 tokens · $0.012")
         #expect(AgentStore.usageText(input: nil, output: nil, cost: nil) == nil)
     }

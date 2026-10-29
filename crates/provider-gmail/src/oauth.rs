@@ -63,7 +63,12 @@ pub struct TokenResponse {
 impl TokenResponse {
     /// Whether full mail access (IMAP) was granted.
     pub fn grants_imap(&self) -> bool {
-        self.scope.as_deref().is_some_and(|s| s.split(' ').any(|x| x == FULL_MAIL_SCOPE))
+        self.grants(FULL_MAIL_SCOPE)
+    }
+
+    /// Whether `scope` was granted.
+    pub fn grants(&self, scope: &str) -> bool {
+        self.scope.as_deref().is_some_and(|s| s.split(' ').any(|x| x == scope))
     }
 }
 
@@ -168,6 +173,24 @@ pub async fn begin_with(
     login_hint: Option<&str>,
     scope: &str,
 ) -> ProviderResult<PendingAuthorization> {
+    begin_full(client, auth_url, login_hint, scope, false).await
+}
+
+/// Ask for more access for a signed-in account (`scope` names all it
+/// should have, the mail scopes included): Google adds it to what was
+/// granted (`include_granted_scopes`), and the token that comes back
+/// covers both.
+pub async fn begin_adding(client: &OAuthClient, login_hint: &str, scope: &str) -> ProviderResult<PendingAuthorization> {
+    begin_full(client, AUTH_URL, Some(login_hint), scope, true).await
+}
+
+async fn begin_full(
+    client: &OAuthClient,
+    auth_url: &str,
+    login_hint: Option<&str>,
+    scope: &str,
+    adding: bool,
+) -> ProviderResult<PendingAuthorization> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|e| ProviderError::Network(e.to_string()))?;
     let port = listener.local_addr().map_err(|e| ProviderError::Network(e.to_string()))?.port();
     let redirect_uri = format!("http://127.0.0.1:{port}/callback");
@@ -190,6 +213,9 @@ pub async fn begin_with(
             .append_pair("prompt", if login_hint.is_some() { "consent" } else { "consent select_account" });
         if let Some(hint) = login_hint {
             q.append_pair("login_hint", hint);
+        }
+        if adding {
+            q.append_pair("include_granted_scopes", "true");
         }
     }
     Ok(PendingAuthorization { url: url.into(), redirect_uri, verifier: Redacted::new(verifier), state, listener })
@@ -409,6 +435,28 @@ mod tests {
             code_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
+    }
+
+    #[tokio::test]
+    async fn adding_access_keeps_what_was_granted() {
+        let scope = format!("{SCOPE_WITH_IMAP} https://www.googleapis.com/auth/calendar.freebusy");
+        let pending = begin_adding(&client(), "me@example.com", &scope).await.unwrap();
+        let url = url::Url::parse(&pending.url).unwrap();
+        let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(q["include_granted_scopes"], "true");
+        assert_eq!(q["scope"], scope);
+        assert_eq!(q["login_hint"], "me@example.com");
+        let plain = begin(&client(), Some("me@example.com"), true).await.unwrap();
+        assert!(!plain.url.contains("include_granted_scopes"), "signing in asks for mail only");
+        let granted = TokenResponse {
+            access_token: String::new(),
+            refresh_token: None,
+            expires_in: None,
+            id_token: None,
+            scope: Some(scope.clone()),
+        };
+        assert!(granted.grants("https://www.googleapis.com/auth/calendar.freebusy") && granted.grants_imap());
+        assert!(!granted.grants("https://www.googleapis.com/auth/calendar.events.owned"));
     }
 
     #[tokio::test]
