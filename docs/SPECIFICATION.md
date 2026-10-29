@@ -3679,7 +3679,10 @@ its evidence, decided in Facts' Review mode like a gleaned one; the same
 answer again raises the proposal's support, a rejected one is not
 proposed again, and one that states what a fact already says proposes
 nothing. Each question carries a category and a label (amended
-2026-10-02, 2026-10-05, 2026-10-26).
+2026-10-02, 2026-10-05, 2026-10-26). Answers written ahead (§14.13)
+never ask: an option that needs a fact Kaluta does not have gets **no
+ready answer**, and the user's own turn, when they reply, asks for it
+(amended 2026-10-29).
 
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
@@ -4496,10 +4499,13 @@ are looked for as each account opens.
 
 #### Kaluta's writing in workflows
 
-- **Drafts follow the user.** Kaluta writes ahead only where the answer
-  is short and predictable (a quick reply in Triage, a nudge in Waiting),
-  and then writes **up to three** genuinely different answers to pick
-  from (1–3), each with a one-line label, plus *None of these? Tell
+- **Drafts follow the user.** Kaluta writes ahead only where it knows
+  the answers the user might give: a conversation that **needs a reply**
+  and has **options** (the email's own choices, Yes and No for a
+  yes-or-no question, else the likely answers; Triage, Replies, and a
+  task's reply), and a nudge in Waiting. It then has **up to three**
+  whole answers to pick from (1–3), one per option, each with a
+  one-line label, plus *None of these? Tell
   Kaluta what to say…* (/, with dictation). Otherwise the screen leads
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
@@ -4562,7 +4568,11 @@ one decision with a one-line reason:
 
 - **The 30-second rule.** *Quick reply* when Kaluta judges the answer
   takes 30 seconds or less to check and send (the estimate is shown,
-  "about 20 seconds"); then up to three answers are ready.
+  "about 20 seconds"); then up to three answers are ready. Whatever the
+  kind, a conversation a person wrote that expects an answer **needs a
+  reply** and carries up to three options; the Reply answers job writes
+  a whole answer for each (below), and *Reply* says so: *Reply · 3
+  answers ready* (amended 2026-10-29).
   **Make a task** when it takes longer; the task (title, category, due
   day, what completes it) is filled in on the same screen, editable, and
   *Archive the email* is ticked (it stays under the `Task` label).
@@ -4653,7 +4663,10 @@ user something, not answered in Triage (left in the Inbox, skipped, or
 arrived outside a set). Each item: the email with its questions
 highlighted, *What do you want to say?*, then the editable email; Send
 and archive. *Archive* (E), as in Triage, when no reply is needed.
-Kaluta writes no draft before the user has said something.
+Kaluta writes no draft before the user has said something, except the
+answers written ahead for each option (*Reply · 2 answers ready*): Reply
+opens on them, and the screen says they were written with the writing
+guide (amended 2026-10-29).
 
 #### Tasks
 
@@ -4836,9 +4849,27 @@ gets a summary of two or three sentences (migration 0031). A suggestion
 is stored for the conversation's latest message (`triage_suggestions`) and stops counting
 when a newer one arrives, so the job suggests again.
 
+*(Amended 2026-10-29, migration 0034.)* Each suggestion also says
+whether the conversation **needs a reply** (`needs_reply`, whatever the
+kind: a long answer is a task and still needs one; never for mail no
+person wrote, or an archive) and its **options** (`options_json`, up to
+three short labels; a quick reply's answer labels when none are named).
+The **Reply answers** job runs after it: for each conversation in the
+Inbox that needs a reply and has options, newest first, from the last
+seven days, one per turn, it asks for a whole email per option in a
+hidden read-only session (prompt marker *Kaluta reply answers*), with
+the writing guide rendered for the sender, `facts_lookup`, and the rule
+to list under `missing` any option that needs a fact it lacks rather
+than write it. The answers replace the suggestion's (`answers_by =
+writer`); when none are written the triage prompt's quick answers stay
+(`none`) and the conversation is not asked again. A newer message drops
+them with the suggestion; sending a reply makes the user's own message
+the latest, so they go too.
+
 | Job | When | Makes |
 |---|---|---|
-| Triage suggestions | as new mail arrives, in batches | a suggestion per new conversation (kind, seconds, reason; up to three answers for a quick reply), kept until the conversation changes |
+| Triage suggestions | as new mail arrives, in batches | a suggestion per new conversation (kind, seconds, reason; up to three answers for a quick reply; needs a reply, options), kept until the conversation changes |
+| Reply answers | after triage suggestions, one conversation per turn, up to 40 a day | a whole email per option for each conversation that needs a reply, with the writing guide and facts |
 | Waiting check | once at the start of the day | verdicts in `waiting_checks`; `Waiting` labels |
 | Reading summaries | after each routine run | one line and a short summary per sorted message |
 | Nudges | when an item joins Waiting | up to three follow-ups |
