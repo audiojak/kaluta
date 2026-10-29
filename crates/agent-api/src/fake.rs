@@ -89,7 +89,8 @@ pub fn task_answer(prompt: &str) -> Option<String> {
 /// The fake's answer to a Kaluta triage prompt (spec §14.13), or `None`
 /// for any other prompt. Per `<email thread_id="…">` block: a question
 /// gets a quick reply with two answers, mail from a no-reply address is
-/// archived, a long email becomes a task, the rest stay in the Inbox.
+/// archived, a long email becomes a task (needing a reply, with two
+/// options), the rest stay in the Inbox.
 pub fn triage_answer(prompt: &str) -> Option<String> {
     if !prompt.starts_with("Kaluta triage suggestions") {
         return None;
@@ -125,12 +126,12 @@ pub fn triage_answer(prompt: &str) -> Option<String> {
             )
         } else if body.len() > 600 {
             format!(
-                r#"{{"thread_id": "{id}", "kind": "task", "reason": "It needs more than a quick answer.", "task": {{"title": "Answer {}", "category": "Reply", "due": null, "action": "reply", "why": "A longer answer is needed."}}}}"#,
+                r#"{{"thread_id": "{id}", "kind": "task", "reason": "It needs more than a quick answer.", "needs_reply": true, "options": ["Agree", "Ask for more time"], "task": {{"title": "Answer {}", "category": "Reply", "due": null, "action": "reply", "why": "A longer answer is needed."}}}}"#,
                 esc(&name)
             )
         } else if body.contains('?') {
             format!(
-                r#"{{"thread_id": "{id}", "kind": "reply", "seconds": 20, "reason": "{} asks something quick.", "answers": [{{"label": "Yes", "text": "Hi {},\n\nYes, that works for me.\n\nJo"}}, {{"label": "Not this week", "text": "Hi {},\n\nNot this week, sorry. Could we look at next week?\n\nJo"}}]}}"#,
+                r#"{{"thread_id": "{id}", "kind": "reply", "seconds": 20, "reason": "{} asks something quick.", "needs_reply": true, "options": ["Yes", "Not this week"], "answers": [{{"label": "Yes", "text": "Hi {},\n\nYes, that works for me.\n\nJo"}}, {{"label": "Not this week", "text": "Hi {},\n\nNot this week, sorry. Could we look at next week?\n\nJo"}}]}}"#,
                 esc(&name),
                 esc(&name),
                 esc(&name)

@@ -50,6 +50,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0031_triage_summaries.sql"),
     include_str!("../migrations/0032_triage_categories.sql"),
     include_str!("../migrations/0033_hidden_text.sql"),
+    include_str!("../migrations/0034_reply_answers.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;

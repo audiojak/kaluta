@@ -419,6 +419,12 @@ pub struct SuggestionRow {
     pub summary: String,
     /// What kind of email it is (`newsletter`, `receipt`, …), else empty.
     pub category: String,
+    /// The conversation needs a reply from the user, whatever the kind.
+    pub needs_reply: bool,
+    /// The different answers the user might give: `["Yes", "No"]`.
+    pub options_json: String,
+    /// Who wrote `answers_json`: `triage` or `writer`.
+    pub answers_by: String,
 }
 
 /// Keep a suggestion, replacing the conversation's last.
@@ -426,8 +432,8 @@ pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
     tx.execute(
         "INSERT OR REPLACE INTO triage_suggestions
            (thread_id, message_id, kind, seconds, reason, answers_json, task_json, agent, created_at, summary,
-            category)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            category, needs_reply, options_json, answers_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             s.thread_id,
             s.message_id,
@@ -439,7 +445,10 @@ pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
             s.agent,
             s.created_at,
             s.summary,
-            s.category
+            s.category,
+            s.needs_reply,
+            s.options_json,
+            s.answers_by
         ],
     )?;
     Ok(())
@@ -451,7 +460,7 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
     Ok(conn
         .query_row(
             "SELECT s.thread_id, s.message_id, s.kind, s.seconds, s.reason, s.answers_json, s.task_json, s.agent,
-                    s.created_at, s.summary, s.category
+                    s.created_at, s.summary, s.category, s.needs_reply, s.options_json, s.answers_by
                FROM triage_suggestions s
                JOIN threads t ON t.gmail_id = s.thread_id
                JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
@@ -471,6 +480,9 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
                     created_at: r.get(8)?,
                     summary: r.get(9)?,
                     category: r.get(10)?,
+                    needs_reply: r.get(11)?,
+                    options_json: r.get(12)?,
+                    answers_by: r.get(13)?,
                 })
             },
         )
@@ -717,13 +729,20 @@ mod tests {
             created_at: NOW,
             summary: String::new(),
             category: String::new(),
+            needs_reply: true,
+            options_json: r#"["Yes","No"]"#.into(),
+            answers_by: "triage".into(),
         };
         db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
         let left = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
         assert_eq!(left.len(), all.len() - 1);
         assert!(!left.iter().any(|c| c.thread_id == first.thread_id));
         let thread = first.thread_id.clone();
-        assert_eq!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().unwrap().kind, "reply");
+        let kept = db.read_blocking(move |c| suggestion(c, &thread)).unwrap().unwrap();
+        assert_eq!(
+            (kept.kind.as_str(), kept.needs_reply, kept.options_json.as_str()),
+            ("reply", true, r#"["Yes","No"]"#)
+        );
 
         // A newer message: the suggestion no longer counts.
         let thread = first.thread_id.clone();
