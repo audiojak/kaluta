@@ -143,6 +143,33 @@ pub fn triage_answer(prompt: &str) -> Option<String> {
     Some(format!(r#"{{"suggestions": [{}]}}"#, items.join(", ")))
 }
 
+/// The fake's answer to a Kaluta reply answers prompt (spec §14.13), or
+/// `None`: one email per listed answer, to the email's sender; an email
+/// asking for "facts about me" gets questions instead, as writing help's do.
+pub fn reply_answers_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta reply answers") {
+        return None;
+    }
+    let block = prompt.split("<email thread_id=\"").nth(1).unwrap_or_default();
+    if block.contains("facts about me") {
+        return Some(
+            r#"{"questions": [{"question": "What is your role?", "category": "work", "label": "Role"}]}"#.into(),
+        );
+    }
+    let from = block.lines().find_map(|l| l.strip_prefix("From: ")).unwrap_or_default();
+    let name: String = from.split(['<', ' ', '@']).next().unwrap_or_default().replace(['\\', '"'], "");
+    let options = prompt
+        .split("Answers to write:\n")
+        .nth(1)
+        .unwrap_or_default()
+        .lines()
+        .map_while(|l| l.strip_prefix("- "))
+        .map(|o| o.replace(['\\', '"'], ""));
+    let answers: Vec<String> =
+        options.map(|o| format!(r#"{{"label": "{o}", "text": "Hi {name},\n\n{o}.\n\nJo"}}"#)).collect();
+    Some(format!(r#"{{"answers": [{}], "missing": []}}"#, answers.join(", ")))
+}
+
 /// The fake's answer to a Kaluta waiting check (spec §14.13), or `None`
 /// for any other prompt: a sent email with a question in it expects an
 /// answer, the rest do not.
@@ -423,6 +450,7 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
 pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
         .or_else(|| triage_answer(prompt))
+        .or_else(|| reply_answers_answer(prompt))
         .or_else(|| waiting_answer(prompt))
         .or_else(|| nudge_answer(prompt))
         .or_else(|| reading_answer(prompt))

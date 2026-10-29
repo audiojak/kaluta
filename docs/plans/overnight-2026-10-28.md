@@ -112,6 +112,15 @@ facts), and Replies never sees them.
    question gives none for that option and the others stay; the cap
    stops the job; a newer message drops them; the writing guide is in
    the prompt.
+   *(as built: options come from the triage prompt, which is told to use
+   the email's own choices, Yes and No for a yes-or-no question, else the
+   likely answers; Swift's `WritingText.starters` stays on the words
+   screen. The writer's prompt is the core's own (`reply_answers.rs`),
+   the same rules as the composer's: guide, `facts_lookup`, never invent,
+   a `missing` list. `answers_by` is `triage`, `writer`, or `none` when
+   the writer wrote nothing (the triage prompt's quick answers stay and
+   it is not asked again). Workflow jobs have no Run Now, so none was
+   added.)*
 3. **App: answers in Replies and Tasks, and the bar** (oagc-d04c.3).
    Replies and Tasks load the suggestion for the current item as Triage
    does; `startWriting` offers the writer's answers for any kind; the

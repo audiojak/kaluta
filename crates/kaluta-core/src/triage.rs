@@ -264,8 +264,13 @@ pub fn parse(text: &str, thread_ids: &[String], categories: &[String]) -> Option
     Some(out)
 }
 
+/// A label: tidied, and short.
+pub(crate) fn clean_label(v: Option<&Value>) -> String {
+    clean(v, LABEL_CAP)
+}
+
 /// An answer's text: spaces inside lines tidied, its lines kept.
-fn answer_text(v: Option<&Value>) -> String {
+pub(crate) fn answer_text(v: Option<&Value>) -> String {
     let s = v.and_then(Value::as_str).unwrap_or("");
     let lines: Vec<String> = s.lines().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
     let text = lines.join("\n").trim().to_owned();
