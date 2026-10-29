@@ -46,6 +46,8 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
         ("provider-gmail", &["mail-domain", "mail-mime", "provider-api"][..]),
         ("provider-primitive", &["mail-domain", "mail-mime", "provider-api"][..]),
         ("provider-agentmail", &["mail-domain", "mail-mime", "provider-api"][..]),
+        // The user's own calendar (free/busy, holds): no mail to decode.
+        ("provider-gcal", &["mail-domain", "provider-api"][..]),
         ("mail-sync", &["mail-domain", "mail-store", "mail-mime", "provider-api"][..]),
         ("agent-api", &["mail-domain"][..]),
         ("permissions", &["mail-domain"][..]),
@@ -69,6 +71,7 @@ fn allowed_internal_deps() -> BTreeMap<&'static str, &'static [&'static str]> {
                 "provider-gmail",
                 "provider-primitive",
                 "provider-agentmail",
+                "provider-gcal",
                 "agent-api",
                 "agent-claude",
                 "agent-codex",

@@ -2033,6 +2033,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "provider-gcal"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "provider-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "provider-gmail"
 version = "0.1.0"
 dependencies = [

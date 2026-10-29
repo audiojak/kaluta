@@ -20,6 +20,7 @@ provider-api = { path = "crates/provider-api" }
 provider-gmail = { path = "crates/provider-gmail" }
 provider-primitive = { path = "crates/provider-primitive" }
 provider-agentmail = { path = "crates/provider-agentmail" }
+provider-gcal = { path = "crates/provider-gcal" }
 agent-api = { path = "crates/agent-api" }
 agent-claude = { path = "crates/agent-claude" }
 agent-codex = { path = "crates/agent-codex" }
@@ -65,6 +66,7 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 insta = "1"
 rrule = "0.14"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
 # Connect an Agent… edits Codex's config.toml (spec §10.1).
 toml = "1"
 # The shim's own uid, to check the app's socket (no `unsafe` getuid).
