@@ -493,6 +493,35 @@ extension AppModel {
         }
     }
 
+    /// Hold the times the reply offers (spec §14.9, ⇧⌘H), undoably: one
+    /// undo releases them all.
+    func holdTimes(_ writer: WorkflowWriter, session: WorkflowSession) async {
+        let subject = session.threads[writer.threadID]?.thread.subject ?? ""
+        let title = subject.replacingOccurrences(of: #"^((re|fwd?):\s*)+"#, with: "", options: [.regularExpression, .caseInsensitive])
+        let made = await writer.holdOffered(title: title.isEmpty ? "Meeting" : title, model: self)
+        guard !made.isEmpty, let accountID = openAccountID else { return }
+        let count = made.count
+        let notice = count == 1 ? "Held 1 time on your calendar" : "Held \(count) times on your calendar"
+        undo.record(accountID: accountID, actionName: "Hold These Times", noticeText: notice,
+                    undo: { [weak self] in
+                        guard let self else { return }
+                        await writer.releaseHeld(model: self)
+                    },
+                    redo: { [weak self] in
+                        guard let self, let core = self.core else { return }
+                        var again: [CalendarHoldInfo] = []
+                        for h in made {
+                            let minutes = UInt32(max(15, (h.endMs - h.startMs) / 60_000))
+                            if let x = try? await core.calendarHold(startMs: h.startMs, minutes: minutes,
+                                                                    title: title.isEmpty ? "Meeting" : title,
+                                                                    threadID: writer.threadID) {
+                                again.append(x)
+                            }
+                        }
+                        writer.setHeld(again)
+                    })
+    }
+
     /// The current item's answers written ahead (spec §14.13): Triage,
     /// Replies and Tasks; Waiting has its nudges.
     func readyAnswers(_ session: WorkflowSession) -> [TriageAnswer] {
@@ -643,7 +672,11 @@ extension AppModel {
             // Attach is the paperclip by the email; its key still answers.
             var attach = a(.attach, .plain, nil)
             attach.shown = false
-            return send + [a(.back, .quiet, "Change what I said"), attach, a(.discard, .quiet, nil)]
+            // The times offered are held from the line under the email.
+            var hold = a(.holdTimes, .plain, nil)
+            hold.shown = false
+            let holds = writer.offeredSlots.isEmpty || !writer.held.isEmpty ? [] : [hold]
+            return send + [a(.back, .quiet, "Change what I said"), attach] + holds + [a(.discard, .quiet, nil)]
         case .forward:
             // Return in the note sends too; ⌘. drops it.
             var send = a(.primary, .primary, "Send")
@@ -699,6 +732,8 @@ extension AppModel {
             writer.changeWhatISaid()
         case (.final, .attach):
             writer.choosingFiles = true
+        case (.final, .holdTimes):
+            await holdTimes(writer, session: session)
         case (.final, .send), (.final, .sendKeepTask):
             let keep = command == .sendKeepTask
             guard await writer.send(model: self, keepTask: keep) else { return }

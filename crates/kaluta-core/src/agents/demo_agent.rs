@@ -203,6 +203,9 @@ impl Worker {
         if !asks_to_meet(prompt) {
             return None;
         }
+        if let Some(times) = offered_times(prompt) {
+            return Some(times);
+        }
         let found = self.call("facts_lookup", json!({ "category": "availability" })).await;
         let link = found.as_ref().and_then(|v| v["facts"].as_array()).and_then(|facts| {
             facts.iter().find(|f| f["label"].as_str().is_some_and(|l| l.eq_ignore_ascii_case("Calendar link")))
@@ -604,6 +607,20 @@ fn asks_to_meet(prompt: &str) -> bool {
     asks && !timed && !instruction.starts_with("make it")
 }
 
+/// The reply to a request to meet when the app gave the free times from
+/// the calendar: the first two, each on a line of its own, as given.
+fn offered_times(prompt: &str) -> Option<String> {
+    let list = prompt.split_once("The user's calendar is free at these times")?.1;
+    let times: Vec<&str> = list.lines().skip(1).map_while(|l| l.strip_prefix("- ")).take(2).collect();
+    if times.is_empty() {
+        return None;
+    }
+    let reply = writing_help(prompt);
+    let (body, sign_off) = reply.rsplit_once("\n\n").unwrap_or((reply.as_str(), "Jo"));
+    let lines: String = times.iter().map(|t| format!("- {t}\n")).collect();
+    Some(format!("{body}\n\nWould one of these work?\n{lines}\n{sign_off}"))
+}
+
 /// The reply to a request to meet: with the user's calendar link on a
 /// line of its own before the sign-off, or, without one, a question
 /// asking for it (never invented times).
@@ -851,6 +868,15 @@ mod tests {
         let with = meeting_reply(&meet, Some("https://cal.com/jo"));
         assert!(with.starts_with("Hi Sam,"), "{with}");
         assert!(with.contains("\nhttps://cal.com/jo\n\nJo") || with.ends_with("https://cal.com/jo\n\nJo"), "{with}");
+        // Free times from the calendar: the first two, as given.
+        let timed = format!(
+            "{meet}\n\nThe user's calendar is free at these times (America/Los_Angeles):\n- Thu Oct 30, 2–2:30 pm\n\
+             - Fri Oct 31, 9–9:30 am\n- Mon Nov 2, 9–9:30 am\nWhen the reply agrees to meet…"
+        );
+        let offered = offered_times(&timed).unwrap();
+        assert!(offered.contains("\n- Thu Oct 30, 2–2:30 pm\n- Fri Oct 31, 9–9:30 am\n"), "{offered}");
+        assert!(!offered.contains("Mon Nov 2") && offered.ends_with("Jo"));
+        assert!(offered_times(&meet).is_none());
         let without = meeting_reply(&meet, None);
         let q: Value = serde_json::from_str(&without).unwrap();
         assert_eq!(q["questions"][0]["label"], "Calendar link");

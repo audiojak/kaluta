@@ -618,6 +618,57 @@ struct WorkflowTests {
         #expect(!fresh.contains("Calendar link"))
     }
 
+    @Test func freeTimesAreOfferedAndHeldWithOneUndo() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        core.useFakeCalendar()
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: [item], startedAt: 0, resumed: false))
+        session.threads[row.id] = detail
+        model.workflowSession = session
+
+        // Not about meeting: no times looked for.
+        let deck = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                  taskID: nil, email: "Can you send the deck?")
+        deck.field = "Sure"
+        await deck.write(model: model)
+        #expect(deck.freeSlots.isEmpty && deck.offeredSlots.isEmpty)
+
+        // About meeting: the calendar's free times go to Kaluta, and the
+        // ones the email offers are shown, held with one key, one undo.
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Hi Jo, when can we talk this week?")
+        session.writer = writer
+        writer.field = "Sure"
+        await writer.write(model: model)
+        #expect(writer.step == .final && !writer.freeSlots.isEmpty)
+        let offered = writer.offeredSlots
+        #expect(!offered.isEmpty, "the echoing fake repeats the times it was given")
+        #expect(model.workflowActions().contains { $0.command == .holdTimes })
+        await model.performWorkflow(.holdTimes)
+        #expect(writer.held.count == offered.count)
+        let holds = try await core.calendarHolds()
+        #expect(holds.map(\.startMs) == offered.map(\.startMs))
+        #expect(!model.workflowActions().contains { $0.command == .holdTimes }, "held once")
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where !writer.held.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let left = try await core.calendarHolds()
+        #expect(writer.held.isEmpty && left.isEmpty, "one undo releases them all")
+
+        #expect(WorkflowCommand.command(key: KeyEquivalent("h"), characters: "h", modifiers: [.command, .shift]) == .holdTimes)
+        let prompt = ComposerAssistant.prompt(instruction: "Sure", from: "", to: [], subject: "", draft: "",
+                                              original: "When can we talk?",
+                                              freeTimes: ("America/Los_Angeles", ["Thu Oct 30, 2–2:30 pm"]))
+        #expect(prompt.contains("(America/Los_Angeles):\n- Thu Oct 30, 2–2:30 pm\n"))
+        #expect(!prompt.contains(ComposerAssistant.meetingRule), "times from the calendar, not the link")
+    }
+
     @Test func answersWrittenAheadOpenTheReplyInReplies() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))

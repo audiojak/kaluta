@@ -410,8 +410,63 @@ final class WorkflowWriter {
         }
     }
 
+    // MARK: Times (spec §14.9)
+
+    /// Free times found on the user's calendar for an email that asks to
+    /// meet, and its zone; fetched once, before Kaluta first writes.
+    private(set) var freeSlots: [CalendarSlot] = []
+    private(set) var freeSlotsZone = ""
+    private var lookedForSlots = false
+    /// The holds made for the offered times (Hold these, ⇧⌘H).
+    private(set) var held: [CalendarHoldInfo] = []
+
+    /// The free times the email that will be sent offers, by their labels.
+    var offeredSlots: [CalendarSlot] { freeSlots.filter { text.contains($0.label) } }
+
+    /// Free times for an email that asks to meet, when the calendar is
+    /// connected; nothing otherwise.
+    private func lookForSlots(_ core: CoreClient) async {
+        guard !lookedForSlots else { return }
+        lookedForSlots = true
+        guard WritingText.asksToMeet(email), (try? await core.calendarStatus())?.connected == true,
+              let found = try? await core.calendarFreeSlots() else { return }
+        freeSlots = found.slots
+        freeSlotsZone = found.timeZone
+    }
+
+    /// Hold the offered times on the calendar, titled `title`. The holds
+    /// made; none when some failed (those made are released).
+    func holdOffered(title: String, model: AppModel) async -> [CalendarHoldInfo] {
+        guard step == .final, held.isEmpty, let core = model.core else { return [] }
+        var made: [CalendarHoldInfo] = []
+        for slot in offeredSlots {
+            let minutes = UInt32(max(15, (slot.endMs - slot.startMs) / 60_000))
+            do {
+                made.append(try await core.calendarHold(startMs: slot.startMs, minutes: minutes, title: title,
+                                                        threadID: threadID))
+            } catch {
+                problem = error.message
+                for h in made { try? await core.calendarRelease(h.id) }
+                return []
+            }
+        }
+        held = made
+        return made
+    }
+
+    /// The holds released (undo).
+    func releaseHeld(model: AppModel) async {
+        guard let core = model.core else { return }
+        for h in held { try? await core.calendarRelease(h.id) }
+        held = []
+    }
+
+    /// Held again (redo).
+    func setHeld(_ holds: [CalendarHoldInfo]) { held = holds }
+
     private func ask(model: AppModel, instruction: String, draft: String) async {
         guard let core = model.core else { return }
+        await lookForSlots(core)
         let back: Step = draft.isEmpty ? .say : .final
         step = .writing
         problem = nil
@@ -428,7 +483,8 @@ final class WorkflowWriter {
             let prompt = ComposerAssistant.prompt(
                 instruction: instruction, from: (try? await core.accountAddress()) ?? "", to: to,
                 subject: Self.replySubject(detail.thread.subject), draft: draft, original: email,
-                guide: guide?.text ?? "")
+                guide: guide?.text ?? "",
+                freeTimes: freeSlots.isEmpty ? nil : (freeSlotsZone, freeSlots.map(\.label)))
             let opened = try await KalutaChat.open(model: model, about: [threadID])
             chat = opened
             let answer = ComposerAssistant.cleaned(try await opened.ask(prompt))

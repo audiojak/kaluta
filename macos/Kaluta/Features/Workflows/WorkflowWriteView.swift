@@ -64,6 +64,9 @@ struct WorkflowWriteView: View {
                     Button("Attach a file") { perform(.attach) } // no-help: hidden
                         .keyboardShortcut("a", modifiers: [.command, .shift])
                         .hidden()
+                    Button("Hold these times") { perform(.holdTimes) } // no-help: hidden
+                        .keyboardShortcut("h", modifiers: [.command, .shift])
+                        .hidden()
                 }
                 Button("Discard") { perform(.discard) } // no-help: hidden
                     .keyboardShortcut(".", modifiers: .command)
@@ -445,8 +448,39 @@ struct WorkflowWriteView: View {
             if !writer.attachments.isEmpty {
                 DraftAttachmentChips(attachments: writer.attachments, remove: writer.removeAttachment)
             }
+            // The times it offers, from the calendar: held at a key (spec §14.9).
+            if !writer.offeredSlots.isEmpty {
+                offeredTimes
+            }
         }
         .attachingFiles(choosing: $writer.choosingFiles, attach: writer.attach)
+    }
+
+    private var offeredTimes: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Label(writer.held.isEmpty ? "Times offered" : "Held on your calendar",
+                  systemImage: writer.held.isEmpty ? "calendar" : "calendar.badge.checkmark")
+                .font(TypeRole.workflowContext)
+                .foregroundStyle(.secondary)
+            ForEach(writer.offeredSlots, id: \.startMs) { slot in
+                Text(slot.label)
+                    .font(TypeRole.meta)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, Space.xs)
+                    .background(.quaternary, in: .capsule)
+            }
+            if writer.held.isEmpty {
+                Button { perform(.holdTimes) } label: {
+                    HStack(spacing: Space.s) {
+                        Text("Hold these")
+                        Keycap(key: "⇧⌘H")
+                    }
+                }
+                .buttonStyle(.link)
+                .hoverHelp("Hold these times on your calendar while they answer: private, tentative, nobody invited (⇧⌘H)")
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func working(_ title: String) -> some View {

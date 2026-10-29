@@ -4,6 +4,13 @@ import SwiftUI
 /// do you want to say?* (spec §14.13). Pure.
 enum WritingText {
     /// The sentences that ask something, in order: each ends in "?".
+    /// The email asks to meet, talk or find a time (spec §14.9).
+    static func asksToMeet(_ text: String) -> Bool {
+        let t = text.lowercased()
+        return ["meet", "talk", "a call", "find a time", "catch up", "schedule", "coffee", "your availability",
+                "when are you free", "when works"].contains { t.contains($0) }
+    }
+
     static func questions(in text: String) -> [String] {
         var found: [String] = []
         text.enumerateSubstrings(in: text.startIndex..., options: .bySentences) { sentence, _, _, _ in

@@ -377,8 +377,20 @@ final class ComposerAssistant {
         none, do not invent times: ask, with a question in category availability labelled "Calendar link".
         """
 
+    /// The free times the app found on the user's calendar, offered in
+    /// place of the link (spec §14.9): their labels, as written.
+    static func freeTimesRule(zone: String, labels: [String]) -> String {
+        """
+        The user's calendar is free at these times (\(zone)):
+        \(labels.map { "- \($0)" }.joined(separator: "\n"))
+        When the reply agrees to meet and the user named no time, offer two or three of these, each on a line \
+        of its own starting with "- ", exactly as written here; never other times.
+        """
+    }
+
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,
-                       original: String, guide: String = "", facts: [String] = []) -> String {
+                       original: String, guide: String = "", facts: [String] = [],
+                       freeTimes: (zone: String, labels: [String])? = nil) -> String {
         var parts = [
             "You are helping write an email in Kaluta's composer. The user asks: \(instruction)",
             """
@@ -401,8 +413,13 @@ final class ComposerAssistant {
         if !facts.isEmpty { parts.append("Facts the user gave for this message:\n" + facts.map { "- \($0)" }.joined(separator: "\n")) }
         if !guide.isEmpty { parts.append(guide) }
         let original = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Answering an email: it may ask to meet.
-        if !original.isEmpty { parts.insert(meetingRule, at: 3) }
+        // Answering an email: it may ask to meet. Free times from the
+        // calendar come first; without them, the link.
+        if let freeTimes, !freeTimes.labels.isEmpty {
+            parts.insert(freeTimesRule(zone: freeTimes.zone, labels: freeTimes.labels), at: 3)
+        } else if !original.isEmpty {
+            parts.insert(meetingRule, at: 3)
+        }
         if !original.isEmpty {
             parts.append("The message being answered or forwarded:\n<<<\n\(String(original.prefix(12_000)))\n>>>")
         }

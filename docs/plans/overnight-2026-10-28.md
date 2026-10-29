@@ -243,6 +243,13 @@ External) that decides approval.
    email is about meeting; the screen shows chips for the offered
    times; holding makes the events; undo deletes them; a sent reply
    records the slots.
+   *(as built: the app, not the agent, asks the calendar: when the email
+   asks to meet and the calendar is connected, the writer fetches free
+   slots before Kaluta first writes and puts their labels in the prompt
+   (offered in place of the link), and the screen finds the offered ones
+   by their labels in the text, so no trailing JSON line is needed. The
+   agent's `calendar_free_slots` tool stays for the agent column. A sent
+   reply does not record its slots: the holds keep their conversation.)*
 9. **Settings and spec** (oagc-awri.5): Settings › Accounts ›
    *Calendar* (Connect, which calendars, Disconnect), the Keys list
    gains ⇧⌘H; spec §7.7 (scopes), §10.2 (the two tools), §14.9 (times
