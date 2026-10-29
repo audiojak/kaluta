@@ -574,7 +574,9 @@ fn a_user_policy_can_require_approval_for_reversible_tools() {
 fn the_policy_is_set_from_the_app() {
     let core = demo("policy-ffi");
     assert!(core.agent_policy().is_empty());
-    assert_eq!(core.configurable_agent_tools().len(), 8);
+    // The eight mail changes, and a hold on the user's calendar.
+    assert_eq!(core.configurable_agent_tools().len(), 9);
+    assert!(core.configurable_agent_tools().contains(&"calendar_hold".to_owned()));
     core.set_agent_policy(vec!["mail_archive".into(), "mail_create_draft".into()]).unwrap();
     assert_eq!(core.agent_policy(), vec!["mail_create_draft", "mail_archive"]);
     assert_eq!(core.set_agent_policy(vec!["mail_send".into()]).unwrap_err().kind(), crate::ErrorKind::InvalidInput);

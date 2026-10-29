@@ -27,6 +27,8 @@ pub(crate) const DAILY_CAP: u32 = 200;
 const BODY_CAP: usize = 3_000;
 /// The 30-second rule.
 pub const QUICK_SECONDS: u32 = 30;
+/// `triage_suggestions.answers_by` for answers the Reply answers job wrote.
+pub(crate) const ANSWERS_BY_WRITER: &str = "writer";
 const REASON_CAP: usize = 160;
 const LABEL_CAP: usize = 60;
 const ANSWER_CAP: usize = 2_000;
@@ -81,8 +83,19 @@ pub struct TriageSuggestion {
     pub seconds: Option<u32>,
     /// One line on why.
     pub reason: String,
-    /// Up to three, for a quick reply.
+    /// Up to three whole answers: a quick reply's, written by the triage
+    /// prompt, or one per option, written by the Reply answers job with
+    /// the writing guide and facts (`answers_by_writer`).
     pub answers: Vec<TriageAnswer>,
+    /// The answers were written by the writer, one per option.
+    pub answers_by_writer: bool,
+    /// The conversation needs a reply from the user, whatever the kind:
+    /// a long answer is a task and still needs one (spec §14.13).
+    pub needs_reply: bool,
+    /// The different answers the user might give, at most three short
+    /// labels ("Yes", "No"; the email's own choices); empty when no
+    /// reply is needed.
+    pub options: Vec<String>,
     /// The task to make, for a task.
     pub task: Option<TaskSuggestion>,
     /// For a long email meant for reading (a newsletter, a digest, a
@@ -147,12 +160,18 @@ pub fn prompt(emails: &[String], today: &str, weekday: &str, categories: &[Strin
          Answer with only a JSON object, and nothing else:\n\
          {{\"suggestions\": [{{\"thread_id\": \"...\", \"kind\": \"reply\" or \"task\" or \"archive\" or \"leave\", \
          \"seconds\": 20, \"reason\": \"one short line on why\", \
-         \"answers\": [{{\"label\": \"...\", \"text\": \"...\"}}], \
+         \"answers\": [{{\"label\": \"...\", \"text\": \"...\"}}], \"needs_reply\": true, \"options\": [\"...\"], \
          \"task\": {{\"title\": \"...\", \"category\": \"...\", \"due\": \"YYYY-MM-DD\" or null, \
          \"action\": \"reply\" or \"reply_all\" or \"forward\" or \"none\", \"why\": \"...\"}}, \
          \"summary\": \"\", \"category\": \"\"}}]}}\n\
          - seconds: your estimate of the time to check and send an answer; for a reply, {QUICK_SECONDS} or less.\n\
          - answers only for a reply; task only for a task.\n\
+         - needs_reply: true when a person wrote to the user and expects an answer from them (a question, a \
+         request, an invitation to say yes or no), whatever the kind, a task included; false for mail no person \
+         wrote to the user, an FYI, or a thanks that needs nothing back.\n\
+         - options: when needs_reply, the different answers the user might give, at most three, each a few words: \
+         the email's own choices when it offers them (\"Tuesday\", \"Thursday\"), \"Yes\" and \"No\" for a yes-or-no \
+         question, else the likely answers (\"Accept\", \"Decline\", \"Ask for more time\"); else [].\n\
          - summary: for a long email meant for reading (a newsletter, a digest, a report, an \
          announcement), two or three sentences on what it says that would matter to the user; else \"\".\n\
          - category: what kind of email it is, only when no person wrote it to the user: one of {}; else \"\".\n\
@@ -209,23 +228,49 @@ pub fn parse(text: &str, thread_ids: &[String], categories: &[String]) -> Option
         if kind == TriageKind::Task && task.is_none() {
             kind = TriageKind::Leave;
         }
+        let category = category(s.get("category"));
+        // Mail no person wrote, or nothing to do, needs no reply; a quick
+        // reply always does.
+        let needs_reply = kind == TriageKind::QuickReply
+            || (category.is_empty()
+                && kind != TriageKind::Archive
+                && s.get("needs_reply").and_then(Value::as_bool).unwrap_or(false));
+        let mut options: Vec<String> = Vec::new();
+        if needs_reply {
+            let named =
+                s.get("options").and_then(Value::as_array).into_iter().flatten().map(|o| clean(Some(o), LABEL_CAP));
+            // A quick reply's answers are options too, when none are named.
+            for o in named.chain(answers.iter().map(|a| a.label.clone())) {
+                if !o.is_empty() && !options.iter().any(|x| x.eq_ignore_ascii_case(&o)) && options.len() < 3 {
+                    options.push(o);
+                }
+            }
+        }
         out.push(TriageSuggestion {
             thread_id: id.to_owned(),
             kind,
             seconds: if kind == TriageKind::QuickReply { seconds } else { None },
             reason: clean(s.get("reason"), REASON_CAP),
             answers: if kind == TriageKind::QuickReply { answers } else { vec![] },
+            answers_by_writer: false,
+            needs_reply,
+            options,
             task: if kind == TriageKind::Task { task } else { None },
             summary: clip_sentences(s.get("summary"), SUMMARY_CAP),
-            category: category(s.get("category")),
+            category,
         });
     }
     out.sort_by_key(|s| thread_ids.iter().position(|t| *t == s.thread_id));
     Some(out)
 }
 
+/// A label: tidied, and short.
+pub(crate) fn clean_label(v: Option<&Value>) -> String {
+    clean(v, LABEL_CAP)
+}
+
 /// An answer's text: spaces inside lines tidied, its lines kept.
-fn answer_text(v: Option<&Value>) -> String {
+pub(crate) fn answer_text(v: Option<&Value>) -> String {
     let s = v.and_then(Value::as_str).unwrap_or("");
     let lines: Vec<String> = s.lines().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
     let text = lines.join("\n").trim().to_owned();
@@ -250,6 +295,9 @@ fn from_row(r: store::SuggestionRow) -> Option<TriageSuggestion> {
         seconds: r.seconds,
         reason: r.reason,
         answers,
+        answers_by_writer: r.answers_by == ANSWERS_BY_WRITER,
+        needs_reply: r.needs_reply,
+        options: serde_json::from_str(&r.options_json).unwrap_or_default(),
         task,
         summary: r.summary,
         category: r.category,
@@ -326,6 +374,9 @@ impl Core {
                     created_at: now,
                     summary: s.summary,
                     category: s.category,
+                    needs_reply: s.needs_reply,
+                    options_json: serde_json::to_string(&s.options).unwrap_or_else(|_| "[]".into()),
+                    answers_by: "triage".into(),
                 })
             })
             .collect();
@@ -433,6 +484,38 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_is_needed_whatever_the_kind_and_comes_with_its_options() {
+        let ids: Vec<String> = ["q", "t", "n", "f", "x"].iter().map(|s| (*s).to_owned()).collect();
+        let answer = r#"{"suggestions": [
+            {"thread_id": "q", "kind": "reply", "seconds": 15, "reason": "Asks.",
+             "answers": [{"label": "Yes", "text": "Yes."}, {"label": "No", "text": "No."}]},
+            {"thread_id": "t", "kind": "task", "reason": "Long.", "needs_reply": true,
+             "options": ["Tuesday", " tuesday ", "Thursday", "Next week", "A fourth"],
+             "task": {"title": "Answer Avery", "category": "Reply", "due": null, "action": "reply", "why": "Long."}},
+            {"thread_id": "n", "kind": "archive", "reason": "A newsletter.", "needs_reply": true,
+             "options": ["Yes"], "category": "newsletter"},
+            {"thread_id": "f", "kind": "leave", "reason": "FYI.", "needs_reply": false, "options": ["Thanks"]},
+            {"thread_id": "x", "kind": "leave", "reason": "A person, a request.", "needs_reply": true, "options": []}
+        ]}"#;
+        let found = parse(answer, &ids, &cats()).unwrap();
+        // A quick reply needs one; its answers are its options.
+        assert!(found[0].needs_reply);
+        assert_eq!(found[0].options, ["Yes", "No"]);
+        assert!(!found[0].answers_by_writer);
+        // A task needs one too: three options, the same one once.
+        assert_eq!(found[1].kind, TriageKind::Task);
+        assert!(found[1].needs_reply);
+        assert_eq!(found[1].options, ["Tuesday", "Thursday", "Next week"]);
+        // Mail no person wrote, or an FYI, needs none, whatever is said.
+        assert!(!found[2].needs_reply && found[2].options.is_empty(), "a newsletter");
+        assert!(!found[3].needs_reply && found[3].options.is_empty(), "an FYI");
+        // Needed, with no options named: the writer asks the user.
+        assert!(found[4].needs_reply && found[4].options.is_empty());
+        let p = prompt(&[], "2026-10-29", "Thursday", &cats());
+        assert!(p.contains("needs_reply") && p.contains("options"), "the prompt asks for both");
+    }
+
+    #[test]
     fn a_long_summary_ends_on_a_whole_sentence_and_only_known_categories_count() {
         let long = format!("{} Second one here. {}", "First sentence is fine.", "word ".repeat(200));
         let s = clip_sentences(Some(&Value::String(long)), 60);
@@ -469,6 +552,7 @@ mod tests {
         let (thread, _) = rows.iter().find(|(_, k)| k == "reply").unwrap().clone();
         let got = rt(core.triage_suggestion(thread)).unwrap().unwrap();
         assert_eq!((got.kind, got.answers.len()), (TriageKind::QuickReply, 2));
+        assert!(got.needs_reply && got.options == ["Yes", "Not this week"], "stored and read back: {got:?}");
         // Everything new has one now: another look asks nothing.
         assert_eq!(crate::workflow_jobs::tests::settle_and_run(core), 0);
     }

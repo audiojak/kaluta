@@ -202,6 +202,29 @@ Ask to move threads to Trash (never deleted permanently). The user approves firs
 |---|---|---|---|
 | `thread_ids` | array of string | yes | Threads to trash. At most 200. |
 
+## `calendar_free_slots`
+
+Free times on the user's calendar to offer for a meeting: up to eight slots within their usual hours, in their time zone, two a day at most, none in the next two hours. Returns slots (start, end and a label such as "Thu Oct 30, 2–3 pm") and the time zone; never what the user is doing. Fails with not_connected when the user has not connected their calendar: then offer their calendar link (facts_lookup) or ask them which times work.
+
+**Risk:** Read-only — always allowed
+
+| Argument | Type | Required | Notes |
+|---|---|---|---|
+| `days` | integer |  | How many days ahead to look. At most 21. |
+| `minutes` | integer |  | How long the meeting is. At most 240. |
+
+## `calendar_hold`
+
+Hold one time on the user's calendar while they wait for an answer: a tentative, private event with no attendees, titled "Hold: <title>". One hold per call, at most four hours, within the next 60 days. Nobody is invited; the user can release it.
+
+**Risk:** Reversible — allowed unless you ask to approve it
+
+| Argument | Type | Required | Notes |
+|---|---|---|---|
+| `minutes` | integer | yes | At most 240. |
+| `start` | string | yes | RFC 3339 start, as calendar_free_slots gave it. |
+| `title` | string | yes | What the meeting is about, a few words. |
+
 # Mailbox mode: agents outside Kaluta
 
 `kaluta-mcp --mailbox <address>` serves one agent mailbox to an agent that runs outside the app (Claude Code, Codex, a script), whether or not Kaluta is open (spec §10.1). *Connect an Agent…* in the mailbox's settings adds it to Claude Code or Codex. Only agent mailboxes are served, never the user's own accounts. With Kaluta open every call goes through it, as the app's own agents' do: the same permission engine, activity log and approvals. With Kaluta closed, reads open the mailbox's store read-only, and a send is checked and recorded the same way, then queued: it goes out when Kaluta next opens. A mailbox set to ask before each send cannot send while Kaluta is closed.

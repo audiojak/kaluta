@@ -336,6 +336,10 @@ struct WorkflowItemView: View {
                 TriageSuggestionLine(suggestion: session.suggestions[threadID],
                                      task: model.openTask(onThread: threadID), kind: session.kind)
             }
+            // The times Kaluta can offer, before the user replies (spec §14.9).
+            if let threadID, let times = session.freeTimes[threadID], !times.slots.isEmpty {
+                FreeTimesLine(slots: times.slots)
+            }
             if session.kind == .triage || session.kind == .replies, let threadID,
                let written = session.writtenSince[threadID] {
                 WrittenSinceLine(written: written,
@@ -1068,6 +1072,26 @@ struct WorkflowEmailBody: View {
 /// The user wrote to this sender since, in another conversation (spec
 /// §14.13): "You wrote to Melissa Brown on Oct 5 · Re: ORCA Business …",
 /// with that conversation a click away. They may have answered there.
+/// "Kaluta can offer: Thu Oct 30, 2–2:30 pm · Fri Oct 31, 9–9:30 am":
+/// free times from the calendar for an email that asks to meet.
+struct FreeTimesLine: View {
+    let slots: [CalendarSlot]
+
+    var body: some View {
+        Label(Self.words(slots), systemImage: "calendar")
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .font(TypeRole.workflowContext)
+            .foregroundStyle(.secondary)
+            .hoverHelp("Free times on your calendar; Reply offers them, and Hold these holds them")
+    }
+
+    /// The first three, as the reply would offer them.
+    static func words(_ slots: [CalendarSlot]) -> String {
+        "Kaluta can offer: " + slots.prefix(3).map(\.label).joined(separator: " · ")
+    }
+}
+
 struct WrittenSinceLine: View {
     let written: WrittenSince
     let name: String

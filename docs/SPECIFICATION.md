@@ -77,6 +77,9 @@ The short version. Everything below elaborates on these.
 Everything in the product spec's §27: no cloud, no mobile, no Windows/Linux,
 no calendar, no autonomous background sending, no
 embeddings, no shell access for agents, no App Store build.
+*(Amended 2026-10-29, ADR 0019: still no calendar of Kaluta's own, but
+once the user connects their Google Calendar Kaluta reads when they are
+busy and holds times on it, to offer times in replies, §14.9.)*
 *(Amended 2026-10-06: an agent mailbox (§7.9) may let its agents send
 without approval; the user's own accounts never do.)*
 *(Amended 2026-10-08, ADR 0016: "no cloud" means no mail in the cloud.
@@ -1039,6 +1042,16 @@ agent sessions and Keychain items. New pieces:
   scanning the directories (each store records its `account_email`), then
   kept in step by sign-in and sign-out. The current account id lives in
   `UserDefaults` on the Swift side, not in the index.
+- Calendar *(amended 2026-10-29, ADR 0019)*: never asked for at
+  sign-in. Settings › Accounts › *Connect Google Calendar…* (the open
+  Google account) runs consent again with the account's own client,
+  `login_hint`, `include_granted_scopes=true`, and the mail scopes plus
+  `calendar.freebusy` (free/busy only) and `calendar.events.owned`
+  (events on calendars the user owns, for holds). The new refresh token
+  replaces the account's; what it grants is recorded in the account's
+  store (`calendar_access`), so a later sign-in without the calendar
+  scopes leaves it unconnected. *Stop Using the Calendar* forgets it
+  (revoking is Google's, in the user's account).
 - Identity: sign-in requests `openid` and `profile` alongside the
   existing scopes (both non-sensitive; no verification change). The token
   response's ID token carries `name` and `picture`, read without a
@@ -1945,6 +1958,8 @@ not the app is open.
 | `mail.send` | External | Sends an existing draft id. **Always** approval-gated, except on an agent mailbox set to send freely (§7.9). |
 | `mail.forward` | External | Creates a forward draft and requests send approval in one step. |
 | `mail.delete` | External | Moves to Trash (never permanent). Approval-gated. |
+| `calendar.free_slots` | ReadOnly | *(Amended 2026-10-29.)* Up to eight free times in the next `days` (1–21, default 10) for a meeting of `minutes` (15–240, default 30): the user's hours and zone, two hours' notice, two a day, labelled "Thu Oct 30, 2–3 pm". Slots only, never events. `not_connected` without a connected calendar. |
+| `calendar.hold` | Reversible | *(Amended 2026-10-29.)* One tentative, private event "Hold: <title>" for `minutes` (15–240) from `start` (RFC 3339, within 60 days); no attendees, no reminders; recorded so the user can release it (Settings › Accounts). |
 
 Not exposed in MVP: raw HTML, attachment bytes, account settings, anything
 that reaches the filesystem or the network.
@@ -3679,7 +3694,33 @@ its evidence, decided in Facts' Review mode like a gleaned one; the same
 answer again raises the proposal's support, a rejected one is not
 proposed again, and one that states what a fact already says proposes
 nothing. Each question carries a category and a label (amended
-2026-10-02, 2026-10-05, 2026-10-26).
+2026-10-02, 2026-10-05, 2026-10-26). Answers written ahead (§14.13)
+never ask: an option that needs a fact Kaluta does not have gets **no
+ready answer**, and the user's own turn, when they reply, asks for it
+(amended 2026-10-29).
+
+**Meeting.** When the email being answered asks to meet, talk or find a
+time and the user agrees without saying which times work, writing help
+offers the user's **calendar link**: the *Calendar link* fact
+(*Availability*, §14.11; cal.com, Calendly, a Google appointment page),
+looked up with `facts_lookup`, as a plain URL on a line of its own.
+Without one it never invents times: it asks, one question in
+*Availability* labelled *Calendar link*, whose answer is proposed as
+that fact. A time the user named is used as said. With the calendar
+connected (§7.7) a workflow's reply offers **free times** instead: the
+writer asks the calendar for free slots before Kaluta first writes (the
+*Time zone* and *Usual hours* facts, else the Mac's zone and 9 to 5;
+busy blocks from free/busy only) and gives their labels in the prompt;
+Kaluta offers two or three, each on a line of its own, exactly as
+given. The editable screen shows the times the email offers under it;
+*Hold these* (⇧⌘H) holds them, tentative and private, nobody invited,
+one undo releasing them all; Settings › Accounts lists the holds with
+*Release*. Before the user replies, a Triage or Replies card whose email
+asks to meet says *Kaluta can offer: Thu Oct 30, 2–2:30 pm · …* (the
+first three), and the answers written ahead offer those times too, so
+one picked can be held as written. Answers written ahead
+follow the same rule: one that agrees to meet without a link is missing
+(amended 2026-10-29).
 
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
@@ -3907,7 +3948,7 @@ work. They can be hidden but not renamed or deleted:
 | --- | --- | --- |
 | `identity` | Identity | Full name, Preferred name, Pronouns, Name pronunciation |
 | `contact` | Contact | Phone, Other email addresses, Mailing address, Website or profiles |
-| `availability` | Availability | Time zone, Usual hours, Calendar link, Where I usually am, Away or travel dates |
+| `availability` | Availability | Time zone, Usual hours, Calendar link, Where I usually am, Away or travel dates; *Time zone* (an IANA name) and *Usual hours* ("9–5") set the free times offered, *Calendar link* is offered without a connected calendar (§14.9) |
 | `people` | People | Who people the user mentions are to them and how to refer to them; default *Ask before using* |
 | `work` | Work | Occupation or role, Organisation, Team; not shown while empty |
 | `preferences` | Preferences | How the user likes to be reached or to meet, things to keep in mind when making plans |
@@ -4496,10 +4537,13 @@ are looked for as each account opens.
 
 #### Kaluta's writing in workflows
 
-- **Drafts follow the user.** Kaluta writes ahead only where the answer
-  is short and predictable (a quick reply in Triage, a nudge in Waiting),
-  and then writes **up to three** genuinely different answers to pick
-  from (1–3), each with a one-line label, plus *None of these? Tell
+- **Drafts follow the user.** Kaluta writes ahead only where it knows
+  the answers the user might give: a conversation that **needs a reply**
+  and has **options** (the email's own choices, Yes and No for a
+  yes-or-no question, else the likely answers; Triage, Replies, and a
+  task's reply), and a nudge in Waiting. It then has **up to three**
+  whole answers to pick from (1–3), one per option, each with a
+  one-line label, plus *None of these? Tell
   Kaluta what to say…* (/, with dictation). Otherwise the screen leads
   with **What do you want to say?** (typed or dictated, with starters
   drawn from the questions Kaluta found in the email, which are
@@ -4562,7 +4606,11 @@ one decision with a one-line reason:
 
 - **The 30-second rule.** *Quick reply* when Kaluta judges the answer
   takes 30 seconds or less to check and send (the estimate is shown,
-  "about 20 seconds"); then up to three answers are ready.
+  "about 20 seconds"); then up to three answers are ready. Whatever the
+  kind, a conversation a person wrote that expects an answer **needs a
+  reply** and carries up to three options; the Reply answers job writes
+  a whole answer for each (below), and *Reply* says so: *Reply · 3
+  answers ready* (amended 2026-10-29).
   **Make a task** when it takes longer; the task (title, category, due
   day, what completes it) is filled in on the same screen, editable, and
   *Archive the email* is ticked (it stays under the `Task` label).
@@ -4653,7 +4701,10 @@ user something, not answered in Triage (left in the Inbox, skipped, or
 arrived outside a set). Each item: the email with its questions
 highlighted, *What do you want to say?*, then the editable email; Send
 and archive. *Archive* (E), as in Triage, when no reply is needed.
-Kaluta writes no draft before the user has said something.
+Kaluta writes no draft before the user has said something, except the
+answers written ahead for each option (*Reply · 2 answers ready*): Reply
+opens on them, and the screen says they were written with the writing
+guide (amended 2026-10-29).
 
 #### Tasks
 
@@ -4836,9 +4887,27 @@ gets a summary of two or three sentences (migration 0031). A suggestion
 is stored for the conversation's latest message (`triage_suggestions`) and stops counting
 when a newer one arrives, so the job suggests again.
 
+*(Amended 2026-10-29, migration 0034.)* Each suggestion also says
+whether the conversation **needs a reply** (`needs_reply`, whatever the
+kind: a long answer is a task and still needs one; never for mail no
+person wrote, or an archive) and its **options** (`options_json`, up to
+three short labels; a quick reply's answer labels when none are named).
+The **Reply answers** job runs after it: for each conversation in the
+Inbox that needs a reply and has options, newest first, from the last
+seven days, one per turn, it asks for a whole email per option in a
+hidden read-only session (prompt marker *Kaluta reply answers*), with
+the writing guide rendered for the sender, `facts_lookup`, and the rule
+to list under `missing` any option that needs a fact it lacks rather
+than write it. The answers replace the suggestion's (`answers_by =
+writer`); when none are written the triage prompt's quick answers stay
+(`none`) and the conversation is not asked again. A newer message drops
+them with the suggestion; sending a reply makes the user's own message
+the latest, so they go too.
+
 | Job | When | Makes |
 |---|---|---|
-| Triage suggestions | as new mail arrives, in batches | a suggestion per new conversation (kind, seconds, reason; up to three answers for a quick reply), kept until the conversation changes |
+| Triage suggestions | as new mail arrives, in batches | a suggestion per new conversation (kind, seconds, reason; up to three answers for a quick reply; needs a reply, options), kept until the conversation changes |
+| Reply answers | after triage suggestions, one conversation per turn, up to 40 a day | a whole email per option for each conversation that needs a reply, with the writing guide and facts |
 | Waiting check | once at the start of the day | verdicts in `waiting_checks`; `Waiting` labels |
 | Reading summaries | after each routine run | one line and a short summary per sorted message |
 | Nudges | when an item joins Waiting | up to three follow-ups |

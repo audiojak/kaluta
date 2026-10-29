@@ -48,6 +48,8 @@ pub(crate) struct JobStep {
 /// (`docs/plans/workflows.md`).
 pub(crate) const JOBS: &[Job] = &[
     Job { name: "triage", daily_cap: crate::triage::DAILY_CAP, step: crate::triage::step },
+    // After triage: it answers what triage found needs a reply.
+    Job { name: "reply_answers", daily_cap: crate::reply_answers::DAILY_CAP, step: crate::reply_answers::step },
     Job { name: "waiting", daily_cap: crate::waiting::DAILY_CAP, step: crate::waiting::step },
     Job { name: "nudges", daily_cap: crate::waiting::NUDGE_DAILY_CAP, step: crate::waiting::nudge_step },
     Job { name: "reading", daily_cap: crate::reading::DAILY_CAP, step: crate::reading::step },

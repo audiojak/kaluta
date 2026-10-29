@@ -64,6 +64,9 @@ struct WorkflowWriteView: View {
                     Button("Attach a file") { perform(.attach) } // no-help: hidden
                         .keyboardShortcut("a", modifiers: [.command, .shift])
                         .hidden()
+                    Button("Hold these times") { perform(.holdTimes) } // no-help: hidden
+                        .keyboardShortcut("h", modifiers: [.command, .shift])
+                        .hidden()
                 }
                 Button("Discard") { perform(.discard) } // no-help: hidden
                     .keyboardShortcut(".", modifiers: .command)
@@ -223,7 +226,11 @@ struct WorkflowWriteView: View {
 
     private var choose: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Kaluta's answers").font(TypeRole.workflowHeading)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Kaluta's answers").font(TypeRole.workflowHeading)
+                Text(Self.answersNote(byWriter: writer.answersByWriter))
+                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+            }
             ForEach(Array(writer.answers.enumerated()), id: \.element.id) { i, answer in
                 Button { perform([.pick1, .pick2, .pick3][i]) } label: {
                     HStack(alignment: .top, spacing: Space.l) {
@@ -441,8 +448,39 @@ struct WorkflowWriteView: View {
             if !writer.attachments.isEmpty {
                 DraftAttachmentChips(attachments: writer.attachments, remove: writer.removeAttachment)
             }
+            // The times it offers, from the calendar: held at a key (spec §14.9).
+            if !writer.offeredSlots.isEmpty {
+                offeredTimes
+            }
         }
         .attachingFiles(choosing: $writer.choosingFiles, attach: writer.attach)
+    }
+
+    private var offeredTimes: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+            Label(writer.held.isEmpty ? "Times offered" : "Held on your calendar",
+                  systemImage: writer.held.isEmpty ? "calendar" : "calendar.badge.checkmark")
+                .font(TypeRole.workflowContext)
+                .foregroundStyle(.secondary)
+            ForEach(writer.offeredSlots, id: \.startMs) { slot in
+                Text(slot.label)
+                    .font(TypeRole.meta)
+                    .padding(.horizontal, Space.m)
+                    .padding(.vertical, Space.xs)
+                    .background(.quaternary, in: .capsule)
+            }
+            if writer.held.isEmpty {
+                Button { perform(.holdTimes) } label: {
+                    HStack(spacing: Space.s) {
+                        Text("Hold these")
+                        Keycap(key: "⇧⌘H")
+                    }
+                }
+                .buttonStyle(.link)
+                .hoverHelp("Hold these times on your calendar while they answer: private, tentative, nobody invited (⇧⌘H)")
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private func working(_ title: String) -> some View {
@@ -491,6 +529,12 @@ struct WorkflowWriteView: View {
     static func preview(_ text: String) -> String {
         text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Under *Kaluta's answers*: how they were written.
+    static func answersNote(byWriter: Bool) -> String {
+        byWriter ? "Written ahead with your writing guide. Pick one to read and change before it goes."
+            : "Pick one to read and change before it goes."
     }
 
     /// Above the final email: what the user said, or which answer they chose.

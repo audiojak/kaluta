@@ -75,7 +75,7 @@ struct WorkflowTests {
     /// unless it is a reply.
     @Test func aTriageSuggestionIsTakenByItsOwnKey() {
         func suggestion(_ kind: TriageKind) -> TriageSuggestion {
-            TriageSuggestion(threadId: "t", kind: kind, seconds: nil, reason: "", answers: [], task: nil, summary: "",
+            TriageSuggestion(threadId: "t", kind: kind, seconds: nil, reason: "", answers: [], answersByWriter: false, needsReply: false, options: [], task: nil, summary: "",
                              category: "")
         }
         #expect(AppModel.triageCommand(suggestion(.quickReply)) == .replyNow)
@@ -110,7 +110,7 @@ struct WorkflowTests {
 
     /// Triage shows a long email's summary; a short one reads as it is.
     @Test func aLongEmailInTriageShowsItsSummary() {
-        let s = TriageSuggestion(threadId: "t", kind: .archive, seconds: nil, reason: "", answers: [], task: nil,
+        let s = TriageSuggestion(threadId: "t", kind: .archive, seconds: nil, reason: "", answers: [], answersByWriter: false, needsReply: false, options: [], task: nil,
                                  summary: "Facebook lets you type what your feed shows.", category: "newsletter")
         let long = String(repeating: "A newsletter line. ", count: 60)
         #expect(WorkflowItemView.triageSummary(s, text: long) == s.summary)
@@ -339,10 +339,10 @@ struct WorkflowTests {
     }
 
     @Test func triageSaysWhatKalutaSuggests() {
-        let reply = TriageSuggestion(threadId: "t", kind: .quickReply, seconds: 18, reason: "", answers: [], task: nil,
+        let reply = TriageSuggestion(threadId: "t", kind: .quickReply, seconds: 18, reason: "", answers: [], answersByWriter: false, needsReply: false, options: [], task: nil,
                                      summary: "", category: "")
         #expect(TriageSuggestionLine.verb(reply) == "Quick reply · about 20 seconds")
-        let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], task: nil,
+        let task = TriageSuggestion(threadId: "t", kind: .task, seconds: nil, reason: "", answers: [], answersByWriter: false, needsReply: false, options: [], task: nil,
                                     summary: "", category: "")
         #expect(TriageSuggestionLine.verb(task) == "Make a task")
     }
@@ -605,6 +605,145 @@ struct WorkflowTests {
         // Change what I said: the words are the user's to write, not Kaluta's.
         writer.changeWhatISaid()
         #expect(writer.step == .say && writer.field.isEmpty)
+    }
+
+    @Test func aReplyToAMeetingOffersTheCalendarLinkNeverInventedTimes() {
+        let reply = ComposerAssistant.prompt(instruction: "Sure", from: "jo@example.com", to: ["sam@example.com"],
+                                             subject: "Re: Talk?", draft: "", original: "When can we talk this week?")
+        #expect(reply.contains(ComposerAssistant.meetingRule))
+        #expect(reply.contains("facts_lookup") && reply.contains("label \"Calendar link\"") && reply.contains("do not invent times"))
+        // Its own email, answering nothing: no meeting to offer.
+        let fresh = ComposerAssistant.prompt(instruction: "Ask about lunch", from: "jo@example.com", to: [],
+                                             subject: "", draft: "", original: "")
+        #expect(!fresh.contains("Calendar link"))
+    }
+
+    @Test func freeTimesAreOfferedAndHeldWithOneUndo() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        core.useFakeCalendar()
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let detail = try #require(try await core.thread(row.id))
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: [item], startedAt: 0, resumed: false))
+        session.threads[row.id] = detail
+        model.workflowSession = session
+
+        // Not about meeting: no times looked for.
+        let deck = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                  taskID: nil, email: "Can you send the deck?")
+        deck.field = "Sure"
+        await deck.write(model: model)
+        #expect(deck.freeSlots.isEmpty && deck.offeredSlots.isEmpty)
+
+        // About meeting: the calendar's free times go to Kaluta, and the
+        // ones the email offers are shown, held with one key, one undo.
+        let writer = WorkflowWriter(threadID: row.id, messageID: detail.messages.last?.id ?? "", replyAll: false,
+                                    taskID: nil, email: "Hi Jo, when can we talk this week?")
+        session.writer = writer
+        writer.field = "Sure"
+        await writer.write(model: model)
+        #expect(writer.step == .final && !writer.freeSlots.isEmpty)
+        let offered = writer.offeredSlots
+        #expect(!offered.isEmpty, "the echoing fake repeats the times it was given")
+        #expect(model.workflowActions().contains { $0.command == .holdTimes })
+        await model.performWorkflow(.holdTimes)
+        #expect(writer.held.count == offered.count)
+        let holds = try await core.calendarHolds()
+        #expect(holds.map(\.startMs) == offered.map(\.startMs))
+        #expect(!model.workflowActions().contains { $0.command == .holdTimes }, "held once")
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where !writer.held.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        let left = try await core.calendarHolds()
+        #expect(writer.held.isEmpty && left.isEmpty, "one undo releases them all")
+
+        #expect(WorkflowCommand.command(key: KeyEquivalent("h"), characters: "h", modifiers: [.command, .shift]) == .holdTimes)
+        #expect(WorkflowCommand.holdTimes.keyLabel == "⇧⌘H" && WorkflowCommand.holdTimes.title(in: .replies) == "Hold these times")
+        let status = try await core.calendarStatus()
+        #expect(CalendarRow.connectedText(status).hasPrefix("Connected · ") && status.canHold)
+        #expect(CalendarRow.connectedText(CalendarStatus(connected: true, canHold: false, timeZone: "UTC", hours: "9 am–5 pm"))
+                == "Connected · 9 am–5 pm, UTC · free times only")
+        let prompt = ComposerAssistant.prompt(instruction: "Sure", from: "", to: [], subject: "", draft: "",
+                                              original: "When can we talk?",
+                                              freeTimes: ("America/Los_Angeles", ["Thu Oct 30, 2–2:30 pm"]))
+        #expect(prompt.contains("(America/Los_Angeles):\n- Thu Oct 30, 2–2:30 pm\n"))
+        #expect(!prompt.contains(ComposerAssistant.meetingRule), "times from the calendar, not the link")
+    }
+
+    @Test func aCardThatAsksToMeetShowsTheTimesAndAPickedAnswerHoldsThem() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        core.useFakeCalendar()
+        let rows = try await core.threads(in: "INBOX", limit: 200).rows
+        let row = try #require(rows.first { WritingText.asksToMeet($0.snippet) }, "the demo has an email about meeting")
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: [item], startedAt: 0, resumed: false))
+        model.workflowSession = session
+        await model.prepareCurrentItem()
+        let times = try #require(session.freeTimes[row.id])
+        #expect(!times.slots.isEmpty)
+        #expect(FreeTimesLine.words(times.slots).hasPrefix("Kaluta can offer: \(times.slots[0].label)"))
+
+        // An answer written ahead that offers two of them: picked, the times
+        // are shown under the email and held at a key.
+        let offer = "Hi,\n\nYes.\n- \(times.slots[0].label)\n- \(times.slots[1].label)\n\nJo"
+        session.suggestions[row.id] = TriageSuggestion(
+            threadId: row.id, kind: .quickReply, seconds: 20, reason: "", answers: [TriageAnswer(label: "Yes", text: offer)],
+            answersByWriter: true, needsReply: true, options: ["Yes"], task: nil, summary: "", category: "")
+        await model.performWorkflow(.replyNow)
+        await model.performWorkflow(.pick1)
+        let writer = try #require(session.writer)
+        #expect(writer.step == .final && writer.offeredSlots.map(\.startMs) == times.slots.prefix(2).map(\.startMs))
+        await model.performWorkflow(.holdTimes)
+        #expect(writer.held.count == 2)
+        let holds = try await core.calendarHolds()
+        #expect(holds.count == 2)
+    }
+
+    @Test func answersWrittenAheadOpenTheReplyInReplies() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let rows = try await core.threads(in: "INBOX", limit: 2).rows
+        let (ready, plain) = (try #require(rows.first), try #require(rows.last))
+        #expect(ready.id != plain.id)
+        let items = [ready, plain].map { WorkflowItem(key: "thread:\($0.id)", threadId: $0.id, taskId: nil, decision: nil) }
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: items, startedAt: 0, resumed: false))
+        for row in [ready, plain] { session.threads[row.id] = try await core.thread(row.id) }
+        let answers = [TriageAnswer(label: "Yes", text: "Hi Sam,\n\nYes, Thursday works.\n\nJo"),
+                       TriageAnswer(label: "No", text: "Hi Sam,\n\nNot Thursday, sorry.\n\nJo")]
+        session.suggestions[ready.id] = TriageSuggestion(
+            threadId: ready.id, kind: .leave, seconds: nil, reason: "", answers: answers, answersByWriter: true,
+            needsReply: true, options: ["Yes", "No"], task: nil, summary: "", category: "")
+        model.workflowSession = session
+
+        // The bar says they are ready; Reply opens on them.
+        #expect(model.workflowActions().first?.title == "Reply · 2 answers ready")
+        await model.performWorkflow(.replyNow)
+        let writer = try #require(session.writer)
+        #expect(writer.step == .choose && writer.answers.map(\.label) == ["Yes", "No"] && writer.answersByWriter)
+        #expect(WorkflowWriteView.answersNote(byWriter: true).hasPrefix("Written ahead with your writing guide"))
+        // A whole answer, picked: the email that will be sent, to read and change.
+        await model.performWorkflow(.pick2)
+        #expect(writer.step == .final && writer.text == "Hi Sam,\n\nNot Thursday, sorry.\n\nJo")
+        await model.performWorkflow(.back)
+        #expect(writer.step == .choose, "Esc goes back to the answers")
+
+        // A conversation with none: the words, and Reply as it is.
+        session.writer = nil
+        session.replace(WorkflowSet(id: 1, kind: .replies, items: [items[1]], startedAt: 0, resumed: false))
+        #expect(model.workflowActions().first?.title == "Reply")
+        await model.performWorkflow(.replyNow)
+        #expect(session.writer?.step == .say)
+        #expect(AppModel.readyTitle(1) == "Reply · 1 answer ready")
     }
 
     @Test func theCardsLinksWorkWhileWriting() async throws {

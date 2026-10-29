@@ -419,6 +419,12 @@ pub struct SuggestionRow {
     pub summary: String,
     /// What kind of email it is (`newsletter`, `receipt`, …), else empty.
     pub category: String,
+    /// The conversation needs a reply from the user, whatever the kind.
+    pub needs_reply: bool,
+    /// The different answers the user might give: `["Yes", "No"]`.
+    pub options_json: String,
+    /// Who wrote `answers_json`: `triage` or `writer`.
+    pub answers_by: String,
 }
 
 /// Keep a suggestion, replacing the conversation's last.
@@ -426,8 +432,8 @@ pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
     tx.execute(
         "INSERT OR REPLACE INTO triage_suggestions
            (thread_id, message_id, kind, seconds, reason, answers_json, task_json, agent, created_at, summary,
-            category)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            category, needs_reply, options_json, answers_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             s.thread_id,
             s.message_id,
@@ -439,7 +445,10 @@ pub fn save_suggestion(tx: &Transaction, s: &SuggestionRow) -> StoreResult<()> {
             s.agent,
             s.created_at,
             s.summary,
-            s.category
+            s.category,
+            s.needs_reply,
+            s.options_json,
+            s.answers_by
         ],
     )?;
     Ok(())
@@ -451,7 +460,7 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
     Ok(conn
         .query_row(
             "SELECT s.thread_id, s.message_id, s.kind, s.seconds, s.reason, s.answers_json, s.task_json, s.agent,
-                    s.created_at, s.summary, s.category
+                    s.created_at, s.summary, s.category, s.needs_reply, s.options_json, s.answers_by
                FROM triage_suggestions s
                JOIN threads t ON t.gmail_id = s.thread_id
                JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
@@ -471,6 +480,9 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
                     created_at: r.get(8)?,
                     summary: r.get(9)?,
                     category: r.get(10)?,
+                    needs_reply: r.get(11)?,
+                    options_json: r.get(12)?,
+                    answers_by: r.get(13)?,
                 })
             },
         )
@@ -491,6 +503,74 @@ pub fn to_suggest(conn: &Connection, since: Millis, limit: usize) -> StoreResult
         }
     }
     Ok(out)
+}
+
+/// A conversation that needs a reply and has options, with no whole
+/// answers written for them yet (spec §14.13, ready answers).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToAnswer {
+    pub thread_id: String,
+    /// The latest message, which the answers are for.
+    pub message_id: String,
+    /// `["Yes", "No"]`.
+    pub options_json: String,
+    /// Who the reply goes to.
+    pub from_email: Option<String>,
+    pub at: Millis,
+}
+
+/// The next conversations to write whole answers for, newest first: in the
+/// Inbox, latest message since `since` and not the user's own, its
+/// suggestion still for that message, needing a reply, with options, and
+/// not yet answered by the writer (`answers_by` is still `triage`).
+pub fn to_answer(conn: &Connection, since: Millis, limit: usize) -> StoreResult<Vec<ToAnswer>> {
+    let inbox = label_rowid(conn, system_labels::INBOX)?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT s.thread_id, s.message_id, s.options_json, m.from_email, m.internal_date
+           FROM triage_suggestions s
+           JOIN threads t ON t.gmail_id = s.thread_id
+           JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
+                                       ORDER BY internal_date DESC, id DESC LIMIT 1)
+          WHERE s.needs_reply = 1 AND s.options_json <> '[]' AND s.answers_by = 'triage'
+            AND m.gmail_id = s.message_id AND m.is_sent_by_me = 0 AND m.internal_date >= ?1
+            AND EXISTS (SELECT 1 FROM thread_labels i WHERE i.thread_id = t.id AND i.label_id = ?2)
+          ORDER BY m.internal_date DESC
+          LIMIT ?3",
+    )?;
+    let rows = stmt.query_map(params![since, inbox, limit as i64], |r| {
+        Ok(ToAnswer {
+            thread_id: r.get(0)?,
+            message_id: r.get(1)?,
+            options_json: r.get(2)?,
+            from_email: r.get(3)?,
+            at: r.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The writer's whole answers for a conversation's latest message
+/// (`answers_by` becomes `writer`), or, with `None`, that it wrote none
+/// (`none`: the triage prompt's answers stay, and it is not asked again).
+/// Nothing changes when a newer message arrived meanwhile.
+pub fn save_answers(
+    tx: &Transaction,
+    thread_id: &str,
+    message_id: &str,
+    answers_json: Option<&str>,
+) -> StoreResult<bool> {
+    let n = match answers_json {
+        Some(json) => tx.execute(
+            "UPDATE triage_suggestions SET answers_json = ?3, answers_by = 'writer'
+              WHERE thread_id = ?1 AND message_id = ?2",
+            params![thread_id, message_id, json],
+        )?,
+        None => tx.execute(
+            "UPDATE triage_suggestions SET answers_by = 'none' WHERE thread_id = ?1 AND message_id = ?2",
+            params![thread_id, message_id],
+        )?,
+    };
+    Ok(n > 0)
 }
 
 /// What a background job did on one day (spec §14.13).
@@ -699,6 +779,50 @@ mod tests {
     }
 
     #[test]
+    fn a_conversation_is_answered_once_for_its_latest_message() {
+        let Store(_, db) = &store("to-answer");
+        crate::demo_workflows::generate(db, NOW).unwrap();
+        let since = NOW - DAY_MS;
+        let all = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let (needs, fyi) = (all[0].clone(), all[1].clone());
+        for (c, needs_reply, options) in [(&needs, true, r#"["Yes","No"]"#), (&fyi, false, "[]")] {
+            let row = SuggestionRow {
+                thread_id: c.thread_id.clone(),
+                message_id: c.message_id.clone(),
+                kind: "leave".into(),
+                seconds: None,
+                reason: String::new(),
+                answers_json: "[]".into(),
+                task_json: None,
+                agent: None,
+                created_at: NOW,
+                summary: String::new(),
+                category: String::new(),
+                needs_reply,
+                options_json: options.into(),
+                answers_by: "triage".into(),
+            };
+            db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
+        }
+        let queue = db.read_blocking(move |c| to_answer(c, since, 50)).unwrap();
+        assert_eq!(queue.iter().map(|a| a.thread_id.as_str()).collect::<Vec<_>>(), [needs.thread_id.as_str()]);
+        assert_eq!(queue[0].options_json, r#"["Yes","No"]"#);
+        assert!(db.read_blocking(move |c| to_answer(c, NOW + 1, 50)).unwrap().is_empty(), "too old");
+
+        // Written: not asked again, and the suggestion says who wrote them.
+        let (t, m) = (needs.thread_id.clone(), needs.message_id.clone());
+        let json = r#"[{"label":"Yes","text":"Yes."}]"#;
+        assert!(db.write_blocking(move |tx| save_answers(tx, &t, &m, Some(json))).unwrap());
+        assert!(db.read_blocking(move |c| to_answer(c, since, 50)).unwrap().is_empty());
+        let t = needs.thread_id.clone();
+        let kept = db.read_blocking(move |c| suggestion(c, &t)).unwrap().unwrap();
+        assert_eq!((kept.answers_by.as_str(), kept.answers_json.as_str()), ("writer", json));
+        // For a message that is no longer the latest: nothing changes.
+        let t = needs.thread_id.clone();
+        assert!(!db.write_blocking(move |tx| save_answers(tx, &t, "older", None)).unwrap());
+    }
+
+    #[test]
     fn a_suggestion_counts_until_the_conversation_changes() {
         let Store(_, db) = &store("suggestions");
         crate::demo_workflows::generate(db, NOW).unwrap();
@@ -717,13 +841,20 @@ mod tests {
             created_at: NOW,
             summary: String::new(),
             category: String::new(),
+            needs_reply: true,
+            options_json: r#"["Yes","No"]"#.into(),
+            answers_by: "triage".into(),
         };
         db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
         let left = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
         assert_eq!(left.len(), all.len() - 1);
         assert!(!left.iter().any(|c| c.thread_id == first.thread_id));
         let thread = first.thread_id.clone();
-        assert_eq!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().unwrap().kind, "reply");
+        let kept = db.read_blocking(move |c| suggestion(c, &thread)).unwrap().unwrap();
+        assert_eq!(
+            (kept.kind.as_str(), kept.needs_reply, kept.options_json.as_str()),
+            ("reply", true, r#"["Yes","No"]"#)
+        );
 
         // A newer message: the suggestion no longer counts.
         let thread = first.thread_id.clone();
@@ -738,6 +869,10 @@ mod tests {
         .unwrap();
         let thread = first.thread_id.clone();
         assert!(db.read_blocking(move |c| suggestion(c, &thread)).unwrap().is_none());
+        // …and its answers are not written: they would answer the old one.
+        let (thread, message) = (first.thread_id.clone(), first.message_id.clone());
+        let answering = db.read_blocking(move |c| to_answer(c, 0, 50)).unwrap();
+        assert!(!answering.iter().any(|a| a.thread_id == thread && a.message_id == message));
         let again = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
         assert!(again.iter().any(|c| c.thread_id == first.thread_id && c.message_id == "newer"));
     }

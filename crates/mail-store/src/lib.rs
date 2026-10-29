@@ -5,6 +5,7 @@
 
 pub mod agents;
 pub mod analysis;
+pub mod calendar;
 pub mod cleanup;
 pub mod cloud_reports;
 pub mod compositions;

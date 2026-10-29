@@ -137,7 +137,9 @@ extension AppModel {
             return
         }
         guard let core, let threadID = threadID(of: item) else { return }
-        if session.kind == .triage, session.suggestions[threadID] == nil,
+        // Kaluta's suggestion, with the answers it wrote ahead (Triage,
+        // Replies, and a task's reply).
+        if [.triage, .replies, .tasks].contains(session.kind), session.suggestions[threadID] == nil,
            let suggestion = try? await core.triageSuggestion(threadID) {
             session.suggestions[threadID] = suggestion
         }
@@ -183,6 +185,14 @@ extension AppModel {
                 }
                 session.bodies[threadID] = Self.readingText(ComposerAssistant.plainText(fromHTML: html))
             }
+        }
+        // An email that asks to meet: the free times Kaluta can offer, once
+        // (spec §14.9). Nothing when the calendar is not connected.
+        if [.triage, .replies].contains(session.kind), session.freeTimes[threadID] == nil,
+           WritingText.asksToMeet(session.bodies[threadID] ?? session.threads[threadID]?.thread.snippet ?? "") {
+            let connected = (try? await core.calendarStatus())?.connected == true
+            let found = connected ? try? await core.calendarFreeSlots() : nil
+            session.freeTimes[threadID] = found ?? CalendarSlots(timeZone: "", slots: [])
         }
     }
 
@@ -424,8 +434,11 @@ extension AppModel {
         let kind = session.kind
         // Answering an earlier message of the conversation: Reply says whose.
         let answering = session.writer == nil ? answeringEarlier(session) : nil
+        // Answers written ahead: Reply says how many are ready.
+        let ready = answering == nil ? readyAnswers(session).count : 0
         func a(_ c: WorkflowCommand, _ style: WorkflowButton.Style = .plain, _ title: String? = nil) -> WorkflowAction {
-            let named = c == .replyNow ? answering.map { "Reply to \(Self.firstName($0, own: ownAddresses))" } : nil
+            let named = c == .replyNow ? answering.map { "Reply to \(Self.firstName($0, own: ownAddresses))" }
+                ?? (ready > 0 ? Self.readyTitle(ready) : nil) : nil
             return WorkflowAction(command: c, title: title ?? named ?? c.title(in: kind), style: style)
         }
         if let writer = session.writer { return writingActions(writer, a) }
@@ -486,6 +499,48 @@ extension AppModel {
         default:
             return [a(.done, .primary), a(.skip, .quiet)]
         }
+    }
+
+    /// Hold the times the reply offers (spec §14.9, ⇧⌘H), undoably: one
+    /// undo releases them all.
+    func holdTimes(_ writer: WorkflowWriter, session: WorkflowSession) async {
+        let subject = session.threads[writer.threadID]?.thread.subject ?? ""
+        let title = subject.replacingOccurrences(of: #"^((re|fwd?):\s*)+"#, with: "", options: [.regularExpression, .caseInsensitive])
+        let made = await writer.holdOffered(title: title.isEmpty ? "Meeting" : title, model: self)
+        guard !made.isEmpty, let accountID = openAccountID else { return }
+        let count = made.count
+        let notice = count == 1 ? "Held 1 time on your calendar" : "Held \(count) times on your calendar"
+        undo.record(accountID: accountID, actionName: "Hold These Times", noticeText: notice,
+                    undo: { [weak self] in
+                        guard let self else { return }
+                        await writer.releaseHeld(model: self)
+                    },
+                    redo: { [weak self] in
+                        guard let self, let core = self.core else { return }
+                        var again: [CalendarHoldInfo] = []
+                        for h in made {
+                            let minutes = UInt32(max(15, (h.endMs - h.startMs) / 60_000))
+                            if let x = try? await core.calendarHold(startMs: h.startMs, minutes: minutes,
+                                                                    title: title.isEmpty ? "Meeting" : title,
+                                                                    threadID: writer.threadID) {
+                                again.append(x)
+                            }
+                        }
+                        writer.setHeld(again)
+                    })
+    }
+
+    /// The current item's answers written ahead (spec §14.13): Triage,
+    /// Replies and Tasks; Waiting has its nudges.
+    func readyAnswers(_ session: WorkflowSession) -> [TriageAnswer] {
+        guard [.triage, .replies, .tasks].contains(session.kind),
+              let id = session.current.flatMap(threadID(of:)) else { return [] }
+        return session.suggestions[id]?.answers ?? []
+    }
+
+    /// Reply's title with answers ready: "Reply · 3 answers ready".
+    static func readyTitle(_ count: Int) -> String {
+        "Reply · \(count) \(count == 1 ? "answer" : "answers") ready"
     }
 
     /// Triage (spec §14.13): the same buttons in the same order for every
@@ -625,7 +680,11 @@ extension AppModel {
             // Attach is the paperclip by the email; its key still answers.
             var attach = a(.attach, .plain, nil)
             attach.shown = false
-            return send + [a(.back, .quiet, "Change what I said"), attach, a(.discard, .quiet, nil)]
+            // The times offered are held from the line under the email.
+            var hold = a(.holdTimes, .plain, nil)
+            hold.shown = false
+            let holds = writer.offeredSlots.isEmpty || !writer.held.isEmpty ? [] : [hold]
+            return send + [a(.back, .quiet, "Change what I said"), attach] + holds + [a(.discard, .quiet, nil)]
         case .forward:
             // Return in the note sends too; ⌘. drops it.
             var send = a(.primary, .primary, "Send")
@@ -681,6 +740,8 @@ extension AppModel {
             writer.changeWhatISaid()
         case (.final, .attach):
             writer.choosingFiles = true
+        case (.final, .holdTimes):
+            await holdTimes(writer, session: session)
         case (.final, .send), (.final, .sendKeepTask):
             let keep = command == .sendKeepTask
             guard await writer.send(model: self, keepTask: keep) else { return }
@@ -937,16 +998,24 @@ extension AppModel {
         let earlier = message.id != Self.shownMessage(detail, session.kind)?.id
         // The item's task, else the conversation's: Send offers to finish it.
         let task = session.kind == .waiting ? nil : self.task(of: item) ?? openTask(onThread: id)
-        // Kaluta's answers: a quick reply's (Triage), or the follow-ups
-        // written ahead (Waiting).
+        // Kaluta's answers written ahead: one per option (Triage, Replies,
+        // Tasks), or the follow-ups (Waiting).
         let written = session.kind == .waiting ? session.waits[id]?.nudges : session.suggestions[id]?.answers
         let answers = written?.map { WorkflowWriter.Answer(label: $0.label, text: $0.text) } ?? []
+        // Written for the conversation's latest message: not for a task
+        // that answers an earlier one.
+        let forTask = task?.messageId.map { $0 == message.id } ?? true
+        let byWriter = session.kind != .waiting && session.suggestions[id]?.answersByWriter == true
         let email = earlier
             ? session.messageBodies[message.id]?.html.map { Self.readingText(ComposerAssistant.plainText(fromHTML: $0)) }
             : session.bodies[id]
-        session.writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
-                                        replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
-                                        email: email ?? message.snippet, answers: earlier ? [] : answers)
+        let writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
+                                    replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
+                                    email: email ?? message.snippet, answers: earlier || !forTask ? [] : answers,
+                                    answersByWriter: byWriter)
+        // The card's free times: what an answer written ahead offers, held from the email.
+        if !earlier, let times = session.freeTimes[id], !times.slots.isEmpty { writer.useSlots(times) }
+        session.writer = writer
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
 

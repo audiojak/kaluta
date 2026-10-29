@@ -20,6 +20,7 @@ provider-api.workspace = true
 provider-gmail.workspace = true
 provider-primitive.workspace = true
 provider-agentmail.workspace = true
+provider-gcal.workspace = true
 agent-api.workspace = true
 agent-claude.workspace = true
 agent-codex.workspace = true
@@ -38,6 +39,8 @@ serde_json.workspace = true
 async-trait.workspace = true
 getrandom.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
+iana-time-zone.workspace = true
 reqwest.workspace = true
 toml.workspace = true
 

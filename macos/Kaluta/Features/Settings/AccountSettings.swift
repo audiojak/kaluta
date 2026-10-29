@@ -363,6 +363,10 @@ struct AccountRow: View {
                         .foregroundStyle(.secondary)
                 }
                 .hoverHelp("IMAP is used for downloading; the Gmail API for categories, drafts, changes made elsewhere and sending, and whenever IMAP fails")
+                // The calendar is the open account's (spec §14.9).
+                if account.id == model.openAccountID, signedIn == true {
+                    CalendarRow()
+                }
                 if !account.imapEnabled, signedIn == true {
                     Button("Sign In Again for IMAP…") { Task { await model.signInAgainForIMAP(account.id) } }
                         .hoverHelp("Grant the full mail access IMAP needs; downloads get much faster. Kaluta still never deletes mail permanently")

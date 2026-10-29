@@ -1,0 +1,23 @@
+[package]
+name = "provider-gcal"
+description = "Google Calendar: free/busy and tentative holds on the user's own calendar, for offering times."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+provider-api.workspace = true
+chrono.workspace = true
+chrono-tz.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock.workspace = true
+
+[lints]
+workspace = true

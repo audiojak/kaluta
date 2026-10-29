@@ -56,10 +56,14 @@ pub enum Tool {
     Send,
     Forward,
     Delete,
+    /// Free times on the user's calendar (spec §14.9): slots only.
+    CalendarFreeSlots,
+    /// A tentative hold on the user's calendar, no attendees.
+    CalendarHold,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 18] = [
+    pub const ALL: [Tool; 20] = [
         Tool::Search,
         Tool::GetThread,
         Tool::GetMessage,
@@ -78,6 +82,8 @@ impl Tool {
         Tool::Send,
         Tool::Forward,
         Tool::Delete,
+        Tool::CalendarFreeSlots,
+        Tool::CalendarHold,
     ];
 
     /// The MCP tool name. Underscores, not dots: both the Anthropic and
@@ -102,6 +108,8 @@ impl Tool {
             Tool::Send => "mail_send",
             Tool::Forward => "mail_forward",
             Tool::Delete => "mail_delete",
+            Tool::CalendarFreeSlots => "calendar_free_slots",
+            Tool::CalendarHold => "calendar_hold",
         }
     }
 
@@ -117,7 +125,8 @@ impl Tool {
             | Tool::ListLabels
             | Tool::FactsLookup
             | Tool::GetAttachmentText
-            | Tool::PresentThreads => Risk::ReadOnly,
+            | Tool::PresentThreads
+            | Tool::CalendarFreeSlots => Risk::ReadOnly,
             Tool::CreateDraft
             | Tool::UpdateDraft
             | Tool::Archive
@@ -125,7 +134,8 @@ impl Tool {
             | Tool::MarkUnread
             | Tool::AddLabel
             | Tool::RemoveLabel
-            | Tool::CreateLabel => Risk::Reversible,
+            | Tool::CreateLabel
+            | Tool::CalendarHold => Risk::Reversible,
             Tool::Send | Tool::Forward | Tool::Delete => Risk::External,
         }
     }
