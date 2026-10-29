@@ -3715,7 +3715,10 @@ Kaluta offers two or three, each on a line of its own, exactly as
 given. The editable screen shows the times the email offers under it;
 *Hold these* (⇧⌘H) holds them, tentative and private, nobody invited,
 one undo releasing them all; Settings › Accounts lists the holds with
-*Release*. Answers written ahead
+*Release*. Before the user replies, a Triage or Replies card whose email
+asks to meet says *Kaluta can offer: Thu Oct 30, 2–2:30 pm · …* (the
+first three), and the answers written ahead offer those times too, so
+one picked can be held as written. Answers written ahead
 follow the same rule: one that agrees to meet without a link is missing
 (amended 2026-10-29).
 

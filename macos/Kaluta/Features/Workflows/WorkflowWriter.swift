@@ -420,6 +420,13 @@ final class WorkflowWriter {
     /// The holds made for the offered times (Hold these, ⇧⌘H).
     private(set) var held: [CalendarHoldInfo] = []
 
+    /// Free times already found (the card's): Kaluta is given these.
+    func useSlots(_ found: CalendarSlots) {
+        freeSlots = found.slots
+        freeSlotsZone = found.timeZone
+        lookedForSlots = true
+    }
+
     /// The free times the email that will be sent offers, by their labels.
     var offeredSlots: [CalendarSlot] { freeSlots.filter { text.contains($0.label) } }
 

@@ -186,6 +186,14 @@ extension AppModel {
                 session.bodies[threadID] = Self.readingText(ComposerAssistant.plainText(fromHTML: html))
             }
         }
+        // An email that asks to meet: the free times Kaluta can offer, once
+        // (spec §14.9). Nothing when the calendar is not connected.
+        if [.triage, .replies].contains(session.kind), session.freeTimes[threadID] == nil,
+           WritingText.asksToMeet(session.bodies[threadID] ?? session.threads[threadID]?.thread.snippet ?? "") {
+            let connected = (try? await core.calendarStatus())?.connected == true
+            let found = connected ? try? await core.calendarFreeSlots() : nil
+            session.freeTimes[threadID] = found ?? CalendarSlots(timeZone: "", slots: [])
+        }
     }
 
     /// A workflow's email shows its remote images: loaded here, or always
@@ -1001,10 +1009,13 @@ extension AppModel {
         let email = earlier
             ? session.messageBodies[message.id]?.html.map { Self.readingText(ComposerAssistant.plainText(fromHTML: $0)) }
             : session.bodies[id]
-        session.writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
-                                        replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
-                                        email: email ?? message.snippet, answers: earlier || !forTask ? [] : answers,
-                                        answersByWriter: byWriter)
+        let writer = WorkflowWriter(threadID: id, messageID: earlier ? message.id : task?.messageId ?? message.id,
+                                    replyAll: all || (!earlier && task?.action == .replyAll), taskID: task?.id,
+                                    email: email ?? message.snippet, answers: earlier || !forTask ? [] : answers,
+                                    answersByWriter: byWriter)
+        // The card's free times: what an answer written ahead offers, held from the email.
+        if !earlier, let times = session.freeTimes[id], !times.slots.isEmpty { writer.useSlots(times) }
+        session.writer = writer
         if !agent.isProviderReady { Task { await agent.loadProviders() } }
     }
 

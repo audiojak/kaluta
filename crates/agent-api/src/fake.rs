@@ -165,8 +165,15 @@ pub fn reply_answers_answer(prompt: &str) -> Option<String> {
         .lines()
         .map_while(|l| l.strip_prefix("- "))
         .map(|o| o.replace(['\\', '"'], ""));
+    // Free times given: the first two, each on a line of its own.
+    let times: String = prompt
+        .split_once("free at these times")
+        .map(|(_, list)| {
+            list.lines().skip(1).map_while(|l| l.strip_prefix("- ")).take(2).map(|t| format!("\\n- {t}")).collect()
+        })
+        .unwrap_or_default();
     let answers: Vec<String> =
-        options.map(|o| format!(r#"{{"label": "{o}", "text": "Hi {name},\n\n{o}.\n\nJo"}}"#)).collect();
+        options.map(|o| format!(r#"{{"label": "{o}", "text": "Hi {name},\n\n{o}.{times}\n\nJo"}}"#)).collect();
     Some(format!(r#"{{"answers": [{}], "missing": []}}"#, answers.join(", ")))
 }
 

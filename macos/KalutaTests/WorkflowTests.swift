@@ -674,6 +674,39 @@ struct WorkflowTests {
         #expect(!prompt.contains(ComposerAssistant.meetingRule), "times from the calendar, not the link")
     }
 
+    @Test func aCardThatAsksToMeetShowsTheTimesAndAPickedAnswerHoldsThem() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        core.useFakeCalendar()
+        let rows = try await core.threads(in: "INBOX", limit: 200).rows
+        let row = try #require(rows.first { WritingText.asksToMeet($0.snippet) }, "the demo has an email about meeting")
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: [item], startedAt: 0, resumed: false))
+        model.workflowSession = session
+        await model.prepareCurrentItem()
+        let times = try #require(session.freeTimes[row.id])
+        #expect(!times.slots.isEmpty)
+        #expect(FreeTimesLine.words(times.slots).hasPrefix("Kaluta can offer: \(times.slots[0].label)"))
+
+        // An answer written ahead that offers two of them: picked, the times
+        // are shown under the email and held at a key.
+        let offer = "Hi,\n\nYes.\n- \(times.slots[0].label)\n- \(times.slots[1].label)\n\nJo"
+        session.suggestions[row.id] = TriageSuggestion(
+            threadId: row.id, kind: .quickReply, seconds: 20, reason: "", answers: [TriageAnswer(label: "Yes", text: offer)],
+            answersByWriter: true, needsReply: true, options: ["Yes"], task: nil, summary: "", category: "")
+        await model.performWorkflow(.replyNow)
+        await model.performWorkflow(.pick1)
+        let writer = try #require(session.writer)
+        #expect(writer.step == .final && writer.offeredSlots.map(\.startMs) == times.slots.prefix(2).map(\.startMs))
+        await model.performWorkflow(.holdTimes)
+        #expect(writer.held.count == 2)
+        let holds = try await core.calendarHolds()
+        #expect(holds.count == 2)
+    }
+
     @Test func answersWrittenAheadOpenTheReplyInReplies() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))

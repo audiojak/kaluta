@@ -87,6 +87,9 @@ final class WorkflowSession {
     var answeringMessageID: String?
     /// The key list (?) is open.
     var showsKeys = false
+    /// The free times Kaluta can offer for an email that asks to meet
+    /// (spec §14.9), by thread id; empty when none or not connected.
+    var freeTimes: [String: CalendarSlots] = [:]
     /// Conversations whose hidden text (spec §14.4) is shown on the card.
     var hiddenTextShown: Set<String> = []
     /// The conversation's line has scrolled above the top: it pins there.
