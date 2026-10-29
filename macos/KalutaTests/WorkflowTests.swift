@@ -662,6 +662,11 @@ struct WorkflowTests {
         #expect(writer.held.isEmpty && left.isEmpty, "one undo releases them all")
 
         #expect(WorkflowCommand.command(key: KeyEquivalent("h"), characters: "h", modifiers: [.command, .shift]) == .holdTimes)
+        #expect(WorkflowCommand.holdTimes.keyLabel == "⇧⌘H" && WorkflowCommand.holdTimes.title(in: .replies) == "Hold these times")
+        let status = try await core.calendarStatus()
+        #expect(CalendarRow.connectedText(status).hasPrefix("Connected · ") && status.canHold)
+        #expect(CalendarRow.connectedText(CalendarStatus(connected: true, canHold: false, timeZone: "UTC", hours: "9 am–5 pm"))
+                == "Connected · 9 am–5 pm, UTC · free times only")
         let prompt = ComposerAssistant.prompt(instruction: "Sure", from: "", to: [], subject: "", draft: "",
                                               original: "When can we talk?",
                                               freeTimes: ("America/Los_Angeles", ["Thu Oct 30, 2–2:30 pm"]))

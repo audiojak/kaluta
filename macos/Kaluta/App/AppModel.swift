@@ -440,7 +440,7 @@ final class AppModel {
     private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "app")
     /// The event loop, observers and network monitor, ended with the model.
     @ObservationIgnored private let subscriptions = Subscriptions()
-    private var signInSession: String?
+    var signInSession: String?
 
     /// The app's preferences; tests pass a throwaway suite so they never
     /// touch the real app's (the test host *is* the app).
