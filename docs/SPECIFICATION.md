@@ -3684,6 +3684,17 @@ never ask: an option that needs a fact Kaluta does not have gets **no
 ready answer**, and the user's own turn, when they reply, asks for it
 (amended 2026-10-29).
 
+**Meeting.** When the email being answered asks to meet, talk or find a
+time and the user agrees without saying which times work, writing help
+offers the user's **calendar link**: the *Calendar link* fact
+(*Availability*, §14.11; cal.com, Calendly, a Google appointment page),
+looked up with `facts_lookup`, as a plain URL on a line of its own.
+Without one it never invents times: it asks, one question in
+*Availability* labelled *Calendar link*, whose answer is proposed as
+that fact. A time the user named is used as said. Answers written ahead
+follow the same rule: one that agrees to meet without a link is missing
+(amended 2026-10-29).
+
 **Drafting with an audience.** An AI draft says who it is written for
 ("Written for Customers"), chosen from the recipients. Choosing another
 audience writes a new draft under that audience's guidelines from the same

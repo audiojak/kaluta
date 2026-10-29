@@ -150,6 +150,9 @@ impl Worker {
         let p = prompt.to_lowercase();
         let selected: Vec<String> = turn.context.selected_thread_ids.iter().map(|t| t.0.clone()).collect();
         if prompt.starts_with("You are helping write an email in Kaluta's composer.") {
+            if let Some(answer) = self.meeting(prompt).await {
+                return answer;
+            }
             return writing_help(prompt);
         }
         if prompt.starts_with("Your draft breaks the user's writing guide") {
@@ -191,6 +194,20 @@ impl Worker {
             };
         }
         format!("You said: {prompt}")
+    }
+
+    /// Writing help for an email that asks to meet, when the user said no
+    /// time (spec §14.9): their Calendar link from the facts, or a question
+    /// asking for it. `None` for anything else.
+    async fn meeting(&mut self, prompt: &str) -> Option<String> {
+        if !asks_to_meet(prompt) {
+            return None;
+        }
+        let found = self.call("facts_lookup", json!({ "category": "availability" })).await;
+        let link = found.as_ref().and_then(|v| v["facts"].as_array()).and_then(|facts| {
+            facts.iter().find(|f| f["label"].as_str().is_some_and(|l| l.eq_ignore_ascii_case("Calendar link")))
+        });
+        Some(meeting_reply(prompt, link.and_then(|f| f["value"].as_str())))
     }
 
     /// Call one of Kaluta's tools, reporting it as a CLI's stream would.
@@ -574,6 +591,32 @@ fn writing_help(prompt: &str) -> String {
     reply_text(first_name(&to), original, instruction)
 }
 
+/// The email being answered asks to meet and the user named no time.
+fn asks_to_meet(prompt: &str) -> bool {
+    let instruction = between(prompt, "The user asks: ", "\n").unwrap_or_default().to_lowercase();
+    let Some(original) = between(prompt, "The message being answered or forwarded:\n<<<\n", "\n>>>") else {
+        return false;
+    };
+    let original = original.to_lowercase();
+    let asks = ["meet", "talk", "a call", "find a time", "catch up", "schedule"].iter().any(|w| original.contains(w));
+    const DAYS: [&str; 7] = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    let timed = instruction.chars().any(|c| c.is_ascii_digit()) || DAYS.iter().any(|d| instruction.contains(d));
+    asks && !timed && !instruction.starts_with("make it")
+}
+
+/// The reply to a request to meet: with the user's calendar link on a
+/// line of its own before the sign-off, or, without one, a question
+/// asking for it (never invented times).
+fn meeting_reply(prompt: &str, link: Option<&str>) -> String {
+    let Some(link) = link else {
+        return r#"{"questions": [{"question": "Which times work for you, or what is your calendar link?", "category": "availability", "label": "Calendar link"}]}"#
+            .into();
+    };
+    let reply = writing_help(prompt);
+    let (body, sign_off) = reply.rsplit_once("\n\n").unwrap_or((reply.as_str(), "Jo"));
+    format!("{body}\n\nPick a time that suits you here:\n{link}\n\n{sign_off}")
+}
+
 /// A draft changed as asked ("Make it …"): shorter keeps its greeting,
 /// first sentence and sign-off; warmer thanks them first; anything else
 /// adds the request as a line before the sign-off.
@@ -790,6 +833,28 @@ mod tests {
     fn writing_help_answers_the_message() {
         let prompt = "You are helping write an email in Kaluta's composer. The user asks: Reply\n\nAnswer with only the text.\n\nFrom: Me <me@example.com>\nTo: Sam Rivera <sam.rivera@example.com>\nSubject: Re: Board prep\n\nThe message so far:\n<<<\n\n>>>\n\nThe message being answered or forwarded:\n<<<\nHi Jo,\n\nCan you do Thursday at 2pm for the board prep?\n\nSam\n>>>";
         assert_eq!(writing_help(prompt), "Hi Sam,\n\nThursday works for me. Please send the invite.\n\nJo");
+    }
+
+    #[test]
+    fn a_request_to_meet_is_answered_with_the_calendar_link_or_a_question() {
+        let ask = |said: &str, email: &str| {
+            format!(
+                "You are helping write an email in Kaluta's composer. The user asks: {said}\n\nTo: Sam Rivera <sam@example.com>\n\n\
+                 The message being answered or forwarded:\n<<<\nHi Jo,\n\n{email}\n\nSam\n>>>"
+            )
+        };
+        let meet = ask("Sure, happy to", "When can we talk this week?");
+        assert!(asks_to_meet(&meet));
+        assert!(!asks_to_meet(&ask("Yes, Thursday at 2", "When can we talk this week?")), "a time was named");
+        assert!(!asks_to_meet(&ask("Sure", "Can you send the deck?")), "not about meeting");
+        assert!(!asks_to_meet(&ask("Make it shorter", "When can we talk?")));
+        let with = meeting_reply(&meet, Some("https://cal.com/jo"));
+        assert!(with.starts_with("Hi Sam,"), "{with}");
+        assert!(with.contains("\nhttps://cal.com/jo\n\nJo") || with.ends_with("https://cal.com/jo\n\nJo"), "{with}");
+        let without = meeting_reply(&meet, None);
+        let q: Value = serde_json::from_str(&without).unwrap();
+        assert_eq!(q["questions"][0]["label"], "Calendar link");
+        assert_eq!(q["questions"][0]["category"], "availability");
     }
 
     #[test]

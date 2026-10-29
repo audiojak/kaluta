@@ -607,6 +607,17 @@ struct WorkflowTests {
         #expect(writer.step == .say && writer.field.isEmpty)
     }
 
+    @Test func aReplyToAMeetingOffersTheCalendarLinkNeverInventedTimes() {
+        let reply = ComposerAssistant.prompt(instruction: "Sure", from: "jo@example.com", to: ["sam@example.com"],
+                                             subject: "Re: Talk?", draft: "", original: "When can we talk this week?")
+        #expect(reply.contains(ComposerAssistant.meetingRule))
+        #expect(reply.contains("facts_lookup") && reply.contains("label \"Calendar link\"") && reply.contains("do not invent times"))
+        // Its own email, answering nothing: no meeting to offer.
+        let fresh = ComposerAssistant.prompt(instruction: "Ask about lunch", from: "jo@example.com", to: [],
+                                             subject: "", draft: "", original: "")
+        #expect(!fresh.contains("Calendar link"))
+    }
+
     @Test func answersWrittenAheadOpenTheReplyInReplies() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))

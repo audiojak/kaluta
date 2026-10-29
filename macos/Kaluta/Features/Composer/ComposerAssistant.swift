@@ -368,6 +368,15 @@ final class ComposerAssistant {
         """
     }
 
+    /// When the email asks to meet (spec §14.9, amended 2026-10-29): the
+    /// user's calendar link, or a question; never invented times.
+    static let meetingRule = """
+        When the message being answered asks to meet, talk or find a time, and the user agrees without \
+        saying which times work, offer their calendar link: look it up with facts_lookup (category \
+        availability, label "Calendar link") and put it on a line of its own as a plain URL. If they have \
+        none, do not invent times: ask, with a question in category availability labelled "Calendar link".
+        """
+
     static func prompt(instruction: String, from: String, to: [String], subject: String, draft: String,
                        original: String, guide: String = "", facts: [String] = []) -> String {
         var parts = [
@@ -392,6 +401,8 @@ final class ComposerAssistant {
         if !facts.isEmpty { parts.append("Facts the user gave for this message:\n" + facts.map { "- \($0)" }.joined(separator: "\n")) }
         if !guide.isEmpty { parts.append(guide) }
         let original = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Answering an email: it may ask to meet.
+        if !original.isEmpty { parts.insert(meetingRule, at: 3) }
         if !original.isEmpty {
             parts.append("The message being answered or forwarded:\n<<<\n\(String(original.prefix(12_000)))\n>>>")
         }
