@@ -12,6 +12,15 @@ struct CalendarRow: View {
     @State private var problem: String?
 
     var body: some View {
+        // A Group, so the load runs even with no holds: a modifier on an
+        // empty ForEach never runs.
+        Group {
+            rows
+        }
+        .task(id: model.openAccountID) { await load() }
+    }
+
+    @ViewBuilder private var rows: some View {
         LabeledContent("Calendar") {
             VStack(alignment: .trailing, spacing: Space.xs) {
                 if let status, status.connected {
@@ -20,7 +29,7 @@ struct CalendarRow: View {
                         .hoverHelp("Kaluta stops offering times from it; remove Kaluta's access in your Google account to revoke it")
                 } else {
                     Button(working ? "Waiting for Google…" : "Connect Google Calendar…") { Task { await connect() } }
-                        .disabled(working || status == nil)
+                        .disabled(working)
                         .hoverHelp("Let Kaluta offer free times from your calendar when someone asks to meet, and hold them while you wait. It sees when you are busy, never what you are doing, and never invites anyone")
                 }
                 if let problem {
@@ -37,7 +46,6 @@ struct CalendarRow: View {
                 }
             }
         }
-        .task(id: model.openAccountID) { await load() }
     }
 
     /// "Connected · 9 am–5 pm, America/Los_Angeles"; "· free times only"
@@ -52,6 +60,8 @@ struct CalendarRow: View {
     }
 
     private func connect() async {
+        working = true
+        defer { working = false }
         problem = await model.connectCalendar()
         await load()
     }
