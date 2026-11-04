@@ -452,6 +452,9 @@ extension AppModel {
         if let form = session.taskForm {
             return [a(.primary, .primary, form.isExisting ? "Save the task" : "Make the task"), a(.back, .quiet, "Cancel")]
         }
+        if session.noteDraft != nil {
+            return [a(.primary, .primary, "Save the note"), a(.back, .quiet, "Cancel")]
+        }
         switch kind {
         case .triage:
             return triageActions(session, a)
@@ -463,9 +466,11 @@ extension AppModel {
                 guard let item = session.current, let task = task(of: item) else { return false }
                 return task.action != .noEmail
             }()
+            // M answers its key; its link is beside the note.
+            var note = a(.note)
+            note.shown = false
             return (replies ? [a(.replyNow, .primary)] : [])
-                + [a(.done, replies ? .plain : .primary), a(.later),
-                                                                         a(.skip, .quiet)]
+                + [a(.done, replies ? .plain : .primary), a(.later), a(.skip, .quiet), note]
                 + emailLinks(session, a, opens: true)
         case .waiting:
             return [a(.replyNow, .primary), a(.done), a(.later, .plain, "Check again"), a(.skip, .quiet)]
@@ -779,7 +784,8 @@ extension AppModel {
             // Esc closes the conversation first; the next Esc leaves.
             withAnimation(Self.itemMotion) { session.showsConversation = false }
             return
-        case .back where session.writer == nil && session.taskForm == nil && !session.choosingCheckAgain:
+        case .back where session.writer == nil && session.taskForm == nil && session.noteDraft == nil
+            && !session.choosingCheckAgain:
             leaveWorkflow()
             return
         case .whatsLeft:
@@ -830,6 +836,10 @@ extension AppModel {
             if command == .back { session.taskForm = nil } else { await makeTask(form, item: item, session: session) }
             return
         }
+        if session.noteDraft != nil {
+            if command == .back { session.noteDraft = nil } else { await saveNote(item, session: session) }
+            return
+        }
         switch (session.kind, command) {
         case (.triage, .task):
             await openTaskForm(item, session: session)
@@ -866,6 +876,8 @@ extension AppModel {
             await finishTask(item, session: session)
         case (.tasks, .later):
             await moveTaskToTomorrow(item, session: session)
+        case (.tasks, .note):
+            if let task = task(of: item) { session.noteDraft = task.notes }
         case (.agents, _):
             await performAgents(command, item: item, session: session)
         case (.teach, _):
@@ -956,6 +968,17 @@ extension AppModel {
 
     /// The set after a change: the next item's conversation loaded first,
     /// then the decided item leaves and the next rises (spec §14.13).
+    /// Clicked in the rail: an undecided item comes up next. Not while a
+    /// reply, a task or a note is written; the current item stays then.
+    func bringForward(_ item: WorkflowItem, session: WorkflowSession) async {
+        guard item.decision == nil, item.key != session.current?.key,
+              !session.isTyping, session.writer == nil, let core,
+              let set = try? await core.bringWorkflowItemForward(set: session.workflowSet.id, key: item.key)
+        else { return }
+        session.exit = .up
+        await show(set, in: session)
+    }
+
     private func show(_ set: WorkflowSet, in session: WorkflowSession) async {
         if let next = set.items.first(where: { $0.decision == nil }) { await prepare(next, in: session) }
         withAnimation(Self.itemMotion) { session.replace(set) }
@@ -1192,6 +1215,31 @@ extension AppModel {
         await decide(item, "done", session: session, notice: "Done: “\(task.title)”",
                      undoMail: { _ = try? await core.setTaskDone(task.id, false) },
                      redoMail: { _ = try? await core.setTaskDone(task.id, true) })
+    }
+
+    /// Keep the note being written on the task (spec §14.13); ⌘Z puts the
+    /// old one back. The task stays on screen.
+    func saveNote(_ item: WorkflowItem, session: WorkflowSession) async {
+        guard let core, let draft = session.noteDraft, let task = task(of: item) else { return }
+        session.noteDraft = nil
+        let notes = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard notes != task.notes else { return }
+        let edit = TaskEdit(title: task.title, notes: notes, category: task.category, dueDay: task.dueDay,
+                            action: task.action)
+        let before = TaskEdit(title: task.title, notes: task.notes, category: task.category, dueDay: task.dueDay,
+                              action: task.action)
+        guard (try? await core.updateTask(task.id, edit)) != nil else { return }
+        await tasks.load()
+        await loadTaskInfo(session)
+        guard let accountID = openAccountID else { return }
+        let reload = { [weak self] in
+            guard let self else { return }
+            await self.tasks.load()
+            if let session = self.workflowSession { await self.loadTaskInfo(session) }
+        }
+        undo.record(accountID: accountID, actionName: "Note", noticeText: notes.isEmpty ? "Note removed" : "Note saved",
+                    undo: { _ = try? await core.updateTask(task.id, before); await reload() },
+                    redo: { _ = try? await core.updateTask(task.id, edit); await reload() })
     }
 
     private func moveTaskToTomorrow(_ item: WorkflowItem, session: WorkflowSession) async {

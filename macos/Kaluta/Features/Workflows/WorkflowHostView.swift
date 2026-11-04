@@ -315,6 +315,7 @@ struct WorkflowItemView: View {
                             .font(TypeRole.workflowContext)
                             .foregroundStyle(.secondary)
                     }
+                    TaskNoteView(session: session, item: item, task: task)
                 }
             }
             if session.kind == .agents {
@@ -578,23 +579,21 @@ struct WorkflowRail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text(railTitle).font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
-                    .padding(.horizontal, Space.l)
-                ForEach(railItems, id: \.key) { item in
-                    if session.kind == .teach {
-                        let line = session.teachLines[item.key]
-                        WorkflowRailRow(title: line?.title ?? "Decided", detail: Self.teachDetail(line, item),
-                                        state: state(item), kind: session.kind)
-                    } else if session.kind == .reading, let id = item.threadId {
-                        WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
-                                            ?? session.readingSubject(id) ?? "…",
-                                        detail: Self.readingDetail(item), state: state(item), kind: session.kind)
-                    } else if let id = item.taskId, let task = session.taskInfo[id] {
-                        WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
-                                        kind: session.kind)
-                    } else if let id = item.threadId, let wait = session.waits[id] {
-                        WorkflowRailRow(title: wait.who.isEmpty ? "Someone" : wait.who, detail: Self.detail(wait, item),
-                                        state: state(item), kind: session.kind)
+                ForEach(Array(sections.enumerated()), id: \.offset) { index, section in
+                    Text(section.title).font(TypeRole.workflowKey).fontWeight(.semibold).foregroundStyle(.secondary)
+                        .padding(.horizontal, Space.l)
+                        .padding(.top, index == 0 ? 0 : Space.l)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(section.items, id: \.key) { item in
+                        if clickable(item) {
+                            Button { Task { await model.bringForward(item, session: session) } } label: {
+                                row(item).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .hoverHelp("Work on this one now")
+                        } else {
+                            row(item)
+                        }
                     }
                 }
             }
@@ -605,6 +604,48 @@ struct WorkflowRail: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(session.kind == .waiting ? "Waiting on others"
                             : session.kind == .teach ? "To decide" : "Today's tasks")
+    }
+
+    /// An undecided item other than the one on screen, while nothing is
+    /// being written (a reply, a task, a note).
+    private func clickable(_ item: WorkflowItem) -> Bool {
+        item.decision == nil && item.key != session.current?.key && session.writer == nil && !session.isTyping
+    }
+
+    /// Tasks under their categories, in the set's order; one heading
+    /// elsewhere.
+    private var sections: [(title: String, items: [WorkflowItem])] {
+        guard session.kind == .tasks else { return [(railTitle, railItems)] }
+        return Self.sections(railItems) { item in item.taskId.flatMap { session.taskInfo[$0]?.category } }
+    }
+
+    /// Runs of the same category, each under its name ("Other" without one).
+    static func sections(_ items: [WorkflowItem], category: (WorkflowItem) -> String?)
+        -> [(title: String, items: [WorkflowItem])] {
+        var out: [(title: String, items: [WorkflowItem])] = []
+        for item in items {
+            let title = category(item) ?? "Other"
+            if out.last?.title == title { out[out.count - 1].items.append(item) } else { out.append((title, [item])) }
+        }
+        return out
+    }
+
+    @ViewBuilder private func row(_ item: WorkflowItem) -> some View {
+        if session.kind == .teach {
+            let line = session.teachLines[item.key]
+            WorkflowRailRow(title: line?.title ?? "Decided", detail: Self.teachDetail(line, item),
+                            state: state(item), kind: session.kind)
+        } else if session.kind == .reading, let id = item.threadId {
+            WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
+                                ?? session.readingSubject(id) ?? "…",
+                            detail: Self.readingDetail(item), state: state(item), kind: session.kind)
+        } else if let id = item.taskId, let task = session.taskInfo[id] {
+            WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
+                            kind: session.kind)
+        } else if let id = item.threadId, let wait = session.waits[id] {
+            WorkflowRailRow(title: wait.who.isEmpty ? "Someone" : wait.who, detail: Self.detail(wait, item),
+                            state: state(item), kind: session.kind)
+        }
     }
 
     /// Weekly reading lists the bucket on screen, one line each.
@@ -657,7 +698,8 @@ struct WorkflowRail: View {
         case "elsewhere": "Done elsewhere"
         case "later": "Tomorrow"
         case .some: "Done"
-        case nil: "\(task.category) · \(WorkflowItemView.due(task))"
+        // The category is the heading above it.
+        case nil: WorkflowItemView.due(task)
         }
     }
 
@@ -674,6 +716,50 @@ struct WorkflowRail: View {
     }
 
     static let width: CGFloat = 280
+}
+
+/// The task's note (spec §14.13): shown under its title, written in place
+/// (M). Return keeps it, Esc leaves it as it was.
+struct TaskNoteView: View {
+    @Environment(AppModel.self) private var model
+    let session: WorkflowSession
+    let item: WorkflowItem
+    let task: TaskItem
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        if let draft = session.noteDraft {
+            TextField("A note for yourself", text: Binding(get: { draft }, set: { session.noteDraft = $0 }),
+                      axis: .vertical)
+                .lineLimit(1...8)
+                .textFieldStyle(.plain)
+                .font(TypeRole.workflowContext)
+                .padding(Space.m)
+                .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+                .focused($focused)
+                .onSubmit { Task { await model.saveNote(item, session: session) } }
+                .onExitCommand { session.noteDraft = nil }
+                .onAppear { Task { @MainActor in focused = true } }
+                .accessibilityLabel("Note")
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                if !task.notes.isEmpty {
+                    Label(task.notes, systemImage: "note.text")
+                        .font(TypeRole.workflowContext)
+                        .textSelection(.enabled)
+                        .accessibilityLabel("Note: \(task.notes)")
+                }
+                Button { Task { await model.performWorkflow(.note) } } label: {
+                    HStack(spacing: Space.s) {
+                        Text(task.notes.isEmpty ? "Add a note" : "Edit the note")
+                        Keycap(key: "M")
+                    }
+                }
+                .buttonStyle(.link)
+                .hoverHelp(task.notes.isEmpty ? "Write a note on this task for yourself (M)" : "Change this task's note (M)")
+            }
+        }
+    }
 }
 
 /// An Agents item (spec §14.13): a proposed send on its editable email

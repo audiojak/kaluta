@@ -125,6 +125,23 @@ pub fn skip(tx: &Transaction<'_>, set_id: i64, item: &str) -> StoreResult<()> {
     Ok(())
 }
 
+/// Bring an item up next: it moves to just before the first undecided
+/// item, so it is the one on screen. A decided item, or one not in the
+/// set, stays where it is; false then.
+pub fn bring_forward(tx: &Transaction<'_>, set_id: i64, item: &str) -> StoreResult<bool> {
+    let Some(set) = get_set(tx, set_id)? else { return Ok(false) };
+    let decided: std::collections::HashSet<String> = decisions(tx, set_id)?.into_iter().map(|d| d.item).collect();
+    if decided.contains(item) || !set.items.iter().any(|i| i == item) {
+        return Ok(false);
+    }
+    let mut items: Vec<String> = set.items.into_iter().filter(|i| i != item).collect();
+    let at = items.iter().position(|i| !decided.contains(i)).unwrap_or(items.len());
+    items.insert(at, item.to_owned());
+    tx.prepare_cached("UPDATE workflow_sets SET items_json = ?2 WHERE id = ?1")?
+        .execute(params![set_id, serde_json::to_string(&items)?])?;
+    Ok(true)
+}
+
 pub fn finish(tx: &Transaction<'_>, set_id: i64, now: Millis) -> StoreResult<()> {
     tx.prepare_cached("UPDATE workflow_sets SET finished_at = ?2 WHERE id = ?1 AND finished_at IS NULL")?
         .execute(params![set_id, now])?;
@@ -279,13 +296,15 @@ pub struct DueTask {
     pub due_day: String,
 }
 
-/// Tasks' set (spec §14.13): open tasks due on or before `today`, those
-/// carried over from earlier days first.
+/// Tasks' set (spec §14.13): open tasks due on or before `today`, by
+/// category in the account's order (one it no longer has after them),
+/// those carried over from earlier days first within each.
 pub fn tasks_due(conn: &Connection, today: &str) -> StoreResult<Vec<DueTask>> {
     let mut stmt = conn.prepare_cached(
-        "SELECT id, thread_id, title, due_day FROM tasks
-          WHERE status = 'open' AND due_day IS NOT NULL AND due_day <= ?1
-          ORDER BY due_day, created_at, id",
+        "SELECT t.id, t.thread_id, t.title, t.due_day FROM tasks t
+          LEFT JOIN task_categories c ON c.name = t.category
+          WHERE t.status = 'open' AND t.due_day IS NOT NULL AND t.due_day <= ?1
+          ORDER BY c.position IS NULL, c.position, t.category COLLATE NOCASE, t.due_day, t.created_at, t.id",
     )?;
     let rows = stmt.query_map([today], |r| {
         Ok(DueTask { id: r.get(0)?, thread_id: r.get(1)?, title: r.get(2)?, due_day: r.get(3)? })
@@ -678,6 +697,28 @@ mod tests {
     }
 
     #[test]
+    fn an_item_brought_forward_is_up_next() {
+        let Store(_, db) = &store("forward");
+        let id = db
+            .write_blocking(|tx| {
+                create_set(tx, "tasks", "2026-10-11", &keys(&["task:1", "task:2", "task:3", "task:4"]), NOW)
+            })
+            .unwrap();
+        db.write_blocking(move |tx| decide(tx, id, "task:1", "done", NOW, 1)).unwrap();
+        // Before the first undecided (task:2), after what is decided.
+        assert!(db.write_blocking(move |tx| bring_forward(tx, id, "task:4")).unwrap());
+        let items = |db: &Db| db.read_blocking(move |c| get_set(c, id)).unwrap().unwrap().items;
+        assert_eq!(items(db), keys(&["task:1", "task:4", "task:2", "task:3"]));
+        // Decided, or not in the set: nothing moves.
+        assert!(!db.write_blocking(move |tx| bring_forward(tx, id, "task:1")).unwrap());
+        assert!(!db.write_blocking(move |tx| bring_forward(tx, id, "task:9")).unwrap());
+        assert_eq!(items(db), keys(&["task:1", "task:4", "task:2", "task:3"]));
+        // Already up next: stays.
+        assert!(db.write_blocking(move |tx| bring_forward(tx, id, "task:4")).unwrap());
+        assert_eq!(items(db), keys(&["task:1", "task:4", "task:2", "task:3"]));
+    }
+
+    #[test]
     fn the_day_summary_and_the_pace_come_from_decisions() {
         let Store(_, db) = &store("pace");
         let id = db
@@ -758,6 +799,32 @@ mod tests {
             db.read_blocking(move |c| tasks_due(c, "2026-10-11")).unwrap().into_iter().map(|t| t.thread_id).collect();
         assert_eq!(due, keys(&["b", "a"]));
         assert_eq!(db.read_blocking(move |c| tasks_due_later(c, "2026-10-11", "2026-10-17")).unwrap(), 1);
+    }
+
+    #[test]
+    fn tasks_due_come_by_category_in_the_accounts_order() {
+        let Store(_, db) = &store("task-categories");
+        db.write_blocking(move |tx| {
+            for (t, category, due) in [
+                ("old-gone", "Gone", "2026-10-01"),
+                ("follow", "Follow Up", "2026-10-11"),
+                ("decide-new", "Decide", "2026-10-11"),
+                ("decide-old", "Decide", "2026-10-02"),
+                ("reply", "Reply", "2026-10-10"),
+            ] {
+                tx.execute(
+                    "INSERT INTO tasks (thread_id, title, category, due_day, source, created_at) VALUES (?1, 'x', ?2, ?3, 'you', 0)",
+                    params![t, category, due],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let due: Vec<String> =
+            db.read_blocking(move |c| tasks_due(c, "2026-10-11")).unwrap().into_iter().map(|t| t.thread_id).collect();
+        // Reply, Decide, … Follow Up as the account orders them; a category
+        // it no longer has comes last.
+        assert_eq!(due, keys(&["reply", "decide-old", "decide-new", "follow", "old-gone"]));
     }
 
     #[test]

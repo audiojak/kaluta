@@ -4445,7 +4445,9 @@ that day.
   user's; in Tasks a task no longer open.
 - **A rail** where the workflow has one: what is up next (Triage), the
   set with each item's state (Replies, Tasks, Waiting, Agents), or the
-  queue by kind (Teach Kaluta).
+  queue by kind (Teach Kaluta). Clicking an undecided item in it brings
+  that item up next, ahead of the rest; not while a reply, a task or a
+  note is being written (amended 2026-11-04).
 - **The item's email** shows as it was sent, with its own formatting, in
   the reader's locked-down web view (the same sanitizer, policy and link
   check, §14.4), as tall as the email so the workflow keeps the one
@@ -4708,10 +4710,13 @@ guide (amended 2026-10-29).
 
 #### Tasks
 
-Today's open tasks (due today, and *carried over* from earlier days,
-first), one at a time: the task at display size (its category, *Due
-today* or *Carried over from yesterday*, Kaluta's reason), its email
-below. A task that ends in a reply asks *What did you decide?* (with
+Today's open tasks (due today, and *carried over* from earlier days),
+by category in the account's order (Settings › Tasks), carried over
+first within each, one at a time: the task at display size (its
+category, *Due today* or *Carried over from yesterday*, Kaluta's reason,
+the user's note), its email below. *M* writes or changes the task's
+note in place: Return keeps it, Esc leaves it as it was, ⌘Z puts the
+old one back (amended 2026-11-04). A task that ends in a reply asks *What did you decide?* (with
 starters from the email) and goes on to the editable reply; *Send and
 finish the task* completes it and archives the email (the `Task` label
 goes with the task). A task with nothing to send has *Done* (E). *L*
@@ -4719,9 +4724,10 @@ moves a task to tomorrow without penalty. Tasks finished elsewhere
 (by a reply in Triage) show as done in the rail. Later days stay out of
 the set ("3 more later this week").
 
-The rail lists the set beside the task: the one on screen marked, done
-ones ticked with how ("Done", "Tomorrow", "Done elsewhere"); it steps
-aside while a reply is written. A task finished outside the set is
+The rail lists the set beside the task under its categories' headings:
+the one on screen marked, the others with their due line, done ones
+ticked with how ("Done", "Tomorrow", "Done elsewhere"); it steps aside
+while a reply is written. A task finished outside the set is
 decided *elsewhere* when the set resumes, with no time counted, and the
 end's score says "done elsewhere". The due line reads *Due today*,
 *Carried over from yesterday*, *Carried over from Friday* (within the

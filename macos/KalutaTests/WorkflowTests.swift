@@ -40,7 +40,7 @@ struct WorkflowTests {
             (KeyEquivalent("e"), "e", [.command, .shift], nil),
             (KeyEquivalent("m"), "m", [.command, .shift], .ownWords),
             (KeyEquivalent("a"), "a", [.command, .shift], .attach),
-            (KeyEquivalent("m"), "m", [], nil),
+            (KeyEquivalent("m"), "m", [], .note),
             (KeyEquivalent("x"), "x", [], nil),
         ]
         for (key, characters, modifiers, expected) in keys {
@@ -765,6 +765,60 @@ struct WorkflowTests {
         await model.performWorkflow(.openInFull)
         #expect(opened == [row.id])
         #expect(session.writer != nil, "and the writing goes on")
+    }
+
+    @Test func tasksComeByCategoryAClickedOneIsUpNextAndANoteIsKept() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        let core = try #require(model.core)
+        let rows = try await core.threads(in: "INBOX", limit: 3).rows
+        try #require(rows.count == 3)
+        let today = DueDay.string(.now)
+        _ = try await core.createTasks(zip(rows, ["Follow Up", "Reply", "Decide"]).map { row, category in
+            NewTask(threadId: row.id, messageId: nil, title: "\(category) task", notes: "", category: category,
+                    dueDay: today, action: .noEmail, why: "", fromAi: false)
+        })
+        await model.beginWorkflow(.tasks)
+        let session = try #require(model.workflowSession)
+
+        // In the account's order of categories, under their headings.
+        let order = try await core.taskCategories()
+        let categories = session.items.compactMap { model.task(of: $0)?.category }
+        #expect(categories == categories.sorted { order.firstIndex(of: $0) ?? .max < order.firstIndex(of: $1) ?? .max })
+        let sections = WorkflowRail.sections(session.items) { model.task(of: $0)?.category }
+        #expect(sections.map(\.title) == ["Reply", "Decide", "Follow Up"].filter(categories.contains))
+        #expect(WorkflowRail.sections([]) { _ in nil }.isEmpty)
+
+        // Clicked in the rail: up next; the one before waits its turn.
+        let first = try #require(session.current)
+        let clicked = try #require(session.items.last)
+        await model.bringForward(clicked, session: session)
+        #expect(session.current?.key == clicked.key)
+        #expect(session.items.contains { $0.key == first.key && $0.decision == nil })
+
+        // M writes a note in place; the bar saves or cancels it.
+        await model.performWorkflow(.note)
+        #expect(session.noteDraft == "" && session.isTyping)
+        #expect(model.workflowActions().map(\.title) == ["Save the note", "Cancel"])
+        session.noteDraft = "  Ask Jo first  "
+        await model.performWorkflow(.primary)
+        #expect(session.noteDraft == nil && session.current?.key == clicked.key, "the task stays on screen")
+        #expect(model.task(of: clicked)?.notes == "Ask Jo first")
+        model.undo.undo(in: model.openAccountID)
+        for _ in 0..<100 where model.task(of: clicked)?.notes != "" { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.task(of: clicked)?.notes == "", "⌘Z puts the old note back")
+
+        // Esc leaves the note as it was, and the workflow open.
+        await model.performWorkflow(.note)
+        session.noteDraft = "Not this"
+        await model.performWorkflow(.back)
+        #expect(session.noteDraft == nil && model.workflowSession != nil && model.task(of: clicked)?.notes == "")
+        // While writing, the rail does not move the set.
+        await model.performWorkflow(.note)
+        await model.bringForward(first, session: session)
+        #expect(session.current?.key == clicked.key)
     }
 
     @Test func aFileGoesWithTheReply() async throws {

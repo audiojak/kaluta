@@ -496,6 +496,23 @@ impl Core {
         .await
     }
 
+    /// Bring an undecided item up next (clicked in the rail): it moves
+    /// before the first undecided item. A decided one stays put.
+    pub async fn bring_workflow_item_forward(&self, set_id: i64, key: String) -> Result<WorkflowSet, CoreError> {
+        let db = self.db()?;
+        runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    store::bring_forward(tx, set_id, &key)?;
+                    let set = store::get_set(tx, set_id)?
+                        .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {set_id}")))?;
+                    Core::set_info(tx, set, true)
+                })
+                .await?)
+        })
+        .await
+    }
+
     /// Finish a set and score it. A triage set moves "new" on to when it
     /// started: mail that arrived meanwhile is the next set's.
     pub async fn finish_workflow(&self, set_id: i64) -> Result<WorkflowScore, CoreError> {
@@ -766,6 +783,8 @@ mod tests {
         let second = again.items[1].key.clone();
         let skipped = block_on(core.skip_workflow_item(set.id, second.clone())).unwrap();
         assert_eq!(skipped.items.last().unwrap().key, second);
+        let back = block_on(core.bring_workflow_item_forward(set.id, second.clone())).unwrap();
+        assert_eq!(back.items.iter().find(|i| i.decision.is_none()).unwrap().key, second, "clicked: up next");
 
         assert!(block_on(core.undo_workflow_decision(set.id, first.clone())).unwrap());
         block_on(core.decide_workflow_item(set.id, first, "task".into(), 6_000)).unwrap();
