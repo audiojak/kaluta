@@ -185,6 +185,19 @@ impl SyncService {
         self.outbox_wake.notify_one();
     }
 
+    /// The connection is back (or the user asked): changes waiting on a
+    /// retry go now rather than at their next try (spec §7.4, the queue).
+    pub async fn retry_outbox_now(&self) {
+        match self.engine.db().write(mail_store::outbox::retry_now).await {
+            Ok(0) => {}
+            Ok(n) => {
+                tracing::info!(changes = n, "retrying queued changes now");
+                self.outbox_wake.notify_one();
+            }
+            Err(e) => tracing::warn!(error = %e, "could not bring queued changes forward"),
+        }
+    }
+
     /// Fetch these bodies next and wake the backfill.
     pub async fn prioritize(&self, ids: Vec<mail_domain::MessageId>) -> Result<(), mail_sync::SyncError> {
         self.engine.prioritize(ids).await?;
@@ -405,11 +418,16 @@ impl SyncService {
 
     async fn poll_loop(self: Arc<Self>) {
         let mut backoff = Duration::from_secs(5);
+        // The last poll failed (offline, or Gmail unreachable).
+        let mut down = false;
         loop {
             self.status(SyncState::Checking, 0);
             match self.engine.sync_incremental().await {
                 Ok(report) => {
                     backoff = Duration::from_secs(5);
+                    if std::mem::take(&mut down) {
+                        self.retry_outbox_now().await;
+                    }
                     // The day's mail is in: the daily review may start (spec
                     // §14.10). A synced account with nothing to download
                     // never reports Idle, so this marks it too.
@@ -434,6 +452,7 @@ impl SyncService {
                     return;
                 }
                 Err(e) => {
+                    down = true;
                     self.offline_or_error(&e);
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(MAX_BACKOFF);

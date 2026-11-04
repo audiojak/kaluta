@@ -2,7 +2,7 @@ import SwiftUI
 
 /// What the window shows when no review is open (spec §14.13).
 enum WorkflowHome: String {
-    /// The start screen, *What's next*: home.
+    /// The start screen, the *Dashboard*: home.
     case start
     /// The mail view (§14.3), one key away.
     case mail

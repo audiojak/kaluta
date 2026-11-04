@@ -31,6 +31,9 @@ pub struct FakeProvider {
     reject_missing: std::sync::atomic::AtomicBool,
     /// A rate-limit pause to report, as a real provider's limiter would.
     paused: Mutex<Option<std::time::Duration>>,
+    /// Sends get the server's own Message-ID, as Gmail's API gives them,
+    /// and the optimistic copy takes the id `send` returned.
+    gmail_message_ids: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -64,7 +67,14 @@ impl FakeProvider {
             label_ops: Mutex::new(Vec::new()),
             reject_missing: std::sync::atomic::AtomicBool::new(false),
             paused: Mutex::new(None),
+            gmail_message_ids: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// From now on, sent messages get the server's own Message-ID (as
+    /// Gmail's API gives them) and the provider adopts sent copies.
+    pub fn use_gmail_message_ids(&self, on: bool) {
+        self.gmail_message_ids.store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// From now on, a label change or trash naming any message the server
@@ -244,6 +254,10 @@ impl MailProvider for FakeProvider {
         *self.paused.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    fn adopts_sent_copies(&self) -> bool {
+        self.gmail_message_ids.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     async fn profile(&self) -> ProviderResult<Profile> {
         let s = self.state();
         Ok(Profile {
@@ -326,7 +340,11 @@ impl MailProvider for FakeProvider {
             thread_id: thread_id.clone(),
             label_ids: vec![LabelId::new("SENT")],
             internal_date: self.now,
-            message_id_header: header("Message-ID").map(|v| v.trim_matches(['<', '>']).to_owned()),
+            message_id_header: if self.gmail_message_ids.load(std::sync::atomic::Ordering::Relaxed) {
+                Some(format!("CAK={}@mail.gmail.com", id.0))
+            } else {
+                header("Message-ID").map(|v| v.trim_matches(['<', '>']).to_owned())
+            },
             in_reply_to: header("In-Reply-To").map(|v| v.trim_matches(['<', '>']).to_owned()),
             subject: header("Subject").unwrap_or_default(),
             snippet: text.chars().take(100).collect(),

@@ -47,7 +47,7 @@ The short version. Everything below elaborates on these.
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
 | Distribution | Direct download, Developer ID, notarized, Sparkle 2 auto-update; **not** sandboxed, **not** App Store |
 | Telemetry | None in MVP |
-| Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (*What's next*); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
+| Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -807,7 +807,8 @@ forever on the other.
   an error that may have come after the provider took it) is first looked
   for: `MailProvider::already_sent`. Gmail searches `rfc822msgid:` (its
   `messages.send` has no idempotency key; it keeps the composer's
-  Message-ID, §7.5); AgentMail looks for its `X-Kaluta-Outbox-Id` header
+  Message-ID, §7.5; *not so* for every account, see the 2026-11-04
+  amendment below); AgentMail looks for its `X-Kaluta-Outbox-Id` header
   (and its `Idempotency-Key` holds 24 h); Primitive cannot look and relies
   on its Message-ID `Idempotency-Key`. Found, the send is taken as sent
   (the draft is done with, the optimistic copy adopted) and not sent again.
@@ -821,6 +822,49 @@ forever on the other.
   reaches the provider exactly once and in queue order; a process killed
   inside a send is recovered at once, and the send is found rather than
   sent again (or sent once, if it never reached the provider).
+
+**Amendment (2026-11-04): the queue, retries for days.** *Implemented
+2026-11-04.* From the user's daily use: a mark-as-read gave up after a
+network blip (five tries in about 30 s), twelve "Waiting" label changes
+were refused by Gmail, and nothing on screen said so.
+- *Retries.* A transient failure (network, server error, rate limit,
+  undecodable answer) is retried while the change is younger than three
+  days (`outbox::MAX_RETRY_AGE_MS`), not five times: 2 s, 4 s, 8 s …
+  doubling to 15 minutes (`MAX_BACKOFF`), or longer when the provider
+  asked (`Retry-After`). Past three days, or on a permanent error, the
+  change is rolled back and kept as failed, as before. Order still holds:
+  later changes wait behind one that is retrying.
+- *Back online.* When a sync round succeeds after one failed, changes
+  waiting on a retry go at once (`outbox::retry_now`).
+- *Local copies stay out.* An optimistic copy of sent mail (`local-…`) is
+  never named to the provider: Gmail answers a `batchModify` naming one
+  with 400 "Invalid ids value" and changes nothing, which is how a thread
+  replied to and labelled *Waiting* at once failed. Label, trash and
+  untrash ops drop such ids when they run; an op left with none is done.
+- *Gmail's own Message-ID.* Gmail gives a message sent through the API
+  its own Message-ID (`…@mail.gmail.com`, seen on every send of the
+  user's Workspace account), so matching the copy by the composer's
+  Message-ID never worked there: copies piled up beside the real
+  messages. The Gmail provider now adopts sent copies
+  (`adopts_sent_copies`): the copy takes the id `messages.send` returned.
+  Copies left from before are dropped at the next drain when older than
+  ten minutes, no longer queued, and the thread holds the user's own
+  message from the provider with the same subject within two minutes
+  (`outbox::drop_stale_local_copies`). The same rewrite means
+  `already_sent`'s `rfc822msgid:` search cannot find an earlier attempt
+  of a send for such an account; that is a follow-up.
+- *The queue, on screen.* The sidebar's footer shows "N changes waiting
+  for Gmail" while any change has failed a try, and "N changes didn't
+  reach Gmail" when any was given up; a click opens the queue: each
+  change in words ("Add “Waiting” · “Q3 planning” and 2 more
+  conversations"), where it is (waiting its turn, sending, tried 3 times ·
+  trying again in 4 minutes · the error, or undone here with the error),
+  *Try Again* and *Dismiss* for a failed one, and *Try All Again* /
+  *Dismiss All* / *Try Now*. Try Again makes the change here again and
+  queues it afresh at the end (`outbox::requeue_failed`), so it cannot
+  overtake what was done since; failed sends are not in the queue (they
+  are back in Drafts with their error). Core: `queued_changes`,
+  `retry_queued_changes`, `dismiss_queued_change`.
 
 **Amendment (2026-09-26): bulk backfill over IMAP.** *Superseded by the
 2026-09-28 amendment, IMAP-first sync, at the end of this section; kept for
@@ -2967,7 +3011,7 @@ Every target in §1.3 traces to one of these rules.
 ### 14.3 Main window
 
 *(Amended 2026-10-11, ADR 0018: the window opens on the start screen,
-*What's next* (§14.13); everything below is the mail view, one key (Esc or M)
+the *Dashboard* (§14.13); everything below is the mail view, one key (Esc or M)
 away, unchanged except where §14.13 says.)*
 
 - Sidebar: account avatar button (§7.7), mailboxes and labels, unread
@@ -4359,6 +4403,23 @@ the other tips, until put away or until Clean Up is opened.)*
   Junk) leaves the Inbox on this Mac only; no `archived` label is added at
   the service (§7.9, ADR 0014).
 
+**Amendment (2026-11-04): on the Dashboard.** *Implemented 2026-11-04.*
+The user cleared Triage and still had 6,706 conversations in the Inbox,
+97% older than a month (Triage only takes what is new since the last
+set). A light Clean Up sits on the Dashboard under the workflow cards:
+*Tidy the Inbox*, the Inbox's message count, and up to five groups worth
+archiving whole, largest first, each with its count and an **Archive**
+button (one undoable action, ⌘Z, as in Clean Up), and *Open Clean Up…*
+for the rest. The groups (`inbox_tidy`, Inbox scope, each at least 20
+messages): *Promotions* (Gmail's category, every sender); the three
+busiest senders the user has never written to (not their own address,
+and not a sender all of whose Inbox mail is already in Promotions); and
+*Older than three months*, every calendar month before the one three
+back ("Before August 2026"). Archiving is `cleanup_apply` with the
+suggestion's view and keys. It does not widen the sync window as the
+Clean Up window does: it acts on the Inbox as stored. Shown only when
+there is something to offer.
+
 ### 14.13 Workflows **(Amendment 2026-10-11)**
 
 A workflow is a focused, full-window place for one daily job, beside the
@@ -4391,11 +4452,13 @@ ones every workflow must keep:
 
 #### The start screen
 
-The main window opens on the start screen (*What's next*); the mail app
+The main window opens on the start screen, the *Dashboard* (*Amended
+2026-11-04*: named *What's next* until then; the user asked for
+"Dashboard"); the mail app
 is one key away (**Esc** or **M**, *Open Mail* under the cards, and
-*View › Mail*), and Esc in the mail app comes back (as do *What's Next*
-at the top of the sidebar, marked with an Esc keycap, and *View › What's
-Next*, ⌘0), except while typing in a field. The window
+*View › Mail*), and Esc in the mail app comes back (as do *Dashboard*
+at the top of the sidebar, marked with an Esc keycap, and *View ›
+Dashboard*, ⌘0), except while typing in a field. The window
 remembers which of the two was showing when it quits only for the rest of
 that day.
 

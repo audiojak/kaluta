@@ -11,6 +11,7 @@ use provider_api::fake::FakeProvider;
 use provider_api::{FetchedBody, FetchedMessage};
 
 use super::load::CleanupLoadOutcome;
+use super::tidy;
 use super::*;
 use crate::account::SyncWindow;
 use crate::{CoreConfig, CoreEvent, EventListener};
@@ -732,4 +733,64 @@ fn the_first_sync_of_the_day_records_the_inbox() {
         db.read_blocking(|c| mail_store::cleanup::inbox_days(c, "2000-01-01")).unwrap() == want
     });
     assert_eq!(db.read_blocking(mail_store::cleanup::baseline).unwrap(), None, "only opening Clean Up sets it");
+}
+
+/// The Dashboard's card (spec §14.12, on the Dashboard): Promotions, the
+/// busiest senders the user never wrote to, and mail from before the
+/// month three back; small groups and people the user writes to are not
+/// offered.
+#[test]
+fn the_dashboard_offers_the_big_groups_nobody_answers() {
+    const DAY: i64 = 86_400_000;
+    let fake = Arc::new(FakeProvider::new("me@example.com", NOW, 500));
+    let mut n = 0;
+    let mut seed = |from: &str, labels: &[&str], at: i64, count: usize| {
+        for _ in 0..count {
+            n += 1;
+            let mut m = message(&format!("m{n}"), &format!("t{n}"), from, labels);
+            m.internal_date = at;
+            fake.seed(m);
+        }
+    };
+    seed("deals@shop.example", &["INBOX", "CATEGORY_PROMOTIONS"], NOW, 25);
+    seed("no-reply@zoom.example", &["INBOX", "CATEGORY_UPDATES"], NOW, 30);
+    seed("alerts@bank.example", &["INBOX", "CATEGORY_UPDATES"], NOW, 5);
+    seed("friend@pal.example", &["INBOX"], NOW, 40);
+    seed("old@news.example", &["INBOX"], NOW - 200 * DAY, 21);
+    seed("me@example.com", &["INBOX"], NOW, 22);
+    // The user has written to their friend; the shop's mail is all
+    // Promotions, offered once.
+    let mut sent = message("s1", "ts", "me@example.com", &["SENT"]);
+    sent.to = vec![EmailAddress::new(None, "friend@pal.example")];
+    fake.seed(sent);
+    let (_temp, core, _) = synced("tidy", &fake, 144);
+
+    let db = block_on(core.store_for("acct")).unwrap();
+    let card = block_on(crate::runtime::run(async move {
+        Ok(db.read(|c| tidy::suggest(c, NOW, 0, Some("me@example.com"))).await?)
+    }))
+    .unwrap();
+    assert_eq!(card.inbox, 143);
+    let titles: Vec<(&str, u64)> = card.suggestions.iter().map(|s| (s.title.as_str(), s.count)).collect();
+    assert_eq!(
+        titles,
+        vec![
+            ("no-reply@zoom.example", 30),
+            ("Promotions", 25),
+            ("old@news.example", 21),
+            ("Older than three months", 21)
+        ],
+        "{:?}",
+        card.suggestions
+    );
+    let old = card.suggestions.iter().find(|s| s.view == CleanupView::Time).unwrap();
+    assert_eq!(old.detail, "Before June 2026");
+
+    // Archiving one, as the card does: the next card no longer offers it.
+    let zoom = card.suggestions[0].clone();
+    block_on(core.cleanup_apply("acct".into(), zoom.view, CleanupScope::Inbox, zoom.keys, CleanupAction::Archive))
+        .unwrap();
+    let card = block_on(core.inbox_tidy("acct".into())).unwrap();
+    assert_eq!(card.inbox, 113);
+    assert!(!card.suggestions.iter().any(|s| s.title == "no-reply@zoom.example"));
 }

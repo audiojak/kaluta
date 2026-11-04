@@ -15,23 +15,23 @@ struct SidebarView: View {
         // foot. The account switcher sits in the sidebar's title bar.
         List(selection: $model.selectedMailboxID) {
             Section("Favorites") {
-                // Home, while the workflows are on (spec §14.13): the start
-                // screen is a click away from any mailbox.
+                // Home, while the workflows are on (spec §14.13): the
+                // Dashboard is a click away from any mailbox.
                 if model.workflowsEnabled {
                     Button { model.showStart() } label: {
                         Label {
                             HStack(spacing: Space.s) {
-                                Text("What's Next")
+                                Text("Dashboard")
                                 Spacer(minLength: 0)
                                 // Esc here, as Esc there comes back to Mail.
                                 Keycap(key: "Esc")
                             }
                         } icon: {
-                            Image(systemName: "sun.max")
+                            Image(systemName: "square.grid.2x2")
                         }
                     }
                     .buttonStyle(.plain)
-                    .hoverHelp("The start screen: today's workflows (Esc or ⌘0)")
+                    .hoverHelp("The Dashboard: today's workflows and the Inbox (Esc or ⌘0)")
                 }
                 ForEach(model.mailboxes.favorites, id: \.id) { mailbox in
                     MailboxRow(mailbox: mailbox)
@@ -255,6 +255,7 @@ private struct SidebarFooter: View {
     var body: some View {
         VStack(spacing: 0) {
             GuideRunFooter()
+            QueueStatusFooter()
             SyncStatusView()
         }
         .background {

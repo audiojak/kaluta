@@ -71,8 +71,8 @@ private struct GeneralSettings: View {
                     .foregroundStyle(.secondary)
             }
             Section("Workflows") {
-                Toggle("Open on the start screen (preview)", isOn: $workflows)
-                    .hoverHelp("Open Kaluta on What's Next, with the daily workflows; Mail is one key (Esc or M) away")
+                Toggle("Open on the Dashboard (preview)", isOn: $workflows)
+                    .hoverHelp("Open Kaluta on the Dashboard, with the daily workflows; Mail is one key (Esc or M) away")
                     .onChange(of: workflows) { model.workflowsSettingChanged() }
                 Stepper(value: $waitingDays, in: 1...30) {
                     Text("Waiting on others after \(waitingDays) day\(waitingDays == 1 ? "" : "s") without an answer")

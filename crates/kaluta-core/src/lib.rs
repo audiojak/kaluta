@@ -41,6 +41,7 @@ mod mail;
 mod mutations;
 mod outside;
 mod prompt_mail;
+mod queue;
 mod reading;
 mod registry;
 mod reply_answers;
@@ -71,7 +72,7 @@ pub use attachments::AttachmentFileInfo;
 pub use cleanup::{
     CleanupAction, CleanupDay, CleanupGroup, CleanupLoadEstimate, CleanupLoadStatus, CleanupMessage, CleanupProgress,
     CleanupResult, CleanupScope, CleanupUnsubscribeMethod, CleanupUnsubscribeResult, CleanupUnsubscribeTarget,
-    CleanupView,
+    CleanupView, InboxTidy, TidySuggestion,
 };
 pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
@@ -82,6 +83,7 @@ pub use guide::{
 };
 pub use mutations::OutboxStatus;
 pub use outside::{OUTSIDE_SOCKET_FILE, QUEUED_MESSAGE, outside_socket};
+pub use queue::{QueuedChange, QueuedChangeState};
 pub use registry::{AccountKind, AccountSummary, OrphanedStore};
 pub use routines::{RoutineInfo, RoutinePreviewRow, RoutineRunInfo};
 pub use rules_publish::{
