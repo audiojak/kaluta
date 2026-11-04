@@ -862,9 +862,10 @@ were refused by Gmail, and nothing on screen said so.
   `rfc822msgid:` first, then lists sent mail
   `in:sent after:<Date − 10 min> to:<first To or Cc>` (25 at most, Trash
   and Spam included) and reads each one's metadata for that header; a
-  match is taken as sent. Hand-check: *Show original* on a message sent
-  from Kaluta shows the header (that Gmail keeps custom headers on API
-  sends is from its documentation, not yet seen on this account).
+  match is taken as sent. Hand-checked 2026-11-04: *Show original* on a
+  message sent from Kaluta to the user's Workspace account shows
+  `X-Kaluta-Outbox-Id: <…kaluta@actual.ai>`, so Gmail keeps the header
+  while it replaces the Message-ID.
 - *The queue, on screen.* The sidebar's footer shows "N changes waiting
   for Gmail" while any change has failed a try, and "N changes didn't
   reach Gmail" when any was given up; a click opens the queue: each
