@@ -20,5 +20,5 @@ pub use engine::{
 pub use error::{SyncError, SyncResult};
 pub use mail_store::undo::MessageDiff;
 pub use outbox::{
-    AppliedChange, DrainReport, LocalChange, MAX_ATTEMPTS, apply_local_change, apply_local_change_recorded, now_millis,
+    AppliedChange, DrainReport, LocalChange, MAX_BACKOFF, apply_local_change, apply_local_change_recorded, now_millis,
 };

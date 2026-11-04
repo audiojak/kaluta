@@ -344,6 +344,9 @@ final class AppModel {
     var selectedThreadIDs: Set<String> = []
     /// Failed changes that were undone, shown as a banner.
     private(set) var failedChanges: UInt32 = 0
+    /// The changes on their way to the provider, and those given up: the
+    /// sidebar's queue (spec §7.4, the queue).
+    private(set) var queuedChanges: [QueuedChange] = []
     /// Messages the provider would not send, back in Drafts with why: the
     /// list column's banner.
     private(set) var failedSends: [DraftInfo] = []
@@ -392,6 +395,10 @@ final class AppModel {
     }
     /// The start screen's counts, estimates and Done today.
     var workflowOverview: WorkflowOverview?
+    /// The Dashboard's *Tidy the Inbox* card (spec §14.12, on the
+    /// Dashboard), and the suggestion being archived.
+    var inboxTidy: InboxTidy?
+    var tidyWorking: String?
     /// What the mode opened on, decided ones included, until Done.
     var reviewItems: [ReviewItem] = []
     /// How each decided item went, by tag; an item back in the stores
@@ -675,6 +682,7 @@ final class AppModel {
             cancelChecking()
             if core.isAgent(accountID) { Task { await refreshAgentPlan(accountID) } }
             await refreshFailedSends()
+            await refreshQueuedChanges()
             // An imported mailbox has no server and no sign-in (spec §7.8).
             if accountID != Self.demoAccountID, !core.isArchive(accountID) {
                 // A Keychain that will not hand over the sign-in (for example
@@ -1468,6 +1476,33 @@ final class AppModel {
         Task { try? await core.clearFailedChanges() }
     }
 
+    /// Read the queue of changes again.
+    func refreshQueuedChanges() async {
+        guard let core else { return }
+        let changes = (try? await core.queuedChanges()) ?? []
+        if changes != queuedChanges { queuedChanges = changes }
+    }
+
+    /// Try the failed change `id` again (all of them when nil); changes
+    /// waiting on a retry go now.
+    func retryQueuedChanges(_ id: Int64?) async {
+        guard let core else { return }
+        do {
+            try await core.retryQueuedChanges(id: id)
+        } catch {
+            logger.error("retrying queued changes failed: \(error.message, privacy: .private)")
+        }
+        await refreshQueuedChanges()
+    }
+
+    /// Dismiss failed changes the user has seen (all when `id` is nil).
+    func dismissQueuedChanges(_ id: Int64?) async {
+        guard let core else { return }
+        let ids = id.map { [$0] } ?? queuedChanges.filter { $0.state == .failed }.map(\.id)
+        for id in ids { try? await core.dismissQueuedChange(id: id) }
+        await refreshQueuedChanges()
+    }
+
     private func removeFromList(
         _ kind: UndoableAction.Kind,
         action: @escaping @Sendable (CoreClient, [String]) async throws -> UndoToken?
@@ -1686,6 +1721,9 @@ final class AppModel {
             syncPausedUntil = until
         case let .outboxStatus(pending, failed):
             failedChanges = failed
+            if tagged.accountID == nil || tagged.accountID == openAccountID {
+                if pending + failed > 0 || !queuedChanges.isEmpty { await refreshQueuedChanges() }
+            }
             cleanUp.outboxChanged(pending: pending, accountID: tagged.accountID)
             await refreshFailedSends()
         case let .newMail(mail):

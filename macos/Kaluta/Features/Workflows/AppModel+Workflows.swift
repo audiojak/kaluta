@@ -68,7 +68,7 @@ extension AppModel {
         rememberHome()
     }
 
-    /// View › What's Next, and back from a workflow's end.
+    /// View › Dashboard, and back from a workflow's end.
     func showStart() {
         home = .start
         rememberHome()
@@ -78,6 +78,50 @@ extension AppModel {
     func refreshWorkflowOverview() async {
         guard let core else { return }
         workflowOverview = try? await core.workflowOverview()
+        await refreshInboxTidy()
+    }
+
+    /// The Dashboard's Inbox card, for the open account.
+    func refreshInboxTidy() async {
+        guard let core, let accountID = openAccountID else {
+            inboxTidy = nil
+            return
+        }
+        let tidy = try? await core.inboxTidy(accountID: accountID)
+        if tidy != inboxTidy { inboxTidy = tidy }
+    }
+
+    /// Archive one of the card's suggestions: one undoable action, as in
+    /// Clean Up.
+    func archiveTidy(_ suggestion: TidySuggestion) async {
+        guard let core, let accountID = openAccountID, tidyWorking == nil else { return }
+        tidyWorking = suggestion.title
+        defer { tidyWorking = nil }
+        do {
+            let result = try await core.cleanupApply(accountID: accountID, view: suggestion.view, scope: .inbox,
+                                                     keys: suggestion.keys, action: .archive)
+            if let token = result.undo {
+                undo.record(accountID: accountID, actionName: result.actionName, noticeText: result.description,
+                            undo: { [weak self] in await self?.replayTidy { try await core.undo(token) } },
+                            redo: { [weak self] in await self?.replayTidy { try await core.redo(token) } })
+            } else {
+                undo.show(result.description, accountID: accountID, offersUndo: false)
+            }
+        } catch {
+            let message = (error as? CoreClientError)?.message ?? error.localizedDescription
+            workflowLog.error("tidying the Inbox failed: \(message, privacy: .private)")
+            undo.show(message, accountID: accountID, offersUndo: false)
+        }
+        await refreshWorkflowOverview()
+    }
+
+    private func replayTidy(_ step: () async throws -> Void) async {
+        do {
+            try await step()
+        } catch {
+            workflowLog.error("undoing a tidy failed: \(error.localizedDescription, privacy: .private)")
+        }
+        await refreshWorkflowOverview()
     }
 
     /// Start (or resume) a workflow.

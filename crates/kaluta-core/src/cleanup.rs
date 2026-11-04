@@ -437,6 +437,8 @@ impl Core {
 
 mod load;
 pub use load::{CleanupLoadEstimate, CleanupLoadStatus};
+mod tidy;
+pub use tidy::{InboxTidy, TidySuggestion};
 mod unsubscribe;
 pub use unsubscribe::{CleanupUnsubscribeMethod, CleanupUnsubscribeResult, CleanupUnsubscribeTarget};
 

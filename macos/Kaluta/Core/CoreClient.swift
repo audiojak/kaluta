@@ -611,6 +611,28 @@ final class CoreClient: Sendable {
         try await call { try await core.clearFailedChanges() }
     }
 
+    /// The changes on their way to the provider, and those given up (spec
+    /// §7.4, the queue), oldest first.
+    func queuedChanges() async throws(CoreClientError) -> [QueuedChange] {
+        try await call { try await core.queuedChanges() }
+    }
+
+    /// Try the failed change `id` again (every failed one when nil); those
+    /// waiting on a retry go now.
+    func retryQueuedChanges(id: Int64?) async throws(CoreClientError) {
+        try await call { try await core.retryQueuedChanges(id: id) }
+    }
+
+    /// Dismiss a failed change the user has seen.
+    func dismissQueuedChange(id: Int64) async throws(CoreClientError) {
+        try await call { try await core.dismissQueuedChange(id: id) }
+    }
+
+    /// The Dashboard's Inbox card (spec §14.12, on the Dashboard).
+    func inboxTidy(accountID: String) async throws(CoreClientError) -> InboxTidy {
+        try await call { try await core.inboxTidy(accountId: accountID) }
+    }
+
     // MARK: Attachments
 
     struct AttachmentFile: Sendable, Equatable {
@@ -1821,6 +1843,10 @@ typealias CleanupView = KalutaCore.CleanupView
 typealias CleanupScope = KalutaCore.CleanupScope
 typealias CleanupAction = KalutaCore.CleanupAction
 typealias CleanupGroup = KalutaCore.CleanupGroup
+typealias InboxTidy = KalutaCore.InboxTidy
+typealias TidySuggestion = KalutaCore.TidySuggestion
+typealias QueuedChange = KalutaCore.QueuedChange
+typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias CleanupMessage = KalutaCore.CleanupMessage
 typealias CleanupResult = KalutaCore.CleanupResult
 typealias CleanupLoadStatus = KalutaCore.CleanupLoadStatus

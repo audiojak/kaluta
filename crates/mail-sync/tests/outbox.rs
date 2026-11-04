@@ -116,6 +116,106 @@ async fn a_transient_failure_is_retried_in_order() {
     assert_eq!(labels(&fake, "m1"), vec!["INBOX", "UNREAD"], "archive then unarchive, in order");
 }
 
+/// A change keeps being retried while the network is down, for up to three
+/// days: then it is given up and rolled back (spec §7.4, the queue).
+#[tokio::test]
+async fn a_transient_failure_is_retried_for_days_not_seconds() {
+    let (fake, db, _recorder, engine) = setup("retry-days").await;
+    engine.apply_change(LocalChange::archive(vec![ThreadId::new("a")]), true).await.unwrap();
+    for attempt in 0..12 {
+        fake.fail_next_writes(vec![ProviderError::Network("offline".into())]);
+        let report = engine.drain_outbox().await.unwrap();
+        assert_eq!((report.retrying, report.failed), (1, 0), "attempt {attempt} is retried");
+        db.write(|tx| Ok(tx.execute("UPDATE outbox SET next_attempt_at = 0", [])?)).await.unwrap();
+    }
+    assert_eq!(inbox(&db).await, vec!["b"], "still archived here meanwhile");
+    // The longest wait between tries is a quarter of an hour.
+    fake.fail_next_writes(vec![ProviderError::Network("offline".into())]);
+    engine.drain_outbox().await.unwrap();
+    let wait = engine.next_outbox_retry().await.unwrap().unwrap() - mail_sync::now_millis();
+    assert!(wait <= 15 * 60 * 1000 && wait > 14 * 60 * 1000, "{wait}");
+
+    // Three days on, a change still failing is given up.
+    let old = mail_sync::now_millis() - outbox::MAX_RETRY_AGE_MS - 1;
+    db.write(move |tx| Ok(tx.execute("UPDATE outbox SET next_attempt_at = 0, created_at = ?1", [old])?)).await.unwrap();
+    fake.fail_next_writes(vec![ProviderError::Network("offline".into())]);
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!(report.failed, 1);
+    assert_eq!(inbox(&db).await, vec!["b", "a"], "rolled back");
+}
+
+#[tokio::test]
+async fn retry_now_sends_what_waits_on_a_retry_at_once() {
+    let (fake, db, _recorder, engine) = setup("retry-now").await;
+    engine.apply_change(LocalChange::archive(vec![ThreadId::new("a")]), true).await.unwrap();
+    fake.fail_next_writes(vec![ProviderError::Network("offline".into())]);
+    engine.drain_outbox().await.unwrap();
+    assert_eq!(engine.drain_outbox().await.unwrap().sent, 0, "waiting on its retry");
+    assert_eq!(db.write(outbox::retry_now).await.unwrap(), 1);
+    assert_eq!(engine.drain_outbox().await.unwrap().sent, 1);
+    assert_eq!(labels(&fake, "m1"), vec!["UNREAD"]);
+}
+
+/// A failed change, tried again, is made again here and reaches the
+/// server; one dismissed is gone.
+#[tokio::test]
+async fn a_failed_change_can_be_tried_again_or_dismissed() {
+    let (fake, db, _recorder, engine) = setup("requeue").await;
+    engine.apply_change(LocalChange::archive(vec![ThreadId::new("a")]), true).await.unwrap();
+    engine.apply_change(LocalChange::set_starred(vec![ThreadId::new("b")], true), true).await.unwrap();
+    fake.fail_next_writes(vec![
+        ProviderError::Invalid("Invalid ids value".into()),
+        ProviderError::Invalid("Invalid ids value".into()),
+    ]);
+    assert_eq!(engine.drain_outbox().await.unwrap().failed, 2);
+    assert_eq!(inbox(&db).await, vec!["b", "a"], "the archive was rolled back");
+    let entries = db.read(outbox::entries).await.unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|e| e.state == "failed" && e.last_error.as_deref() == Some("Invalid ids value")));
+
+    let (archive, star) = (entries[0].id, entries[1].id);
+    assert!(db.write(move |tx| outbox::discard_failed(tx, star)).await.unwrap());
+    let now = mail_sync::now_millis();
+    let (n, changes) = db.write(move |tx| outbox::requeue_failed(tx, Some(archive), now)).await.unwrap();
+    assert_eq!(n, 1);
+    assert!(changes.mailboxes["INBOX"].removed.contains("a"), "archived here again");
+    assert_eq!(inbox(&db).await, vec!["b"]);
+    assert_eq!(engine.drain_outbox().await.unwrap().sent, 1);
+    assert_eq!(labels(&fake, "m1"), vec!["UNREAD"], "and on the server");
+    assert_eq!(labels(&fake, "m3"), vec!["INBOX"], "the dismissed star never went");
+    assert_eq!(engine.outbox_counts().await.unwrap(), outbox::OutboxCounts::default());
+    assert!(db.read(consistency::check).await.unwrap().is_empty());
+}
+
+/// Gmail rejects a whole batch naming an id it never gave out ("Invalid
+/// ids value"): optimistic copies of sent mail stay out of the call.
+#[tokio::test]
+async fn a_local_copy_never_reaches_the_provider() {
+    let (fake, db, _recorder, engine) = setup("local-ids").await;
+    fake.reject_missing_ids(true);
+    let mixed = outbox::OutboxOp::ModifyLabels {
+        message_ids: vec![MessageId::new("m1"), MessageId::new("local-abc")],
+        add: vec![LabelId::new("STARRED")],
+        remove: vec![],
+    };
+    let only_local = outbox::OutboxOp::ModifyLabels {
+        message_ids: vec![MessageId::new("local-abc")],
+        add: vec![LabelId::new("STARRED")],
+        remove: vec![],
+    };
+    db.write(move |tx| {
+        outbox::enqueue(tx, &mixed, 0)?;
+        outbox::enqueue(tx, &only_local, 0).map(|_| ())
+    })
+    .await
+    .unwrap();
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!((report.sent, report.failed), (2, 0));
+    let ops = fake.label_ops();
+    assert_eq!(ops.len(), 1, "nothing to send for the local copy alone");
+    assert_eq!(ops[0].message_ids, vec![MessageId::new("m1")]);
+}
+
 #[tokio::test]
 async fn a_send_held_for_undo_steps_aside_for_later_changes() {
     let (fake, db, _recorder, engine) = setup("held").await;

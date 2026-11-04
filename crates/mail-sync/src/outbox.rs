@@ -14,8 +14,8 @@ use provider_api::{LabelOp, ProviderError};
 use crate::engine::SyncEngine;
 use crate::error::SyncResult;
 
-/// Retries before an op is given up and rolled back.
-pub const MAX_ATTEMPTS: u32 = 5;
+/// The longest wait between two retries of a change (spec §7.4).
+pub const MAX_BACKOFF: Duration = Duration::from_secs(15 * 60);
 
 /// How soon to look again while another drainer has an op in flight.
 const BUSY_POLL_MS: Millis = 2_000;
@@ -118,8 +118,14 @@ pub fn now_millis() -> Millis {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as Millis).unwrap_or_default()
 }
 
-fn backoff(attempts: u32) -> Duration {
-    Duration::from_secs(2u64.saturating_pow(attempts + 1).min(300))
+/// The wait before retry `attempts + 1`: 2 s, 4 s, 8 s … doubling to
+/// [`MAX_BACKOFF`], or longer when the provider asked for longer.
+fn backoff(attempts: u32, error: &ProviderError) -> Duration {
+    let doubling = Duration::from_secs(2u64.saturating_pow(attempts.saturating_add(1))).min(MAX_BACKOFF);
+    match error {
+        ProviderError::RateLimited { retry_after: Some(after) } => doubling.max(*after),
+        _ => doubling,
+    }
 }
 
 /// What one message's labels become: `add` it lacked, `remove` it had.
@@ -261,8 +267,11 @@ impl SyncEngine {
     }
 
     /// Send every ready op to the provider, oldest first. Transient failures
-    /// are retried later with backoff; after [`MAX_ATTEMPTS`], or on a
-    /// permanent error, the op is rolled back locally and marked failed.
+    /// (the network, a busy server, a rate limit) are retried later with
+    /// backoff ([`backoff`]) for as long as the op is younger than
+    /// [`outbox::MAX_RETRY_AGE_MS`]; past that, or on a permanent error,
+    /// the op is rolled back locally and marked failed, for the user to
+    /// try again or dismiss.
     ///
     /// Safe to run from several engines or processes on one store (spec
     /// §7.4, outbox claims): each op is claimed in the transaction that
@@ -273,7 +282,14 @@ impl SyncEngine {
     pub async fn drain_outbox(&self) -> SyncResult<DrainReport> {
         let _serialized = self.drain_lock.lock().await;
         let me = self.claimant.clone();
-        self.db().write(move |tx| outbox::recover_in_flight(tx, &me, now_millis())).await?;
+        let repaired = self
+            .db()
+            .write(move |tx| {
+                outbox::recover_in_flight(tx, &me, now_millis())?;
+                outbox::drop_stale_local_copies(tx, now_millis())
+            })
+            .await?;
+        self.publish_changes(&repaired);
         let mut report = DrainReport::default();
         loop {
             let now = now_millis();
@@ -294,8 +310,18 @@ impl SyncEngine {
             let timer = crate::transport::Timer::start();
             // A send's optimistic copy and the id the provider gave it.
             let mut adopt: Option<(MessageId, MessageId)> = None;
+            // Optimistic copies of sent mail are not the provider's: an op
+            // left with nothing else is done.
+            let Some(op) = outbox::without_local_copies(queued.op.clone()) else {
+                let me = self.claimant.clone();
+                self.db()
+                    .write(move |tx| if outbox::holds(tx, id, me.id())? { outbox::complete(tx, id) } else { Ok(()) })
+                    .await?;
+                report.sent += 1;
+                continue;
+            };
             let call = async {
-                SyncResult::Ok(match &queued.op {
+                SyncResult::Ok(match &op {
                     OutboxOp::ModifyLabels { message_ids, add, remove } => {
                         // Before the call: history may report it before we return.
                         self.remember_own(message_ids, add, remove);
@@ -394,8 +420,8 @@ impl SyncEngine {
                     self.db().write(move |tx| if held(tx)? { outbox::complete(tx, id) } else { Ok(()) }).await?;
                     report.sent += 1;
                 }
-                Err(e) if e.is_transient() && queued.attempts + 1 < MAX_ATTEMPTS => {
-                    let at = now + backoff(queued.attempts).as_millis() as Millis;
+                Err(e) if e.is_transient() && now - queued.created_at < outbox::MAX_RETRY_AGE_MS => {
+                    let at = now + backoff(queued.attempts, &e).as_millis() as Millis;
                     let message = e.to_string();
                     self.db()
                         .write(move |tx| if held(tx)? { outbox::retry_later(tx, id, at, &message) } else { Ok(()) })

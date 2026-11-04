@@ -190,8 +190,8 @@ struct MailCommands: Commands {
         }
         CommandGroup(before: .sidebar) {
             if model.workflowsEnabled {
-                // The start screen and the mail view (spec §14.13).
-                Button("What's Next") { model.workflowSession = nil; model.showStart() }
+                // The Dashboard and the mail view (spec §14.13).
+                Button("Dashboard") { model.workflowSession = nil; model.showStart() }
                     .keyboardShortcut("0")
                     .disabled(!mailKey || model.showsWorkflows && model.workflowSession == nil)
                 Button("Mail") { model.showMail() }

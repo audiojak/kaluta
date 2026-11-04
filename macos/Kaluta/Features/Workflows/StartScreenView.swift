@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The start screen, *What's next* (spec §14.13): the day in one line, the
+/// The start screen, the *Dashboard* (spec §14.13): the day in one line, the
 /// next workflow as a large card (Return), the others on 1–7, Done today,
 /// and the mail view on Esc or M.
 struct StartScreenView: View {
@@ -28,6 +28,9 @@ struct StartScreenView: View {
                             WorkflowCard(summary: summary) { start(summary.kind) }
                         }
                     }
+                    if let tidy = model.inboxTidy, !tidy.suggestions.isEmpty {
+                        InboxTidyCard(tidy: tidy)
+                    }
                     footer(overview)
                 }
             }
@@ -36,6 +39,7 @@ struct StartScreenView: View {
             .frame(maxWidth: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { UndoNoticeView() }
         .focusable()
         .focused($focused)
         .defaultFocus($focused, true)
@@ -98,6 +102,9 @@ struct StartScreenView: View {
     private func footer(_ overview: WorkflowOverview) -> some View {
         HStack(spacing: Space.l) {
             Text(Self.doneToday(overview)).foregroundStyle(.secondary)
+            // Changes that have not reached Gmail (spec §7.4, the queue):
+            // the sidebar is not on screen here.
+            QueueStatusFooter().fixedSize()
             Spacer(minLength: Space.l)
             Text("Return starts · 1–7 chooses").foregroundStyle(.secondary)
             Button("Open Mail", systemImage: "tray") { model.showMail() }
@@ -108,7 +115,7 @@ struct StartScreenView: View {
     }
 
     static func headline(_ overview: WorkflowOverview?) -> String {
-        guard let overview else { return "What's next" }
+        guard let overview else { return "Dashboard" }
         let minutes = (Int(overview.estimateSecs) + 30) / 60
         if overview.next == nil { return "You're all caught up." }
         return minutes < 1 ? "A minute or two of mail today." : "About \(minutes) minutes of mail today."

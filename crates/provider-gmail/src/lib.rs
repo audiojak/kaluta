@@ -279,6 +279,13 @@ impl MailProvider for GmailProvider {
         Ok(list.messages.into_iter().next().map(|m| MessageId(m.id)))
     }
 
+    /// Gmail gives a message sent through the API its own Message-ID
+    /// (`…@mail.gmail.com`), so the optimistic copy could never be matched
+    /// by the composer's: it takes the id `messages.send` returned instead.
+    fn adopts_sent_copies(&self) -> bool {
+        true
+    }
+
     async fn fetch_attachment(&self, message: &MessageId, attachment_id: &str) -> ProviderResult<Vec<u8>> {
         let url = self.url(&format!("messages/{}/attachments/{attachment_id}", message.as_str()));
         let data: wire::AttachmentData =

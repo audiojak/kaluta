@@ -62,7 +62,14 @@ pub struct QueuedOp {
     pub id: i64,
     pub op: OutboxOp,
     pub attempts: u32,
+    /// When it was queued: transient failures are retried until it is
+    /// too old ([`MAX_RETRY_AGE_MS`]).
+    pub created_at: Millis,
 }
+
+/// How long a change keeps being retried after a transient failure (the
+/// network down, Gmail busy) before it is given up and rolled back.
+pub const MAX_RETRY_AGE_MS: Millis = 3 * 24 * 60 * 60 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct OutboxCounts {
@@ -389,19 +396,19 @@ pub fn release_held_sends(tx: &Transaction<'_>, now: Millis) -> StoreResult<usiz
 /// reach the server before the one it follows. Sends still held for Undo
 /// Send are the exception: they step aside until their time.
 pub fn next_ready(conn: &Connection, now: Millis) -> StoreResult<Option<QueuedOp>> {
-    let row: Option<(i64, String, i64, Option<Millis>)> = conn
+    let row: Option<(i64, String, i64, Option<Millis>, Millis)> = conn
         .prepare_cached(
-            "SELECT id, payload_json, attempts, next_attempt_at FROM outbox
+            "SELECT id, payload_json, attempts, next_attempt_at, created_at FROM outbox
              WHERE state = 'pending'
                AND NOT (kind = 'send' AND attempts = 0 AND next_attempt_at IS NOT NULL AND next_attempt_at > ?1)
              ORDER BY id LIMIT 1",
         )?
-        .query_row([now], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+        .query_row([now], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
         .optional()?;
     match row {
-        Some((_, _, _, Some(at))) if at > now => Ok(None),
-        Some((id, json, attempts, _)) => {
-            Ok(Some(QueuedOp { id, op: serde_json::from_str(&json)?, attempts: attempts.max(0) as u32 }))
+        Some((_, _, _, Some(at), _)) if at > now => Ok(None),
+        Some((id, json, attempts, _, created_at)) => {
+            Ok(Some(QueuedOp { id, op: serde_json::from_str(&json)?, attempts: attempts.max(0) as u32, created_at }))
         }
         None => Ok(None),
     }
@@ -499,6 +506,194 @@ pub fn counts(conn: &Connection) -> StoreResult<OutboxCounts> {
 /// Drop failed ops the user has acknowledged.
 pub fn clear_failed(tx: &Transaction<'_>) -> StoreResult<usize> {
     Ok(tx.execute("DELETE FROM outbox WHERE state = 'failed'", [])?)
+}
+
+/// One row of the queue as the user sees it (spec §7.4, *the queue*).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutboxEntry {
+    pub id: i64,
+    pub op: OutboxOp,
+    /// `pending`, `in_flight` or `failed`.
+    pub state: String,
+    pub attempts: u32,
+    pub created_at: Millis,
+    /// When a retry is due; `None` when it goes as soon as it can.
+    pub next_attempt_at: Option<Millis>,
+    pub last_error: Option<String>,
+}
+
+/// Every op waiting, in flight or given up, oldest first. Sends held for
+/// Undo Send and draft mirroring are left out: Drafts and the composer
+/// show those.
+pub fn entries(conn: &Connection) -> StoreResult<Vec<OutboxEntry>> {
+    /// id, payload, state, attempts, created, next attempt, last error.
+    type Row = (i64, String, String, i64, Millis, Option<Millis>, Option<String>);
+    let rows: Vec<Row> = conn
+        .prepare_cached(
+            "SELECT id, payload_json, state, attempts, created_at, next_attempt_at, last_error FROM outbox
+             WHERE kind NOT IN ('sync_draft', 'delete_draft')
+               AND NOT (kind = 'send' AND state = 'pending' AND attempts = 0)
+             ORDER BY id",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)))?
+        .collect::<Result<_, _>>()?;
+    rows.into_iter()
+        .map(|(id, json, state, attempts, created_at, next_attempt_at, last_error)| {
+            Ok(OutboxEntry {
+                id,
+                op: serde_json::from_str(&json)?,
+                state,
+                attempts: attempts.max(0) as u32,
+                created_at,
+                next_attempt_at,
+                last_error,
+            })
+        })
+        .collect()
+}
+
+/// Ops waiting on a retry go at once (the network is back, or the user
+/// asked). Sends still held for Undo Send keep their hold.
+pub fn retry_now(tx: &Transaction<'_>) -> StoreResult<usize> {
+    Ok(tx.execute(
+        "UPDATE outbox SET next_attempt_at = NULL WHERE state = 'pending' AND attempts > 0 AND next_attempt_at IS NOT NULL",
+        [],
+    )?)
+}
+
+/// Try a failed op again (all of them when `id` is `None`): its change is
+/// made locally again, as when the user first made it, and it is queued
+/// afresh at the end, so it cannot overtake what was done since. A failed
+/// send is left alone: it is back in Drafts, sent from there. Optimistic
+/// copies of sent mail are dropped from it ([`without_local_copies`]).
+pub fn requeue_failed(tx: &Transaction<'_>, id: Option<i64>, now: Millis) -> StoreResult<(usize, ThreadChanges)> {
+    let rows: Vec<(i64, String)> = tx
+        .prepare_cached(
+            "SELECT id, payload_json FROM outbox WHERE state = 'failed' AND kind != 'send' AND (?1 IS NULL OR id = ?1)
+             ORDER BY id",
+        )?
+        .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let mut w = MailWriter::new(tx);
+    let mut requeued = 0;
+    for (old, json) in rows {
+        tx.execute("DELETE FROM outbox WHERE id = ?1", [old])?;
+        let op: OutboxOp = serde_json::from_str(&json)?;
+        let Some(op) = without_local_copies(op) else { continue };
+        match &op {
+            OutboxOp::ModifyLabels { message_ids, add, remove } => {
+                for m in message_ids {
+                    w.modify_message_labels(m, add, remove)?;
+                }
+            }
+            OutboxOp::Trash { message_ids, .. } => {
+                let (trash, inbox) = (
+                    [LabelId::new(mail_domain::system_labels::TRASH)],
+                    [LabelId::new(mail_domain::system_labels::INBOX)],
+                );
+                for m in message_ids {
+                    w.modify_message_labels(m, &trash, &inbox)?;
+                }
+            }
+            OutboxOp::Untrash { message_ids } => {
+                let trash = [LabelId::new(mail_domain::system_labels::TRASH)];
+                for m in message_ids {
+                    w.modify_message_labels(m, &[], &trash)?;
+                }
+            }
+            OutboxOp::Send { .. } | OutboxOp::SyncDraft { .. } | OutboxOp::DeleteDraft { .. } => {}
+        }
+        enqueue(tx, &op, now)?;
+        requeued += 1;
+    }
+    Ok((requeued, w.finish()?))
+}
+
+/// Dismiss one failed op (the user has seen it); `false` if there is no
+/// such failed op.
+pub fn discard_failed(tx: &Transaction<'_>, id: i64) -> StoreResult<bool> {
+    Ok(tx.execute("DELETE FROM outbox WHERE id = ?1 AND state = 'failed'", [id])? == 1)
+}
+
+/// Whether a message id is an optimistic local copy of sent mail, which
+/// the provider has never heard of.
+pub fn is_local_copy(id: &MessageId) -> bool {
+    id.as_str().starts_with(crate::write::LOCAL_PREFIX)
+}
+
+/// `op` without optimistic local copies of sent mail: the provider does
+/// not know their ids, and Gmail rejects a whole batch for one of them
+/// ("Invalid ids value"). `None` when nothing is left to send. Other ops
+/// are returned as they are.
+pub fn without_local_copies(op: OutboxOp) -> Option<OutboxOp> {
+    let keep = |ids: Vec<MessageId>| ids.into_iter().filter(|m| !is_local_copy(m)).collect::<Vec<_>>();
+    let op = match op {
+        OutboxOp::ModifyLabels { message_ids, add, remove } => {
+            OutboxOp::ModifyLabels { message_ids: keep(message_ids), add, remove }
+        }
+        OutboxOp::Trash { message_ids, previous } => OutboxOp::Trash {
+            message_ids: keep(message_ids),
+            previous: previous.into_iter().filter(|(m, _)| !is_local_copy(m)).collect(),
+        },
+        OutboxOp::Untrash { message_ids } => OutboxOp::Untrash { message_ids: keep(message_ids) },
+        other => return Some(other),
+    };
+    match &op {
+        OutboxOp::ModifyLabels { message_ids, .. }
+        | OutboxOp::Trash { message_ids, .. }
+        | OutboxOp::Untrash { message_ids }
+            if message_ids.is_empty() =>
+        {
+            None
+        }
+        _ => Some(op),
+    }
+}
+
+/// How close in time the provider's copy of a sent message is to the
+/// optimistic local one for [`drop_stale_local_copies`] to take it for
+/// the same message.
+const LOCAL_COPY_MATCH_MS: Millis = 2 * 60 * 1000;
+/// How old a local copy must be before it can be taken for stale.
+const LOCAL_COPY_STALE_MS: Millis = 10 * 60 * 1000;
+
+/// Optimistic copies of sent mail that were never replaced: a provider
+/// that gave the message another Message-ID (Gmail does, for some
+/// accounts) left both the copy and its own message in the thread. A copy
+/// is dropped once it is older than ten minutes, its send is no longer
+/// queued, and the thread holds a message of the user's own, from the
+/// provider, with the same subject sent within two minutes of it.
+pub fn drop_stale_local_copies(tx: &Transaction<'_>, now: Millis) -> StoreResult<ThreadChanges> {
+    let stale: Vec<String> = tx
+        .prepare_cached(
+            "SELECT l.gmail_id FROM messages l
+             WHERE l.gmail_id >= ?1 AND l.gmail_id < ?2 AND l.internal_date < ?3
+               AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.kind = 'send' AND o.state != 'failed'
+                                 AND json_extract(o.payload_json, '$.local_message_id') = l.gmail_id)
+               AND EXISTS (SELECT 1 FROM messages p
+                           WHERE p.thread_id = l.thread_id AND p.id != l.id AND p.is_sent_by_me
+                             AND NOT (p.gmail_id >= ?1 AND p.gmail_id < ?2)
+                             AND p.subject = l.subject
+                             AND abs(p.internal_date - l.internal_date) <= ?4)",
+        )?
+        .query_map(
+            params![
+                crate::write::LOCAL_PREFIX,
+                crate::write::LOCAL_PREFIX.trim_end_matches('-').to_owned() + ".",
+                now - LOCAL_COPY_STALE_MS,
+                LOCAL_COPY_MATCH_MS
+            ],
+            |r| r.get(0),
+        )?
+        .collect::<Result<_, _>>()?;
+    let mut w = MailWriter::new(tx);
+    for id in &stale {
+        w.delete_message(&MessageId(id.clone()))?;
+    }
+    if !stale.is_empty() {
+        tracing::info!(count = stale.len(), "dropped optimistic sent copies the provider's own replaced");
+    }
+    w.finish()
 }
 
 pub fn current_labels(tx: &Transaction<'_>, m: &MessageId) -> StoreResult<Vec<LabelId>> {

@@ -105,6 +105,81 @@ async fn sending_shows_an_optimistic_copy_then_the_real_one_replaces_it() {
     assert!(db.read(consistency::check).await.unwrap().is_empty());
 }
 
+/// Gmail gives a message sent through the API its own Message-ID, so the
+/// optimistic copy is replaced by the id `send` returned, not matched by
+/// Message-ID; a label change made meanwhile leaves the copy out.
+#[tokio::test]
+async fn with_gmails_own_message_ids_the_copy_is_still_replaced() {
+    let (fake, db, engine) = setup("gmail-ids").await;
+    fake.use_gmail_message_ids(true);
+    let mut d = reply_draft(&db, &MessageId::new("m1"), false, &["me@example.com".to_owned()]).await.unwrap();
+    d.body_html = format!("<p>Thursday works.</p>{}", d.quoted_html);
+    let id = save(&db, d).await;
+    send_draft(&db, id, me(), true, 0).await.unwrap();
+    // Waiting on others labels the thread as the reply goes.
+    engine
+        .apply_change(
+            mail_sync::LocalChange::Labels {
+                thread_ids: vec![ThreadId::new("t1")],
+                add: vec![LabelId::new("Label_24")],
+                remove: vec![],
+            },
+            true,
+        )
+        .await
+        .unwrap();
+
+    let report = engine.drain_outbox().await.unwrap();
+    assert_eq!((report.sent, report.failed), (2, 0));
+    assert!(
+        fake.label_ops().iter().all(|op| op.message_ids.iter().all(|m| !m.as_str().starts_with("local-"))),
+        "the provider is never asked about a local copy: {:?}",
+        fake.label_ops()
+    );
+    assert!(fake.message(&MessageId::new("m1")).unwrap().label_ids.contains(&LabelId::new("Label_24")));
+
+    engine.sync_incremental().await.unwrap();
+    let (_, messages) = db.read(|c| read::get_thread(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
+    assert!(!messages.iter().any(|m| m.id.0.starts_with("local-")), "placeholder replaced");
+    assert_eq!(messages.len(), 2, "one copy of the reply, not two");
+    assert!(db.read(consistency::check).await.unwrap().is_empty());
+}
+
+/// A copy left behind before the fix (its Message-ID never came back) goes
+/// once the provider's own copy of the same reply is in the thread.
+#[tokio::test]
+async fn a_local_copy_left_behind_is_dropped_once_the_real_one_is_there() {
+    let (_fake, db, engine) = setup("stale-copy").await;
+    let mut d = reply_draft(&db, &MessageId::new("m1"), false, &["me@example.com".to_owned()]).await.unwrap();
+    d.body_html = format!("<p>Thursday works.</p>{}", d.quoted_html);
+    let id = save(&db, d).await;
+    send_draft(&db, id, me(), true, 0).await.unwrap();
+    engine.drain_outbox().await.unwrap();
+    // As Gmail did: the copy's Message-ID never comes back, so the next
+    // sync cannot match it. Sent at the fake's time, long ago.
+    db.write(|tx| {
+        Ok(tx.execute(
+            "UPDATE messages SET rfc822_message_id = 'kaluta.1@example.com', internal_date = ?1 WHERE gmail_id LIKE 'local-%'",
+            [NOW],
+        )?)
+    })
+    .await
+    .unwrap();
+    engine.sync_incremental().await.unwrap();
+    let count = |db: &Db| {
+        let db = db.clone();
+        async move { db.read(|c| read::get_thread(c, &ThreadId::new("t1"))).await.unwrap().unwrap().1.len() }
+    };
+    assert_eq!(count(&db).await, 3, "both copies of the reply, as before the fix");
+
+    engine.drain_outbox().await.unwrap();
+    let (_, messages) = db.read(|c| read::get_thread(c, &ThreadId::new("t1"))).await.unwrap().unwrap();
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(!messages.iter().any(|m| m.id.0.starts_with("local-")));
+    assert!(messages.iter().any(|m| m.id.as_str() == "sent1"));
+    assert!(db.read(consistency::check).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_failed_send_brings_the_draft_back_with_the_error() {
     let (fake, db, engine) = setup("fail").await;
