@@ -4724,8 +4724,9 @@ moves a task to tomorrow without penalty. Tasks finished elsewhere
 (by a reply in Triage) show as done in the rail. Later days stay out of
 the set ("3 more later this week").
 
-The rail lists the set beside the task under its categories' headings:
-the one on screen marked, the others with their due line, done ones
+The rail lists the set beside the task under its categories' headings,
+each by due day; it holds still as the set is worked (a clicked or
+skipped task keeps its line): the one on screen marked, the others with their due line, done ones
 ticked with how ("Done", "Tomorrow", "Done elsewhere"); it steps aside
 while a reply is written. A task finished outside the set is
 decided *elsewhere* when the set resumes, with no time counted, and the

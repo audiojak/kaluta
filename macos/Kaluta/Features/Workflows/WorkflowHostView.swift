@@ -612,22 +612,34 @@ struct WorkflowRail: View {
         item.decision == nil && item.key != session.current?.key && session.writer == nil && !session.isTyping
     }
 
-    /// Tasks under their categories, in the set's order; one heading
-    /// elsewhere.
+    /// Tasks under their categories; one heading elsewhere.
     private var sections: [(title: String, items: [WorkflowItem])] {
         guard session.kind == .tasks else { return [(railTitle, railItems)] }
-        return Self.sections(railItems) { item in item.taskId.flatMap { session.taskInfo[$0]?.category } }
+        return Self.sections(railItems, order: session.taskCategories) { item in
+            item.taskId.flatMap { session.taskInfo[$0] }
+        }
     }
 
-    /// Runs of the same category, each under its name ("Other" without one).
-    static func sections(_ items: [WorkflowItem], category: (WorkflowItem) -> String?)
+    /// Tasks by category in the account's order (others after, by name;
+    /// "Other" without a task), each by due day then as made. It holds
+    /// still as the set is worked: a clicked or skipped task keeps its line.
+    static func sections(_ items: [WorkflowItem], order: [String], task: (WorkflowItem) -> TaskItem?)
         -> [(title: String, items: [WorkflowItem])] {
-        var out: [(title: String, items: [WorkflowItem])] = []
-        for item in items {
-            let title = category(item) ?? "Other"
-            if out.last?.title == title { out[out.count - 1].items.append(item) } else { out.append((title, [item])) }
-        }
-        return out
+        let known = Dictionary(order.enumerated().map { ($1.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        let grouped = Dictionary(grouping: items) { task($0)?.category ?? "Other" }
+        return grouped.keys
+            .sorted { a, b in
+                let (x, y) = (known[a.lowercased()] ?? .max, known[b.lowercased()] ?? .max)
+                return x != y ? x < y : a.localizedStandardCompare(b) == .orderedAscending
+            }
+            .map { title in
+                let lines = (grouped[title] ?? []).sorted { a, b in
+                    let (x, y) = (task(a), task(b))
+                    let (dx, dy) = (x?.dueDay ?? "", y?.dueDay ?? "")
+                    return dx != dy ? dx < dy : (x?.id ?? 0) < (y?.id ?? 0)
+                }
+                return (title, lines)
+            }
     }
 
     @ViewBuilder private func row(_ item: WorkflowItem) -> some View {

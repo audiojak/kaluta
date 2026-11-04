@@ -787,15 +787,18 @@ struct WorkflowTests {
         let order = try await core.taskCategories()
         let categories = session.items.compactMap { model.task(of: $0)?.category }
         #expect(categories == categories.sorted { order.firstIndex(of: $0) ?? .max < order.firstIndex(of: $1) ?? .max })
-        let sections = WorkflowRail.sections(session.items) { model.task(of: $0)?.category }
+        let rail = { WorkflowRail.sections(session.items, order: session.taskCategories) { model.task(of: $0) } }
+        let sections = rail()
         #expect(sections.map(\.title) == ["Reply", "Decide", "Follow Up"].filter(categories.contains))
-        #expect(WorkflowRail.sections([]) { _ in nil }.isEmpty)
+        #expect(sections.flatMap(\.items).map(\.key) == session.items.map(\.key), "the walk follows the rail")
+        #expect(WorkflowRail.sections([], order: []) { _ in nil }.isEmpty)
 
         // Clicked in the rail: up next; the one before waits its turn.
         let first = try #require(session.current)
         let clicked = try #require(session.items.last)
         await model.bringForward(clicked, session: session)
         #expect(session.current?.key == clicked.key)
+        #expect(rail().flatMap(\.items).map(\.key) == sections.flatMap(\.items).map(\.key), "the rail holds still")
         #expect(session.items.contains { $0.key == first.key && $0.decision == nil })
 
         // M writes a note in place; the bar saves or cancels it.

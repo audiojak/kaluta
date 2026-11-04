@@ -256,6 +256,7 @@ extension AppModel {
         guard let core, let all = try? await core.listTasks(includeDone: true) else { return }
         let ids = Set(session.items.compactMap(\.taskId))
         session.taskInfo = Dictionary(all.filter { ids.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        if let order = try? await core.taskCategories() { session.taskCategories = order }
     }
 
     /// The message an item shows: in Waiting on others the user's own (what
