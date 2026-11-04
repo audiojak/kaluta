@@ -96,6 +96,38 @@ impl GmailProvider {
     }
 }
 
+/// The header naming a send across its retries: the composer's
+/// Message-ID, which Gmail may replace with its own.
+pub const OUTBOX_HEADER: &str = "X-Kaluta-Outbox-Id";
+/// How long before a message's `Date` its earlier attempt is looked for.
+const SENT_LOOKBACK_MS: i64 = 10 * 60 * 1000;
+/// How many recent sent messages are read for the header.
+const SENT_CANDIDATES: u32 = 25;
+
+/// A Message-ID that can name a send: without brackets, not empty, no
+/// spaces.
+fn outbox_id(message_id: Option<&str>) -> Option<String> {
+    let id = message_id?.trim().trim_matches(['<', '>']);
+    (!id.is_empty() && !id.contains(char::is_whitespace)).then(|| id.to_owned())
+}
+
+/// `raw` with [`OUTBOX_HEADER`] first, naming it by its Message-ID; as it
+/// is when it has none, or already carries the header. The same raw always
+/// gives the same bytes, so every retry carries the same value.
+pub fn with_outbox_header(raw: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let Ok(parsed) = mail_mime::parse(raw) else { return raw.into() };
+    let Some(id) = outbox_id(parsed.headers.message_id.as_deref()) else { return raw.into() };
+    let head_end = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(raw.len());
+    let head = String::from_utf8_lossy(&raw[..head_end]).to_ascii_lowercase();
+    let name = OUTBOX_HEADER.to_ascii_lowercase();
+    if head.starts_with(&format!("{name}:")) || head.contains(&format!("\n{name}:")) {
+        return raw.into();
+    }
+    let mut out = format!("{OUTBOX_HEADER}: <{id}>\r\n").into_bytes();
+    out.extend_from_slice(raw);
+    out.into()
+}
+
 #[async_trait]
 impl MailProvider for GmailProvider {
     async fn paused_for(&self) -> Option<std::time::Duration> {
@@ -248,9 +280,13 @@ impl MailProvider for GmailProvider {
         self.http.empty(cost::TRASH, Priority::Interactive, |c| c.post(&url)).await
     }
 
+    /// Sends carry [`OUTBOX_HEADER`] (the composer's Message-ID), which
+    /// Gmail keeps when it gives the message its own Message-ID: how
+    /// [`MailProvider::already_sent`] finds an earlier attempt.
     async fn send(&self, raw: &[u8], thread: Option<&ThreadId>) -> ProviderResult<MessageId> {
         let url = self.url("messages/send");
-        let mut body = json!({ "raw": encode_base64url(raw) });
+        let raw = with_outbox_header(raw);
+        let mut body = json!({ "raw": encode_base64url(&raw) });
         if let Some(t) = thread {
             body["threadId"] = json!(t.as_str());
         }
@@ -260,23 +296,56 @@ impl MailProvider for GmailProvider {
     }
 
     /// Gmail's `messages.send` takes no idempotency key, so an earlier
-    /// attempt is found by the composer's Message-ID, which Gmail keeps
-    /// (§7.5): `rfc822msgid:` anywhere in the mailbox, Trash and Spam
-    /// included. A send with no Message-ID cannot be looked for.
+    /// attempt is looked for: first by the composer's Message-ID
+    /// (`rfc822msgid:`, anywhere, Trash and Spam included), which some
+    /// accounts keep; then, since Gmail gives API sends its own Message-ID
+    /// on others (spec §7.4, amended 2026-11-04), among the user's sent
+    /// mail since shortly before the message's `Date`, to its first
+    /// recipient, by the [`OUTBOX_HEADER`] every send carries. A send with
+    /// no Message-ID cannot be looked for.
     async fn already_sent(&self, raw: &[u8]) -> ProviderResult<Option<MessageId>> {
         let parsed = mail_mime::parse(raw).map_err(|e| ProviderError::Invalid(e.to_string()))?;
-        let Some(id) = parsed.headers.message_id.as_deref().map(|m| m.trim().trim_matches(['<', '>'])) else {
+        let Some(id) = outbox_id(parsed.headers.message_id.as_deref()) else {
             return Ok(None);
         };
-        if id.is_empty() || id.contains(char::is_whitespace) {
-            return Ok(None);
-        }
         let url = self.url("messages");
         let query =
             [("q", format!("rfc822msgid:{id}")), ("includeSpamTrash", "true".into()), ("maxResults", "1".into())];
         let list: wire::MessageList =
             self.http.json(cost::MESSAGES_LIST, Priority::Interactive, |c| c.get(&url).query(&query)).await?;
-        Ok(list.messages.into_iter().next().map(|m| MessageId(m.id)))
+        if let Some(m) = list.messages.into_iter().next() {
+            return Ok(Some(MessageId(m.id)));
+        }
+        let Some(date) = parsed.headers.date else { return Ok(None) };
+        let mut q = format!("in:sent after:{}", (date - SENT_LOOKBACK_MS).div_euclid(1000));
+        if let Some(to) = parsed.headers.to.first().or(parsed.headers.cc.first()) {
+            q.push_str(&format!(" to:{}", to.email));
+        }
+        let query = [("q", q), ("includeSpamTrash", "true".into()), ("maxResults", SENT_CANDIDATES.to_string())];
+        let list: wire::MessageList =
+            self.http.json(cost::MESSAGES_LIST, Priority::Interactive, |c| c.get(&url).query(&query)).await?;
+        for candidate in list.messages {
+            let url = self.url(&format!("messages/{}", candidate.id));
+            let query = [("format", "metadata"), ("metadataHeaders", OUTBOX_HEADER)];
+            let m = match self
+                .http
+                .json::<wire::Message>(cost::MESSAGES_GET, Priority::Interactive, |c| c.get(&url).query(&query))
+                .await
+            {
+                Ok(m) => m,
+                // Deleted since it was listed.
+                Err(ProviderError::NotFound(_)) => continue,
+                Err(e) => return Err(e),
+            };
+            let carries =
+                m.payload.iter().flat_map(|p| &p.headers).any(|h| {
+                    h.name.eq_ignore_ascii_case(OUTBOX_HEADER) && h.value.trim().trim_matches(['<', '>']) == id
+                });
+            if carries {
+                return Ok(Some(MessageId(m.id)));
+            }
+        }
+        Ok(None)
     }
 
     /// Gmail gives a message sent through the API its own Message-ID

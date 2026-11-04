@@ -807,8 +807,9 @@ forever on the other.
   an error that may have come after the provider took it) is first looked
   for: `MailProvider::already_sent`. Gmail searches `rfc822msgid:` (its
   `messages.send` has no idempotency key; it keeps the composer's
-  Message-ID, §7.5; *not so* for every account, see the 2026-11-04
-  amendment below); AgentMail looks for its `X-Kaluta-Outbox-Id` header
+  Message-ID, §7.5; *not so* for every account, so it also looks for
+  its `X-Kaluta-Outbox-Id` header among recent sent mail, see the
+  2026-11-04 amendment below); AgentMail looks for its `X-Kaluta-Outbox-Id` header
   (and its `Idempotency-Key` holds 24 h); Primitive cannot look and relies
   on its Message-ID `Idempotency-Key`. Found, the send is taken as sent
   (the draft is done with, the optimistic copy adopted) and not sent again.
@@ -850,9 +851,20 @@ were refused by Gmail, and nothing on screen said so.
   Copies left from before are dropped at the next drain when older than
   ten minutes, no longer queued, and the thread holds the user's own
   message from the provider with the same subject within two minutes
-  (`outbox::drop_stale_local_copies`). The same rewrite means
-  `already_sent`'s `rfc822msgid:` search cannot find an earlier attempt
-  of a send for such an account; that is a follow-up.
+  (`outbox::drop_stale_local_copies`). The same rewrite meant
+  `already_sent`'s `rfc822msgid:` search could not find an earlier
+  attempt of a send for such an account, so a send retried after an
+  ambiguous failure could go twice. *Fixed 2026-11-04:* every Gmail send
+  now carries `X-Kaluta-Outbox-Id: <composer's Message-ID>` (added by the
+  provider as it sends, so every retry of the frozen message carries the
+  same value; recipients can see it in the message source, as they
+  could the Message-ID it repeats). `already_sent` searches
+  `rfc822msgid:` first, then lists sent mail
+  `in:sent after:<Date − 10 min> to:<first To or Cc>` (25 at most, Trash
+  and Spam included) and reads each one's metadata for that header; a
+  match is taken as sent. Hand-check: *Show original* on a message sent
+  from Kaluta shows the header (that Gmail keeps custom headers on API
+  sends is from its documentation, not yet seen on this account).
 - *The queue, on screen.* The sidebar's footer shows "N changes waiting
   for Gmail" while any change has failed a try, and "N changes didn't
   reach Gmail" when any was given up; a click opens the queue: each
