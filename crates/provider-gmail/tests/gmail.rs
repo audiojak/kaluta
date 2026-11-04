@@ -303,6 +303,79 @@ async fn an_earlier_attempt_of_a_send_is_found_by_its_message_id() {
     assert_eq!(gmail.already_sent(no_id).await.unwrap(), None, "nothing to look for, no call");
 }
 
+/// Gmail gives an API send its own Message-ID on some accounts (spec §7.4,
+/// amended 2026-11-04): every send carries the composer's as
+/// `X-Kaluta-Outbox-Id`, the same on every retry.
+#[tokio::test]
+async fn a_send_carries_its_outbox_id() {
+    let (server, gmail) = setup().await;
+    let raw =
+        b"From: me@example.com\r\nTo: a@example.com\r\nMessage-ID: <k3.kaluta@example.com>\r\nSubject: Hi\r\n\r\nHello";
+    let mut stamped = b"X-Kaluta-Outbox-Id: <k3.kaluta@example.com>\r\n".to_vec();
+    stamped.extend_from_slice(raw);
+    Mock::given(method("POST"))
+        .and(path("/users/me/messages/send"))
+        .and(body_json(json!({"raw": encode_base64url(&stamped)})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "sent1", "threadId": "t1"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    gmail.send(raw, None).await.unwrap();
+    assert_eq!(&*provider_gmail::with_outbox_header(&stamped), &stamped[..], "never stamped twice");
+}
+
+/// Its Message-ID replaced, an earlier attempt is found among the sent mail
+/// to the same recipient since just before its Date, by the header.
+#[tokio::test]
+async fn an_earlier_attempt_with_gmails_own_message_id_is_found_by_its_outbox_id() {
+    let (server, gmail) = setup().await;
+    let raw = b"From: me@example.com\r\nTo: a@example.com\r\nDate: Wed, 04 Nov 2026 22:00:00 +0000\r\n\
+Message-ID: <k3.kaluta@example.com>\r\nSubject: Hi\r\n\r\nHello";
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages"))
+        .and(query_param("q", "rfc822msgid:k3.kaluta@example.com"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"resultSizeEstimate": 0})))
+        .expect(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages"))
+        .and(query_param("q", "in:sent after:1793829000 to:a@example.com"))
+        .and(query_param("includeSpamTrash", "true"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"messages": [{"id": "s1", "threadId": "t1"}, {"id": "s2", "threadId": "t2"}]})),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let metadata = |id: &str, outbox: &str| {
+        json!({"id": id, "threadId": "t", "labelIds": ["SENT"],
+               "payload": {"headers": [{"name": "X-Kaluta-Outbox-Id", "value": outbox}]}})
+    };
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages/s1"))
+        .and(query_param("format", "metadata"))
+        .and(query_param("metadataHeaders", "X-Kaluta-Outbox-Id"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(metadata("s1", "<other.kaluta@example.com>")))
+        .mount(&server)
+        .await;
+    let s2 = Mock::given(method("GET"))
+        .and(path("/users/me/messages/s2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(metadata("s2", "<k3.kaluta@example.com>")))
+        .up_to_n_times(1)
+        .mount_as_scoped(&server)
+        .await;
+    assert_eq!(gmail.already_sent(raw).await.unwrap(), Some(MessageId::new("s2")));
+    drop(s2);
+    Mock::given(method("GET"))
+        .and(path("/users/me/messages/s2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "s2", "threadId": "t2"})))
+        .mount(&server)
+        .await;
+    assert_eq!(gmail.already_sent(raw).await.unwrap(), None, "no sent message carries it: the send goes");
+}
+
 #[tokio::test]
 async fn drafts_are_created_replaced_and_deleted() {
     let (server, gmail) = setup().await;
