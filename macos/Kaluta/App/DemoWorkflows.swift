@@ -10,6 +10,9 @@ import os
 extension AppModel {
     func prepareDemoWorkflows(fresh: Bool) async {
         guard let core else { return }
+        // A calendar to offer times from and answer the meetup's
+        // invitation on (spec §14.9): the core's fake, never Google.
+        core.useFakeCalendar()
         if fresh {
             await agent.loadProviders()
             await seedWorkflowTasks()

@@ -126,3 +126,42 @@ fn the_scopes_are_the_least_that_do_the_job() {
     assert!(FREEBUSY_SCOPE.ends_with("/calendar.freebusy"));
     assert!(EVENTS_SCOPE.ends_with("/calendar.events.owned"));
 }
+
+#[tokio::test]
+async fn an_invitation_is_found_by_its_uid_and_answered_for_the_user_alone() {
+    let server = MockServer::start().await;
+    let attendees = json!([
+        { "email": "alex@example.com", "organizer": true, "responseStatus": "accepted" },
+        { "email": "me@example.com", "self": true, "responseStatus": "needsAction" },
+        { "email": "sam@example.com", "responseStatus": "tentative", "comment": "maybe" }
+    ]);
+    Mock::given(method("GET"))
+        .and(path("/calendars/primary/events"))
+        .and(wiremock::matchers::query_param("iCalUID", "abc@example.com"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "items": [
+            { "id": "old1", "status": "cancelled", "attendees": [] },
+            { "id": "ev1", "status": "confirmed", "attendees": attendees }
+        ]})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/calendars/primary/events/ev1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "ev1", "attendees": attendees })))
+        .mount(&server)
+        .await;
+    let mut answered = attendees.clone();
+    answered[1]["responseStatus"] = json!("accepted");
+    Mock::given(method("PATCH"))
+        .and(path("/calendars/primary/events/ev1"))
+        .and(wiremock::matchers::query_param("sendUpdates", "all"))
+        .and(wiremock::matchers::body_json(json!({ "attendees": answered })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "id": "ev1", "attendees": answered })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let cal = calendar(&server).await;
+    let found = cal.find_invite("abc@example.com").await.unwrap().unwrap();
+    assert_eq!(found, InvitedEvent { id: "ev1".into(), response: Some(Rsvp::NeedsAction) });
+    assert_eq!(cal.respond("ev1", Rsvp::Accepted).await.unwrap(), Rsvp::Accepted);
+    assert!(cal.respond("../x", Rsvp::Accepted).await.is_err(), "not an event id");
+}

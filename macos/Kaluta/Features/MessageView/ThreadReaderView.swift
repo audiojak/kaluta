@@ -23,6 +23,10 @@ struct ThreadReaderView: View {
         VStack(spacing: 0) {
             if let detail = reader.detail {
                 header(detail)
+                // A calendar invitation: answered on Google Calendar (spec §14.9).
+                InviteBar(threadID: detail.thread.id)
+                    .padding(.horizontal, Space.xxl)
+                    .padding(.bottom, Space.s)
                 if !reader.attachments.isEmpty {
                     // By the email each came with (each card lists its own too).
                     AttachmentStrip(groups: reader.attachmentGroups)

@@ -1109,6 +1109,31 @@ agent sessions and Keychain items. New pieces:
   store (`calendar_access`), so a later sign-in without the calendar
   scopes leaves it unconnected. *Stop Using the Calendar* forgets it
   (revoking is Google's, in the user's account).
+- *Invitations (amended 2026-11-04).* An email carrying an iCalendar
+  invitation (`text/calendar` or an `.ics` file, `METHOD:REQUEST`) shows
+  a bar in the reader, under the subject, and on the item of every
+  workflow with a conversation (Triage, Replies, Tasks, Waiting on
+  others, Weekly reading): the event's title, when (in the Mac's zone;
+  an all-day event by its date), where and from whom, and **Accept**,
+  **Maybe**, **Decline**. The answer goes to Google Calendar as Gmail's
+  buttons send it: the event is found on the primary calendar by the
+  invitation's `UID` (`events.list?iCalUID=`), the user's own guest entry
+  (`self`) takes the answer, and the event is patched with the guest list
+  otherwise as it was and `sendUpdates=all`, so it shows in Google
+  Calendar and the organiser is told. The answer chosen shows as chosen;
+  the bar reads the calendar again each time it is shown. The newest
+  calendar part of the conversation counts (an update or a cancellation
+  supersedes the invitation); its file is fetched like any attachment
+  and parsed in the core (`invites.rs`: unfolded lines, the first
+  `VEVENT`, `DTSTART` in UTC, a `TZID`, floating in the Mac's zone, or a
+  date). Not answerable, the bar says why: the calendar not connected,
+  connected for free/busy only (answering needs `calendar.events.owned`,
+  the holds scope), the event not on the calendar, the user organising
+  it, cancelled, or over. Replies and announcements (`METHOD:REPLY`,
+  `PUBLISH`) show nothing. No undo: answering again changes the answer.
+  Hand-check on the real account pending: Google letting
+  `calendar.events.owned` patch the guest entry of an event someone else
+  organises. Core: `calendar_invite`, `respond_to_invite`.
 - Identity: sign-in requests `openid` and `profile` alongside the
   existing scopes (both non-sensitive; no verification change). The token
   response's ID token carries `name` and `picture`, read without a

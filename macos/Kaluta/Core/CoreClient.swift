@@ -628,6 +628,17 @@ final class CoreClient: Sendable {
         try await call { try await core.dismissQueuedChange(id: id) }
     }
 
+    /// The invitation a conversation carries, and the user's answer on
+    /// their calendar (spec §14.9); nil without one.
+    func calendarInvite(threadID: String) async throws(CoreClientError) -> CalendarInvite? {
+        try await call { try await core.calendarInvite(threadId: threadID) }
+    }
+
+    /// Answer it on the user's Google Calendar; the organiser is told.
+    func respondToInvite(threadID: String, response: InviteResponse) async throws(CoreClientError) -> CalendarInvite {
+        try await call { try await core.respondToInvite(threadId: threadID, response: response) }
+    }
+
     /// The Dashboard's Inbox card (spec §14.12, on the Dashboard).
     func inboxTidy(accountID: String) async throws(CoreClientError) -> InboxTidy {
         try await call { try await core.inboxTidy(accountId: accountID) }
@@ -1847,6 +1858,9 @@ typealias InboxTidy = KalutaCore.InboxTidy
 typealias TidySuggestion = KalutaCore.TidySuggestion
 typealias QueuedChange = KalutaCore.QueuedChange
 typealias QueuedChangeState = KalutaCore.QueuedChangeState
+typealias CalendarInvite = KalutaCore.CalendarInvite
+typealias InviteResponse = KalutaCore.InviteResponse
+typealias InviteState = KalutaCore.InviteState
 typealias CleanupMessage = KalutaCore.CleanupMessage
 typealias CleanupResult = KalutaCore.CleanupResult
 typealias CleanupLoadStatus = KalutaCore.CleanupLoadStatus

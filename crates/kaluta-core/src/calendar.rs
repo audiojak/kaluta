@@ -13,7 +13,7 @@ use chrono::{DateTime, Duration, NaiveTime, Utc};
 use chrono_tz::Tz;
 use mail_store::calendar as store;
 use provider_api::{HttpClient, RateLimiter, RetryPolicy};
-use provider_gcal::{Busy, GoogleCalendar, Hold, Slot, SlotRequest};
+use provider_gcal::{Busy, GoogleCalendar, Hold, InvitedEvent, Rsvp, Slot, SlotRequest};
 
 use crate::{Core, CoreError, ErrorKind, runtime};
 
@@ -32,6 +32,10 @@ pub(crate) trait CalendarSource: Send + Sync {
     async fn busy(&self, from: DateTime<Utc>, to: DateTime<Utc>, calendars: &[String]) -> Result<Vec<Busy>, CoreError>;
     async fn hold(&self, hold: &Hold) -> Result<String, CoreError>;
     async fn release(&self, event_id: &str) -> Result<(), CoreError>;
+    /// The event an invitation's `UID` names on the primary calendar.
+    async fn find_invite(&self, ical_uid: &str) -> Result<Option<InvitedEvent>, CoreError>;
+    /// Answer it; the answer as the calendar now has it.
+    async fn respond(&self, event_id: &str, rsvp: Rsvp) -> Result<Rsvp, CoreError>;
 }
 
 struct Google(GoogleCalendar);
@@ -50,13 +54,23 @@ impl CalendarSource for Google {
         let (cal, id) = (self.0.clone(), event_id.to_owned());
         runtime::run(async move { Ok(cal.release(&id).await?) }).await
     }
+    async fn find_invite(&self, ical_uid: &str) -> Result<Option<InvitedEvent>, CoreError> {
+        let (cal, uid) = (self.0.clone(), ical_uid.to_owned());
+        runtime::run(async move { Ok(cal.find_invite(&uid).await?) }).await
+    }
+    async fn respond(&self, event_id: &str, rsvp: Rsvp) -> Result<Rsvp, CoreError> {
+        let (cal, id) = (self.0.clone(), event_id.to_owned());
+        runtime::run(async move { Ok(cal.respond(&id, rsvp).await?) }).await
+    }
 }
 
 /// The demo's and tests' calendar: busy every day from 19:00 to 20:00 UTC
-/// (noon in California), and its own holds.
+/// (noon in California), its own holds, and every invitation on it,
+/// unanswered until answered (the event id is the `UID`).
 #[derive(Default)]
 pub(crate) struct FakeCalendar {
     holds: Mutex<Vec<(String, Busy)>>,
+    answers: Mutex<std::collections::HashMap<String, Rsvp>>,
 }
 
 impl FakeCalendar {
@@ -89,6 +103,15 @@ impl CalendarSource for FakeCalendar {
     async fn release(&self, event_id: &str) -> Result<(), CoreError> {
         self.holds.lock().unwrap_or_else(|e| e.into_inner()).retain(|(id, _)| id != event_id);
         Ok(())
+    }
+    async fn find_invite(&self, ical_uid: &str) -> Result<Option<InvitedEvent>, CoreError> {
+        let answers = self.answers.lock().unwrap_or_else(|e| e.into_inner());
+        let response = answers.get(ical_uid).copied().unwrap_or(Rsvp::NeedsAction);
+        Ok(Some(InvitedEvent { id: ical_uid.to_owned(), response: Some(response) }))
+    }
+    async fn respond(&self, event_id: &str, rsvp: Rsvp) -> Result<Rsvp, CoreError> {
+        self.answers.lock().unwrap_or_else(|e| e.into_inner()).insert(event_id.to_owned(), rsvp);
+        Ok(rsvp)
     }
 }
 
@@ -200,7 +223,9 @@ fn hours_label(start: NaiveTime, end: NaiveTime) -> String {
 impl Core {
     /// The calendar for the open account, what it grants, and the calendars
     /// that count; `None` when not connected.
-    async fn calendar_source(&self) -> Result<Option<(Arc<dyn CalendarSource>, store::CalendarAccess)>, CoreError> {
+    pub(crate) async fn calendar_source(
+        &self,
+    ) -> Result<Option<(Arc<dyn CalendarSource>, store::CalendarAccess)>, CoreError> {
         if let Some(fake) = self.calendar.fake.get() {
             let access = store::CalendarAccess {
                 free_busy: true,

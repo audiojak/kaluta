@@ -402,15 +402,18 @@ const THREADS: &[Thread] = &[
             "Dashboards are here. Pin any chart, share a live link with your team, and schedule a weekly email of the numbers that matter.",
         )],
     ),
-    service(
-        "meetup",
-        "You're invited: Founders Meetup on the 23rd",
-        EVENTS,
-        UPDATES_TAB,
-        &[them(
-            8 * HOUR,
-            "Join 80 founders for talks and drinks on the 23rd at 6pm. RSVP to save your spot; space is limited.",
-        )],
+    attached(
+        service(
+            "meetup",
+            "You're invited: Founders Meetup on the 23rd",
+            EVENTS,
+            UPDATES_TAB,
+            &[them(
+                8 * HOUR,
+                "Join 80 founders for talks and drinks on the 23rd at 6pm. RSVP to save your spot; space is limited.",
+            )],
+        ),
+        "invite.ics",
     ),
     service(
         "earlybird",
@@ -740,6 +743,20 @@ fn thread_messages(t: &Thread, thread_key: &str, now: i64) -> Vec<IncomingMessag
         }
         previous = Some((author, m.text.to_owned(), paragraphs(m.text)));
         let attachments = match t.attachment {
+            // An invitation (spec §14.9): two days on, 6 to 8 pm UTC.
+            Some(file) if i == 0 && !m.from_me && file.ends_with(".ics") => {
+                let ics = demo_invite(thread_key, t.subject, &other, at);
+                vec![IncomingAttachment {
+                    part_id: Some("3".into()),
+                    provider_attachment_id: None,
+                    filename: file.to_owned(),
+                    mime_type: "text/calendar".into(),
+                    size: ics.len() as u64,
+                    content_id: None,
+                    is_inline: false,
+                    data: Some(ics),
+                }]
+            }
             Some(file) if i == 0 && !m.from_me => {
                 let pdf = crate::demo::one_page_pdf(t.subject);
                 vec![IncomingAttachment {
@@ -780,6 +797,30 @@ fn thread_messages(t: &Thread, thread_key: &str, now: i64) -> Vec<IncomingMessag
 }
 
 /// The text without its greeting, on one line, as a list shows it.
+/// An iCalendar invitation for a demo conversation, its event two days
+/// after the email from 18:00 to 20:00 UTC.
+fn demo_invite(key: &str, subject: &str, organizer: &EmailAddress, sent: i64) -> Vec<u8> {
+    const DAY_MS: i64 = 86_400_000;
+    let day = (sent + 2 * DAY_MS).div_euclid(DAY_MS) * DAY_MS;
+    let stamp = |ms: i64| {
+        let (y, m, d) = mail_domain::civil_from_days(ms.div_euclid(DAY_MS));
+        let secs = ms.rem_euclid(DAY_MS) / 1000;
+        format!("{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z", secs / 3600, secs / 60 % 60, secs % 60)
+    };
+    let title = subject.trim_start_matches("You're invited: ");
+    format!(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Kaluta demo//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n\
+UID:{key}@example.com\r\nSUMMARY:{title}\r\nDTSTAMP:{}\r\nDTSTART:{}\r\nDTEND:{}\r\nLOCATION:Example Hall\r\n\
+ORGANIZER;CN={}:mailto:{}\r\nATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:{ME}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        stamp(sent),
+        stamp(day + 18 * 3_600_000),
+        stamp(day + 20 * 3_600_000),
+        organizer.name.as_deref().unwrap_or("Events"),
+        organizer.email,
+    )
+    .into_bytes()
+}
+
 fn snippet(text: &str) -> String {
     let mut lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     if lines.len() > 1 && lines[0].ends_with(',') {

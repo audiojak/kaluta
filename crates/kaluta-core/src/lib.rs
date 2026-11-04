@@ -36,6 +36,7 @@ mod guide_learn;
 mod guide_merge;
 mod guide_render;
 mod guide_run;
+mod invites;
 mod logging;
 mod mail;
 mod mutations;
@@ -81,6 +82,7 @@ pub use events::{ChangeHint, CoreEvent, EventBus, EventListener, LogLevel, NewMa
 pub use guide::{
     GuideCheck, GuideCheckKind, GuideEdit, GuideEntryFields, GuideKind, GuideScope, GuideSource, GuideStatus,
 };
+pub use invites::{CalendarInvite, InviteResponse, InviteState};
 pub use mutations::OutboxStatus;
 pub use outside::{OUTSIDE_SOCKET_FILE, QUEUED_MESSAGE, outside_socket};
 pub use queue::{QueuedChange, QueuedChangeState};
