@@ -68,6 +68,8 @@ final class WorkflowSession {
     var taskForm: WorkflowTaskForm?
     /// Every task in a Tasks set, finished ones too, by id: the rail.
     var taskInfo: [Int64: TaskItem] = [:]
+    /// The account's task categories in order, for the rail's headings.
+    var taskCategories: [String] = []
     /// Weekly reading: the report, Kaluta's summaries by thread id, whether
     /// the report is showing (before the first bucket), and whether the
     /// item shows in full rather than summarised.
@@ -112,6 +114,8 @@ final class WorkflowSession {
     var waits: [String: WaitingInfo] = [:]
     /// *Check again* is choosing its day.
     var choosingCheckAgain = false
+    /// The task's note being written (M), or nil.
+    var noteDraft: String?
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
     /// What the user sent the sender since, in another conversation (Triage,
@@ -131,6 +135,7 @@ final class WorkflowSession {
             writer = nil
             taskForm = nil
             choosingCheckAgain = false
+            noteDraft = nil
             showsInFull = false
             showsConversation = false
             openMessages = []
@@ -158,7 +163,7 @@ final class WorkflowSession {
     /// A field has the keyboard's work: what to say, the email to send, or
     /// a task being made. The workflow's own keys stand aside meanwhile.
     var isTyping: Bool {
-        if taskForm != nil { return true }
+        if taskForm != nil || noteDraft != nil { return true }
         guard let step = writer?.step else { return false }
         return step == .say || step == .asking || step == .final || step == .forward
     }

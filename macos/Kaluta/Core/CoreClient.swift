@@ -761,6 +761,10 @@ final class CoreClient: Sendable {
         try await call { try await core.skipWorkflowItem(setId: set, key: key) }
     }
 
+    func bringWorkflowItemForward(set: Int64, key: String) async throws(CoreClientError) -> WorkflowSet {
+        try await call { try await core.bringWorkflowItemForward(setId: set, key: key) }
+    }
+
     func finishWorkflow(set: Int64) async throws(CoreClientError) -> WorkflowScore {
         try await call { try await core.finishWorkflow(setId: set) }
     }

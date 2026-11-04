@@ -65,6 +65,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case attach
     /// Hold the times the email offers on the user's calendar (⇧⌘H).
     case holdTimes
+    /// M: write or change the task's note (Tasks).
+    case note
     /// The words typed are the email, as written: no drafting.
     case ownWords
     /// Kaluta writes the likely reply with nothing said (⌘Return on the
@@ -113,6 +115,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skipQuestion: "⇧Return"
         case .attach: "⇧⌘A"
         case .holdTimes: "⇧⌘H"
+        case .note: "M"
         case .back: "Esc"
         // Where it is offered (the answers, *What do you want to say?*):
         // the words as written. Not ⌘Return, which sends.
@@ -126,7 +129,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     private static let characters: [Character: WorkflowCommand] = [
         "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
         "f": .forward, "p": .previousMessage, "n": .nextMessage, "?": .showKeys,
-        "i": .backToInbox, "c": .copyCode,
+        "i": .backToInbox, "c": .copyCode, "m": .note,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
     ]
 
@@ -204,6 +207,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .skipQuestion: "Skip the question"
         case .attach: "Attach a file"
         case .holdTimes: "Hold these times"
+        case .note: "Add a note"
         case .ownWords: "Use my words"
         case .firstPass: "Kaluta's first pass"
         case .back: "Back"
