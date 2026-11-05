@@ -452,10 +452,35 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
     )
 }
 
+/// The fake's answer to a Kaluta meeting follow-up prompt (spec §14.14),
+/// or `None` for any other prompt: a follow-up with two options when the
+/// meeting was with anyone else (the first address on its `With:` line),
+/// none otherwise.
+pub fn followup_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta meeting follow-ups") {
+        return None;
+    }
+    let id = prompt.split("<meeting id=\"").nth(1)?.split('"').next()?.to_owned();
+    let with = prompt.lines().find_map(|l| l.strip_prefix("With: ")).unwrap_or_default();
+    let email = with.split('<').nth(1).and_then(|r| r.split('>').next());
+    let title =
+        prompt.lines().find_map(|l| l.strip_prefix("Title: ")).unwrap_or("the meeting").replace(['"', '\\'], "");
+    Some(match email {
+        Some(email) => {
+            let name = with.split(" <").next().unwrap_or("there").split(' ').next().unwrap_or("there");
+            format!(
+                r#"{{"meeting_id": "{id}", "follow_up": true, "reason": "You agreed to send something after {title}.", "options": [{{"label": "Send what you promised", "to": ["{email}"], "subject": "Following up: {title}", "body": "Hi {name},\n\nThanks for today. As promised, here is what we discussed; the details are attached.\n\nJo"}}, {{"label": "Thank and recap", "to": ["{email}"], "subject": "Thanks, and next steps", "body": "Hi {name},\n\nThanks for the time today. Next steps: I send the proposal by Friday, you share it with your team.\n\nJo"}}]}}"#
+            )
+        }
+        None => format!(r#"{{"meeting_id": "{id}", "follow_up": false, "reason": "No one else was there."}}"#),
+    })
+}
+
 /// The scripted answer to one of Kaluta's own prompts (tasks, the writing
 /// guide, analysis, facts, writing help's questions), or `None`.
 pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
+        .or_else(|| followup_answer(prompt))
         .or_else(|| triage_answer(prompt))
         .or_else(|| reply_answers_answer(prompt))
         .or_else(|| waiting_answer(prompt))

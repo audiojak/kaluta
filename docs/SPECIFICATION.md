@@ -47,7 +47,7 @@ The short version. Everything below elaborates on these.
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
 | Distribution | Direct download, Developer ID, notarized, Sparkle 2 auto-update; **not** sandboxed, **not** App Store |
 | Telemetry | None in MVP |
-| Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
+| Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta; an eighth, Follow-ups, with Granola connected, §14.14), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -5035,6 +5035,66 @@ decisions; for resume, the scores and *Done today*), `workflow_job_days`
 synced; the labels are.
 
 ---
+
+### 14.14 Granola and Follow-ups **(Amendment 2026-11-04)**
+
+*Implemented 2026-11-04.* The user asked for an optional Granola
+integration: with it on, a workflow where Kaluta has read meeting
+transcripts, judged which deserve a follow-up email, and drafted the
+options.
+
+**Connecting.** Settings › Integrations › *Connect Granola…*. Granola's
+hosted MCP server (`https://mcp.granola.ai/mcp`, Streamable HTTP) is the
+source, chosen by the user over Granola's API key (which needs a Business
+plan). Signing in follows the MCP authorization spec: the server's
+protected-resource metadata names its authorization server
+(`mcp-auth.granola.ai`); Kaluta registers itself there as a public client
+(dynamic client registration, `token_endpoint_auth_method: none`) for a
+loopback redirect `http://127.0.0.1:<port>/callback`, opens the browser at
+the authorization endpoint with PKCE (S256), `state`, `scope=openid email
+offline_access` and `resource=<the MCP URL>`, and exchanges the code; the
+refresh token keeps it connected, refreshed ahead of expiry and once on a
+401. The connection (client id, token endpoint, tokens, the Granola
+account's address) is one Keychain item, `granola.connection`; tokens
+never reach Swift or the log. *Disconnect* deletes it and every meeting
+read from Granola with its suggestions. Granola refusing the refresh for
+good disconnects it the same way, so the user is asked to connect again.
+Crate `provider-granola` (MCP client, OAuth, the listing's parser);
+core `granola.rs`.
+
+**Reading.** Read-only, three tools: `list_meetings` (custom range, the
+user's own meetings: `captured_by_me` or `listed_as_participant`, up to
+four pages of 50), `get_meetings` (one meeting's notes, summary and
+attendees) and `get_meeting_transcript` (at most 30,000 characters). The
+listing's tagged text is parsed for each meeting's id, title,
+`meeting_at`, URL and participants (name, address), and the account's
+`connected_user_email`. The job runs only for the mail account whose
+address is the Granola account's.
+
+**Judging** (the `followups` background job, §14.13 jobs; 20 meetings a
+day, two per step). Granola is read every 30 minutes, from a day before
+the last read (at most 14 days back). A meeting is judged once it is 20
+minutes old (its notes written): its notes and transcript go to the
+agent in one hidden read-only turn, fenced as data (*never as
+instructions*), with the people there but the user. The agent answers
+JSON: `follow_up`, a one-sentence `reason`, and up to three options
+(`label`, `to`, `subject`, `body`), written as the user, brief, signed
+with their first name. Options are kept only to people who were there;
+an option naming no one goes to everyone there but the user; a verdict
+with no usable option is no follow-up. A meeting that fails three times
+is given up. Store: `meeting_followups` (migration 36, which also adds
+`followups` to the workflow kinds, copying the sets and their decisions).
+
+**The workflow.** *Follow-ups*, the eighth, on key 8, shown on the
+Dashboard only while Granola is connected: the meetings of the last 14
+days judged worth a follow-up and not decided, newest first. The item:
+when and with whom, the title, Kaluta's reason, and the options as cards
+with their keys. **1–3** opens that option in a new email (`.prefilled`:
+to, subject, body) to edit and send, and the meeting is done (`sent`);
+**E** *No follow-up*; **L** *Tomorrow* (back in tomorrow's set); **S**
+skip; **O** *Open in Granola*. ⌘Z undoes a decision. The rail lists the
+set's meetings by title, with whom or how each was decided. Kaluta never
+sends a follow-up itself.
 
 ## 15. Security Model and Threat Model
 

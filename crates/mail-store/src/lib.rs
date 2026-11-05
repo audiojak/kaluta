@@ -16,6 +16,7 @@ pub mod demo_workflows;
 pub mod drafts;
 mod error;
 pub mod facts;
+pub mod followups;
 pub mod guide;
 pub mod outbox;
 pub mod priority;

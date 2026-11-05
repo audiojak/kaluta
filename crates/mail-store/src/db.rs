@@ -52,6 +52,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0033_hidden_text.sql"),
     include_str!("../migrations/0034_reply_answers.sql"),
     include_str!("../migrations/0035_calendar.sql"),
+    include_str!("../migrations/0036_followups.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -361,7 +362,7 @@ fn migrate(conn: &mut Connection) -> StoreResult<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn temp_db_path(name: &str) -> PathBuf {
@@ -473,6 +474,7 @@ mod tests {
              DROP TABLE triage_suggestions;
              DROP TABLE waiting_checks; DROP TABLE waiting; DROP TABLE reading_summaries;
              DROP TABLE routine_proposals;
+             DROP TABLE meeting_followups;
              PRAGMA user_version = 19",
         )
         .unwrap();

@@ -29,6 +29,8 @@ mod events;
 mod facts;
 mod facts_io;
 pub mod ffi;
+mod followups;
+mod granola;
 mod guide;
 mod guide_ai;
 mod guide_change;
@@ -79,6 +81,8 @@ pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
 pub use error::{CoreError, ErrorKind};
 pub use events::{ChangeHint, CoreEvent, EventBus, EventListener, LogLevel, NewMailInfo, SyncState};
+pub use followups::{FollowUpOption, MeetingFollowUp, MeetingPerson};
+pub use granola::GranolaStatus;
 pub use guide::{
     GuideCheck, GuideCheckKind, GuideEdit, GuideEntryFields, GuideKind, GuideScope, GuideSource, GuideStatus,
 };
@@ -137,6 +141,7 @@ pub struct Core {
     rules: rules_publish::RulesState,
     /// Offering times from the user's calendar (spec §14.9).
     calendar: calendar::CalendarState,
+    granola: granola::GranolaState,
     /// This core, for work it starts on its own (the rules publisher).
     me: std::sync::Weak<Core>,
 }
@@ -220,6 +225,7 @@ impl Core {
             headless,
             rules: Default::default(),
             calendar: Default::default(),
+            granola: Default::default(),
             me: me.clone(),
         }))
     }

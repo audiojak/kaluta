@@ -13,6 +13,8 @@ extension AppModel {
         // A calendar to offer times from and answer the meetup's
         // invitation on (spec §14.9): the core's fake, never Google.
         core.useFakeCalendar()
+        // Granola connected, with two meetings (spec §14.14): the core's fake.
+        core.useFakeGranola(email: "me@example.com")
         if fresh {
             await agent.loadProviders()
             await seedWorkflowTasks()

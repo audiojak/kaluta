@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0137C0948D394912988757FD /* AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 752DC015E7BDB77F845D93FE /* AgentActivity.swift */; };
 		020026E14DEF4437276B95F2 /* CleanUpWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22705AD5F3308CCDEC35A9A /* CleanUpWindow.swift */; };
+		028FD5F3943DDEF33BE332A0 /* FollowUpTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB94DA386B6E811E054A23A1 /* FollowUpTests.swift */; };
 		02BD0A95B9A4A43346BC2005 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 3F81D3A4014F952872A48F8B /* Sparkle */; };
 		049F2000C7D180DA2543073A /* SyncDebuggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 457704FFE194239C4B4BA91A /* SyncDebuggerTests.swift */; };
 		0668AB77C7EBD22BD43E76F8 /* WorkflowHostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D54C810D6E812DF274D182FF /* WorkflowHostView.swift */; };
@@ -86,6 +87,7 @@
 		52A56057F9A2B81C597C7594 /* FactProposals.swift in Sources */ = {isa = PBXBuildFile; fileRef = C31570D1A011025F8599EA4E /* FactProposals.swift */; };
 		534A1CAF328A0B2F7E27F8CD /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB31634BD804486D8D862CA /* AppModel.swift */; };
 		552B126519D939E6B58D5225 /* AppShellTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55C4D0037FD95A32B795A4EB /* AppShellTests.swift */; };
+		560E2E72C71DCD5BE32FE069 /* AppModel+FollowUps.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C180D79CF6F6F97E1BE2133 /* AppModel+FollowUps.swift */; };
 		570DC21EB5D3E9B9D139DAD1 /* LinkSafety.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD5AD309FC75125E8B5FCB8 /* LinkSafety.swift */; };
 		586805488B3F223C5331646D /* AppModel+Analysis.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4B13FACBE3B0DF5CC79459 /* AppModel+Analysis.swift */; };
 		5A3A666ECC294D212F903253 /* MailUndo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370CF9C5D6F977AE4DE5A278 /* MailUndo.swift */; };
@@ -174,6 +176,7 @@
 		DD416F4D2F54860D18CB984B /* LabelTreeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 122C89A288F22719B15CF540 /* LabelTreeTests.swift */; };
 		E099140D1D55B8BC9C15DF72 /* ConversationStack.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */; };
 		E2CDB58391993EA4870D5D48 /* ConnectAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = E22FEDF2DAB3F98325D31235 /* ConnectAgent.swift */; };
+		E3B83BB15D03B8FB30CAB9B6 /* FollowUpItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 067DFA8BD23A96D7D3F7AEA2 /* FollowUpItemView.swift */; };
 		E401F518B7467B5345F5E03E /* LabelTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8128058BC4ACCDB5648187F5 /* LabelTree.swift */; };
 		E58279C3E1F8AF3953F1F217 /* agent-system-prompt.md in Resources */ = {isa = PBXBuildFile; fileRef = 4BA81684911B5A3A24F963AC /* agent-system-prompt.md */; };
 		E6346BD88E191F6B0B72CD02 /* AccountSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 495AB4CE21DE1F03F1E594A9 /* AccountSwitchTests.swift */; };
@@ -190,6 +193,7 @@
 		EFA2A992B4DBEF4224B9C592 /* WordDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6581CBC0627233B8B1854239 /* WordDiff.swift */; };
 		EFAFD5617D30F4F17E61EF27 /* DesignTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53A10F82D2BDD36DFC965DB3 /* DesignTests.swift */; };
 		F2DEEBFC8540750F13946668 /* RoutinesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CC5E4923AB69D828A75A3A /* RoutinesWindow.swift */; };
+		F6C786A5496A984C66AE8979 /* IntegrationSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE9238142B19F6AA323469E8 /* IntegrationSettings.swift */; };
 		F7116AD2C795622CA69CE7C0 /* Tips.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03659305604B88A2E366B20F /* Tips.swift */; };
 		F7CF28A2EFE526AA4A05C62D /* AnalysisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74C5A79E4614AC2336D7E050 /* AnalysisTests.swift */; };
 		F7E9CDAF945ACB27E2734F85 /* ComposerAssistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F600D37C0DF424ECFB13FA /* ComposerAssistant.swift */; };
@@ -235,6 +239,7 @@
 		03659305604B88A2E366B20F /* Tips.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tips.swift; sourceTree = "<group>"; };
 		051A5A4C363376D9FB73A734 /* FactsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsStore.swift; sourceTree = "<group>"; };
 		05C013B8C226F6454B8DEBE7 /* CloudAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAgentTests.swift; sourceTree = "<group>"; };
+		067DFA8BD23A96D7D3F7AEA2 /* FollowUpItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpItemView.swift; sourceTree = "<group>"; };
 		0A28D50A8C8359AE0AADBB1B /* Kaluta.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Kaluta.entitlements; sourceTree = "<group>"; };
 		0A474F901BD20CC11D6386FA /* SearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTests.swift; sourceTree = "<group>"; };
 		0BFBA6EAD51AA1E5B2A6C409 /* ThreadListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadListStore.swift; sourceTree = "<group>"; };
@@ -280,6 +285,7 @@
 		3B149CDCE1665861B2B5955B /* ReaderStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReaderStore.swift; sourceTree = "<group>"; };
 		3B8839950BDBBD0B6BCFFFDF /* SyncDebuggerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDebuggerView.swift; sourceTree = "<group>"; };
 		3D535DA1ADB4E53CC6B04E58 /* InviteBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteBar.swift; sourceTree = "<group>"; };
+		3C180D79CF6F6F97E1BE2133 /* AppModel+FollowUps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppModel+FollowUps.swift"; sourceTree = "<group>"; };
 		3DD9BF17ACCDEB888B3E2259 /* DraftClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DraftClient.swift; sourceTree = "<group>"; };
 		41CA094E6C1388B1B4897233 /* FactsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactsSettings.swift; sourceTree = "<group>"; };
 		41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStack.swift; sourceTree = "<group>"; };
@@ -371,6 +377,7 @@
 		BD42D6C8981215D14A3B36C8 /* GuideAudiences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideAudiences.swift; sourceTree = "<group>"; };
 		BD65AAA17530F1FCA5EBDEE5 /* MessageWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWebView.swift; sourceTree = "<group>"; };
 		BE48AA33985A7D97BBED0E5F /* SchemeHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemeHandlers.swift; sourceTree = "<group>"; };
+		BE9238142B19F6AA323469E8 /* IntegrationSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntegrationSettings.swift; sourceTree = "<group>"; };
 		BED381521B150F07DE226178 /* RecipientField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipientField.swift; sourceTree = "<group>"; };
 		C0CC5E4923AB69D828A75A3A /* RoutinesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinesWindow.swift; sourceTree = "<group>"; };
 		C1871214B0DCEA15F9E324EE /* OutsideAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutsideAgentTests.swift; sourceTree = "<group>"; };
@@ -422,6 +429,7 @@
 		F6ABAFCCDF9F53AFBF2A5256 /* AgentSuggestions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentSuggestions.swift; sourceTree = "<group>"; };
 		FA30597CBC77E0876FAB1A11 /* GoogleClientConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleClientConfiguration.swift; sourceTree = "<group>"; };
 		FB4CD90B7656ACB4E75E1C12 /* TipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipTests.swift; sourceTree = "<group>"; };
+		FB94DA386B6E811E054A23A1 /* FollowUpTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowUpTests.swift; sourceTree = "<group>"; };
 		FBF724B8C228A5380ED3E0F9 /* UndoNoticeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoNoticeView.swift; sourceTree = "<group>"; };
 		FE569DDE37B20EDD82780B10 /* ChangesQueueView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangesQueueView.swift; sourceTree = "<group>"; };
 		FF7A2FFA6107BD9435E13029 /* TaskTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTests.swift; sourceTree = "<group>"; };
@@ -554,6 +562,7 @@
 				7D58325F0BAF587E66438F6A /* CloudAgentSettings.swift */,
 				E22FEDF2DAB3F98325D31235 /* ConnectAgent.swift */,
 				41CA094E6C1388B1B4897233 /* FactsSettings.swift */,
+				BE9238142B19F6AA323469E8 /* IntegrationSettings.swift */,
 				46DB0CCE2A313ABE2DE66165 /* RulesServerSettings.swift */,
 				483437108BD1ACAA1991AAF6 /* ServiceAccountSettings.swift */,
 				1D22468F49402ADD7D567D1C /* SettingsView.swift */,
@@ -589,6 +598,7 @@
 				788E53B5A8E5D41E7307DB19 /* CoreEventTests.swift */,
 				53A10F82D2BDD36DFC965DB3 /* DesignTests.swift */,
 				1A16569109508207AFC34434 /* FactsTests.swift */,
+				FB94DA386B6E811E054A23A1 /* FollowUpTests.swift */,
 				4867308667F24D4AB7B9B456 /* FormattingTests.swift */,
 				B76AF570B019D3910BDD5420 /* GuideTests.swift */,
 				54E5A4E647E271F202B94754 /* HiddenTextTests.swift */,
@@ -858,9 +868,11 @@
 		C542E7637DC071704F044DBA /* Workflows */ = {
 			isa = PBXGroup;
 			children = (
+				3C180D79CF6F6F97E1BE2133 /* AppModel+FollowUps.swift */,
 				22D183BDABE35601345873A7 /* AppModel+Teach.swift */,
 				D4E4CDEC85AD87AFD58A21F1 /* AppModel+Workflows.swift */,
 				41CD2A70EFE48277BF4FB88E /* ConversationStack.swift */,
+				067DFA8BD23A96D7D3F7AEA2 /* FollowUpItemView.swift */,
 				6C90AAC01B5C353EC82F3694 /* InboxTidyCard.swift */,
 				E83AAF6B20A125F9CFDADC3B /* StartScreenView.swift */,
 				739E07DF5DB114C7564F2B06 /* TeachItemView.swift */,
@@ -1093,6 +1105,7 @@
 				4F732899419D0F8C2C4E6CE2 /* CoreEventTests.swift in Sources */,
 				EFAFD5617D30F4F17E61EF27 /* DesignTests.swift in Sources */,
 				101CE0E2A2621543F93CAE5C /* FactsTests.swift in Sources */,
+				028FD5F3943DDEF33BE332A0 /* FollowUpTests.swift in Sources */,
 				947BDA1D89F2D3C2811EB2C5 /* FormattingTests.swift in Sources */,
 				EAF8B6ABD8AB249EF3E8D87D /* GuideTests.swift in Sources */,
 				3ACEE4AA71C6E0A2568B5618 /* HiddenTextTests.swift in Sources */,
@@ -1152,6 +1165,7 @@
 				B0A6D1EEC4A1250B100471A6 /* AppDelegate.swift in Sources */,
 				586805488B3F223C5331646D /* AppModel+Analysis.swift in Sources */,
 				A0215ADFE4A543AC2B800534 /* AppModel+Facts.swift in Sources */,
+				560E2E72C71DCD5BE32FE069 /* AppModel+FollowUps.swift in Sources */,
 				24032714635137600B01BC71 /* AppModel+Guide.swift in Sources */,
 				D53705EF7BEAF20D93D50F9A /* AppModel+Tasks.swift in Sources */,
 				AA3A19D66DD7B7E304DEAF9C /* AppModel+Teach.swift in Sources */,
@@ -1188,6 +1202,7 @@
 				CB716285E44F586D1320A133 /* FactsStore.swift in Sources */,
 				99BA01067CCEDBBC96B50DEF /* FactsView.swift in Sources */,
 				1D57504E39014B56D2355790 /* FocusCycle.swift in Sources */,
+				E3B83BB15D03B8FB30CAB9B6 /* FollowUpItemView.swift in Sources */,
 				D4E26385A991C6FE0271663B /* FormattingBar.swift in Sources */,
 				FDA686F5362FEDA16DFB265C /* GoogleClientConfiguration.swift in Sources */,
 				1C6F5455C0945B5AF44E0F09 /* GuideAudiences.swift in Sources */,
@@ -1203,6 +1218,7 @@
 				6E79D67D5DA8906466F66E2B /* ImportMailbox.swift in Sources */,
 				4A39F8DF2A1399C4E97DAD42 /* InboxCategories.swift in Sources */,
 				B572F9BCC6D6D47CD60C7C48 /* InboxTidyCard.swift in Sources */,
+				F6C786A5496A984C66AE8979 /* IntegrationSettings.swift in Sources */,
 				3DE1826AA2FB3C8CB663E85A /* InterviewSheet.swift in Sources */,
 				7B840CBEEC2AFD0335AF5803 /* InviteBar.swift in Sources */,
 				91A7F312961C93EE9F8CA32A /* KalutaApp.swift in Sources */,

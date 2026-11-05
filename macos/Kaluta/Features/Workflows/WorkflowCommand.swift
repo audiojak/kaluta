@@ -169,6 +169,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             case .waiting: "Let it go"
             case .reading: "Read, next"
             case .teach: "Accept"
+            case .followups: "No follow-up"
             }
         case .task: "Make a task"
         case .later:
@@ -177,6 +178,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             case .tasks: "Tomorrow"
             case .waiting: "Check again later"
             case .reading: "Keep for later"
+            case .followups: "Tomorrow"
             default: "Later"
             }
         case .skip: "Skip for now"

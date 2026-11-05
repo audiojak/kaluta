@@ -180,6 +180,10 @@ extension AppModel {
             await prepareTeach(item)
             return
         }
+        if session.kind == .followups {
+            await loadMeetings(session)
+            return
+        }
         guard let core, let threadID = threadID(of: item) else { return }
         // Kaluta's suggestion, with the answers it wrote ahead (Triage,
         // Replies, and a task's reply).
@@ -537,6 +541,8 @@ extension AppModel {
             }
         case .teach:
             return teachActions(session, a)
+        case .followups:
+            return followUpActions(session, a)
         case .reading:
             // T and S answer their keys without a button: the bar fits.
             var task = a(.task)
@@ -927,6 +933,8 @@ extension AppModel {
             await performAgents(command, item: item, session: session)
         case (.teach, _):
             await performTeach(command, item: item, session: session)
+        case (.followups, _):
+            await performFollowUp(command, item: item, session: session)
         case (.reading, .openInFull):
             session.showsInFull.toggle()
         case (.reading, .done):

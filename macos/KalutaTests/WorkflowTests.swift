@@ -226,9 +226,10 @@ struct WorkflowTests {
         #expect(AppModel.firstName(mine, own: own) == "Taylor", "a reply to the user's own goes to whom it went to")
     }
 
-    @Test func theStartScreenOrdersTheSevenWithTheirKeys() {
-        #expect(WorkflowKind.all.map(\.number) == Array(1...7))
-        #expect(WorkflowKind.all.first == .triage && WorkflowKind.all.last == .teach)
+    @Test func theStartScreenOrdersTheEightWithTheirKeys() {
+        #expect(WorkflowKind.all.map(\.number) == Array(1...8))
+        // Follow-ups last (spec §14.14): the seven keep their keys.
+        #expect(WorkflowKind.all.first == .triage && WorkflowKind.all[6] == .teach && WorkflowKind.all.last == .followups)
     }
 
     @Test func aSessionCountsWhatIsLeft() {

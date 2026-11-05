@@ -53,6 +53,8 @@ pub(crate) const JOBS: &[Job] = &[
     Job { name: "waiting", daily_cap: crate::waiting::DAILY_CAP, step: crate::waiting::step },
     Job { name: "nudges", daily_cap: crate::waiting::NUDGE_DAILY_CAP, step: crate::waiting::nudge_step },
     Job { name: "reading", daily_cap: crate::reading::DAILY_CAP, step: crate::reading::step },
+    // With Granola connected (spec §14.14): meetings that deserve a follow-up.
+    Job { name: "followups", daily_cap: crate::followups::DAILY_CAP, step: crate::followups::step },
 ];
 
 impl Core {
