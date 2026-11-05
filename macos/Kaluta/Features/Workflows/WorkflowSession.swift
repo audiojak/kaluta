@@ -70,6 +70,8 @@ final class WorkflowSession {
     var taskInfo: [Int64: TaskItem] = [:]
     /// The account's task categories in order, for the rail's headings.
     var taskCategories: [String] = []
+    /// Follow-ups: each meeting and Kaluta's drafts, by Granola's id.
+    var meetings: [String: MeetingFollowUp] = [:]
     /// Weekly reading: the report, Kaluta's summaries by thread id, whether
     /// the report is showing (before the first bucket), and whether the
     /// item shows in full rather than summarised.

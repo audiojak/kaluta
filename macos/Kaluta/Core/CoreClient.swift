@@ -639,6 +639,42 @@ final class CoreClient: Sendable {
         try await call { try await core.respondToInvite(threadId: threadID, response: response) }
     }
 
+    // MARK: Granola (spec §14.14)
+
+    func granolaStatus() throws(CoreClientError) -> GranolaStatus {
+        try callSync { try core.granolaStatus() }
+    }
+
+    /// Start connecting Granola; open the URL in the browser, then finish
+    /// with `completeGranolaConnect`.
+    func beginGranolaConnect() async throws(CoreClientError) -> SignInStart {
+        let start = try await call { try await core.beginGranolaConnect() }
+        guard let url = URL(string: start.authorizationUrl) else {
+            throw CoreClientError(kind: .internalError, message: "invalid authorization URL")
+        }
+        return SignInStart(sessionID: start.sessionId, authorizationURL: url)
+    }
+
+    func completeGranolaConnect(_ sessionID: String) async throws(CoreClientError) -> GranolaStatus {
+        try await call { try await core.completeGranolaConnect(sessionId: sessionID) }
+    }
+
+    func cancelGranolaConnect(_ sessionID: String) {
+        core.cancelGranolaConnect(sessionId: sessionID)
+    }
+
+    func disconnectGranola() async throws(CoreClientError) {
+        try await call { try await core.disconnectGranola() }
+    }
+
+    /// A meeting's follow-up, for the Follow-ups workflow's item.
+    func meetingFollowUp(_ meetingID: String) async throws(CoreClientError) -> MeetingFollowUp? {
+        try await call { try await core.meetingFollowUp(meetingId: meetingID) }
+    }
+
+    /// The workflow demo: a fake Granola with two meetings.
+    func useFakeGranola(email: String) { core.debugUseFakeGranola(email: email) }
+
     /// The Dashboard's Inbox card (spec §14.12, on the Dashboard).
     func inboxTidy(accountID: String) async throws(CoreClientError) -> InboxTidy {
         try await call { try await core.inboxTidy(accountId: accountID) }
@@ -1861,6 +1897,10 @@ typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse
 typealias InviteState = KalutaCore.InviteState
+typealias GranolaStatus = KalutaCore.GranolaStatus
+typealias MeetingFollowUp = KalutaCore.MeetingFollowUp
+typealias FollowUpOption = KalutaCore.FollowUpOption
+typealias MeetingPerson = KalutaCore.MeetingPerson
 typealias CleanupMessage = KalutaCore.CleanupMessage
 typealias CleanupResult = KalutaCore.CleanupResult
 typealias CleanupLoadStatus = KalutaCore.CleanupLoadStatus

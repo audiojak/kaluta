@@ -21,7 +21,8 @@ const FIRST_TRIAGE_MS: i64 = DAY_MS;
 /// Replies look back this far.
 const REPLIES_DAYS: i64 = 14;
 
-/// The seven workflows, in the start screen's order.
+/// The workflows, in the start screen's order; Follow-ups only while
+/// Granola is connected (spec §14.14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum WorkflowKind {
     Triage,
@@ -31,10 +32,11 @@ pub enum WorkflowKind {
     Reading,
     Agents,
     Teach,
+    Followups,
 }
 
 impl WorkflowKind {
-    pub const ALL: [WorkflowKind; 7] = [
+    pub const ALL: [WorkflowKind; 8] = [
         WorkflowKind::Triage,
         WorkflowKind::Replies,
         WorkflowKind::Tasks,
@@ -42,6 +44,7 @@ impl WorkflowKind {
         WorkflowKind::Reading,
         WorkflowKind::Agents,
         WorkflowKind::Teach,
+        WorkflowKind::Followups,
     ];
 
     pub fn key(self) -> &'static str {
@@ -53,6 +56,7 @@ impl WorkflowKind {
             WorkflowKind::Reading => "reading",
             WorkflowKind::Agents => "agents",
             WorkflowKind::Teach => "teach",
+            WorkflowKind::Followups => "followups",
         }
     }
 
@@ -64,7 +68,7 @@ impl WorkflowKind {
     fn default_ms(self) -> i64 {
         match self {
             WorkflowKind::Triage => 30_000,
-            WorkflowKind::Replies | WorkflowKind::Tasks => 120_000,
+            WorkflowKind::Replies | WorkflowKind::Tasks | WorkflowKind::Followups => 120_000,
             WorkflowKind::Waiting | WorkflowKind::Reading | WorkflowKind::Teach => 20_000,
             WorkflowKind::Agents => 30_000,
         }
@@ -323,7 +327,7 @@ impl Core {
         Ok(WorkflowSet { id: set.id, kind, items, started_at: set.started_at, resumed })
     }
 
-    fn workflows_changed(&self) {
+    pub(crate) fn workflows_changed(&self) {
         self.account_events().emit(CoreEvent::WorkflowsChanged);
     }
 }
@@ -343,12 +347,16 @@ impl Core {
         let db = self.db()?;
         let now = mail_sync::now_millis();
         let core_free = self.workflow_fresh().await;
+        let granola = self.granola_status().map(|s| s.connected).unwrap_or(false);
         runtime::run(async move {
             Ok(db
                 .read(move |c| {
                     let today = day_of(now);
                     let mut workflows = Vec::new();
                     for kind in WorkflowKind::ALL {
+                        if kind == WorkflowKind::Followups && !granola {
+                            continue;
+                        }
                         let fresh = core_free.fresh(c, kind, now)?;
                         let open = store::open_set(c, kind.key(), &today)?;
                         let (count, in_progress) = match &open {
@@ -463,9 +471,14 @@ impl Core {
     ) -> Result<(), CoreError> {
         let db = self.db()?;
         let now = mail_sync::now_millis();
-        runtime::run(
-            async move { Ok(db.write(move |tx| store::decide(tx, set_id, &key, &decision, now, millis)).await?) },
-        )
+        runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    store::decide(tx, set_id, &key, &decision, now, millis)?;
+                    crate::followups::on_decided(tx, &key, Some(&decision), now)
+                })
+                .await?)
+        })
         .await?;
         self.workflows_changed();
         Ok(())
@@ -474,8 +487,17 @@ impl Core {
     /// Undo a decision: the item is undecided again.
     pub async fn undo_workflow_decision(&self, set_id: i64, key: String) -> Result<bool, CoreError> {
         let db = self.db()?;
-        let undone =
-            runtime::run(async move { Ok(db.write(move |tx| store::undecide(tx, set_id, &key)).await?) }).await?;
+        let now = mail_sync::now_millis();
+        let undone = runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    let undone = store::undecide(tx, set_id, &key)?;
+                    crate::followups::on_decided(tx, &key, None, now)?;
+                    Ok(undone)
+                })
+                .await?)
+        })
+        .await?;
         self.workflows_changed();
         Ok(undone)
     }
@@ -675,6 +697,11 @@ fn fresh_set(
         }
         // Agents is the caller's.
         WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0, card: None },
+        // Meetings that deserve a follow-up, newest first (spec §14.14).
+        WorkflowKind::Followups => {
+            let (keys, preview) = crate::followups::waiting_keys(conn, now)?;
+            Fresh { keys, preview, later: 0, card: None }
+        }
     })
 }
 

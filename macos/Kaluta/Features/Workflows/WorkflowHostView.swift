@@ -26,7 +26,7 @@ struct WorkflowHostView: View {
             HStack(spacing: 0) {
             // Tasks: today's set beside the task, done ones ticked.
             // Writing needs the room: the rail steps aside meanwhile.
-            if [.tasks, .waiting, .reading, .teach].contains(session.kind), !session.isFinished, !session.showsReport,
+            if [.tasks, .waiting, .reading, .teach, .followups].contains(session.kind), !session.isFinished, !session.showsReport,
                session.writer == nil {
                 WorkflowRail(session: session)
             }
@@ -323,6 +323,9 @@ struct WorkflowItemView: View {
             }
             if session.kind == .teach {
                 TeachItemView(session: session, item: item)
+            }
+            if session.kind == .followups {
+                FollowUpItemView(session: session, item: item)
             }
             if session.kind == .reading, let bucket = session.bucket(of: item) {
                 Text("\(bucket.title) · \(bucket.verb)")
@@ -655,6 +658,10 @@ struct WorkflowRail: View {
             WorkflowRailRow(title: session.summaries[id]?.line ?? session.threads[id]?.thread.subject
                                 ?? session.readingSubject(id) ?? "…",
                             detail: Self.readingDetail(item), state: state(item), kind: session.kind)
+        } else if session.kind == .followups {
+            let meeting = item.meetingID.flatMap { session.meetings[$0] }
+            WorkflowRailRow(title: meeting?.title ?? "…", detail: Self.followUpDetail(meeting, item),
+                            state: state(item), kind: session.kind)
         } else if let id = item.taskId, let task = session.taskInfo[id] {
             WorkflowRailRow(title: task.title, detail: Self.detail(task, item), state: state(item),
                             kind: session.kind)
@@ -677,7 +684,19 @@ struct WorkflowRail: View {
         case .waiting: "Waiting on"
         case .teach: "To decide"
         case .reading: session.current.flatMap(session.bucket(of:))?.title ?? "Reading"
+        case .followups: "Meetings"
         default: "Today"
+        }
+    }
+
+    /// Who it was with while it waits, then how it was decided.
+    static func followUpDetail(_ meeting: MeetingFollowUp?, _ item: WorkflowItem) -> String {
+        switch item.decision {
+        case "sent": "Follow-up opened"
+        case "none": "No follow-up"
+        case "later": "Tomorrow"
+        case .some: "Done"
+        case nil: meeting.map { FollowUpItemView.with($0.people) } ?? ""
         }
     }
 

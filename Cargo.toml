@@ -21,6 +21,7 @@ provider-gmail = { path = "crates/provider-gmail" }
 provider-primitive = { path = "crates/provider-primitive" }
 provider-agentmail = { path = "crates/provider-agentmail" }
 provider-gcal = { path = "crates/provider-gcal" }
+provider-granola = { path = "crates/provider-granola" }
 agent-api = { path = "crates/agent-api" }
 agent-claude = { path = "crates/agent-claude" }
 agent-codex = { path = "crates/agent-codex" }

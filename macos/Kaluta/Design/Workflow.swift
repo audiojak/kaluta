@@ -28,7 +28,7 @@ extension TypeRole {
 
 extension WorkflowKind {
     /// In the start screen's order.
-    static let all: [WorkflowKind] = [.triage, .replies, .tasks, .waiting, .reading, .agents, .teach]
+    static let all: [WorkflowKind] = [.triage, .replies, .tasks, .waiting, .reading, .agents, .teach, .followups]
 
     var title: String {
         switch self {
@@ -39,6 +39,7 @@ extension WorkflowKind {
         case .reading: "Weekly reading"
         case .agents: "Agents"
         case .teach: "Teach Kaluta"
+        case .followups: "Follow-ups"
         }
     }
 
@@ -52,10 +53,11 @@ extension WorkflowKind {
         case .reading: "Catch up on reading"
         case .agents: "See what your agents need"
         case .teach: "Teach Kaluta"
+        case .followups: "Follow up on meetings"
         }
     }
 
-    /// Its key on the start screen (1–7).
+    /// Its key on the start screen (1–8).
     var number: Int { Self.all.firstIndex(of: self).map { $0 + 1 } ?? 0 }
 
     var symbol: String {
@@ -67,6 +69,7 @@ extension WorkflowKind {
         case .reading: "newspaper"
         case .agents: "person.2.badge.gearshape"
         case .teach: "graduationcap"
+        case .followups: "person.2.wave.2"
         }
     }
 }
@@ -83,6 +86,7 @@ extension Tone {
         case .reading: Color(red: 0.494, green: 0.392, blue: 0.110) // sand #7e641c
         case .agents: Color(red: 0.290, green: 0.333, blue: 0.400) // graphite #4a5566
         case .teach: Color(red: 0.184, green: 0.490, blue: 0.231) // green #2f7d3b
+        case .followups: Color(red: 0.690, green: 0.227, blue: 0.357) // rose #b03a5b
         }
     }
 

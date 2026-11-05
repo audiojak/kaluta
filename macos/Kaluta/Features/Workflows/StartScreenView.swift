@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The start screen, the *Dashboard* (spec §14.13): the day in one line, the
-/// next workflow as a large card (Return), the others on 1–7, Done today,
+/// next workflow as a large card (Return), the others on 1–8, Done today,
 /// and the mail view on Esc or M.
 struct StartScreenView: View {
     @Environment(AppModel.self) private var model
@@ -68,8 +68,11 @@ struct StartScreenView: View {
             case "m":
                 model.showMail()
                 return .handled
-            case let c where Int(c).map { (1...7).contains($0) } == true:
-                start(WorkflowKind.all[Int(c)! - 1])
+            // Follow-ups (8) only while Granola is connected (spec §14.14).
+            case let c where Int(c).map { (1...WorkflowKind.all.count).contains($0) } == true:
+                let kind = WorkflowKind.all[Int(c)! - 1]
+                guard overview?.workflows.contains(where: { $0.kind == kind }) == true else { return .ignored }
+                start(kind)
                 return .handled
             default:
                 return .ignored
@@ -106,7 +109,7 @@ struct StartScreenView: View {
             // the sidebar is not on screen here.
             QueueStatusFooter().fixedSize()
             Spacer(minLength: Space.l)
-            Text("Return starts · 1–7 chooses").foregroundStyle(.secondary)
+            Text("Return starts · 1–\(overview.workflows.count) chooses").foregroundStyle(.secondary)
             Button("Open Mail", systemImage: "tray") { model.showMail() }
                 .buttonStyle(.link)
                 .hoverHelp("Open the mailboxes (Esc or M)")
@@ -264,6 +267,7 @@ private struct WorkflowCard: View {
         case .reading: return "\(n) due today"
         case .agents: return "\(n) waiting on you"
         case .teach: return "\(n) to decide"
+        case .followups: return "\(n) meeting\(n == 1 ? "" : "s") to follow up"
         }
     }
 

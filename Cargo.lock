@@ -1484,6 +1484,7 @@ dependencies = [
  "provider-api",
  "provider-gcal",
  "provider-gmail",
+ "provider-granola",
  "provider-primitive",
  "reqwest 0.12.28",
  "rules-crypto",
@@ -2071,6 +2072,24 @@ dependencies = [
  "tracing",
  "url",
  "webpki-roots",
+ "wiremock",
+]
+
+[[package]]
+name = "provider-granola"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.3.4",
+ "mail-domain",
+ "provider-api",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "url",
  "wiremock",
 ]
 
