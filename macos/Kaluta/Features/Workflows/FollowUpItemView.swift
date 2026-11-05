@@ -22,7 +22,7 @@ struct FollowUpItemView: View {
                 }
                 VStack(alignment: .leading, spacing: Space.l) {
                     ForEach(Array(meeting.options.prefix(3).enumerated()), id: \.offset) { index, option in
-                        FollowUpOptionCard(option: option, key: index + 1, kind: session.kind) {
+                        FollowUpOptionCard(option: option, key: index + 1) {
                             Task { await model.performWorkflow(Self.pick(index)) }
                         }
                     }
@@ -63,7 +63,6 @@ struct FollowUpItemView: View {
 private struct FollowUpOptionCard: View {
     let option: FollowUpOption
     let key: Int
-    let kind: WorkflowKind
     let open: () -> Void
 
     var body: some View {
@@ -84,9 +83,7 @@ private struct FollowUpOptionCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(Space.xl)
-            .background {
-                RoundedRectangle(cornerRadius: Radius.panel).fill(Tone.workflowSurface).workflowMorph(kind)
-            }
+            .background { RoundedRectangle(cornerRadius: Radius.panel).fill(Tone.workflowSurface) }
             .contentShape(RoundedRectangle(cornerRadius: Radius.panel))
         }
         .buttonStyle(.plain)
