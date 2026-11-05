@@ -341,6 +341,10 @@ struct WorkflowItemView: View {
             if let threadID, let times = session.freeTimes[threadID], !times.slots.isEmpty {
                 FreeTimesLine(slots: times.slots)
             }
+            // A calendar invitation: answered on Google Calendar (spec §14.9).
+            if let threadID, session.kind != .agents, session.kind != .teach {
+                InviteBar(threadID: threadID)
+            }
             if session.kind == .triage || session.kind == .replies, let threadID,
                let written = session.writtenSince[threadID] {
                 WrittenSinceLine(written: written,

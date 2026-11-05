@@ -140,6 +140,109 @@ impl GoogleCalendar {
     }
 }
 
+/// The user's answer to an invitation, as Google Calendar names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rsvp {
+    NeedsAction,
+    Accepted,
+    Tentative,
+    Declined,
+}
+
+impl Rsvp {
+    pub fn as_api(self) -> &'static str {
+        match self {
+            Self::NeedsAction => "needsAction",
+            Self::Accepted => "accepted",
+            Self::Tentative => "tentative",
+            Self::Declined => "declined",
+        }
+    }
+
+    pub fn from_api(s: &str) -> Option<Self> {
+        Some(match s {
+            "needsAction" => Self::NeedsAction,
+            "accepted" => Self::Accepted,
+            "tentative" => Self::Tentative,
+            "declined" => Self::Declined,
+            _ => return None,
+        })
+    }
+}
+
+/// An invitation as it sits on the user's primary calendar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvitedEvent {
+    pub id: String,
+    /// The user's answer; `None` when they are not among its guests (they
+    /// organise it, or it reached them through a group).
+    pub response: Option<Rsvp>,
+}
+
+impl GoogleCalendar {
+    /// The event an invitation's `UID` names on the primary calendar, if
+    /// Google has put it there (it does for invitations to the account's
+    /// address, Google's own and most others). Cancelled copies are not it.
+    pub async fn find_invite(&self, ical_uid: &str) -> ProviderResult<Option<InvitedEvent>> {
+        let url = format!("{}/calendars/primary/events", self.base);
+        let query = [("iCalUID", ical_uid), ("showDeleted", "false"), ("maxResults", "5")];
+        let list: EventList = self.http.json(1, Priority::Interactive, |c| c.get(&url).query(&query)).await?;
+        Ok(list
+            .items
+            .into_iter()
+            .find(|e| e.status.as_deref() != Some("cancelled"))
+            .map(|e| InvitedEvent { response: own_response(&e.attendees), id: e.id }))
+    }
+
+    /// Answer the invitation `event_id` on the primary calendar, as
+    /// Gmail's buttons do: the user's own guest entry changes and the
+    /// organiser is told (`sendUpdates=all`). The other guests are sent
+    /// back as they were, since a patch replaces the whole list.
+    pub async fn respond(&self, event_id: &str, rsvp: Rsvp) -> ProviderResult<Rsvp> {
+        if event_id.is_empty() || !event_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return Err(ProviderError::Invalid(format!("not an event id: {event_id}")));
+        }
+        let url = format!("{}/calendars/primary/events/{event_id}", self.base);
+        let event: Event = self.http.json(1, Priority::Interactive, |c| c.get(&url)).await?;
+        let mut attendees = event.attendees;
+        let mine = attendees
+            .iter_mut()
+            .find(|a| a.get("self").and_then(Value::as_bool) == Some(true))
+            .ok_or_else(|| ProviderError::Invalid("you are not on this event's guest list".into()))?;
+        mine["responseStatus"] = json!(rsvp.as_api());
+        let body = json!({ "attendees": attendees });
+        let query = [("sendUpdates", "all")];
+        let updated: Event =
+            self.http.json(1, Priority::Interactive, |c| c.patch(&url).query(&query).json(&body)).await?;
+        Ok(own_response(&updated.attendees).unwrap_or(rsvp))
+    }
+}
+
+fn own_response(attendees: &[Value]) -> Option<Rsvp> {
+    attendees
+        .iter()
+        .find(|a| a.get("self").and_then(Value::as_bool) == Some(true))
+        .and_then(|a| a.get("responseStatus").and_then(Value::as_str))
+        .and_then(Rsvp::from_api)
+}
+
+#[derive(Deserialize)]
+struct EventList {
+    #[serde(default)]
+    items: Vec<Event>,
+}
+
+#[derive(Deserialize)]
+struct Event {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    status: Option<String>,
+    /// Kept whole: a patch sends the list back.
+    #[serde(default)]
+    attendees: Vec<Value>,
+}
+
 /// Busy times in order, overlapping and touching ones joined.
 fn merge(mut busy: Vec<Busy>) -> Vec<Busy> {
     busy.retain(|b| b.end > b.start);

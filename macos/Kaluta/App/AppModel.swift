@@ -347,6 +347,10 @@ final class AppModel {
     /// The changes on their way to the provider, and those given up: the
     /// sidebar's queue (spec §7.4, the queue).
     private(set) var queuedChanges: [QueuedChange] = []
+    /// Invitations in conversations, by thread id, as last read (spec
+    /// §14.9), and the conversation whose answer is on its way.
+    private(set) var invites: [String: CalendarInvite] = [:]
+    private(set) var inviteWorking: String?
     /// Messages the provider would not send, back in Drafts with why: the
     /// list column's banner.
     private(set) var failedSends: [DraftInfo] = []
@@ -1474,6 +1478,28 @@ final class AppModel {
     func dismissFailedChanges() {
         guard let core else { return }
         Task { try? await core.clearFailedChanges() }
+    }
+
+    /// Read the conversation's invitation, if it has one.
+    func loadInvite(_ threadID: String) async {
+        guard let core else { return }
+        let invite = try? await core.calendarInvite(threadID: threadID)
+        if invites[threadID] != invite { invites[threadID] = invite }
+    }
+
+    /// Accept, Maybe or Decline on the user's Google Calendar.
+    func respondToInvite(_ threadID: String, _ response: InviteResponse) async {
+        guard let core, let accountID = openAccountID, inviteWorking == nil else { return }
+        inviteWorking = threadID
+        defer { inviteWorking = nil }
+        do {
+            let invite = try await core.respondToInvite(threadID: threadID, response: response)
+            invites[threadID] = invite
+            undo.show(InviteBar.notice(invite), accountID: accountID, offersUndo: false)
+        } catch {
+            undo.show(error.message, accountID: accountID, offersUndo: false)
+            await loadInvite(threadID)
+        }
     }
 
     /// Read the queue of changes again.
