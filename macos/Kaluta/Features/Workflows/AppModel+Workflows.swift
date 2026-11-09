@@ -884,7 +884,12 @@ extension AppModel {
             return
         }
         if let form = session.taskForm {
-            if command == .back { session.taskForm = nil } else { await makeTask(form, item: item, session: session) }
+            if command == .back {
+                form.draft.matcher.stop()
+                session.taskForm = nil
+            } else {
+                await makeTask(form, item: item, session: session)
+            }
             return
         }
         if session.noteDraft != nil {
@@ -1220,6 +1225,8 @@ extension AppModel {
                               sender: Self.latestReceived(detail)?.from.map { $0.name ?? $0.email } ?? "",
                               categories: categories)
         session.taskForm = WorkflowTaskForm(draft: draft)
+        // Meanwhile, a task it may belong to (spec §14.8): never waited for.
+        Task { await draft.matcher.run(threadID: id, core: core) }
         if let suggested = session.suggestions[id]?.task {
             draft.apply(suggested)
         } else if TaskSuggester.canAsk(self) {
@@ -1247,6 +1254,7 @@ extension AppModel {
             }
         }
         draft.suggester.cancel()
+        draft.matcher.stop()
         await tasks.load()
         let token = form.archiveEmail ? try? await core.archive([draft.threadID]) : nil
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1257,6 +1265,32 @@ extension AppModel {
                      },
                      redoMail: {
                          for t in made { _ = try? await core.restoreTask(t) }
+                         if let token { _ = try? await core.redo(token) }
+                     })
+    }
+
+    /// The email added to a task it belongs to (spec §14.8) instead of
+    /// making one: archived if ticked, and on; ⌘Z takes all of it back.
+    func addToTask(_ match: TaskMatch, form: WorkflowTaskForm, item: WorkflowItem, session: WorkflowSession) async {
+        guard let core, session.taskForm === form else { return }
+        let (taskID, threadID) = (match.task.id, form.draft.threadID)
+        do {
+            _ = try await core.addThreadToTask(taskID, threadID: threadID)
+        } catch {
+            form.draft.error = error.message
+            return
+        }
+        form.draft.suggester.cancel()
+        form.draft.matcher.stop()
+        await tasks.load()
+        let token = form.archiveEmail ? try? await core.archive([threadID]) : nil
+        await decide(item, "task", session: session, notice: "Added to “\(match.task.title)”",
+                     undoMail: {
+                         if let token { _ = try? await core.undo(token) }
+                         _ = try? await core.removeThreadFromTask(taskID, threadID: threadID)
+                     },
+                     redoMail: {
+                         _ = try? await core.addThreadToTask(taskID, threadID: threadID)
                          if let token { _ = try? await core.redo(token) }
                      })
     }

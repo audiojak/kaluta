@@ -316,6 +316,16 @@ struct WorkflowItemView: View {
                             .foregroundStyle(.secondary)
                     }
                     TaskNoteView(session: session, item: item, task: task)
+                    // Reminders and follow-ups added to it (spec §14.8).
+                    if !task.linkedThreadIds.isEmpty {
+                        let n = task.linkedThreadIds.count
+                        Button("\(n) more email\(n == 1 ? "" : "s") on this task", systemImage: "envelope.badge") {
+                            model.openThreads(task.linkedThreadIds)
+                        }
+                        .buttonStyle(.link)
+                        .font(TypeRole.workflowContext)
+                        .hoverHelp("Open the other emails added to this task")
+                    }
                 }
             }
             if session.kind == .agents {

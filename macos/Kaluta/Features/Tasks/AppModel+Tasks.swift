@@ -104,6 +104,8 @@ extension AppModel {
         let draft = TaskDraft(threadID: row.id, subject: row.subject.isEmpty ? "(no subject)" : row.subject,
                               sender: ThreadRowView.senderLine(row), categories: categories, now: now)
         taskDraft = draft
+        // Meanwhile, a task it may belong to; never waited for.
+        Task { await draft.matcher.run(threadID: row.id, core: core) }
         if TaskSuggester.canAsk(self) {
             await draft.suggester.run(threadIDs: [row.id], model: self, now: now)
         }
@@ -163,7 +165,35 @@ extension AppModel {
 
     func closeTaskDialog() {
         taskDraft?.suggester.cancel()
+        taskDraft?.matcher.stop()
         taskDraft = nil
+    }
+
+    /// The dialog's email added to a task it belongs to, instead of a new
+    /// one; ⌘Z takes it off again.
+    func addDialogEmail(to match: TaskMatch, draft: TaskDraft) async {
+        guard let core, let accountID = openAccountID else { return }
+        do {
+            _ = try await core.addThreadToTask(match.task.id, threadID: draft.threadID)
+        } catch {
+            draft.error = error.message
+            return
+        }
+        draft.suggester.cancel()
+        draft.matcher.stop()
+        if taskDraft === draft { taskDraft = nil }
+        await tasks.load()
+        let (taskID, threadID) = (match.task.id, draft.threadID)
+        undo.record(accountID: accountID, actionName: "Add to Task", noticeText: "Added to “\(match.task.title)”",
+                    undo: { [weak self] in
+                        _ = try? await core.removeThreadFromTask(taskID, threadID: threadID)
+                        await self?.tasks.load()
+                    },
+                    redo: { [weak self] in
+                        _ = try? await core.addThreadToTask(taskID, threadID: threadID)
+                        await self?.tasks.load()
+                    })
+        await workflowTaskMade(threadID: threadID)
     }
 
     /// Add the dialog's task (the core labels the email `Task`); Undo
@@ -184,6 +214,7 @@ extension AppModel {
         do {
             let made = try await core.createTasks([draft.newTask])
             draft.suggester.cancel()
+            draft.matcher.stop()
             if taskDraft === draft { taskDraft = nil }
             recordTaskUndo(made, accountID: accountID)
             // A task made for a workflow's current conversation decides it.

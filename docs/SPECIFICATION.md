@@ -3609,6 +3609,42 @@ need or made a decision.
   the tabs. The store's lists take exclusion narrowings for it
   (`INBOX+!Label_7`, "and not labelled", next to `INBOX+IMPORTANT`).
 
+**Amendment (2026-11-09): one task, several emails; finding the task an
+email belongs to.** *Implemented 2026-11-09.* From the user's daily use:
+a contract to sign came as one email from a person and eight DocuSign
+reminders, each its own conversation, and nothing said a task for it
+already existed.
+- *Several emails.* A task keeps its own conversation (`tasks.thread_id`)
+  and may have others added (`task_threads`, migration 37): reminders,
+  follow-ups, the same request again. A task is *about* each of them:
+  the conversation's open task (Triage's line, the `Task` label, which
+  follows each added conversation too) counts them all. Deleting a task
+  drops its added conversations; undoing the delete brings them back.
+  The Tasks workflow's item says "2 more emails on this task", opening
+  them. Core: `add_thread_to_task`, `remove_thread_from_task`;
+  `TaskItem.linked_thread_ids`.
+- *Finding the task.* As soon as a task is started for an email (T in
+  Triage's form, `t`'s dialog in the mail view), Kaluta looks for an open
+  task it may belong to, in the background, with a progress bar under the
+  form ("Looking for a task this email belongs to…"). It never holds the
+  user up: Return makes a new task at any time, and a search still running
+  then (or when the form is put away) is let go and its answer ignored.
+  The quick pass, in the store: the share of the email's subject words
+  (lowercase, without words like *re*, *reminder*, *the*) found in a
+  task's title or its email's subject, plus 0.25 for the same sender (0.1
+  the same domain); a sender alone is no match. Tasks at 0.2 or more, then
+  the newest others (twelve in all), go to the agent in one hidden
+  read-only turn (the email and tasks fenced as data), which names the
+  true matches, best first, at most three, each with why; with no agent
+  ready, or if it fails, the quick pass alone shows tasks at 0.6 or more
+  ("Same subject", "Same subject and sender"). Tasks already about the
+  email are not offered. Found, the form lists them ("This may belong to a
+  task you have"), each with its category, due day, emails already on it
+  and why, and **Add to This Task** (⌘1–⌘3): the email is added to it,
+  archived when *Archive the email* is ticked (Triage), the item is
+  decided as a task, and ⌘Z takes all of it back. Core:
+  `find_task_matches`.
+
 ### 14.9 Writing guide **(Amendment 2026-09-29)**
 
 Whenever an AI composes email for the user (a new message, a reply or a

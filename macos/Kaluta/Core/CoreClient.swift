@@ -977,6 +977,21 @@ final class CoreClient: Sendable {
         try await call { try await core.resetTaskCategories() }
     }
 
+    /// Open tasks this conversation's email likely belongs to (spec §14.8);
+    /// slow when the agent is asked.
+    func findTaskMatches(threadID: String) async throws(CoreClientError) -> [TaskMatch] {
+        try await call { try await core.findTaskMatches(threadId: threadID) }
+    }
+
+    /// Add a conversation to a task: a reminder or follow-up of the same work.
+    func addThreadToTask(_ taskID: Int64, threadID: String) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.addThreadToTask(taskId: taskID, threadId: threadID) }
+    }
+
+    func removeThreadFromTask(_ taskID: Int64, threadID: String) async throws(CoreClientError) -> TaskItem {
+        try await call { try await core.removeThreadFromTask(taskId: taskID, threadId: threadID) }
+    }
+
     /// Claude's request for task suggestions about these threads, with
     /// `today` as `YYYY-MM-DD` in the user's calendar.
     func taskPrompt(_ threadIDs: [String], today: String) async throws(CoreClientError) -> String {
@@ -1894,6 +1909,7 @@ typealias InboxTidy = KalutaCore.InboxTidy
 typealias TidySuggestion = KalutaCore.TidySuggestion
 typealias QueuedChange = KalutaCore.QueuedChange
 typealias QueuedChangeState = KalutaCore.QueuedChangeState
+typealias TaskMatch = KalutaCore.TaskMatch
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse
 typealias InviteState = KalutaCore.InviteState

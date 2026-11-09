@@ -452,6 +452,28 @@ pub fn writing_help_answer(prompt: &str) -> Option<String> {
     )
 }
 
+/// The fake's answer to a Kaluta task-match prompt (spec §14.8), or
+/// `None` for any other prompt: every listed task whose title shares two
+/// words or more (of three letters or more) with the email's subject.
+pub fn task_match_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta task match") {
+        return None;
+    }
+    let words = |s: &str| -> Vec<String> {
+        s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| w.len() >= 3).map(str::to_owned).collect()
+    };
+    let subject = words(prompt.split("<email>").nth(1)?.lines().find_map(|l| l.strip_prefix("Subject: "))?);
+    let mut found = Vec::new();
+    for block in prompt.split("<task id=\"").skip(1) {
+        let Some((id, rest)) = block.split_once('"') else { continue };
+        let title = rest.lines().find_map(|l| l.strip_prefix("Title: ")).unwrap_or_default();
+        if words(title).iter().filter(|w| subject.contains(w)).count() >= 2 {
+            found.push(format!(r#"{{"task_id": {id}, "why": "The same piece of work."}}"#));
+        }
+    }
+    Some(format!(r#"{{"matches": [{}]}}"#, found.join(", ")))
+}
+
 /// The fake's answer to a Kaluta meeting follow-up prompt (spec §14.14),
 /// or `None` for any other prompt: a follow-up with two options when the
 /// meeting was with anyone else (the first address on its `With:` line),
@@ -480,6 +502,7 @@ pub fn followup_answer(prompt: &str) -> Option<String> {
 /// guide, analysis, facts, writing help's questions), or `None`.
 pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
+        .or_else(|| task_match_answer(prompt))
         .or_else(|| followup_answer(prompt))
         .or_else(|| triage_answer(prompt))
         .or_else(|| reply_answers_answer(prompt))

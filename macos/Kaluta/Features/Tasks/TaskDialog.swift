@@ -29,6 +29,8 @@ final class TaskDraft: Identifiable {
     let editing: TaskItem?
 
     let suggester = TaskSuggester()
+    /// An open task the email may belong to, looked for meanwhile.
+    let matcher = TaskMatcher()
     @ObservationIgnored private var applying = false
     @ObservationIgnored private var editedTitle = false
     /// Category, due day or action changed by the user: a later
@@ -151,6 +153,11 @@ struct TaskDialog: View {
             TextField("Notes", text: $draft.notes, axis: .vertical)
                 .lineLimit(2...4)
                 .textFieldStyle(.roundedBorder)
+            if draft.editing == nil {
+                TaskMatchesView(matcher: draft.matcher) { match in
+                    Task { await model.addDialogEmail(to: match, draft: draft) }
+                }
+            }
         } leading: {
             Button("Ask Again") { ask() }
                 .disabled(!TaskSuggester.canAsk(model) || draft.suggester.state == .working)

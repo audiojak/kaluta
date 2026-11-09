@@ -42,7 +42,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 mail-parser = "0.11"
 mail-builder = "1"
 ammonia = "4"
@@ -73,7 +73,7 @@ iana-time-zone = "0.1"
 toml = "1"
 # The shim's own uid, to check the app's socket (no `unsafe` getuid).
 rustix = { version = "1", default-features = false, features = ["std", "process"] }
-rmcp = { version = "3.4", default-features = false, features = ["server", "transport-io"] }
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io"] }
 # The rules server's HTTP (spec §10.6): plain HTTP/1.1 behind the user's TLS proxy.
 # Rules server encryption at rest (spec §10.6, oagc-gmn7.7): XChaCha20-Poly1305,
 # HKDF-SHA256 and X25519 from RustCrypto and dalek, randomness from getrandom.
