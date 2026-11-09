@@ -69,8 +69,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case note
     /// The words typed are the email, as written: no drafting.
     case ownWords
-    /// Kaluta writes the likely reply with nothing said (⌘Return on the
-    /// words); it may still ask.
+    /// ⌘Return on *What do you want to say?*: Kaluta writes the email from
+    /// what was typed, or, with nothing typed, the reply it finds likely;
+    /// it may still ask.
     case firstPass
     /// Esc: back one step; from an item, back to Mail.
     case back
@@ -211,7 +212,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .holdTimes: "Hold these times"
         case .note: "Add a note"
         case .ownWords: "Use my words"
-        case .firstPass: "Kaluta's first pass"
+        case .firstPass: "Write it"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"

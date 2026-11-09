@@ -586,8 +586,47 @@ struct WorkflowTests {
         #expect(await writer.pickStarter(0, model: model))
         #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
         #expect(writer.said == "Yes, but only until 3", "the answer, then the words typed")
-        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Kaluta's first pass")
-        #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's first pass")
+        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Write it")
+        #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's draft, with nothing said")
+    }
+
+    @Test func returnPutsANewLineAtTheCursor() {
+        var text = "Yes, Tuesday but keep it"
+        var cursor: TextSelection? = TextSelection(insertionPoint: text.index(text.startIndex, offsetBy: 12))
+        WorkflowWriteView.insertNewline(in: &text, at: &cursor)
+        #expect(text == "Yes, Tuesday\n but keep it")
+        WorkflowWriteView.insertNewline(in: &text, at: &cursor)
+        #expect(text == "Yes, Tuesday\n\n but keep it", "the cursor moved past the first")
+        // A selection is replaced; no cursor known, at the end.
+        let start = text.index(text.startIndex, offsetBy: 14)
+        cursor = TextSelection(range: start..<text.index(start, offsetBy: 1))
+        WorkflowWriteView.insertNewline(in: &text, at: &cursor)
+        #expect(text == "Yes, Tuesday\n\n\nbut keep it")
+        var none: TextSelection?
+        WorkflowWriteView.insertNewline(in: &text, at: &none)
+        #expect(text.hasSuffix("keep it\n"))
+    }
+
+    /// *What do you want to say?*: Return is a new line, so one action
+    /// writes, on ⌘Return, named for what it will do (2026-11-09).
+    @Test func theSayStepWritesOnCommandReturnNamedForWhatItDoes() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        await model.agent.loadProviders()
+        let core = try #require(model.core)
+        let row = try #require(try await core.threads(in: "INBOX", limit: 1).rows.first)
+        let item = WorkflowItem(key: "thread:\(row.id)", threadId: row.id, taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .replies, items: [item], startedAt: 0, resumed: false))
+        let writer = WorkflowWriter(threadID: row.id, messageID: "m", replyAll: false, taskID: nil, email: "Can you come?")
+        session.writer = writer
+        model.workflowSession = session
+        let shown = { model.workflowActions().filter(\.shown).map { "\($0.title) \($0.command.keyLabel ?? "")" } }
+        #expect(writer.step == .say)
+        #expect(shown() == ["Let Kaluta draft it ⌘Return", "Cancel Esc"])
+        writer.field = "yes\n\nbut only after 3"
+        #expect(shown() == ["Write it from this ⌘Return", "Use my words ⇧⌘M", "Cancel Esc"])
+        #expect(!model.workflowActions().contains { $0.command == .primary }, "Return is the field's new line")
     }
 
     @Test func kalutaTakesAFirstPassWithNothingSaid() async throws {

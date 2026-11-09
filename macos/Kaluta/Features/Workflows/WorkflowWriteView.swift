@@ -9,6 +9,8 @@ struct WorkflowWriteView: View {
     let session: WorkflowSession
     @Bindable var writer: WorkflowWriter
     @FocusState private var fieldFocused: Bool
+    /// The cursor in *What do you want to say?*: Return puts a new line there.
+    @State private var sayCursor: TextSelection?
     @FocusState private var textFocused: Bool
     @FocusState private var toFocused: Bool
     /// Which of the names offered ↑ and ↓ have reached; Return takes it.
@@ -268,17 +270,24 @@ struct WorkflowWriteView: View {
                 Text(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
                     .font(TypeRole.workflowHeading)
                 Text(model.agent.isProviderReady && !writer.ownWordsOnly
-                     ? "Kaluta writes the email from it, for you to read and change before it goes."
+                     ? "Notes or whole sentences; Return starts a new line. ⌘Return and Kaluta writes the email from them, or, with nothing typed, the reply it thinks likely, for you to read and change before it goes."
                      : "What you type is the email.")
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: Space.m) {
-                TextField("Type it, or dictate it", text: $writer.field, axis: .vertical)
+                TextField("Type it, or dictate it", text: $writer.field, selection: $sayCursor, axis: .vertical)
                     .font(TypeRole.workflowContent)
                     .textFieldStyle(.plain)
-                    .lineLimit(2...6)
+                    .lineLimit(2...10)
                     .focused($fieldFocused)
-                    .onSubmit { perform(.primary) }
+                    // Return is a new line, as in any message: notes in
+                    // parts. ⌘Return writes (the screen's own shortcut).
+                    // Writing it oneself, or with no agent, too.
+                    .onKeyPress(keys: [.return, .enter], phases: .down) { press in
+                        guard press.modifiers.isEmpty || press.modifiers == .shift else { return .ignored }
+                        Self.insertNewline(in: &writer.field, at: &sayCursor)
+                        return .handled
+                    }
                     .onExitCommand { perform(.back) }
                     // 1–3 say an answer, while nothing is typed.
                     .onKeyPress(characters: .decimalDigits) { press in
@@ -537,10 +546,24 @@ struct WorkflowWriteView: View {
             : "Pick one to read and change before it goes."
     }
 
+    /// A new line where the cursor is (in place of any selected text),
+    /// the cursor after it; with no cursor known, at the end.
+    static func insertNewline(in text: inout String, at selection: inout TextSelection?) {
+        guard case let .selection(range)? = selection?.indices,
+              range.lowerBound >= text.startIndex, range.upperBound <= text.endIndex else {
+            text += "\n"
+            selection = TextSelection(insertionPoint: text.endIndex)
+            return
+        }
+        let offset = text.distance(from: text.startIndex, to: range.lowerBound)
+        text.replaceSubrange(range, with: "\n")
+        selection = TextSelection(insertionPoint: text.index(text.startIndex, offsetBy: offset + 1))
+    }
+
     /// Above the final email: what the user said, or which answer they chose.
     static func saidLine(_ said: String) -> String {
         if said.isEmpty { return "Written by you" }
-        if said == WorkflowWriter.firstPassInstruction { return "Kaluta's first pass" }
+        if said == WorkflowWriter.firstPassInstruction { return "Kaluta's draft, with nothing said" }
         if said.hasPrefix("Chose: ") { return "You chose: " + said.dropFirst("Chose: ".count) }
         return "You said: \(said)"
     }
