@@ -13,6 +13,11 @@ ignore = [
   # it never runs in the app or reads mail. Drop this when uniffi moves off
   # it. Accepted 2026-10-20.
   { id = "RUSTSEC-2026-0374", reason = "build-time only, via uniffi_bindgen; no maintained release" },
+  # pin-utils is archived (unmaintained, no successor release; no known
+  # vulnerability). It reaches Kaluta through async-imap's pinning macros,
+  # used by the IMAP backfill. Drop this when async-imap moves off it.
+  # Accepted 2026-11-09.
+  { id = "RUSTSEC-2026-0441", reason = "unmaintained, no vulnerability; via async-imap, no maintained release" },
 ]
 
 [licenses]
