@@ -53,6 +53,7 @@ mod rules_publish;
 mod runtime;
 pub mod secrets;
 mod sync;
+mod task_match;
 mod tasks;
 mod tasks_ai;
 mod triage;
@@ -97,6 +98,7 @@ pub use rules_publish::{
     RulesPublication,
 };
 pub use secrets::SecretStore;
+pub use task_match::TaskMatch;
 
 /// Configuration the app passes when it creates the core.
 #[derive(Debug, Clone, uniffi::Record)]

@@ -69,6 +69,8 @@ pub struct TaskItem {
     pub subject: String,
     pub sender_name: Option<String>,
     pub sender_email: Option<String>,
+    /// Other conversations added to the task (reminders, follow-ups).
+    pub linked_thread_ids: Vec<String>,
 }
 
 impl From<TaskRow> for TaskItem {
@@ -90,6 +92,7 @@ impl From<TaskRow> for TaskItem {
             subject: t.subject,
             sender_name: t.from_name,
             sender_email: t.from_email,
+            linked_thread_ids: t.linked,
         }
     }
 }
@@ -212,6 +215,14 @@ impl Core {
         self.mutate_unrecorded(change).await
     }
 
+    /// The `Task` label on the task's own conversation and those added to it.
+    async fn follow_task_labels(&self, task: &TaskItem) {
+        self.follow_task_label(&task.thread_id).await;
+        for thread in &task.linked_thread_ids {
+            self.follow_task_label(thread).await;
+        }
+    }
+
     async fn task_by_id(&self, id: i64) -> Result<TaskItem, CoreError> {
         let db = self.db()?;
         runtime::run(
@@ -301,7 +312,7 @@ impl Core {
             return Err(not_found());
         }
         let task = self.task_by_id(id).await?;
-        self.follow_task_label(&task.thread_id).await;
+        self.follow_task_labels(&task).await;
         self.tasks_changed();
         Ok(task)
     }
@@ -311,13 +322,14 @@ impl Core {
         let task = self.task_by_id(id).await?;
         let db = self.db()?;
         runtime::run(async move { Ok(db.write(move |tx| tasks::delete(tx, id)).await?) }).await?;
-        self.follow_task_label(&task.thread_id).await;
+        self.follow_task_labels(&task).await;
         self.tasks_changed();
         Ok(task)
     }
 
     /// Put a deleted task back exactly as it was.
     pub async fn restore_task(&self, task: TaskItem) -> Result<TaskItem, CoreError> {
+        let id = task.id;
         let row = TaskRow {
             id: task.id,
             thread_id: task.thread_id.clone(),
@@ -332,13 +344,50 @@ impl Core {
             why: task.why,
             created_at: task.created_at,
             completed_at: task.completed_at,
+            linked: task.linked_thread_ids.clone(),
             ..Default::default()
         };
         let db = self.db()?;
         runtime::run(async move { Ok(db.write(move |tx| tasks::restore(tx, &row)).await?) }).await?;
-        self.follow_task_label(&task.thread_id).await;
+        let restored = self.task_by_id(id).await?;
+        self.follow_task_labels(&restored).await;
         self.tasks_changed();
         self.task_by_id(task.id).await
+    }
+
+    /// Add a conversation to a task (spec §14.8): a reminder or follow-up
+    /// about the same piece of work. It gets the `Task` label too.
+    pub async fn add_thread_to_task(&self, task_id: i64, thread_id: String) -> Result<TaskItem, CoreError> {
+        let db = self.db()?;
+        let (now, thread) = (mail_sync::now_millis(), thread_id.clone());
+        let found = runtime::run(async move {
+            Ok(db
+                .write(move |tx| {
+                    if tasks::get(tx, task_id)?.is_none() {
+                        return Ok(false);
+                    }
+                    tasks::link(tx, task_id, &thread, now)?;
+                    Ok(true)
+                })
+                .await?)
+        })
+        .await?;
+        if !found {
+            return Err(not_found());
+        }
+        self.follow_task_label(&thread_id).await;
+        self.tasks_changed();
+        self.task_by_id(task_id).await
+    }
+
+    /// Take an added conversation off a task again (undo).
+    pub async fn remove_thread_from_task(&self, task_id: i64, thread_id: String) -> Result<TaskItem, CoreError> {
+        let db = self.db()?;
+        let thread = thread_id.clone();
+        runtime::run(async move { Ok(db.write(move |tx| tasks::unlink(tx, task_id, &thread)).await?) }).await?;
+        self.follow_task_label(&thread_id).await;
+        self.tasks_changed();
+        self.task_by_id(task_id).await
     }
 
     /// Which of these threads have an open task (the bulk sheet unchecks

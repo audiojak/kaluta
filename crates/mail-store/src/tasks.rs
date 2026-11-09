@@ -38,6 +38,8 @@ pub struct TaskRow {
     pub subject: String,
     pub from_name: Option<String>,
     pub from_email: Option<String>,
+    /// Other conversations added to it (reminders, follow-ups), oldest first.
+    pub linked: Vec<String>,
 }
 
 /// What a caller may set on a task; the rest is kept.
@@ -52,7 +54,9 @@ pub struct TaskFields {
 
 const SELECT: &str = "SELECT t.id, t.thread_id, t.message_id, t.title, t.notes, t.category, t.due_day, t.action,
        t.status, t.source, t.why, t.created_at, t.completed_at,
-       COALESCE(NULLIF(th.subject, ''), m.subject, ''), m.from_name, m.from_email
+       COALESCE(NULLIF(th.subject, ''), m.subject, ''), m.from_name, m.from_email,
+       (SELECT group_concat(thread_id, ' ') FROM
+          (SELECT thread_id FROM task_threads WHERE task_id = t.id ORDER BY added_at, thread_id))
   FROM tasks t
   LEFT JOIN threads th ON th.gmail_id = t.thread_id
   LEFT JOIN messages m ON m.id = COALESCE(
@@ -78,6 +82,10 @@ fn row(r: &Row<'_>) -> rusqlite::Result<TaskRow> {
         subject: r.get(13)?,
         from_name: r.get(14)?,
         from_email: r.get(15)?,
+        linked: r
+            .get::<_, Option<String>>(16)?
+            .map(|s| s.split(' ').filter(|t| !t.is_empty()).map(str::to_owned).collect())
+            .unwrap_or_default(),
     })
 }
 
@@ -158,6 +166,9 @@ pub fn restore(tx: &Transaction<'_>, t: &TaskRow) -> StoreResult<()> {
         t.created_at,
         t.completed_at
     ])?;
+    for (i, thread) in t.linked.iter().enumerate() {
+        link(tx, t.id, thread, t.created_at + i as Millis)?;
+    }
     Ok(())
 }
 
@@ -181,17 +192,21 @@ pub fn list(conn: &Connection, include_done: bool) -> StoreResult<Vec<TaskRow>> 
     Ok(rows)
 }
 
-/// The open tasks about a thread.
+/// A task is about a thread: its own, or one added to it.
+const ABOUT: &str =
+    "(t.thread_id = ?1 OR EXISTS (SELECT 1 FROM task_threads l WHERE l.task_id = t.id AND l.thread_id = ?1))";
+
+/// The open tasks about a thread (its own, or added to them).
 pub fn open_for_thread(conn: &Connection, thread_id: &str) -> StoreResult<Vec<TaskRow>> {
-    let mut stmt =
-        conn.prepare_cached(&format!("{SELECT} WHERE t.thread_id = ?1 AND t.status = 'open' ORDER BY t.id"))?;
+    let mut stmt = conn.prepare_cached(&format!("{SELECT} WHERE {ABOUT} AND t.status = 'open' ORDER BY t.id"))?;
     let rows = stmt.query_map([thread_id], row)?.collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
 
 /// Which of `thread_ids` have an open task.
 pub fn threads_with_open_tasks(conn: &Connection, thread_ids: &[String]) -> StoreResult<Vec<String>> {
-    let mut stmt = conn.prepare_cached("SELECT 1 FROM tasks WHERE thread_id = ?1 AND status = 'open' LIMIT 1")?;
+    let mut stmt =
+        conn.prepare_cached(&format!("SELECT 1 FROM tasks t WHERE {ABOUT} AND t.status = 'open' LIMIT 1"))?;
     let mut out = Vec::new();
     for id in thread_ids {
         if stmt.exists([id])? {
@@ -199,6 +214,29 @@ pub fn threads_with_open_tasks(conn: &Connection, thread_ids: &[String]) -> Stor
         }
     }
     Ok(out)
+}
+
+/// Add a conversation to a task. False when it is the task's own, or
+/// already added.
+pub fn link(tx: &Transaction<'_>, task_id: i64, thread_id: &str, now: Millis) -> StoreResult<bool> {
+    let own = tx
+        .prepare_cached("SELECT 1 FROM tasks WHERE id = ?1 AND thread_id = ?2")?
+        .exists(params![task_id, thread_id])?;
+    if own {
+        return Ok(false);
+    }
+    Ok(tx
+        .prepare_cached("INSERT OR IGNORE INTO task_threads (task_id, thread_id, added_at) VALUES (?1, ?2, ?3)")?
+        .execute(params![task_id, thread_id, now])?
+        > 0)
+}
+
+/// Take an added conversation off a task (undo).
+pub fn unlink(tx: &Transaction<'_>, task_id: i64, thread_id: &str) -> StoreResult<bool> {
+    Ok(tx
+        .prepare_cached("DELETE FROM task_threads WHERE task_id = ?1 AND thread_id = ?2")?
+        .execute(params![task_id, thread_id])?
+        > 0)
 }
 
 /// The account's categories in order.

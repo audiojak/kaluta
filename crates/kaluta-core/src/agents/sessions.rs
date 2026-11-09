@@ -640,6 +640,22 @@ impl Core {
 pub(crate) type FakeProviders = OnceLock<Vec<Arc<dyn AgentProvider>>>;
 
 #[cfg(test)]
+impl Core {
+    /// Tests: no agent installed, so nothing reaches a real one.
+    pub(crate) fn debug_use_no_agents(&self) {
+        let none: Vec<Arc<dyn AgentProvider>> = vec![
+            Arc::new(agent_api::fake::FakeAgent::with_status(ProviderId::ClaudeCode, AgentStatus::NotInstalled)),
+            Arc::new(agent_api::fake::FakeAgent::with_status(ProviderId::Codex, AgentStatus::NotInstalled)),
+        ];
+        let _ = self.agents.fake_providers.set(none);
+        let mut cloud = self.agents.cloud_locator.lock().unwrap_or_else(|e| e.into_inner());
+        if cloud.is_none() {
+            *cloud = Some(agent_api::process::Locator::only(vec![]));
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn the_chosen_model_is_kept_per_agent() {

@@ -66,6 +66,14 @@ struct WorkflowTaskFormView: View {
             Toggle("Archive the email", isOn: $form.archiveEmail)
                 .font(TypeRole.workflowContext)
                 .hoverHelp("Out of the Inbox; it stays under the Task label until the task is done")
+            // A task it may belong to, looked for meanwhile (spec §14.8):
+            // Return still makes a new one at any time.
+            if !form.isExisting {
+                TaskMatchesView(matcher: draft.matcher, large: true) { match in
+                    guard let item = session.current else { return }
+                    Task { await model.addToTask(match, form: form, item: item, session: session) }
+                }
+            }
             if draft.suggester.state == .working {
                 HStack(spacing: Space.m) {
                     ProgressView().controlSize(.small)
