@@ -586,7 +586,7 @@ struct WorkflowTests {
         #expect(await writer.pickStarter(0, model: model))
         #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
         #expect(writer.said == "Yes, but only until 3", "the answer, then the words typed")
-        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Write it")
+        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Generate it")
         #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's draft, with nothing said")
     }
 
@@ -623,9 +623,9 @@ struct WorkflowTests {
         model.workflowSession = session
         let shown = { model.workflowActions().filter(\.shown).map { "\($0.title) \($0.command.keyLabel ?? "")" } }
         #expect(writer.step == .say)
-        #expect(shown() == ["Let Kaluta draft it ⌘Return", "Cancel Esc"])
+        #expect(shown() == ["Generate a reply ⌘Return", "Cancel Esc"])
         writer.field = "yes\n\nbut only after 3"
-        #expect(shown() == ["Write it from this ⌘Return", "Use my words ⇧⌘M", "Cancel Esc"])
+        #expect(shown() == ["Generate the email from this ⌘Return", "Use my words ⇧⌘M", "Cancel Esc"])
         #expect(!model.workflowActions().contains { $0.command == .primary }, "Return is the field's new line")
     }
 

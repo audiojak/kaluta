@@ -4697,13 +4697,15 @@ are looked for as each account opens.
   was both a new line and "write", and *Write it with Kaluta* beside
   *Kaluta's first pass* did not say how they differed.)* **Return is a
   new line** in the field, so notes can come in parts. One action writes,
-  on **⌘Return**, named for what it will do: *Write it from this* once
-  anything is typed (Kaluta writes the email from it), else *Let Kaluta
-  draft it* (Kaluta writes the reply it finds likely with nothing said,
+  on **⌘Return**, named for what it will do: *Generate the email from
+  this* once anything is typed (Kaluta writes the email from it), else
+  *Generate a reply* (Kaluta writes the reply it finds likely with nothing said,
   recorded as "Write a reply", no direction, and shown as *Kaluta's
   draft, with nothing said* above the email; amended 2026-10-26). *Use
   my words* (⇧⌘M) shows once something is typed. Writing it oneself, or
-  with no agent ready, ⌘Return takes the words as written. When Kaluta
+  with no agent ready, ⌘Return takes the words as written. *(Amended
+  2026-11-10: the buttons say "Generate", and ⌘Return pressed inside the
+  field generates, as the button does.)* When Kaluta
   would have to invent a fact, it asks instead (§14.9), in the session
   it was asked in, **one question at a time** on its own screen: *Kaluta
   asks* in the workflow's colour, "1 of 2", the question, a field

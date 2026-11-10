@@ -729,7 +729,7 @@ extension AppModel {
             // Return is a new line in the field; ⌘Return writes: from what
             // was typed, or, with nothing typed, the likely reply.
             let typed = !writer.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let write = a(.firstPass, .primary, typed ? "Write it from this" : "Let Kaluta draft it")
+            let write = a(.firstPass, .primary, typed ? "Generate the email from this" : "Generate a reply")
             return [write] + (typed ? [a(.ownWords, .plain, nil)] : []) + starters + [back, discard]
         case .asking:
             // Return answers (the last answer writes); ⇧Return skips; 1–3
@@ -880,7 +880,10 @@ extension AppModel {
         // Return in an item is Reply, and nothing where there is none. C
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
-            : command == .copyCode && !actions.contains(.copyCode) ? .conversation : command
+            : command == .copyCode && !actions.contains(.copyCode) ? .conversation
+            // ⌘Return reaches the screen as Send (the field's own shortcut
+            // and the screen's key alike); on the words it generates.
+            : command == .send && !actions.contains(.send) && actions.contains(.firstPass) ? .firstPass : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)
