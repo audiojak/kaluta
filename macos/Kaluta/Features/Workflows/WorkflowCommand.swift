@@ -18,6 +18,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case task
     /// L: later (leave in the Inbox, tomorrow, check again, keep).
     case later
+    /// B (Gmail's Snooze): remind me later (Triage); then 1–3 pick when.
+    case remind
     /// S: skip for now; the item moves to the end of the set.
     case skip
     /// Return (or Enter) and R in an item: reply, wherever there is one
@@ -93,6 +95,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .done: "E"
         case .task: "T"
         case .later: "L"
+        case .remind: "B"
         case .skip: "S"
         case .replyNow: "Return"
         case .openInFull: "O"
@@ -128,7 +131,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
 
     /// The single-character keys, by character.
     private static let characters: [Character: WorkflowCommand] = [
-        "e": .done, "t": .task, "l": .later, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
+        "e": .done, "t": .task, "l": .later, "b": .remind, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
         "f": .forward, "p": .previousMessage, "n": .nextMessage, "?": .showKeys,
         "i": .backToInbox, "c": .copyCode, "m": .note,
         "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
@@ -182,6 +185,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
             case .followups: "Tomorrow"
             default: "Later"
             }
+        case .remind: "Remind me later"
         case .skip: "Skip for now"
         case .replyNow: kind == .waiting ? "Nudge" : "Reply"
         case .openInFull:

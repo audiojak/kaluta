@@ -84,7 +84,8 @@ pub struct WorkflowSummary {
     pub estimate_secs: u32,
     /// The first few items' names: senders (Triage, Replies) or task titles.
     pub preview: Vec<String>,
-    /// Waiting beyond today's set: tasks due later this week.
+    /// Waiting beyond today's set: tasks due later this week; for Triage,
+    /// reminders still to come.
     pub later: u32,
     /// A set of this kind is open today, part decided.
     pub in_progress: bool,
@@ -362,7 +363,13 @@ impl Core {
                         let (count, in_progress) = match &open {
                             Some(set) => {
                                 let decided = store::decisions(c, set.id)?.len();
-                                ((set.items.len().saturating_sub(decided)) as u32, decided > 0)
+                                // Reminders due since join it when it resumes.
+                                let back = if kind == WorkflowKind::Triage {
+                                    mail_store::reminders::due_outside(c, set, now)?
+                                } else {
+                                    0
+                                };
+                                ((set.items.len().saturating_sub(decided)) as u32 + back, decided > 0)
                             }
                             None => (fresh.keys.len() as u32, false),
                         };
@@ -432,7 +439,7 @@ impl Core {
                         }
                         // Answered or archived meanwhile, in Gmail or here: done
                         // elsewhere, so the set never shows it as new.
-                        let elsewhere = match kind {
+                        let mut elsewhere = match kind {
                             WorkflowKind::Tasks => store::decide_done_elsewhere(tx, open.id, now)?,
                             WorkflowKind::Triage | WorkflowKind::Replies => {
                                 store::decide_handled_elsewhere(tx, open.id, now)?
@@ -440,6 +447,10 @@ impl Core {
                             WorkflowKind::Teach => store::decide_taught_elsewhere(tx, open.id, now)?,
                             _ => 0,
                         };
+                        // Reminders that came due meanwhile: up next.
+                        if kind == WorkflowKind::Triage {
+                            elsewhere += mail_store::reminders::bring_back(tx, open.id, now)?;
+                        }
                         if elsewhere > 0 {
                             let id = open.id;
                             let open = store::get_set(tx, id)?
@@ -638,17 +649,21 @@ fn fresh_set(
     Ok(match kind {
         WorkflowKind::Triage => {
             let since = triage_since(conn, now)?;
-            let found = store::triage_candidates(conn, since, MAX_SET)?;
+            // Reminders that are due come first, whatever the order
+            // (*Remind me later*); those still to come wait.
+            let due = mail_store::reminders::due(conn, now)?;
+            let found = store::triage_new(conn, since, now, MAX_SET, &due)?;
             let mut ranked = rank(conn, found)?;
             let card = triage_card(&ranked);
             if by_priority {
                 // Stable: equals keep people first, newest first.
                 ranked.sort_by_key(|r| std::cmp::Reverse(r.score));
             }
+            let first = due.iter().chain(ranked.iter().map(|r| &r.candidate));
             Fresh {
-                preview: ranked.iter().take(5).map(|r| name_of(&r.candidate)).collect(),
-                keys: ranked.iter().map(|r| format!("thread:{}", r.candidate.thread_id)).collect(),
-                later: 0,
+                preview: first.clone().take(5).map(name_of).collect(),
+                keys: first.map(|c| format!("thread:{}", c.thread_id)).collect(),
+                later: mail_store::reminders::pending(conn, now)?,
                 card: Some(card),
             }
         }
@@ -764,6 +779,40 @@ mod tests {
         assert_eq!(summary(&o, WorkflowKind::Tasks).count, 1);
         assert!(summary(&o, WorkflowKind::Replies).count >= 3);
         assert_eq!(summary(&o, WorkflowKind::Waiting).count, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_conversation_put_off_waits_then_comes_back_up_next() {
+        let (core, dir) = demo_core("remind");
+        let set = block_on(core.start_workflow(WorkflowKind::Triage)).unwrap();
+        let first = set.items[0].key.clone();
+        let thread = first.trim_start_matches("thread:").to_owned();
+        block_on(core.decide_workflow_item(set.id, first.clone(), "remind".into(), 1_000)).unwrap();
+        let hour = mail_sync::now_millis() + 3_600_000;
+        assert_eq!(block_on(core.remind_later(thread.clone(), Some(hour))).unwrap(), None);
+        let o = block_on(core.workflow_overview()).unwrap();
+        assert_eq!(summary(&o, WorkflowKind::Triage).later, 1, "one reminder to come");
+        assert_eq!(block_on(core.reminder(thread.clone())).unwrap().map(|r| r.remind_at), Some(hour));
+
+        // Its time comes: the open set has it up next again.
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let before = block_on(core.remind_later(thread.clone(), Some(mail_sync::now_millis()))).unwrap();
+        assert_eq!(before.map(|r| r.remind_at), Some(hour));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let left = |s: &WorkflowSet| s.items.iter().filter(|i| i.decision.is_none()).count();
+        let undecided = left(&block_on(core.start_workflow(WorkflowKind::Triage)).unwrap());
+        let o = block_on(core.workflow_overview()).unwrap();
+        assert_eq!(summary(&o, WorkflowKind::Triage).later, 0);
+        let again = block_on(core.start_workflow(WorkflowKind::Triage)).unwrap();
+        let next = again.items.iter().find(|i| i.decision.is_none()).unwrap();
+        assert_eq!(next.key, first, "back, up next");
+        assert_eq!(left(&again), undecided);
+        assert_eq!(left(&again), set.items.len());
+
+        // Undo puts it back as it was.
+        block_on(core.restore_reminder(thread.clone(), None)).unwrap();
+        assert_eq!(block_on(core.reminder(thread)).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

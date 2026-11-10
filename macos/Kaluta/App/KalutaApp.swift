@@ -199,10 +199,12 @@ struct MailCommands: Commands {
                     .disabled(!mailKey || !model.showsWorkflows)
                 Divider() // menu
             }
+            // Only where the mail list shows; on a task form ⌘1–⌘3 add the
+            // email to a task it may belong to (spec §14.8).
             ForEach(Array(Self.mailboxShortcuts.enumerated()), id: \.offset) { index, item in
                 Button(item.title) { model.selectedMailboxID = item.id }
                     .keyboardShortcut(KeyEquivalent(Character(String(index + 1))))
-                    .disabled(!mailKey)
+                    .disabled(!mailShown || model.taskDraft != nil)
             }
             Divider() // menu
             Button("Check for New Mail") { model.core?.syncNow() }

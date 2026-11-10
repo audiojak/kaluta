@@ -329,7 +329,7 @@ impl Core {
             Ok(db
                 .read(move |c| {
                     let since = crate::workflows::triage_since(c, now)?;
-                    Ok((store::to_suggest(c, since, limit)?, mail_store::tasks::categories(c)?))
+                    Ok((store::to_suggest(c, since, now, limit)?, mail_store::tasks::categories(c)?))
                 })
                 .await?)
         })

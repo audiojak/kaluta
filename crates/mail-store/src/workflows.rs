@@ -115,6 +115,13 @@ pub fn undecide(tx: &Transaction<'_>, set_id: i64, item: &str) -> StoreResult<bo
         > 0)
 }
 
+/// A set's items, in a new order.
+pub fn set_items(tx: &Transaction<'_>, set_id: i64, items: &[String]) -> StoreResult<()> {
+    tx.prepare_cached("UPDATE workflow_sets SET items_json = ?2 WHERE id = ?1")?
+        .execute(params![set_id, serde_json::to_string(items)?])?;
+    Ok(())
+}
+
 /// Skip an item: it moves to the end of the set.
 pub fn skip(tx: &Transaction<'_>, set_id: i64, item: &str) -> StoreResult<()> {
     let Some(set) = get_set(tx, set_id)? else { return Ok(()) };
@@ -219,9 +226,31 @@ fn label_rowid(conn: &Connection, gmail_id: &str) -> StoreResult<i64> {
 /// at or after `since`; `asking`: only those from people whose latest
 /// message asks something and that have no open task (Replies).
 fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) -> StoreResult<Vec<Candidate>> {
+    let rows = inbox_rows(conn, "m.internal_date >= ?3", since, limit)?;
+    Ok(rows
+        .into_iter()
+        .filter(|(c, asks, tasked)| !asking || (c.person && *asks && !*tasked))
+        .map(|(c, ..)| c)
+        .collect())
+}
+
+/// One Inbox conversation as a candidate, if its latest message is
+/// someone else's.
+pub(crate) fn inbox_candidate(conn: &Connection, thread_id: &str) -> StoreResult<Option<Candidate>> {
+    Ok(inbox_rows(conn, "t.gmail_id = ?3", thread_id, 1)?.into_iter().next().map(|(c, ..)| c))
+}
+
+/// Inbox conversations matching `filter` (on `?3`), newest first: each
+/// with whether it asks something and whether it has an open task.
+fn inbox_rows(
+    conn: &Connection,
+    filter: &str,
+    arg: impl rusqlite::ToSql,
+    limit: u32,
+) -> StoreResult<Vec<(Candidate, bool, bool)>> {
     let inbox = label_rowid(conn, system_labels::INBOX)?;
     let personal = label_rowid(conn, "CATEGORY_PERSONAL")?;
-    let mut stmt = conn.prepare_cached(
+    let mut stmt = conn.prepare_cached(&format!(
         "SELECT t.gmail_id, COALESCE(NULLIF(t.subject, ''), m.subject), m.from_name, m.from_email, m.internal_date,
                 (EXISTS (SELECT 1 FROM thread_labels p WHERE p.thread_id = t.id AND p.label_id = ?2)
                  OR NOT EXISTS (SELECT 1 FROM thread_labels c JOIN labels l ON l.id = c.label_id
@@ -233,11 +262,11 @@ fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) 
            JOIN threads t ON t.id = i.thread_id
            JOIN messages m ON m.id = (SELECT id FROM messages WHERE thread_id = t.id AND is_draft = 0
                                        ORDER BY internal_date DESC, id DESC LIMIT 1)
-          WHERE i.label_id = ?1 AND m.is_sent_by_me = 0 AND m.internal_date >= ?3
+          WHERE i.label_id = ?1 AND m.is_sent_by_me = 0 AND {filter}
           ORDER BY m.internal_date DESC
-          LIMIT ?4",
-    )?;
-    let rows = stmt.query_map(params![inbox, personal, since, limit], |r| {
+          LIMIT ?4"
+    ))?;
+    let rows = stmt.query_map(params![inbox, personal, arg, limit], |r| {
         Ok((
             Candidate {
                 thread_id: r.get(0)?,
@@ -252,14 +281,7 @@ fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) 
             r.get::<_, bool>(8)?,
         ))
     })?;
-    let mut out = Vec::new();
-    for row in rows {
-        let (c, asks, tasked) = row?;
-        if !asking || (c.person && asks && !tasked) {
-            out.push(c);
-        }
-    }
-    Ok(out)
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 /// Triage's set (spec §14.13): new conversations since `since`, people
@@ -277,6 +299,28 @@ pub fn triage_candidates(conn: &Connection, since: Millis, limit: u32) -> StoreR
         }
     }
     Ok(people.into_iter().chain(groups.into_iter().flat_map(|(_, g)| g)).collect())
+}
+
+/// Triage's set at `now` (spec §14.13): conversations whose reminder is
+/// due first (*Remind me later*), then the new ones less those put off.
+pub fn triage_set(conn: &Connection, since: Millis, now: Millis, limit: u32) -> StoreResult<Vec<Candidate>> {
+    let due = crate::reminders::due(conn, now)?;
+    Ok(due.iter().cloned().chain(triage_new(conn, since, now, limit, &due)?).collect())
+}
+
+/// `triage_candidates` less what is put off until later and what `due` holds.
+pub fn triage_new(
+    conn: &Connection,
+    since: Millis,
+    now: Millis,
+    limit: u32,
+    due: &[Candidate],
+) -> StoreResult<Vec<Candidate>> {
+    let hidden = crate::reminders::hidden(conn, now)?;
+    Ok(triage_candidates(conn, since, limit)?
+        .into_iter()
+        .filter(|c| !hidden.contains(&c.thread_id) && !due.iter().any(|d| d.thread_id == c.thread_id))
+        .collect())
 }
 
 /// Replies' set (spec §14.13): people's conversations in the Inbox from
@@ -509,11 +553,12 @@ pub fn suggestion(conn: &Connection, thread_id: &str) -> StoreResult<Option<Sugg
 }
 
 /// Triage's next conversations to suggest for, in the set's order: new
-/// since `since`, with no suggestion for their latest message.
-pub fn to_suggest(conn: &Connection, since: Millis, limit: usize) -> StoreResult<Vec<Candidate>> {
+/// since `since` (or reminded about), with no suggestion for their
+/// latest message.
+pub fn to_suggest(conn: &Connection, since: Millis, now: Millis, limit: usize) -> StoreResult<Vec<Candidate>> {
     let mut have = conn.prepare_cached("SELECT 1 FROM triage_suggestions WHERE thread_id = ?1 AND message_id = ?2")?;
     let mut out = Vec::new();
-    for c in triage_candidates(conn, since, 500)? {
+    for c in triage_set(conn, since, now, 500)? {
         if out.len() >= limit {
             break;
         }
@@ -850,7 +895,7 @@ mod tests {
         let Store(_, db) = &store("to-answer");
         crate::demo_workflows::generate(db, NOW).unwrap();
         let since = NOW - DAY_MS;
-        let all = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let all = db.read_blocking(move |c| to_suggest(c, since, NOW, 500)).unwrap();
         let (needs, fyi) = (all[0].clone(), all[1].clone());
         for (c, needs_reply, options) in [(&needs, true, r#"["Yes","No"]"#), (&fyi, false, "[]")] {
             let row = SuggestionRow {
@@ -894,7 +939,7 @@ mod tests {
         let Store(_, db) = &store("suggestions");
         crate::demo_workflows::generate(db, NOW).unwrap();
         let since = NOW - DAY_MS;
-        let all = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let all = db.read_blocking(move |c| to_suggest(c, since, NOW, 500)).unwrap();
         let first = all[0].clone();
         let row = SuggestionRow {
             thread_id: first.thread_id.clone(),
@@ -913,7 +958,7 @@ mod tests {
             answers_by: "triage".into(),
         };
         db.write_blocking(move |tx| save_suggestion(tx, &row)).unwrap();
-        let left = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let left = db.read_blocking(move |c| to_suggest(c, since, NOW, 500)).unwrap();
         assert_eq!(left.len(), all.len() - 1);
         assert!(!left.iter().any(|c| c.thread_id == first.thread_id));
         let thread = first.thread_id.clone();
@@ -940,7 +985,7 @@ mod tests {
         let (thread, message) = (first.thread_id.clone(), first.message_id.clone());
         let answering = db.read_blocking(move |c| to_answer(c, 0, 50)).unwrap();
         assert!(!answering.iter().any(|a| a.thread_id == thread && a.message_id == message));
-        let again = db.read_blocking(move |c| to_suggest(c, since, 500)).unwrap();
+        let again = db.read_blocking(move |c| to_suggest(c, since, NOW, 500)).unwrap();
         assert!(again.iter().any(|c| c.thread_id == first.thread_id && c.message_id == "newer"));
     }
 

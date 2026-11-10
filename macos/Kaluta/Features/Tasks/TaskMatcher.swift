@@ -41,6 +41,8 @@ final class TaskMatcher {
 struct TaskMatchesView: View {
     let matcher: TaskMatcher
     var large = false
+    /// The workflow it is in (`large`), for its colour.
+    var kind: WorkflowKind = .triage
     let add: (TaskMatch) -> Void
 
     var body: some View {
@@ -74,25 +76,44 @@ struct TaskMatchesView: View {
     }
 
     private func row(_ match: TaskMatch, key: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+        HStack(alignment: .center, spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.hair) {
                 Text(match.task.title)
-                    .font(large ? TypeRole.workflowContext : TypeRole.body)
+                    .font(large ? TypeRole.workflowContext.weight(.semibold) : TypeRole.body)
                     .lineLimit(1)
                 Text(Self.detail(match))
                     .font(large ? TypeRole.workflowKey : TypeRole.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer(minLength: Space.m)
-            Button("Add to This Task") { add(match) }
+            addButton(match, key: key)
                 .keyboardShortcut(KeyEquivalent(Character("\(key)")), modifiers: .command)
-                .controlSize(.small)
-                .hoverHelp("Add this email to “\(match.task.title)” instead of making a new task (⌘\(key))")
         }
         .padding(.vertical, Space.xs)
         .accessibilityElement(children: .combine)
     }
+
+    /// In a workflow, a decision bar's button; in the dialog, a standard
+    /// one. Both show their key.
+    @ViewBuilder
+    private func addButton(_ match: TaskMatch, key: Int) -> some View {
+        if large {
+            WorkflowButton(title: "Add to this task", key: Self.keyLabel(key), kind: kind) { add(match) }
+        } else {
+            Button { add(match) } label: {
+                HStack(spacing: Space.s) {
+                    Text("Add to This Task")
+                    Keycap(key: Self.keyLabel(key))
+                }
+            }
+            .hoverHelp("Add this email to “\(match.task.title)” instead of making a new task (\(Self.keyLabel(key)))")
+        }
+    }
+
+    /// ⌘1–⌘3: the email's task; the View menu's mailbox keys stand down
+    /// on a task form.
+    static func keyLabel(_ key: Int) -> String { "⌘\(key)" }
 
     /// "Review · due Tue · Same subject and sender · 2 emails already".
     static func detail(_ m: TaskMatch) -> String {

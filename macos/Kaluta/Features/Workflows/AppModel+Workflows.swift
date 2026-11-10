@@ -195,6 +195,10 @@ extension AppModel {
         if session.kind == .triage || session.kind == .replies {
             session.writtenSince[threadID] = await core.writtenSince(threadID)
         }
+        // Back from *Remind me later*?
+        if session.kind == .triage {
+            session.reminders[threadID] = try? await core.reminder(threadID)
+        }
         if session.threads[threadID] == nil, let detail = try? await core.thread(threadID) {
             session.threads[threadID] = detail
             if let latest = Self.shownMessage(detail, session.kind), let body = try? await core.renderedBody(latest.id),
@@ -494,9 +498,15 @@ extension AppModel {
         if session.kind == .reading, session.showsReport {
             return [a(.primary, .primary, "Start reading")]
         }
-        if session.choosingCheckAgain {
+        switch session.choosingTime {
+        case .checkAgain:
             return [a(.pick1, .plain, "Tomorrow"), a(.pick2, .plain, "In 3 days"), a(.pick3, .plain, "Next week"),
                     a(.back, .quiet, "Cancel")]
+        case .remind:
+            return zip([WorkflowCommand.pick1, .pick2, .pick3], Self.reminderTimes()).map { a($0, .plain, $1.title) }
+                + [a(.back, .quiet, "Cancel")]
+        case nil:
+            break
         }
         if let form = session.taskForm {
             return [a(.primary, .primary, form.isExisting ? "Save the task" : "Make the task"), a(.back, .quiet, "Cancel")]
@@ -607,7 +617,7 @@ extension AppModel {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
         let mark = suggested.map(Self.triageCommand)
         let all = [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                   a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
+                   a(.remind, .plain, nil), a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
         return all.map { var action = $0; action.suggested = action.command == mark; return action }
     }
 
@@ -839,12 +849,12 @@ extension AppModel {
             session.showsKeys = false
             return
         case .back where session.showsConversation && session.writer == nil && session.taskForm == nil
-            && !session.choosingCheckAgain:
+            && session.choosingTime == nil:
             // Esc closes the conversation first; the next Esc leaves.
             withAnimation(Self.itemMotion) { session.showsConversation = false }
             return
         case .back where session.writer == nil && session.taskForm == nil && session.noteDraft == nil
-            && !session.choosingCheckAgain:
+            && session.choosingTime == nil:
             leaveWorkflow()
             return
         case .whatsLeft:
@@ -880,8 +890,19 @@ extension AppModel {
             withAnimation(Self.itemMotion) { session.showsReport = false }
             return
         }
-        if session.choosingCheckAgain {
-            session.choosingCheckAgain = false
+        if session.choosingTime == .remind {
+            session.choosingTime = nil
+            let index: Int? = switch command {
+            case .pick1: 0
+            case .pick2: 1
+            case .pick3: 2
+            default: nil
+            }
+            if let index { await remindLater(item, at: Self.reminderTimes()[index], session: session) }
+            return
+        }
+        if session.choosingTime == .checkAgain {
+            session.choosingTime = nil
             let days: Int? = switch command {
             case .pick1: 1
             case .pick2: 3
@@ -922,6 +943,8 @@ extension AppModel {
             await archiveCurrent(item, session: session)
         case (.triage, .later):
             await decide(item, "leave", session: session, notice: "Left in the Inbox")
+        case (.triage, .remind):
+            session.choosingTime = .remind
         case (.triage, .replyNow), (.replies, .replyNow), (.tasks, .replyNow), (.waiting, .replyNow):
             startWriting(item, session: session)
         case (_, .replyAll):
@@ -965,7 +988,7 @@ extension AppModel {
         case (.waiting, .done):
             await letGo(item, session: session)
         case (.waiting, .later):
-            session.choosingCheckAgain = true
+            session.choosingTime = .checkAgain
         default:
             await decide(item, "done", session: session, notice: nil)
         }
@@ -1212,6 +1235,53 @@ extension AppModel {
         await decide(item, "later", session: session, notice: "Check again \(when)",
                      undoMail: { try? await core.checkWaitingAgain(id, until: nil) },
                      redoMail: { try? await core.checkWaitingAgain(id, until: day) })
+    }
+
+    /// *Remind me later* (B, then 1–3): out of Triage until then, the
+    /// email left in the Inbox; ⌘Z puts the reminder back as it was.
+    private func remindLater(_ item: WorkflowItem, at time: ReminderTime, session: WorkflowSession) async {
+        guard let core, let id = threadID(of: item) else { return }
+        // The reminder it had before (none, mostly): `try?` would flatten
+        // that into a failure.
+        let before: ReminderInfo?
+        do {
+            before = try await core.remindLater(id, at: time.date)
+        } catch {
+            workflowLog.error("remind later: \(error.message, privacy: .public)")
+            return
+        }
+        await decide(item, "remind", session: session, notice: "Back in Triage \(time.phrase)",
+                     undoMail: { try? await core.restoreReminder(id, before) },
+                     redoMail: { _ = try? await core.remindLater(id, at: time.date) })
+    }
+
+    /// A time to be reminded at: its button, and the notice's words.
+    struct ReminderTime: Equatable {
+        let title: String
+        let phrase: String
+        let date: Date
+    }
+
+    /// *Remind me later*'s times: in three hours, tomorrow at 8 AM, next
+    /// Monday at 8 AM.
+    static func reminderTimes(now: Date = .now, calendar: Calendar = .current) -> [ReminderTime] {
+        let today = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now
+        let morning = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        let monday = calendar.nextDate(after: tomorrow, matching: DateComponents(hour: 8, weekday: 2),
+                                       matchingPolicy: .nextTime) ?? morning
+        let week = calendar.isDate(monday, inSameDayAs: tomorrow)
+            ? calendar.date(byAdding: .day, value: 7, to: monday) ?? monday : monday
+        let inThree = now.addingTimeInterval(3 * 3600)
+        let clock = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
+        let threeAt = calendar.isDate(inThree, inSameDayAs: now) ? "today at \(clock(inThree))"
+            : "tomorrow at \(clock(inThree))"
+        return [
+            ReminderTime(title: "In 3 hours", phrase: threeAt, date: inThree),
+            ReminderTime(title: "Tomorrow morning", phrase: "tomorrow at \(clock(morning))", date: morning),
+            ReminderTime(title: "Next week", phrase: "\(week.formatted(.dateTime.weekday(.wide))) at \(clock(week))",
+                         date: week),
+        ]
     }
 
     /// The conversation's open task, if it has one.
