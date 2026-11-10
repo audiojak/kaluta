@@ -4690,10 +4690,17 @@ are looked for as each account opens.
   takes, Yes and No or its choices, with their keys, 1–3 while nothing
   is typed; saying one is what the user says, and Kaluta writes the
   reply from it, asking first when it must, §14.9; words already typed
-  follow the answer); Kaluta writes after that (Return). ***Kaluta's first pass***
-  (⌘Return) has Kaluta write the reply it finds likely with nothing
-  said, recorded as "Write a reply" (no direction) and shown as *Kaluta's
-  first pass* above the email (amended 2026-10-26). When Kaluta
+  follow the answer). *(Amended 2026-11-09, from the user's use: Return
+  was both a new line and "write", and *Write it with Kaluta* beside
+  *Kaluta's first pass* did not say how they differed.)* **Return is a
+  new line** in the field, so notes can come in parts. One action writes,
+  on **⌘Return**, named for what it will do: *Write it from this* once
+  anything is typed (Kaluta writes the email from it), else *Let Kaluta
+  draft it* (Kaluta writes the reply it finds likely with nothing said,
+  recorded as "Write a reply", no direction, and shown as *Kaluta's
+  draft, with nothing said* above the email; amended 2026-10-26). *Use
+  my words* (⇧⌘M) shows once something is typed. Writing it oneself, or
+  with no agent ready, ⌘Return takes the words as written. When Kaluta
   would have to invent a fact, it asks instead (§14.9), in the session
   it was asked in, **one question at a time** on its own screen: *Kaluta
   asks* in the workflow's colour, "1 of 2", the question, a field
