@@ -216,7 +216,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .holdTimes: "Hold these times"
         case .note: "Add a note"
         case .ownWords: "Use my words"
-        case .firstPass: "Write it"
+        case .firstPass: "Generate it"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"

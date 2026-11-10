@@ -270,7 +270,7 @@ struct WorkflowWriteView: View {
                 Text(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
                     .font(TypeRole.workflowHeading)
                 Text(model.agent.isProviderReady && !writer.ownWordsOnly
-                     ? "Notes or whole sentences; Return starts a new line. ⌘Return and Kaluta writes the email from them, or, with nothing typed, the reply it thinks likely, for you to read and change before it goes."
+                     ? "Notes or whole sentences; Return starts a new line. ⌘Return and Kaluta generates the email from them, or, with nothing typed, the reply it thinks likely, for you to read and change before it goes."
                      : "What you type is the email.")
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
             }
