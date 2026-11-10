@@ -47,6 +47,7 @@ mod prompt_mail;
 mod queue;
 mod reading;
 mod registry;
+mod reminders;
 mod reply_answers;
 mod routines;
 mod rules_publish;

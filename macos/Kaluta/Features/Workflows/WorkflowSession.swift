@@ -114,8 +114,13 @@ final class WorkflowSession {
     var agentRuns: [String: RoutineRunInfo] = [:]
     /// Each conversation's wait (Waiting on others), by thread id.
     var waits: [String: WaitingInfo] = [:]
-    /// *Check again* is choosing its day.
-    var choosingCheckAgain = false
+    /// A when is being chosen: *Check again*'s day (Waiting) or *Remind me
+    /// later*'s time (Triage).
+    var choosingTime: TimeChoice?
+    enum TimeChoice { case checkAgain, remind }
+    /// A conversation's reminder (Triage), by thread id, as each item is
+    /// shown: one that brought it back says so.
+    var reminders: [String: ReminderInfo] = [:]
     /// The task's note being written (M), or nil.
     var noteDraft: String?
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
@@ -136,7 +141,7 @@ final class WorkflowSession {
         if set.items.first(where: { $0.decision == nil })?.key != current?.key {
             writer = nil
             taskForm = nil
-            choosingCheckAgain = false
+            choosingTime = nil
             noteDraft = nil
             showsInFull = false
             showsConversation = false

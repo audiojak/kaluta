@@ -923,6 +923,20 @@ final class CoreClient: Sendable {
         try await call { try await core.checkWaitingAgain(threadId: threadID, until: ms) }
     }
 
+    /// Remind me later (B in Triage): the reminder it had before, for undo.
+    func remindLater(_ threadID: String, at: Date?) async throws(CoreClientError) -> ReminderInfo? {
+        let ms = at.map { Int64($0.timeIntervalSince1970 * 1000) }
+        return try await call { try await core.remindLater(threadId: threadID, at: ms) }
+    }
+
+    func restoreReminder(_ threadID: String, _ reminder: ReminderInfo?) async throws(CoreClientError) {
+        try await call { try await core.restoreReminder(threadId: threadID, reminder: reminder) }
+    }
+
+    func reminder(_ threadID: String) async throws(CoreClientError) -> ReminderInfo? {
+        try await call { try await core.reminder(threadId: threadID) }
+    }
+
     func restartWaiting(_ threadID: String) async throws(CoreClientError) {
         try await call { try await core.restartWaiting(threadId: threadID) }
     }
@@ -1910,6 +1924,7 @@ typealias TidySuggestion = KalutaCore.TidySuggestion
 typealias QueuedChange = KalutaCore.QueuedChange
 typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias TaskMatch = KalutaCore.TaskMatch
+typealias ReminderInfo = KalutaCore.ReminderInfo
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse
 typealias InviteState = KalutaCore.InviteState

@@ -258,9 +258,12 @@ private struct WorkflowCard: View {
 
     static func detail(_ s: WorkflowSummary) -> String {
         let n = Int(s.count)
-        if n == 0 { return "Nothing waiting" }
+        // Reminders still to come (Triage's *Remind me later*).
+        let reminders = s.kind == .triage && s.later > 0
+            ? " · \(s.later) reminder\(s.later == 1 ? "" : "s") to come" : ""
+        if n == 0 { return "Nothing waiting" + reminders }
         switch s.kind {
-        case .triage: return "\(n) new conversation\(n == 1 ? "" : "s")"
+        case .triage: return "\(n) new conversation\(n == 1 ? "" : "s")" + reminders
         case .replies: return "\(n) waiting on your answer"
         case .tasks: return "\(n) for today" + (s.later > 0 ? " · \(s.later) later this week" : "")
         case .waiting: return "\(n) with no answer"

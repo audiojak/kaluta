@@ -69,7 +69,7 @@ struct WorkflowTaskFormView: View {
             // A task it may belong to, looked for meanwhile (spec §14.8):
             // Return still makes a new one at any time.
             if !form.isExisting {
-                TaskMatchesView(matcher: draft.matcher, large: true) { match in
+                TaskMatchesView(matcher: draft.matcher, large: true, kind: session.kind) { match in
                     guard let item = session.current else { return }
                     Task { await model.addToTask(match, form: form, item: item, session: session) }
                 }

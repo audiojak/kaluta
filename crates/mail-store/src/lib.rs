@@ -23,6 +23,7 @@ pub mod priority;
 pub mod queue;
 pub mod read;
 pub mod reading;
+pub mod reminders;
 pub mod routine_proposals;
 pub mod routines;
 pub mod search;

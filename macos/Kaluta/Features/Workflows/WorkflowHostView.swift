@@ -347,6 +347,11 @@ struct WorkflowItemView: View {
                 WaitingLine(wait: wait, kind: session.kind)
             }
             if session.kind == .triage, let threadID {
+                if let reminder = session.reminders[threadID], let line = Self.reminderLine(reminder) {
+                    Label(line, systemImage: "bell")
+                        .font(TypeRole.workflowContext)
+                        .foregroundStyle(.secondary)
+                }
                 TriageSuggestionLine(suggestion: session.suggestions[threadID],
                                      task: model.openTask(onThread: threadID), kind: session.kind)
             }
@@ -505,10 +510,17 @@ struct WorkflowItemView: View {
                 .padding(Space.xxxl)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
-                if session.choosingCheckAgain {
+                switch session.choosingTime {
+                case .checkAgain:
                     Text("Check again when? 1 tomorrow, 2 in three days, 3 next week")
                         .font(TypeRole.workflowHeading)
                         .id(WorkflowWriteView.scrollID)
+                case .remind:
+                    Text(Self.remindQuestion())
+                        .font(TypeRole.workflowHeading)
+                        .id(WorkflowWriteView.scrollID)
+                case nil:
+                    EmptyView()
                 }
                 if let writer = session.writer {
                     WorkflowWriteView(session: session, writer: writer)
@@ -525,6 +537,23 @@ struct WorkflowItemView: View {
 
     /// A long email's summary, from its triage suggestion; the text itself
     /// when it is short enough to read.
+    /// "Remind me when? 1 in 3 hours, 2 tomorrow morning, 3 next week".
+    static func remindQuestion(now: Date = .now) -> String {
+        let times = AppModel.reminderTimes(now: now).enumerated().map { "\($0.offset + 1) \($0.element.title.lowercased())" }
+        return "Remind you when? " + times.joined(separator: ", ")
+    }
+
+    /// A reminder that brought the email back: "You asked to be reminded
+    /// (Tuesday)". Nil while it is still to come.
+    static func reminderLine(_ r: ReminderInfo, now: Date = .now) -> String? {
+        let due = Date(timeIntervalSince1970: TimeInterval(r.remindAt) / 1000)
+        guard due <= now else { return nil }
+        let set = Date(timeIntervalSince1970: TimeInterval(r.setAt) / 1000)
+        let when = Calendar.current.isDate(set, inSameDayAs: now) ? "earlier today"
+            : set.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        return "You asked to be reminded about this \(when)"
+    }
+
     static func triageSummary(_ suggestion: TriageSuggestion?, text: String) -> String? {
         guard let summary = suggestion?.summary, !summary.isEmpty, text.count > longEmail else { return nil }
         return summary
@@ -1105,6 +1134,7 @@ struct WorkflowEndView: View {
         case "rejected": "rejected"
         case "task": count == 1 ? "task made" : "tasks made"
         case "leave": "left in Inbox"
+        case "remind": "to remind you about"
         case "done": "done"
         case "later": kind == .waiting ? "to check again" : "moved to tomorrow"
         default: decision

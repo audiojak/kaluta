@@ -3643,7 +3643,10 @@ already existed.
   and why, and **Add to This Task** (⌘1–⌘3): the email is added to it,
   archived when *Archive the email* is ticked (Triage), the item is
   decided as a task, and ⌘Z takes all of it back. Core:
-  `find_task_matches`.
+  `find_task_matches`. Amended 2026-11-09: the button is full size and
+  shows its key (in a workflow, a decision-bar button, *Add to this task
+  ⌘1*); on a task form ⌘1–⌘3 are the match's, not the View menu's
+  mailboxes.
 
 ### 14.9 Writing guide **(Amendment 2026-09-29)**
 
@@ -4756,7 +4759,23 @@ one decision with a one-line reason:
   *Archive* when nothing is asked of the user; *Leave in Inbox* (L) is
   always offered.
 - The bar is the same for every conversation: *Reply* (Return or R),
-  *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Skip* (S).
+  *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Remind me
+  later* (B), *Skip* (S).
+- **Remind me later** (B, Gmail's Snooze key; amended 2026-11-09): two
+  steps. B asks *Remind you when?*, and 1–3 answer: *In 3 hours*,
+  *Tomorrow morning* (8 AM), *Next week* (Monday, 8 AM; a week on when
+  tomorrow is Monday); Esc cancels. The item is decided *remind* and the
+  set moves on (*Back in Triage tomorrow at 8:00 AM*); ⌘Z takes the
+  reminder off. The email stays in the Inbox and nothing changes in
+  Gmail; Triage leaves it out until then, unless someone writes in the
+  conversation meanwhile. When the time comes it is first in the next
+  set, or up next in the day's open set when Triage resumes, whatever
+  "new" means by then, with *You asked to be reminded about this
+  Tuesday*; it stays due until Triage decides it (Skip keeps it). One
+  answered meanwhile (the last word the user's) or no longer in the Inbox
+  is not brought back. The Dashboard's Triage line counts those to come
+  (*· 2 reminders to come*). Store: `reminders` (v38). Core:
+  `remind_later`, `restore_reminder`, `reminder`.
   The suggestion is marked on its own button (a ring and a sparkle on its corner, so no button moves) and
   taken with that button's key; Return is only ever Reply. A
   conversation that already has an open task says so, and T shows that
@@ -4790,7 +4809,7 @@ one decision with a one-line reason:
   again. Amended 2026-10-20: the messages have no buttons of their own;
   everything that acts is in the bar.
 - **The bar's two parts.** The decisions (Reply, Make a task, Archive,
-  Leave in Inbox, Skip) stay put at the left. At the right, apart and
+  Leave in Inbox, Remind me later, Skip) stay put at the left. At the right, apart and
   quieter, what acts on the email: *Reply all* (A), greyed out when no
   one but the user and the sender is on it (its key does nothing then and
   the key list leaves it out), and *Forward* (F), always there. Neither

@@ -54,6 +54,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0035_calendar.sql"),
     include_str!("../migrations/0036_followups.sql"),
     include_str!("../migrations/0037_task_threads.sql"),
+    include_str!("../migrations/0038_reminders.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;
@@ -477,6 +478,7 @@ pub(crate) mod tests {
              DROP TABLE routine_proposals;
              DROP TABLE meeting_followups;
              DROP TABLE task_threads;
+             DROP TABLE reminders;
              PRAGMA user_version = 19",
         )
         .unwrap();
