@@ -59,6 +59,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case reject
     /// 1–3: pick one of Kaluta's answers.
     case pick1, pick2, pick3
+    /// 4 and 5: *Remind me later*'s further times (next month, a day).
+    case pick4, pick5
     /// /: tell Kaluta what to say.
     case tellKaluta
     /// ⇧Return: skip the question Kaluta asked (a [blank] stands for it).
@@ -115,6 +117,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick1: "1"
         case .pick2: "2"
         case .pick3: "3"
+        case .pick4: "4"
+        case .pick5: "5"
         case .tellKaluta: "/"
         case .skipQuestion: "⇧Return"
         case .attach: "⇧⌘A"
@@ -134,7 +138,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         "e": .done, "t": .task, "l": .later, "b": .remind, "s": .skip, "r": .replyNow, "o": .openInFull, "w": .edit, "g": .openInGmail, "a": .replyAll,
         "f": .forward, "p": .previousMessage, "n": .nextMessage, "?": .showKeys,
         "i": .backToInbox, "c": .copyCode, "m": .note,
-        "1": .pick1, "2": .pick2, "3": .pick3, "/": .tellKaluta,
+        "1": .pick1, "2": .pick2, "3": .pick3, "4": .pick4, "5": .pick5, "/": .tellKaluta,
     ]
 
     /// The command a key press means, if any. Single keys count only with
@@ -210,6 +214,8 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .pick1: "First answer"
         case .pick2: "Second answer"
         case .pick3: "Third answer"
+        case .pick4: "Fourth choice"
+        case .pick5: "Fifth choice"
         case .tellKaluta: "Tell Kaluta what to say"
         case .skipQuestion: "Skip the question"
         case .attach: "Attach a file"

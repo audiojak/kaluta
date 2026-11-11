@@ -4775,9 +4775,11 @@ one decision with a one-line reason:
   *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Remind me
   later* (B), *Skip* (S).
 - **Remind me later** (B, Gmail's Snooze key; amended 2026-11-09): two
-  steps. B asks *Remind you when?*, and 1–3 answer: *In 3 hours*,
+  steps. B asks *Remind you when?*, and 1–5 answer: *In 3 hours*,
   *Tomorrow morning* (8 AM), *Next week* (Monday, 8 AM; a week on when
-  tomorrow is Monday); Esc cancels. The item is decided *remind* and the
+  tomorrow is Monday), *Next month* (the same day next month, 8 AM) and
+  *Pick a date…*, which shows a calendar (tomorrow onwards): Return
+  reminds at 8 AM on the day chosen (amended 2026-11-11); Esc cancels. The item is decided *remind* and the
   set moves on (*Back in Triage tomorrow at 8:00 AM*); ⌘Z takes the
   reminder off. The email stays in the Inbox and nothing changes in
   Gmail; Triage leaves it out until then, unless someone writes in the

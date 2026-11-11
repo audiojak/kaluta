@@ -519,6 +519,18 @@ struct WorkflowItemView: View {
                     Text(Self.remindQuestion())
                         .font(TypeRole.workflowHeading)
                         .id(WorkflowWriteView.scrollID)
+                case .remindOn:
+                    VStack(alignment: .leading, spacing: Space.l) {
+                        Text("Remind you on which day?")
+                            .font(TypeRole.workflowHeading)
+                        DatePicker("Day to be reminded", selection: Binding(get: { session.remindDay },
+                                                                            set: { session.remindDay = $0 }),
+                                   in: AppModel.earliestReminderDay()..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .labelsHidden()
+                            .hoverHelp("The day the email comes back to Triage, at 8 AM")
+                    }
+                    .id(WorkflowWriteView.scrollID)
                 case nil:
                     EmptyView()
                 }
@@ -539,10 +551,11 @@ struct WorkflowItemView: View {
 
     /// A long email's summary, from its triage suggestion; the text itself
     /// when it is short enough to read.
-    /// "Remind me when? 1 in 3 hours, 2 tomorrow morning, 3 next week".
+    /// "Remind you when? 1 in 3 hours, 2 tomorrow morning, 3 next week, 4
+    /// next month, 5 pick a date".
     static func remindQuestion(now: Date = .now) -> String {
         let times = AppModel.reminderTimes(now: now).enumerated().map { "\($0.offset + 1) \($0.element.title.lowercased())" }
-        return "Remind you when? " + times.joined(separator: ", ")
+        return "Remind you when? " + (times + ["\(times.count + 1) pick a date"]).joined(separator: ", ")
     }
 
     /// A reminder that brought the email back: "You asked to be reminded
