@@ -40,7 +40,8 @@ struct ReminderTests {
     }
 
     @Test func aReminderSaysSoOnlyOnceItHasComeDue() {
-        let now = Date.now
+        // Midday, so an hour before is still today whenever the run is.
+        let now = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: .now)!
         let ms = { (d: Date) in Int64(d.timeIntervalSince1970 * 1000) }
         let due = ReminderInfo(remindAt: ms(now.addingTimeInterval(-60)), setAt: ms(now.addingTimeInterval(-3600)))
         #expect(WorkflowItemView.reminderLine(due, now: now) == "You asked to be reminded about this earlier today")
