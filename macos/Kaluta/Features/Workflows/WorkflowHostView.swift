@@ -533,6 +533,8 @@ struct WorkflowItemView: View {
                 ProgressView()
             }
         }
+        // The invitation bar's (above), read while the item shows.
+        .loadsInvite(session.kind == .agents || session.kind == .teach ? nil : threadID)
     }
 
     /// A long email's summary, from its triage suggestion; the text itself

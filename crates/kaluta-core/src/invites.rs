@@ -385,6 +385,76 @@ END:VEVENT\r\nEND:VCALENDAR\r\n";
         assert!(rt(core.respond_to_invite("demowf-meetup".into(), InviteResponse::NeedsAction)).is_err());
     }
 
+    /// A synced invitation's file is not stored with the message: it is
+    /// downloaded from the server the first time the bar is shown, as
+    /// Google Calendar sends it (an inline `text/calendar` part and an
+    /// `invite.ics` file of the same).
+    #[test]
+    fn a_synced_invitation_is_downloaded_and_read() {
+        use std::sync::Arc;
+
+        use futures::executor::block_on;
+        use mail_domain::{EmailAddress, LabelId, MessageId, ThreadId};
+        use provider_api::fake::FakeProvider;
+        use provider_api::{FetchedAttachment, FetchedBody, FetchedMessage};
+
+        struct Quiet;
+        impl crate::EventListener for Quiet {
+            fn on_event(&self, _: Option<String>, _: crate::CoreEvent) {}
+        }
+        let dir = std::env::temp_dir().join(format!("kaluta-core-invite-fetch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let core = crate::Core::new(
+            crate::CoreConfig { data_dir: dir.to_string_lossy().into_owned(), log_dir: None },
+            Arc::new(crate::secrets::MemorySecrets::default()),
+            Arc::new(Quiet),
+        )
+        .unwrap();
+        let fake = Arc::new(FakeProvider::new("me@example.com", 1_790_000_000_000, 50));
+        let part = |part: &str, id: &str, mime: &str| FetchedAttachment {
+            part_id: Some(part.into()),
+            attachment_id: Some(id.into()),
+            filename: "invite.ics".into(),
+            mime_type: mime.into(),
+            size: CALCOM.len() as u64,
+            content_id: None,
+            is_inline: false,
+            data: None,
+        };
+        fake.seed(FetchedMessage {
+            id: MessageId::new("inv1"),
+            thread_id: ThreadId::new("t-inv"),
+            label_ids: vec![LabelId::new("INBOX")],
+            internal_date: 1_790_000_000_000,
+            from: Some(EmailAddress::new(None, "alex@example.com")),
+            subject: "Updated invitation: Speaker Prep".into(),
+            body: Some(FetchedBody {
+                text: Some("Invitation".into()),
+                html: None,
+                attachments: vec![part("0.2", "cal-inline", "text/calendar"), part("1", "cal-file", "application/ics")],
+            }),
+            ..Default::default()
+        });
+        let future =
+            CALCOM.replace("20261026T174500Z", "20991026T174500Z").replace("20261026T180000Z", "20991026T180000Z");
+        fake.set_attachment_bytes("cal-inline", future.clone().into_bytes());
+        fake.set_attachment_bytes("cal-file", future.into_bytes());
+        block_on(core.store_for("acct")).unwrap();
+        crate::registry::SCOPED_ACCOUNT.sync_scope("acct".to_owned(), || core.start_sync_with(fake.clone())).unwrap();
+        block_on(core.clone().set_current_account("acct".into())).unwrap();
+        for _ in 0..200 {
+            if block_on(core.list_threads("INBOX".into(), None, 10)).map(|p| p.rows.len()).unwrap_or(0) == 1 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+
+        let invite = block_on(core.calendar_invite("t-inv".into())).unwrap().expect("the invitation is read");
+        assert_eq!(invite.title, "Speaker Prep between Alex and Sam");
+        assert_eq!(invite.state, InviteState::NotConnected);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn zones_dates_and_cancellations() {
         let google = "BEGIN:VCALENDAR\nMETHOD:CANCEL\nBEGIN:VEVENT\nDTSTART;TZID=America/Los_Angeles:20261104T100000\n\
