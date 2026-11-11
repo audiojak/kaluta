@@ -71,6 +71,8 @@ struct ThreadReaderView: View {
                 Color.clear
             }
         }
+        // The invitation bar's, read while the conversation shows.
+        .loadsInvite(reader.detail?.thread.id)
         .opacity(stale && showsLoading ? 0.35 : 1)
         .overlay {
             if stale && showsLoading { ProgressView().controlSize(.small) }

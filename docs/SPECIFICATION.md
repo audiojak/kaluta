@@ -1133,7 +1133,11 @@ agent sessions and Keychain items. New pieces:
   `PUBLISH`) show nothing. No undo: answering again changes the answer.
   Hand-check on the real account pending: Google letting
   `calendar.events.owned` patch the guest entry of an event someone else
-  organises. Core: `calendar_invite`, `respond_to_invite`.
+  organises. Core: `calendar_invite`, `respond_to_invite`. *(Amended
+  2026-11-10: the reader and the workflow item read the invitation
+  themselves; the bar, empty until one is found, had been asked to and
+  so never showed. A synced invitation's file is downloaded the first
+  time; tested with the fake server.)*
 - Identity: sign-in requests `openid` and `profile` alongside the
   existing scopes (both non-sensitive; no verification change). The token
   response's ID token carries `name` and `picture`, read without a

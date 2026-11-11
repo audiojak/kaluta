@@ -48,6 +48,8 @@ struct State {
     /// Server drafts: id → (raw, thread, the message holding it).
     drafts: BTreeMap<String, (Vec<u8>, Option<ThreadId>, MessageId)>,
     draft_counter: u64,
+    /// What an attachment id downloads as, when not the default bytes.
+    attachment_bytes: BTreeMap<String, Vec<u8>>,
 }
 
 impl FakeProvider {
@@ -144,6 +146,11 @@ impl FakeProvider {
     }
 
     /// Add a message as if it had always been there (no history entry).
+    /// The bytes `fetch_attachment` returns for `attachment_id`.
+    pub fn set_attachment_bytes(&self, attachment_id: &str, bytes: Vec<u8>) {
+        self.state().attachment_bytes.insert(attachment_id.to_owned(), bytes);
+    }
+
     pub fn seed(&self, m: FetchedMessage) {
         self.state().messages.insert(m.id.0.clone(), m);
     }
@@ -378,6 +385,9 @@ impl MailProvider for FakeProvider {
             .as_ref()
             .and_then(|b| b.attachments.iter().find(|a| a.attachment_id.as_deref() == Some(attachment_id)))
             .ok_or_else(|| ProviderError::NotFound(attachment_id.to_owned()))?;
+        if let Some(bytes) = s.attachment_bytes.get(attachment_id) {
+            return Ok(bytes.clone());
+        }
         Ok(format!("fake bytes of {}", found.filename).into_bytes())
     }
 

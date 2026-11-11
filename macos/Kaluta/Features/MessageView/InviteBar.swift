@@ -3,18 +3,17 @@ import SwiftUI
 /// A calendar invitation in a conversation (spec §14.9): what, when and
 /// who, and Accept, Maybe and Decline, which answer on the user's Google
 /// Calendar as Gmail's buttons do. Shown in the reader and on a
-/// workflow's item; nothing for a conversation without one.
+/// workflow's item; nothing for a conversation without one. The view it
+/// sits in reads the invitation (`loadsInvite`): until one is found the
+/// bar is nothing, and a task on nothing never runs.
 struct InviteBar: View {
     @Environment(AppModel.self) private var model
     let threadID: String
 
     var body: some View {
-        Group {
-            if let invite = model.invites[threadID] {
-                bar(invite)
-            }
+        if let invite = model.invites[threadID] {
+            bar(invite)
         }
-        .task(id: threadID) { await model.loadInvite(threadID) }
     }
 
     private func bar(_ invite: CalendarInvite) -> some View {
@@ -128,6 +127,26 @@ struct InviteBar: View {
         case .tentative: "Said maybe to “\(i.title)” on your calendar"
         case .declined: "Declined “\(i.title)” on your calendar"
         default: "Answered “\(i.title)”"
+        }
+    }
+}
+
+extension View {
+    /// Reads the conversation's invitation for the `InviteBar` inside,
+    /// each time the conversation is shown. Put it on a view that is always
+    /// there (the bar is nothing until an invitation is found).
+    func loadsInvite(_ threadID: String?) -> some View {
+        modifier(InviteLoader(threadID: threadID))
+    }
+}
+
+private struct InviteLoader: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let threadID: String?
+
+    func body(content: Content) -> some View {
+        content.task(id: threadID) {
+            if let threadID { await model.loadInvite(threadID) }
         }
     }
 }

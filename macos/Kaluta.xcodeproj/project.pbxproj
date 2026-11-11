@@ -205,6 +205,7 @@
 		FA6C347680C90D3CF8BEACF7 /* WorkflowCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C3DDA153B2D81B9B9451397 /* WorkflowCommand.swift */; };
 		FB3EF9FE4BF274C779D24684 /* KeychainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58B0869A0CF8F488398A2CCE /* KeychainTests.swift */; };
 		FDA686F5362FEDA16DFB265C /* GoogleClientConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA30597CBC77E0876FAB1A11 /* GoogleClientConfiguration.swift */; };
+		FF1B7722C906229473CF960E /* InviteBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CEEFD53BB7EDFFFB69BD44F /* InviteBarTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -280,6 +281,7 @@
 		297977E7C2BB58CB399414A2 /* WorkflowTaskForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowTaskForm.swift; sourceTree = "<group>"; };
 		2AD5AD309FC75125E8B5FCB8 /* LinkSafety.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkSafety.swift; sourceTree = "<group>"; };
 		2C6AD51E5D84C1634F2E1E8F /* MailboxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailboxStore.swift; sourceTree = "<group>"; };
+		2CEEFD53BB7EDFFFB69BD44F /* InviteBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteBarTests.swift; sourceTree = "<group>"; };
 		2ED0997F878E320CD6C19656 /* FocusCycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCycle.swift; sourceTree = "<group>"; };
 		30BC7DE875CEB2E18604C286 /* AgentMailboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMailboxTests.swift; sourceTree = "<group>"; };
 		34C17BCF2C4AD0FA0E0EDB1E /* GuideProposals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideProposals.swift; sourceTree = "<group>"; };
@@ -610,6 +612,7 @@
 				4867308667F24D4AB7B9B456 /* FormattingTests.swift */,
 				B76AF570B019D3910BDD5420 /* GuideTests.swift */,
 				54E5A4E647E271F202B94754 /* HiddenTextTests.swift */,
+				2CEEFD53BB7EDFFFB69BD44F /* InviteBarTests.swift */,
 				7AE1EF42CB4F08446759B295 /* InviteTests.swift */,
 				58B0869A0CF8F488398A2CCE /* KeychainTests.swift */,
 				429900E2DBB094C3C8566BDC /* LabelPickerTests.swift */,
@@ -1121,6 +1124,7 @@
 				947BDA1D89F2D3C2811EB2C5 /* FormattingTests.swift in Sources */,
 				EAF8B6ABD8AB249EF3E8D87D /* GuideTests.swift in Sources */,
 				3ACEE4AA71C6E0A2568B5618 /* HiddenTextTests.swift in Sources */,
+				FF1B7722C906229473CF960E /* InviteBarTests.swift in Sources */,
 				76F9A3C00F2534336026DFFC /* InviteTests.swift in Sources */,
 				FB3EF9FE4BF274C779D24684 /* KeychainTests.swift in Sources */,
 				08CF58EA24473A4613949956 /* LabelPickerTests.swift in Sources */,
