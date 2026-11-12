@@ -248,7 +248,7 @@ enum ToolbarHelp {
         case "Hide Sidebar": "Hide the sidebar"
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
-        case "Feedback": "Report a bug or suggest a feature, by email from your account"
+        case "Feedback": FeedbackToolbarMenu.help
         case "New Routine": "Create a routine that sorts important mail on a schedule"
         case "Done": "Back to the page (Esc)"
         case "Accept All": model.reviewMode == .rules ? "Accept every proposed rule that goes against none of yours"

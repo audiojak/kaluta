@@ -188,7 +188,9 @@ struct MailCommands: Commands {
             Divider() // menu
             // An email from the open account, read before it is sent (spec §17.1).
             Button("Report a Bug…") { report(.bug) }
+                .keyboardShortcut("b", modifiers: [.command, .option])
             Button("Suggest a Feature…") { report(.idea) }
+                .keyboardShortcut("b", modifiers: [.command, .option, .shift])
         }
         CommandGroup(after: .windowList) {
             // As Mail's Message Viewer: the mail window back after closing it.

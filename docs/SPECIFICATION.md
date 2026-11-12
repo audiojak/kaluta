@@ -4120,6 +4120,34 @@ habit); a starter set is proposed once three reviews find facts that fit
 it. With *All mail I send*, a review reads up to 30 messages sent since
 the last one read.
 
+*(Amendment 2026-11-12: what counts as a fact.)* Showing every fact one
+message stated filled the queue with things that were true but not worth
+keeping (a dinner's date, times offered in one thread, a person known by
+one detail), and every accepted fact is in every drafting prompt. So:
+
+- **The bar.** The agent is asked only for facts that are *durable*
+  (still true in a few months), *reusable* (likely to matter in later
+  emails, not only the one it came from) and *complete on their own*
+  (the label and value are understood without the email). One-off events
+  and their dates, what was offered in one conversation, what one email
+  was about, and a person without a name, a role and how the user knows
+  them, are named as not wanted.
+- **Two sightings for mail.** A new fact found in what an email says is
+  kept (*watching*) and shown only when a second message states it: in a
+  later review, where the agent is shown the facts seen once and answers
+  `again` with the fact's id, or in the same review, citing both
+  messages. A fact in what the user *told Kaluta* (the instruction when
+  it drafted, or an answer to writing help) is deliberate and is shown
+  at once. Changes to and removals of known facts are still shown at
+  once.
+- **Five at most.** A review proposes at most five new facts; the agent
+  lists the most useful first and the rest are dropped.
+- **Rejections are remembered.** The agent is shown the user's newest
+  rejected facts (40 at most) and told not to propose them again in any
+  wording, and to take them as examples of what is not wanted. A
+  rejected fact in the same words was never raised again; this covers
+  the reworded one.
+
 **Scope.** Facts are per account by default. *Make Global* moves a fact
 into the global store (ADR 0012), where every account reads it; *Make This
 Account's Only* moves it back. An account fact with the same category and
@@ -4941,7 +4969,10 @@ user asked.
   conversations off ("Answered · off the list" in the rail). The item
   shows "Waiting on Hayden · 9 days" with the check's reason, above what
   the user wrote; *Check again* offers tomorrow (1), in three days (2)
-  or next week (3).
+  or next week (3). *(Amendment 2026-11-12:)* and next month (4) or
+  *Pick a date…* (5), a day on a calendar from tomorrow on, then Return,
+  the same keys as Triage's *Remind me later*; the conversation comes
+  back at the start of the day chosen.
 - Per item: **Nudge** (Return) with up to three follow-ups written ahead
   to pick from, then the editable email; sending starts the wait again.
   **Let it go** (E) takes the label off. **Check again** (L) hides it
@@ -5138,7 +5169,12 @@ four pages of 50), `get_meetings` (one meeting's notes, summary and
 attendees) and `get_meeting_transcript` (at most 30,000 characters). The
 listing's tagged text is parsed for each meeting's id, title,
 `meeting_at`, URL and participants (name, address), and the account's
-`connected_user_email`. The job runs only for the mail account whose
+`connected_user_email`. *(Amendment 2026-11-12:)* only meetings with a
+note are kept. A meeting with no note yet (not held, or not written up)
+is listed as a calendar entry under an `evt_` id, and comes back under
+its note's own id later: entries are left out, and those kept before
+this are forgotten at the next read, a decision made on one going to
+its note (same title and time) so it is not asked again. The job runs only for the mail account whose
 address is the Granola account's.
 
 **Judging** (the `followups` background job, §14.13 jobs; 20 meetings a
@@ -5283,7 +5319,8 @@ crash reporter in MVP.
 the mail window. *(Amendment 2026-11-12:)* the same two commands are a
 **Feedback** button at the trailing end of the mail window's toolbar, on
 every screen of it (mail, the Dashboard, a workflow, Review mode,
-onboarding). What it sends is an ordinary email from the open account,
+onboarding), and have keys from any window: ⌥⌘B reports a bug, ⌥⇧⌘B
+suggests a feature. What it sends is an ordinary email from the open account,
 through the outbox like any other (Undo Send included), and it is in Sent
 afterwards. The app contacts no Kaluta server; there is still no telemetry.
 

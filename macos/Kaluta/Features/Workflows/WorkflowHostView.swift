@@ -512,9 +512,21 @@ struct WorkflowItemView: View {
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
                 switch session.choosingTime {
                 case .checkAgain:
-                    Text("Check again when? 1 tomorrow, 2 in three days, 3 next week")
+                    Text(Self.checkAgainQuestion())
                         .font(TypeRole.workflowHeading)
                         .id(WorkflowWriteView.scrollID)
+                case .checkAgainOn:
+                    VStack(alignment: .leading, spacing: Space.l) {
+                        Text("Check again on which day?")
+                            .font(TypeRole.workflowHeading)
+                        DatePicker("Day to check again", selection: Binding(get: { session.remindDay },
+                                                                           set: { session.remindDay = $0 }),
+                                   in: AppModel.earliestReminderDay()..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .labelsHidden()
+                            .hoverHelp("The day the conversation comes back to Waiting on others")
+                    }
+                    .id(WorkflowWriteView.scrollID)
                 case .remind:
                     Text(Self.remindQuestion())
                         .font(TypeRole.workflowHeading)
@@ -553,6 +565,12 @@ struct WorkflowItemView: View {
     /// when it is short enough to read.
     /// "Remind you when? 1 in 3 hours, 2 tomorrow morning, 3 next week, 4
     /// next month, 5 pick a date".
+    static func checkAgainQuestion(now: Date = .now) -> String {
+        let days = AppModel.checkAgainTimes(now: now).enumerated().map { "\($0.offset + 1) \($0.element.title.lowercased())" }
+        return "Check again when? " + (days + ["\(days.count + 1) pick a date"]).joined(separator: ", ")
+    }
+
+    /// "Remind you when? …", as *Check again*'s question above.
     static func remindQuestion(now: Date = .now) -> String {
         let times = AppModel.reminderTimes(now: now).enumerated().map { "\($0.offset + 1) \($0.element.title.lowercased())" }
         return "Remind you when? " + (times + ["\(times.count + 1) pick a date"]).joined(separator: ", ")
