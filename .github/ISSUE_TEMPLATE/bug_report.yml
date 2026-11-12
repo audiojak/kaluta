@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in Kaluta is not working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Leave out anything private, and check a screenshot for mail, names and addresses before attaching it.
+        You can also send a report by email to bug@support.kaluta.org; a maintainer reviews it before it is published here.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Kaluta did instead.
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Kaluta version
+      description: From Kaluta › About Kaluta.
+      placeholder: "0.1.0 (1)"
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "26.1"
+  - type: dropdown
+    id: account
+    attributes:
+      label: Account
+      options:
+        - Gmail
+        - Agent mailbox
+        - Old mail (archive)
+        - Demo
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: Optional. Lines from ~/Library/Logs/Kaluta/core.log around the time it happened. Remove addresses and subjects first.
+      render: text
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Optional. Drag a picture here.

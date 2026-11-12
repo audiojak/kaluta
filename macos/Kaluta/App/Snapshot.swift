@@ -79,7 +79,14 @@ import os
 ///   -KalutaSnapshotTask YES            open the task dialog on the selected
 ///                                       thread (use -KalutaFakeAgents YES)
 ///                                       and capture the sheet
+///   -KalutaSnapshotFeedback bug|idea   open Report a Bug… or Suggest a Feature…
+///                                       filled in, and capture the sheet (use
+///                                       -KalutaSnapshotMode report);
+///                                       -KalutaSnapshotFeedbackCover YES covers
+///                                       part of its picture
 ///   -KalutaSnapshotMode pdf            draw through AppKit's PDF (print) path
+///   -KalutaSnapshotMode report         capture as Report a Bug… does (the
+///                                       window server's picture of this window)
 ///   -KalutaSnapshotMode layer          render the CALayer tree instead
 ///                                       (catches layer-only SwiftUI content)
 @MainActor
@@ -462,6 +469,21 @@ enum Snapshot {
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("compose") ?? false) }
                 FileHandle.standardError.write(Data("snapshot composer window: \(window != nil)\n".utf8))
             }
+            if let kind = defaults.string(forKey: "KalutaSnapshotFeedback").flatMap(FeedbackKind.init(rawValue:)),
+               let model = delegate.model {
+                await model.openFeedback(kind)
+                if let draft = model.feedbackDraft {
+                    draft.title = kind == .bug ? "The list jumps when I archive" : "Snooze until Monday"
+                    draft.details = kind == .bug
+                        ? "I archived the second conversation and the list scrolled back to the top."
+                        : "A way to hide a conversation until the start of next week."
+                    if defaults.bool(forKey: "KalutaSnapshotFeedbackCover") {
+                        draft.covers = [CGRect(x: 0.52, y: 0.08, width: 0.44, height: 0.5)]
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(800))
+                window = NSApp.windows.last { $0.isVisible && $0.sheetParent != nil }
+            }
             try? await Task.sleep(for: .seconds(delay / 2))
             if let model = delegate.model {
                 FileHandle.standardError.write(Data("snapshot state: \(model.accountState) rows=\(model.threads.rows.count) agent=\(model.agent.isPresented)/\(model.agent.entries.count)/\(model.agent.providers.count)\n".utf8))
@@ -479,13 +501,26 @@ enum Snapshot {
                     FileHandle.standardError.write(Data(line.utf8))
                 }
             }
-            capture(window, to: URL(filePath: path))
+            if defaults.string(forKey: "KalutaSnapshotMode") == "report",
+               let target = window ?? NSApp.windows.first(where: { $0.isVisible && !($0 is NSPanel) }) {
+                // What Report a Bug… would attach (spec §17.1).
+                do {
+                    let image = try await WindowCapture.composited(target)
+                    try WindowCapture.png(image)?.write(to: URL(filePath: path))
+                    FileHandle.standardError.write(Data("snapshot report capture: \(image.width)x\(image.height)\n".utf8))
+                } catch {
+                    FileHandle.standardError.write(Data("snapshot report capture failed: \(error)\n".utf8))
+                }
+            } else {
+                capture(window, to: URL(filePath: path))
+            }
             // Left open to look at (a scratch demo run only, like every snapshot).
             if defaults.bool(forKey: "KalutaSnapshotStay") { return }
             // A sheet left open keeps the app from quitting.
             delegate.model?.closeTaskDialog()
             delegate.model?.guidePrompt = nil
             delegate.model?.agentMailboxSheet = nil
+            delegate.model?.feedbackDraft = nil
             delegate.model?.cleanUp.loadQuestion = nil
             delegate.model?.cleanUp.unsubscribeQuestion = nil
             for sheet in NSApp.windows where sheet.sheetParent != nil { sheet.sheetParent?.endSheet(sheet) }

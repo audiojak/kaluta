@@ -46,7 +46,7 @@ The short version. Everything below elaborates on these.
 | Routines | Structured routine model → generated prompt; runs locally (Kaluta agent stack) or as a Claude cloud routine created/updated/run through the user's own `claude` CLI (`RemoteTrigger`, verified), with paste hand-off as fallback; ChatGPT by hand-off only; Kaluta never holds claude.ai/ChatGPT credentials |
 | Composer | Rich text (`NSTextView`), sends `multipart/alternative` HTML + plain text |
 | Distribution | Direct download, Developer ID, notarized, Sparkle 2 auto-update; **not** sandboxed, **not** App Store |
-| Telemetry | None in MVP |
+| Telemetry | None. *(Amendment 2026-11-12, ADR 0020:)* a bug report or feature request is an email the user reads and sends from their own account (§17.1) |
 | Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta; an eighth, Follow-ups, with Granola connected, §14.14), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Issue tracking | beads (`bd`) in the repo |
 
@@ -5186,7 +5186,9 @@ them.)
    things worse; we cannot defend against it).
 4. **The project itself** — must be *unable* to see mail (no backend).
    *(Amended 2026-10-08, ADR 0016: it may run a rules server, which
-   still never holds mail.)*
+   still never holds mail.)* *(Amended 2026-11-12, ADR 0020: it receives
+   the bug reports and feature requests users send it by email, and
+   nothing else, §17.1.)*
 5. **A leaked rules-server agent token** *(amendment 2026-10-08)* — reads
    one mailbox's published rules and shared facts and can file reports,
    until revoked.
@@ -5210,6 +5212,7 @@ them.)
 | Attachments | Never auto-opened; saved with quarantine xattr (`com.apple.quarantine`) so Gatekeeper applies; agent gets extracted text only |
 | Log leakage | `Redacted` newtypes; email bodies never logged above `trace`, which is compiled out in release |
 | Supply chain | `cargo deny` (licenses, advisories), `cargo audit` in CI, Swift packages pinned by revision, Sparkle EdDSA-signed updates |
+| A report leaks mail *(amendment 2026-11-12, ADR 0020)* | A report is sent only by the user, from a sheet that shows all of it; the picture is optional, of Kaluta's window only, and can be covered (the pixels are replaced); the log is off by default, warnings and errors only, and scrubbed of addresses, tokens and keys; a maintainer reviews every report before it is public, and the sender's address is never published (§17.1) |
 | The project sees mail through the rules server | The server holds no mail, no service key and no OAuth token; reports carry only what the agent wrote; it serves agent mailboxes only *(amendment 2026-10-08, ADR 0016, §10.6)* |
 | Leaked rules-server agent token | Scoped to one mailbox; reads only published rules and shared facts; cannot read mail or send; stored as a hash; revocable in the app; reports name the token *(amendment 2026-10-08)*. Revoking takes effect at the next request; each token is rate limited; logs name the token's id, never the token *(implemented 2026-10-09, oagc-gmn7.2)* |
 | Rules server OAuth: phishing, code theft, replay *(amendment 2026-10-09, oagc-gmn7.4)* | No accounts or passwords: a grant needs a one-time connect code from the app (10 minutes, single use, hashed, attempts limited per page, client and server); PKCE S256 required; exact redirect URI match (loopback port aside), errors before that never redirect; `state` passed through and `iss` returned; the consent page shows the client's self-chosen name and the real return host, cannot be framed and checks a CSRF cookie and Origin; tokens bound to `/mcp`; refresh tokens rotate and a reused one, or a reused authorization code, revokes the grant; grants are revoked in the app like tokens |
@@ -5273,6 +5276,85 @@ keeping unified-logging privacy annotations under Swift's control rather
 than trusting a third-party bridge crate. Swift uses `os.Logger` directly.
 A "Collect diagnostics" button zips both logs with secrets scrubbed. No
 crash reporter in MVP.
+
+### 17.1 Bug reports and feature requests *(amendment 2026-11-12, ADR 0020)*
+
+**Help › Report a Bug…** and **Help › Suggest a Feature…** open a sheet on
+the mail window. What it sends is an ordinary email from the open account,
+through the outbox like any other (Undo Send included), and it is in Sent
+afterwards. The app contacts no Kaluta server; there is still no telemetry.
+
+**The sheet** shows everything the email will carry:
+
+- A title (required) and a description.
+- **A picture of the mail window**, taken as the command is chosen, before
+  the sheet covers it. It is the window server's picture of Kaluta's own
+  window (ScreenCaptureKit's current-process content, which needs no
+  Screen Recording permission and can show nothing outside Kaluta); if
+  that fails the window draws itself. At most 2,400 pixels on its longer
+  side. *Include this picture* is on for a bug and off for a suggestion.
+  Dragging over the picture covers that area: covers are painted into the
+  PNG that is sent, so the pixels under them are gone. A picture file
+  dropped on the sheet replaces the window's.
+- **Recent warnings from the log** (bugs only, off until ticked): the
+  newest 40 `WARN` and `ERROR` lines of `core.log`, each scrubbed
+  (addresses, Google tokens, agent-mail keys, signed-URL parameters; the
+  home folder written `~`) and cut at 400 characters. The file itself is
+  never sent.
+- *What else is sent*: the lines below, as they will go.
+
+An imported mailbox cannot send, and with no account open there is
+nothing to send from: the sheet says so and gives the address to write to.
+
+**The message** is the whole interface between the app and the project's
+handler (`kaluta-website/src/lib/feedback/report.ts`), so a report typed in
+any mail program works too:
+
+| Part | Holds |
+|---|---|
+| To | `bug@support.kaluta.org` (a bug) or `idea@support.kaluta.org` (a suggestion) |
+| Subject | The title |
+| Body (plain-text alternative) | The description, then the blocks below, each optional |
+| Attachment | At most one picture is published: the first PNG or JPEG, 8 MB at most. The app sends `screenshot.png` |
+
+```text
+<description>
+
+--- Kaluta report ---
+App: 0.1.0 (1)
+Core: 0.1.0
+macOS: 26.1.0
+Account: Gmail
+--- end ---
+
+--- Kaluta log ---
+<scrubbed lines>
+--- end ---
+```
+
+`Account` is the kind of mailbox only (Gmail, Agent mailbox, Imported
+mailbox, Demo), never its address. A marker is a whole line; each block
+ends at the next `--- end ---` line.
+
+**What the project does with it.** The two addresses are hosted at an
+agent-mail service (Primitive). Its webhook calls a handler on kaluta.org,
+which ignores mail that is not from an authenticated sender or looks like
+spam, and otherwise emails a maintainer a preview with a signed link to a
+review page. Nothing is public until the maintainer approves there:
+
+- **Approve** files an issue on `audiojak/kaluta` through a GitHub App,
+  labelled `bug` or `feature-request`: the title, the description (with
+  mentions and HTML neutralised), the two blocks, and the picture, stored
+  at a public address. The sender's name and address are never published.
+  The sender is emailed the issue's link.
+- **Reject** publishes nothing and tells the sender nothing.
+- When the issue is closed the sender is emailed once more, and the mail
+  is deleted at the mail service; a rejected report's mail is deleted
+  there too. Until then the mail service's copy is the only private
+  record: the handler keeps a decision per report and the published
+  pictures, and no database.
+
+The privacy page (kaluta.org/privacy) says the same to users.
 
 ---
 

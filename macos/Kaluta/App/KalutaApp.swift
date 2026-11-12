@@ -146,6 +146,17 @@ struct MailCommands: Commands {
     private var noTargets: Bool { !mailShown || model.actionTargets.isEmpty }
     private var noReplyTarget: Bool { !mailShown || model.replyTargetMessageID == nil }
 
+    /// The sheet belongs to the mail window: that comes forward (or back)
+    /// first, and its picture is taken before the sheet covers it.
+    private func report(_ kind: FeedbackKind) {
+        if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+            main.makeKeyAndOrderFront(nil)
+        } else {
+            openWindow(id: "main")
+        }
+        Task { await model.openFeedback(kind) }
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("New Message") { model.compose(.new(to: nil)) }
@@ -174,6 +185,10 @@ struct MailCommands: Commands {
             Button("Keyboard Shortcuts") { openWindow(id: "shortcuts") }
                 .keyboardShortcut("/", modifiers: [.command, .shift])
             Link("Kaluta on GitHub", destination: URL(string: "https://github.com/audiojak/kaluta")!)
+            Divider() // menu
+            // An email from the open account, read before it is sent (spec §17.1).
+            Button("Report a Bug…") { report(.bug) }
+            Button("Suggest a Feature…") { report(.idea) }
         }
         CommandGroup(after: .windowList) {
             // As Mail's Message Viewer: the mail window back after closing it.

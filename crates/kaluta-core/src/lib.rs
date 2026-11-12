@@ -28,6 +28,7 @@ mod error;
 mod events;
 mod facts;
 mod facts_io;
+mod feedback;
 pub mod ffi;
 mod followups;
 mod granola;

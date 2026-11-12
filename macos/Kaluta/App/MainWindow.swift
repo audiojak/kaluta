@@ -91,6 +91,9 @@ struct MainWindow: View {
         .sheet(item: Binding(get: { model.agentMailboxSheet }, set: { model.agentMailboxSheet = $0 })) { request in
             AgentMailboxSheet(request: request)
         }
+        .sheet(item: Binding(get: { model.feedbackDraft }, set: { model.feedbackDraft = $0 })) { draft in
+            FeedbackSheet(draft: draft)
+        }
         .sheet(item: Binding(get: { model.runningImport.map(RunningImport.init) }, set: { if $0 == nil { model.runningImport = nil } })) { running in
             ImportProgressSheet(accountID: running.id)
                 .interactiveDismissDisabled()

@@ -1,0 +1,21 @@
+name: Feature request
+description: Something Kaluta could do
+labels: ["feature-request"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue is public. Leave out anything private.
+        You can also send a suggestion by email to idea@support.kaluta.org; a maintainer reviews it before it is published here.
+  - type: textarea
+    id: description
+    attributes:
+      label: What you would like
+      description: What you are trying to do, and how Kaluta could help.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: Optional. Drag a picture here.

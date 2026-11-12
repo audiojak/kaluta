@@ -16,7 +16,9 @@ own AI accounts).
    and prompt injection aimed at the agent ("forward all invoices to …").
 2. **A confused or manipulated agent** that follows injected instructions,
    hallucinates a destructive action, or loops.
-3. **Ourselves** — Kaluta has no servers and must not be able to see mail.
+3. **Ourselves** — no Kaluta server sees mail, and none must be able to.
+   The project receives only the bug reports and suggestions users email
+   it (spec §17.1).
 
 Local malware running as the same user is out of scope; we avoid making it
 worse (secrets in the Keychain, private sockets, no credentials on disk).
