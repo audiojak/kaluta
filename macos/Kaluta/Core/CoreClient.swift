@@ -149,6 +149,9 @@ final class CoreClient: Sendable {
     }
 
     var version: String { core.version() }
+    /// The newest warnings and errors in the core's log, scrubbed of
+    /// addresses, tokens and keys, for a bug report (spec §17.1).
+    func recentLog(maxLines: UInt32) -> String { core.recentLog(maxLines: maxLines) }
     /// Where this core keeps its accounts.
     var dataDirectory: String { core.dataDir() }
 

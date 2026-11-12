@@ -384,6 +384,9 @@ final class AppModel {
     /// Create an Agent Mailbox, or verify one, while its sheet is open
     /// (spec §7.9).
     var agentMailboxSheet: AgentMailboxRequest?
+    /// Report a Bug… or Suggest a Feature…, while its sheet is open
+    /// (spec §17.1).
+    var feedbackDraft: FeedbackDraft?
     /// Review mode (spec §14.10, §14.11): deciding in the whole window.
     var reviewMode: ReviewMode?
     /// Teach Kaluta's routine changes and its current item (spec §14.13).

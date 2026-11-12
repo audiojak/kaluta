@@ -27,8 +27,10 @@ Gmail ──HTTPS/OAuth──▶ Kaluta.app on your Mac
                          └── mail tools (MCP) ──▶ your claude / codex CLI
 ```
 
-- **No backend.** Mail goes from Google to your Mac and nowhere else. The
-  project operates no servers, has no accounts, and collects no telemetry.
+- **No backend.** Mail goes from Google to your Mac and nowhere else. No
+  Kaluta server sees your mail, there are no accounts, and the app collects
+  no telemetry. A bug report or suggestion is an email you read and send
+  yourself; a maintainer reviews it before any of it is public.
 - **Agents get tools, not your mailbox.** An agent searches locally, reads
   only what it asks for, and every access is logged. Email content is
   treated as untrusted input.

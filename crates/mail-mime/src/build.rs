@@ -227,6 +227,30 @@ mod tests {
         assert_eq!(crate::strip_quoted(&text).trim(), "Thursday works.", "the user's own words alone");
     }
 
+    /// A bug report's blocks (spec §17.1) are found by the line: the text
+    /// alternative must keep each line of the composer's HTML on its own.
+    #[test]
+    fn a_reports_blocks_keep_their_lines_in_the_plain_text() {
+        let report = OutgoingMessage {
+            html: "<div>The list jumps.<br><br>--- Kaluta report ---<br>App: 0.1.0 (1)<br>macOS: 26.1<br>--- end ---<br><br>--- Kaluta log ---<br>WARN a &lt;email&gt; b<br>--- end ---</div>".into(),
+            ..sample()
+        };
+        let parsed = crate::parse(&build(&report).unwrap()).unwrap();
+        let text = parsed.text.unwrap().replace("\r\n", "\n");
+        let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+        assert_eq!(lines[0], "The list jumps.", "{text:?}");
+        for line in [
+            "--- Kaluta report ---",
+            "App: 0.1.0 (1)",
+            "macOS: 26.1",
+            "--- end ---",
+            "--- Kaluta log ---",
+            "WARN a <email> b",
+        ] {
+            assert!(lines.contains(&line), "{line:?} in {text:?}");
+        }
+    }
+
     #[test]
     fn bad_input_is_rejected_before_anything_is_sent() {
         let mut m = sample();
