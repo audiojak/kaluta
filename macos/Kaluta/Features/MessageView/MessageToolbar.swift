@@ -112,6 +112,8 @@ struct MessageToolbar: ToolbarContent {
             }
             .help(ToolbarHelp.text(for: model.agent.isPresented ? "Hide Agent" : "Show Agent", model: model) ?? "")
         }
+        // Last, so it is at the window's trailing end (spec §17.1).
+        ToolbarItem { FeedbackToolbarMenu() }
     }
 
     @ToolbarContentBuilder private var mailItems: some ToolbarContent {
@@ -246,6 +248,7 @@ enum ToolbarHelp {
         case "Hide Sidebar": "Hide the sidebar"
         case "Show Sidebar": "Show the sidebar"
         case "Search": "Search mail (⌘F)"
+        case "Feedback": "Report a bug or suggest a feature, by email from your account"
         case "New Routine": "Create a routine that sorts important mail on a schedule"
         case "Done": "Back to the page (Esc)"
         case "Accept All": model.reviewMode == .rules ? "Accept every proposed rule that goes against none of yours"

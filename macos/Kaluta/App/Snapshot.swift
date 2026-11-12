@@ -84,6 +84,10 @@ import os
 ///                                       -KalutaSnapshotMode report);
 ///                                       -KalutaSnapshotFeedbackCover YES covers
 ///                                       part of its picture
+///                                       -KalutaSnapshotFeedbackHideText NO leaves
+///                                       its text showing;
+///                                       -KalutaSnapshotFeedbackPicture <path>
+///                                       also writes the picture as it would be sent
 ///   -KalutaSnapshotMode pdf            draw through AppKit's PDF (print) path
 ///   -KalutaSnapshotMode report         capture as Report a Bug… does (the
 ///                                       window server's picture of this window)
@@ -471,15 +475,24 @@ enum Snapshot {
             }
             if let kind = defaults.string(forKey: "KalutaSnapshotFeedback").flatMap(FeedbackKind.init(rawValue:)),
                let model = delegate.model {
+                // The message has to be on screen to be in the picture.
+                try? await Task.sleep(for: .seconds(delay / 2))
                 await model.openFeedback(kind)
                 if let draft = model.feedbackDraft {
                     draft.title = kind == .bug ? "The list jumps when I archive" : "Snooze until Monday"
                     draft.details = kind == .bug
                         ? "I archived the second conversation and the list scrolled back to the top."
                         : "A way to hide a conversation until the start of next week."
+                    if defaults.string(forKey: "KalutaSnapshotFeedbackHideText") == "NO" { draft.hideText = false }
+                    await draft.findText()
                     if defaults.bool(forKey: "KalutaSnapshotFeedbackCover") {
                         draft.covers = [CGRect(x: 0.52, y: 0.08, width: 0.44, height: 0.5)]
                     }
+                }
+                if let out = defaults.string(forKey: "KalutaSnapshotFeedbackPicture"),
+                   let sent = model.feedbackDraft?.pictureToSend {
+                    try? WindowCapture.png(sent)?.write(to: URL(filePath: out))
+                    FileHandle.standardError.write(Data("snapshot feedback text areas: \(model.feedbackDraft?.textAreas?.count ?? -1)\n".utf8))
                 }
                 try? await Task.sleep(for: .milliseconds(800))
                 window = NSApp.windows.last { $0.isVisible && $0.sheetParent != nil }
