@@ -503,8 +503,11 @@ extension AppModel {
             return [a(.pick1, .plain, "Tomorrow"), a(.pick2, .plain, "In 3 days"), a(.pick3, .plain, "Next week"),
                     a(.back, .quiet, "Cancel")]
         case .remind:
-            return zip([WorkflowCommand.pick1, .pick2, .pick3], Self.reminderTimes()).map { a($0, .plain, $1.title) }
-                + [a(.back, .quiet, "Cancel")]
+            return zip(Self.reminderPicks, Self.reminderTimes()).map { a($0, .plain, $1.title) }
+                + [a(.pick5, .plain, "Pick a date…"), a(.back, .quiet, "Cancel")]
+        case .remindOn:
+            return [a(.primary, .primary, "Remind me \(Self.reminderTime(on: session.remindDay).title)"),
+                    a(.back, .quiet, "Cancel")]
         case nil:
             break
         }
@@ -895,13 +898,20 @@ extension AppModel {
         }
         if session.choosingTime == .remind {
             session.choosingTime = nil
-            let index: Int? = switch command {
-            case .pick1: 0
-            case .pick2: 1
-            case .pick3: 2
-            default: nil
+            if command == .pick5 {
+                // A day on a calendar: a month on, to start from.
+                session.remindDay = Self.earliestReminderDay()
+                session.choosingTime = .remindOn
+            } else if let index = Self.reminderPicks.firstIndex(of: command) {
+                await remindLater(item, at: Self.reminderTimes()[index], session: session)
             }
-            if let index { await remindLater(item, at: Self.reminderTimes()[index], session: session) }
+            return
+        }
+        if session.choosingTime == .remindOn {
+            session.choosingTime = nil
+            if command == .primary {
+                await remindLater(item, at: Self.reminderTime(on: session.remindDay), session: session)
+            }
             return
         }
         if session.choosingTime == .checkAgain {
@@ -1240,7 +1250,7 @@ extension AppModel {
                      redoMail: { try? await core.checkWaitingAgain(id, until: day) })
     }
 
-    /// *Remind me later* (B, then 1–3): out of Triage until then, the
+    /// *Remind me later* (B, then 1–5): out of Triage until then, the
     /// email left in the Inbox; ⌘Z puts the reminder back as it was.
     private func remindLater(_ item: WorkflowItem, at time: ReminderTime, session: WorkflowSession) async {
         guard let core, let id = threadID(of: item) else { return }
@@ -1265,8 +1275,30 @@ extension AppModel {
         let date: Date
     }
 
+    /// The keys of *Remind me later*'s times, in their order; 5 is *Pick a
+    /// date…*.
+    static let reminderPicks: [WorkflowCommand] = [.pick1, .pick2, .pick3, .pick4]
+
+    /// The first day *Pick a date…* offers: tomorrow.
+    static func earliestReminderDay(now: Date = .now, calendar: Calendar = .current) -> Date {
+        calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+    }
+
+    /// A chosen day's reminder: 8 AM that day, never before tomorrow.
+    static func reminderTime(on day: Date, now: Date = .now, calendar: Calendar = .current) -> ReminderTime {
+        let chosen = max(calendar.startOfDay(for: day), earliestReminderDay(now: now, calendar: calendar))
+        let date = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: chosen) ?? chosen
+        var style = Date.FormatStyle.dateTime.weekday(.wide).month(.wide).day()
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        if !calendar.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
+        let words = date.formatted(style)
+        return ReminderTime(title: "on \(words)",
+                            phrase: "\(words) at \(date.formatted(date: .omitted, time: .shortened))", date: date)
+    }
+
     /// *Remind me later*'s times: in three hours, tomorrow at 8 AM, next
-    /// Monday at 8 AM.
+    /// Monday at 8 AM, a month from today at 8 AM.
     static func reminderTimes(now: Date = .now, calendar: Calendar = .current) -> [ReminderTime] {
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now
@@ -1275,6 +1307,9 @@ extension AppModel {
                                        matchingPolicy: .nextTime) ?? morning
         let week = calendar.isDate(monday, inSameDayAs: tomorrow)
             ? calendar.date(byAdding: .day, value: 7, to: monday) ?? monday : monday
+        // The same day next month (the 31st: that month's last).
+        let month = reminderTime(on: calendar.date(byAdding: .month, value: 1, to: today) ?? week,
+                                 now: now, calendar: calendar)
         let inThree = now.addingTimeInterval(3 * 3600)
         let clock = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
         let threeAt = calendar.isDate(inThree, inSameDayAs: now) ? "today at \(clock(inThree))"
@@ -1284,6 +1319,7 @@ extension AppModel {
             ReminderTime(title: "Tomorrow morning", phrase: "tomorrow at \(clock(morning))", date: morning),
             ReminderTime(title: "Next week", phrase: "\(week.formatted(.dateTime.weekday(.wide))) at \(clock(week))",
                          date: week),
+            ReminderTime(title: "Next month", phrase: month.phrase, date: month.date),
         ]
     }
 
