@@ -500,7 +500,10 @@ extension AppModel {
         }
         switch session.choosingTime {
         case .checkAgain:
-            return [a(.pick1, .plain, "Tomorrow"), a(.pick2, .plain, "In 3 days"), a(.pick3, .plain, "Next week"),
+            return zip(Self.reminderPicks, Self.checkAgainTimes()).map { a($0, .plain, $1.title) }
+                + [a(.pick5, .plain, "Pick a date…"), a(.back, .quiet, "Cancel")]
+        case .checkAgainOn:
+            return [a(.primary, .primary, "Check again \(Self.checkAgainTime(on: session.remindDay).title)"),
                     a(.back, .quiet, "Cancel")]
         case .remind:
             return zip(Self.reminderPicks, Self.reminderTimes()).map { a($0, .plain, $1.title) }
@@ -916,13 +919,19 @@ extension AppModel {
         }
         if session.choosingTime == .checkAgain {
             session.choosingTime = nil
-            let days: Int? = switch command {
-            case .pick1: 1
-            case .pick2: 3
-            case .pick3: 7
-            default: nil
+            if command == .pick5 {
+                session.remindDay = Self.earliestReminderDay()
+                session.choosingTime = .checkAgainOn
+            } else if let index = Self.reminderPicks.firstIndex(of: command) {
+                await checkAgain(item, on: Self.checkAgainTimes()[index], session: session)
             }
-            if let days { await checkAgain(item, inDays: days, session: session) }
+            return
+        }
+        if session.choosingTime == .checkAgainOn {
+            session.choosingTime = nil
+            if command == .primary {
+                await checkAgain(item, on: Self.checkAgainTime(on: session.remindDay), session: session)
+            }
             return
         }
         if let form = session.taskForm {
@@ -1239,13 +1248,12 @@ extension AppModel {
                      redoMail: { try? await core.letGoWaiting(id) })
     }
 
-    /// *Check again* (L): hidden until the day chosen.
-    private func checkAgain(_ item: WorkflowItem, inDays days: Int, session: WorkflowSession) async {
+    /// *Check again* (L, then 1–5): hidden until the day chosen.
+    private func checkAgain(_ item: WorkflowItem, on time: ReminderTime, session: WorkflowSession) async {
+        let day = time.date
         guard let core, let id = threadID(of: item),
-              let day = Calendar.current.date(byAdding: .day, value: days, to: Calendar.current.startOfDay(for: .now)),
               (try? await core.checkWaitingAgain(id, until: day)) != nil else { return }
-        let when = days == 1 ? "tomorrow" : day.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
-        await decide(item, "later", session: session, notice: "Check again \(when)",
+        await decide(item, "later", session: session, notice: "Check again \(time.phrase)",
                      undoMail: { try? await core.checkWaitingAgain(id, until: nil) },
                      redoMail: { try? await core.checkWaitingAgain(id, until: day) })
     }
@@ -1295,6 +1303,38 @@ extension AppModel {
         let words = date.formatted(style)
         return ReminderTime(title: "on \(words)",
                             phrase: "\(words) at \(date.formatted(date: .omitted, time: .shortened))", date: date)
+    }
+
+    /// *Check again*'s days (Waiting on others), on the same keys as
+    /// *Remind me later*'s times: tomorrow, in three days, in a week, the
+    /// same day next month; 5 is *Pick a date…*. The conversation comes
+    /// back at the start of the day.
+    static func checkAgainTimes(now: Date = .now, calendar: Calendar = .current) -> [ReminderTime] {
+        let today = calendar.startOfDay(for: now)
+        let day = { (component: Calendar.Component, value: Int) in
+            calendar.date(byAdding: component, value: value, to: today) ?? now
+        }
+        let named = { (title: String, date: Date) in
+            ReminderTime(title: title, phrase: checkAgainTime(on: date, now: now, calendar: calendar).phrase, date: date)
+        }
+        return [
+            ReminderTime(title: "Tomorrow", phrase: "tomorrow", date: day(.day, 1)),
+            named("In 3 days", day(.day, 3)),
+            named("Next week", day(.day, 7)),
+            named("Next month", day(.month, 1)),
+        ]
+    }
+
+    /// A chosen day to check again: the start of that day, never before
+    /// tomorrow.
+    static func checkAgainTime(on day: Date, now: Date = .now, calendar: Calendar = .current) -> ReminderTime {
+        let chosen = max(calendar.startOfDay(for: day), earliestReminderDay(now: now, calendar: calendar))
+        var style = Date.FormatStyle.dateTime.weekday(.wide).day().month(.abbreviated)
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        if !calendar.isDate(chosen, equalTo: now, toGranularity: .year) { style = style.year() }
+        let words = chosen.formatted(style)
+        return ReminderTime(title: "on \(words)", phrase: words, date: chosen)
     }
 
     /// *Remind me later*'s times: in three hours, tomorrow at 8 AM, next

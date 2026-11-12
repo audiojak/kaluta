@@ -117,8 +117,9 @@ final class WorkflowSession {
     /// A when is being chosen: *Check again*'s day (Waiting) or *Remind me
     /// later*'s time (Triage).
     var choosingTime: TimeChoice?
-    /// `remindOn`: *Pick a date…*, the day chosen on a calendar.
-    enum TimeChoice { case checkAgain, remind, remindOn }
+    /// `remindOn` and `checkAgainOn`: *Pick a date…*, the day chosen on a
+    /// calendar.
+    enum TimeChoice { case checkAgain, checkAgainOn, remind, remindOn }
     /// The day *Pick a date…* shows chosen.
     var remindDay: Date = .now
     /// A conversation's reminder (Triage), by thread id, as each item is

@@ -74,5 +74,13 @@ times a year). Ticks, not the highlight, are what these act on.
 | `⌥⌘I` | Show or hide the agent panel |
 | `⌥⌘R` | Routines |
 
+## Help
+
+| Keys | Action |
+|---|---|
+| `⇧⌘/` | Keyboard shortcuts |
+| `⌥⌘B` | Report a bug |
+| `⌥⇧⌘B` | Suggest a feature |
+
 With Full Keyboard Access on (System Settings › Keyboard), Tab reaches every button,
 including approvals in the agent panel.

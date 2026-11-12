@@ -66,6 +66,51 @@ struct ReminderTests {
         #expect(WorkflowItemView.remindQuestion().hasPrefix("Remind you when? 1 in 3 hours, 2 tomorrow morning"))
     }
 
+    /// Waiting on others' *Check again* has the same five choices as
+    /// *Remind me later*, in days.
+    @Test func checkAgainOffersTheSameFiveChoicesInDays() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 11, hour: 15, minute: 30))!
+        let times = AppModel.checkAgainTimes(now: now, calendar: calendar)
+        #expect(times.map(\.title) == ["Tomorrow", "In 3 days", "Next week", "Next month"])
+        let day = { (m: Int, d: Int) in calendar.date(from: DateComponents(year: 2026, month: m, day: d))! }
+        #expect(times.map(\.date) == [day(11, 12), day(11, 14), day(11, 18), day(12, 11)], "the start of each day")
+        #expect(times[0].phrase == "tomorrow")
+        #expect(times[3].phrase.contains("11") && times[3].phrase.contains("Dec"))
+
+        // Pick a date…: the start of the day chosen, never before tomorrow.
+        let picked = AppModel.checkAgainTime(on: calendar.date(from: DateComponents(year: 2027, month: 1, day: 5, hour: 17))!,
+                                             now: now, calendar: calendar)
+        #expect(picked.date == calendar.date(from: DateComponents(year: 2027, month: 1, day: 5))!)
+        #expect(picked.title.hasPrefix("on ") && picked.title.contains("2027"), "another year is named")
+        #expect(AppModel.checkAgainTime(on: now, now: now, calendar: calendar).date == day(11, 12))
+        #expect(WorkflowItemView.checkAgainQuestion()
+            == "Check again when? 1 tomorrow, 2 in 3 days, 3 next week, 4 next month, 5 pick a date")
+    }
+
+    /// L, then the keys: 5 opens the calendar, Esc leaves it.
+    @Test func checkAgainsFifthChoiceIsADayOnACalendar() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        let item = WorkflowItem(key: "thread:t1", threadId: "t1", taskId: nil, decision: nil)
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .waiting, items: [item], startedAt: 0, resumed: false))
+        model.workflowSession = session
+        session.choosingTime = .checkAgain
+        #expect(model.workflowActions().map(\.title)
+            == ["Tomorrow", "In 3 days", "Next week", "Next month", "Pick a date…", "Cancel"])
+        #expect(model.workflowActions().map(\.command) == [.pick1, .pick2, .pick3, .pick4, .pick5, .back])
+        await model.performWorkflow(.pick5)
+        #expect(session.choosingTime == .checkAgainOn)
+        #expect(session.remindDay == AppModel.earliestReminderDay())
+        #expect(model.workflowActions().map(\.command) == [.primary, .back])
+        #expect(model.workflowActions().first?.title.hasPrefix("Check again on ") == true)
+        await model.performWorkflow(.back)
+        #expect(session.choosingTime == nil)
+        #expect(session.items.first?.decision == nil, "nothing decided")
+    }
+
     @Test func addingToAMatchedTaskShowsItsKey() {
         #expect(TaskMatchesView.keyLabel(1) == "⌘1")
     }

@@ -55,9 +55,82 @@ fn row(r: &rusqlite::Row<'_>) -> rusqlite::Result<FollowUpRow> {
     })
 }
 
+/// Granola lists a meeting that has no note yet (it has not happened, or
+/// its notes are not written) as a calendar entry under an `evt_` id, with
+/// the invitation's addresses for people; once the note exists the same
+/// meeting comes back under the note's own id. Only notes are meetings
+/// here: there is nothing to judge in a calendar entry, and keeping both
+/// showed the meeting twice.
+pub fn is_calendar_entry(meeting_id: &str) -> bool {
+    meeting_id.starts_with("evt_")
+}
+
+/// `meeting_id LIKE` this, with `ESCAPE '\'`, is a calendar entry.
+const CALENDAR_IDS: &str = "evt\\_%";
+
+/// Forget the calendar entries kept before they were left out. A decision
+/// made on one goes to its note (same title and time) if that has none,
+/// in the meeting and in any workflow set still open, so nothing already
+/// decided is asked again. How many were forgotten.
+pub fn drop_calendar_entries(tx: &Transaction<'_>) -> StoreResult<usize> {
+    let pairs: Vec<(String, Option<String>)> = tx
+        .prepare(&format!(
+            "SELECT e.meeting_id,
+                    (SELECT n.meeting_id FROM meeting_followups n
+                      WHERE n.title = e.title AND n.meeting_at = e.meeting_at
+                        AND n.meeting_id NOT LIKE '{CALENDAR_IDS}' ESCAPE '\\' LIMIT 1)
+               FROM meeting_followups e WHERE e.meeting_id LIKE '{CALENDAR_IDS}' ESCAPE '\\'"
+        ))?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    if pairs.is_empty() {
+        return Ok(0);
+    }
+    for (entry, note) in &pairs {
+        let (old, new) = (format!("meeting:{entry}"), note.as_ref().map(|n| format!("meeting:{n}")));
+        if let (Some(note), Some(new)) = (note, &new) {
+            tx.execute(
+                "UPDATE meeting_followups
+                    SET decided = (SELECT decided FROM meeting_followups WHERE meeting_id = ?1),
+                        decided_at = (SELECT decided_at FROM meeting_followups WHERE meeting_id = ?1)
+                  WHERE meeting_id = ?2 AND decided IS NULL
+                    AND (SELECT decided FROM meeting_followups WHERE meeting_id = ?1) IS NOT NULL",
+                params![entry, note],
+            )?;
+            // In a set still open, the note's item takes the decision.
+            tx.execute(
+                "UPDATE OR IGNORE workflow_decisions SET item = ?2
+                  WHERE item = ?1 AND set_id IN (SELECT id FROM workflow_sets WHERE finished_at IS NULL)",
+                params![old, new],
+            )?;
+        }
+        tx.execute(
+            "DELETE FROM workflow_decisions
+              WHERE item = ?1 AND set_id IN (SELECT id FROM workflow_sets WHERE finished_at IS NULL)",
+            [&old],
+        )?;
+        let open: Vec<(i64, String)> = tx
+            .prepare(
+                "SELECT id, items_json FROM workflow_sets WHERE finished_at IS NULL AND instr(items_json, ?1) > 0",
+            )?
+            .query_map([&old], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (set_id, items_json) in open {
+            let items: Vec<String> = serde_json::from_str(&items_json)?;
+            let kept: Vec<String> = items.into_iter().filter(|i| i != &old).collect();
+            crate::workflows::set_items(tx, set_id, &kept)?;
+        }
+        tx.execute("DELETE FROM meeting_followups WHERE meeting_id = ?1", [entry])?;
+    }
+    Ok(pairs.len())
+}
+
 /// Keep meetings read from Granola; a meeting seen before keeps its
-/// verdict (its title and people are brought up to date). How many were new.
+/// verdict (its title and people are brought up to date). Calendar
+/// entries are left out, and any kept earlier are forgotten. How many
+/// were new.
 pub fn upsert_meetings(tx: &Transaction<'_>, meetings: &[NewMeeting], now: Millis) -> StoreResult<usize> {
+    drop_calendar_entries(tx)?;
     let mut new = 0;
     let mut stmt = tx.prepare_cached(
         "INSERT INTO meeting_followups (meeting_id, title, meeting_at, participants_json, url, seen_at)
@@ -66,7 +139,7 @@ pub fn upsert_meetings(tx: &Transaction<'_>, meetings: &[NewMeeting], now: Milli
            title = excluded.title, meeting_at = excluded.meeting_at,
            participants_json = excluded.participants_json, url = excluded.url",
     )?;
-    for m in meetings {
+    for m in meetings.iter().filter(|m| !is_calendar_entry(&m.meeting_id)) {
         let existed =
             tx.prepare_cached("SELECT 1 FROM meeting_followups WHERE meeting_id = ?1")?.exists([&m.meeting_id])?;
         stmt.execute(params![m.meeting_id, m.title, m.meeting_at, m.participants_json, m.url, now])?;
@@ -159,6 +232,66 @@ mod tests {
             participants_json: r#"[{"name":"Sam","email":"sam@example.org"}]"#.into(),
             url: None,
         }
+    }
+
+    #[test]
+    fn a_calendar_entry_is_not_a_meeting_and_one_kept_before_gives_its_note_its_decision() {
+        let db = Db::open(&crate::db::tests::temp_db_path("followups-calendar")).unwrap();
+        // As kept before: the entry read ahead of the meeting, then its note.
+        let twin = |id: &str| NewMeeting { title: "Infra demo".into(), ..meeting(id, 500) };
+        let kept = [twin("evt_abc123"), twin("note-1"), meeting("evt_lunch", 600), meeting("note-2", 700)];
+        db.write_blocking(move |tx| {
+            for m in kept {
+                tx.execute(
+                    "INSERT INTO meeting_followups (meeting_id, title, meeting_at, participants_json, url, seen_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 1)",
+                    params![m.meeting_id, m.title, m.meeting_at, m.participants_json, m.url],
+                )?;
+            }
+            decide(tx, "evt_abc123", Some("none"), 9)?;
+            let set = crate::workflows::create_set(
+                tx,
+                "followups",
+                "2026-11-12",
+                &[
+                    "meeting:evt_abc123".into(),
+                    "meeting:note-1".into(),
+                    "meeting:evt_lunch".into(),
+                    "meeting:note-2".into(),
+                ],
+                1,
+            )?;
+            crate::workflows::decide(tx, set, "meeting:evt_abc123", "none", 9, 0)?;
+            Ok(())
+        })
+        .unwrap();
+
+        // The next read of Granola lists a calendar entry again, and a note.
+        let new =
+            db.write_blocking(|tx| upsert_meetings(tx, &[meeting("evt_tomorrow", 900), meeting("note-3", 800)], 20));
+        assert_eq!(new.unwrap(), 1, "the entry is not kept");
+        let ids: Vec<String> = db
+            .read_blocking(|c| {
+                Ok(c.prepare("SELECT meeting_id FROM meeting_followups ORDER BY meeting_id")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<_, _>>()?)
+            })
+            .unwrap();
+        assert_eq!(ids, ["note-1", "note-2", "note-3"]);
+        let note = db.read_blocking(|c| get(c, "note-1")).unwrap().unwrap();
+        assert_eq!(note.decided.as_deref(), Some("none"), "decided once, on the entry: not asked again");
+        assert_eq!(db.read_blocking(|c| get(c, "note-2")).unwrap().unwrap().decided, None);
+        let (items, decided) = db
+            .read_blocking(|c| {
+                let set = crate::workflows::open_set(c, "followups", "2026-11-12")?.unwrap();
+                let decided: Vec<String> =
+                    crate::workflows::decisions(c, set.id)?.into_iter().map(|d| d.item).collect();
+                Ok((set.items, decided))
+            })
+            .unwrap();
+        assert_eq!(items, ["meeting:note-1", "meeting:note-2"]);
+        assert_eq!(decided, ["meeting:note-1"]);
+        assert_eq!(db.write_blocking(drop_calendar_entries).unwrap(), 0, "nothing left to forget");
     }
 
     #[test]

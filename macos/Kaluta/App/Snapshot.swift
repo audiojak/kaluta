@@ -473,6 +473,16 @@ enum Snapshot {
                 window = NSApp.windows.last { $0.isVisible && ($0.identifier?.rawValue.hasPrefix("compose") ?? false) }
                 FileHandle.standardError.write(Data("snapshot composer window: \(window != nil)\n".utf8))
             }
+            // A workflow by name (triage, replies, tasks, waiting…), with
+            // -KalutaDemoWorkflows YES; the Dashboard needs only that.
+            let workflows: [String: WorkflowKind] = ["triage": .triage, "replies": .replies, "tasks": .tasks,
+                                                     "waiting": .waiting, "reading": .reading, "teach": .teach]
+            if let kind = defaults.string(forKey: "KalutaSnapshotWorkflow").flatMap({ workflows[$0] }),
+               let model = delegate.model {
+                // Awaited: its set is fixed when this returns, and the
+                // snapshot's own delay (below) lets the item draw.
+                await model.beginWorkflow(kind)
+            }
             if let kind = defaults.string(forKey: "KalutaSnapshotFeedback").flatMap(FeedbackKind.init(rawValue:)),
                let model = delegate.model {
                 // The message has to be on screen to be in the picture.

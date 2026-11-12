@@ -87,6 +87,8 @@ enum KeyboardShortcutGuide {
         ]),
         Group(title: "Help", shortcuts: [
             .init(keys: "⇧⌘/", action: "Keyboard shortcuts", inThreadList: false),
+            .init(keys: "⌥⌘B", action: "Report a bug", inThreadList: false),
+            .init(keys: "⌥⇧⌘B", action: "Suggest a feature", inThreadList: false),
         ]),
     ]
 }

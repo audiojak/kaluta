@@ -26,6 +26,15 @@ const CATEGORY_FACTS: usize = 3;
 const STARTER_REVIEWS: i64 = 3;
 const TEXT_CAP: usize = 3_000;
 const QUOTE_CAP: usize = 300;
+/// The most new facts one review proposes (spec §14.11): the agent is
+/// asked for the most useful first, and the rest are dropped.
+pub const MAX_NEW_FACTS: usize = 5;
+/// A fact found in sent mail is proposed once this many messages state
+/// it. One the user told Kaluta is deliberate: once is enough.
+const MAIL_SIGHTINGS: i64 = 2;
+/// How many facts seen once, and rejected ones, the agent is shown.
+const SEEN_SHOWN: usize = 60;
+const REJECTED_SHOWN: usize = 40;
 
 /// `analysis_meta` keys.
 pub(crate) mod keys {
@@ -98,6 +107,23 @@ pub struct FactPayload {
     pub fact_ids: Vec<i64>,
     /// A starter set: its id (`business`, `freelance`, `household`, `job_search`).
     pub starter: String,
+    /// The words that state it are what the user told Kaluta, not only
+    /// what an email said.
+    #[serde(default)]
+    pub told: bool,
+    /// A second message in the same review states it too (not stored: it
+    /// is counted as it is merged).
+    #[serde(skip)]
+    pub twice: bool,
+}
+
+/// What earlier reviews left, shown to the agent: facts one message has
+/// stated (waiting for a second, by proposal id) and what the user
+/// rejected (as "label: value").
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct History {
+    pub seen: Vec<(i64, FactPayload)>,
+    pub rejected: Vec<String>,
 }
 
 /// A fact the agent found, checked.
@@ -207,7 +233,15 @@ fn capped(s: &str, n: usize) -> String {
 }
 
 /// The request for the day's sent mail.
-pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]) -> String {
+pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo], history: &History) -> String {
+    let seen: String = history
+        .seen
+        .iter()
+        .map(|(id, p)| format!("~{id} [{}] {}: {}", p.category, fenced(&p.label), fenced(&p.value)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let rejected: String = history.rejected.iter().map(|r| format!("- {}", fenced(r))).collect::<Vec<_>>().join("\n");
+    let none = |s: String| if s.is_empty() { "(none)".to_owned() } else { s };
     let cats: String = categories
         .iter()
         .filter(|c| !c.hidden)
@@ -239,15 +273,28 @@ pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]
          an assistant drafting email for them could use: who they are, how to reach them, when they are \
          available, who the people they mention are to them, their work, their preferences, and anything that \
          fits one of their own categories.\n\n\
+         A fact is worth proposing only if it is all three:\n\
+         - durable: still true in a few months;\n\
+         - reusable: likely to matter in emails the user writes later, not only in the one it came from;\n\
+         - complete on its own: someone reading only its label and value understands it.\n\
+         So do not propose: a one-off event, meeting or dinner, or its date; times, dates, prices or terms \
+         offered in one conversation; what one email was about; a person known by a single detail (a person \
+         needs their name, their role and how the user knows them).\n\
+         Propose at most {MAX_NEW_FACTS} new facts, the most useful first. Fewer, or none, is a good answer.\n\n\
          Never propose: passwords or codes; card, bank or account numbers; government ids; health details \
          about anyone else; anything about another person beyond their name, role and how the user knows them.\n\n\
          Categories (key (name): what belongs there):\n{cats}\n\n\
          Facts already known (alter or remove them by #id rather than repeating them):\n{}\n\n\
+         Seen once before, in another email, and not yet shown to the user. If a message below states one \
+         of these again, answer with op \"again\" and its ~id instead of adding it anew:\n{}\n\n\
+         The user rejected these. Do not propose them again in any wording, and take them as examples of \
+         what is not wanted:\n{}\n\n\
          {messages}\n\n\
          Answer with only a JSON object, and nothing else:\n\
          {{\"facts\": [{{\"op\": \"add\", \"category\": \"work\", \"label\": \"Team\", \"value\": \"...\", \
          \"as_of\": null or \"YYYY-MM-DD\" for facts that age, \"evidence\": {{\"message_id\": \"...\", \"quote\": \
-         \"words from that message\"}}}}, \
+         \"words from that message\"}}, \"also\": null or the same from a second message that states it}}, \
+         {{\"op\": \"again\", \"id\": 7, \"evidence\": {{...}}}}, \
          {{\"op\": \"alter\", \"id\": 12, \"value\": \"the new value\", \"evidence\": {{...}}}}, \
          {{\"op\": \"remove\", \"id\": 12, \"evidence\": {{...}}}}], \
          \"categories\": [{{\"name\": \"...\", \"description\": \"...\", \"facts\": [ids of facts in other]}}], \
@@ -257,7 +304,9 @@ pub fn prompt(sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]
          - Propose a category only for three or more facts in other that belong together.\n\
          - Name a starter set only when the facts plainly fit it (company facts on a work account: business).\n\
          - Do not use tools, and do not create, change, send or delete any mail.",
-        if known.is_empty() { "(none)".to_owned() } else { known },
+        none(known),
+        none(seen),
+        none(rejected),
     )
 }
 
@@ -270,7 +319,13 @@ fn date(v: Option<&Value>) -> Option<i64> {
 /// Read the agent's answer. Facts whose quote is not in the message they
 /// cite, in unknown categories, or that must never be stored, are
 /// dropped. `None` when the answer is not JSON at all.
-pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: &[FactInfo]) -> Option<Vec<Found>> {
+pub fn parse(
+    text: &str,
+    sent: &[Sent],
+    categories: &[FactCategoryInfo],
+    facts: &[FactInfo],
+    history: &History,
+) -> Option<Vec<Found>> {
     let value: Value = text.match_indices('{').find_map(|(i, _)| {
         serde_json::Deserializer::from_str(&text[i..])
             .into_iter::<Value>()
@@ -286,6 +341,7 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
         capped(&crate::guide::clean_text(v.and_then(Value::as_str).unwrap_or("")), cap)
     };
     let mut out = Vec::new();
+    let mut new = 0;
     for f in value.get("facts").and_then(Value::as_array).into_iter().flatten() {
         // Every fact cites the words that state it.
         let e = f.get("evidence");
@@ -297,11 +353,14 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
         if quote.split_whitespace().count() < 2 || !(said(&m.text) || said(&m.asked)) {
             continue;
         }
+        // What the user told Kaluta is said on purpose.
+        let told = !m.asked.trim().is_empty() && said(&m.asked);
         let mut p = FactPayload {
             kind: "fact".into(),
             message_id: message.to_owned(),
             quote,
             as_of: date(f.get("as_of")),
+            told,
             ..Default::default()
         };
         match f.get("op").and_then(Value::as_str).unwrap_or("add") {
@@ -343,7 +402,40 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
                 }) {
                     continue;
                 }
+                // The most useful few: the agent lists those first.
+                if new >= MAX_NEW_FACTS {
+                    continue;
+                }
+                new += 1;
+                // A second message that states it, quoted the same way.
+                let also = f.get("also");
+                let other = also.and_then(|e| e.get("message_id")).and_then(Value::as_str).unwrap_or("");
+                let second = clean(also.and_then(|e| e.get("quote")), QUOTE_CAP);
+                p.twice = other != message
+                    && second.split_whitespace().count() >= 2
+                    && states(&second, &p.value)
+                    && by_id.get(other).is_some_and(|o| loose(&fenced(&o.text)).contains(&loose(&second)));
                 out.push(Found::Add(p));
+            }
+            // A fact one earlier message stated, stated again by another.
+            "again" => {
+                let Some((_, was)) = f
+                    .get("id")
+                    .and_then(Value::as_i64)
+                    .and_then(|id| history.seen.iter().find(|(seen, _)| *seen == id))
+                else {
+                    continue;
+                };
+                if was.message_id == message || !states(&p.quote, &was.value) {
+                    continue;
+                }
+                let again = FactPayload { message_id: p.message_id, quote: p.quote, told: p.told, ..was.clone() };
+                if !out.iter().any(|o| {
+                    matches!(o, Found::Add(q) if q.category == again.category
+                    && q.label.to_lowercase() == again.label.to_lowercase())
+                }) {
+                    out.push(Found::Add(again));
+                }
             }
             "alter" => {
                 let Some(old) = f.get("id").and_then(Value::as_i64).and_then(mine) else { continue };
@@ -406,7 +498,14 @@ pub fn parse(text: &str, sent: &[Sent], categories: &[FactCategoryInfo], facts: 
 
 fn proposal(found: &Found) -> NewProposal {
     let (op, p, key, threshold) = match found {
-        Found::Add(p) => ("add", p, format!("add|{}|{}|{}", p.category, loose(&p.label), loose(&p.value)), 1),
+        // Found in mail: proposed at its second sighting. Told to Kaluta
+        // (while drafting, or answering writing help): at once.
+        Found::Add(p) => (
+            "add",
+            p,
+            format!("add|{}|{}|{}", p.category, loose(&p.label), loose(&p.value)),
+            if p.told || p.source == WRITING_HELP { 1 } else { MAIL_SIGHTINGS },
+        ),
         Found::Alter(p) => ("edit", p, format!("alter|{}|{}", p.fact_id.unwrap_or_default(), loose(&p.value)), 1),
         Found::Remove(p) => ("remove", p, format!("remove|{}", p.fact_id.unwrap_or_default()), 1),
         Found::Category(p) => ("add", p, format!("category|{}", loose(&p.name)), 1),
@@ -526,8 +625,9 @@ impl Core {
         if !sent.is_empty() {
             let categories = self.fact_categories().await?;
             let facts = self.list_facts(vec![FactStatus::Accepted]).await?;
-            let answer = self.ask_agent_hidden(agent, prompt(&sent, &categories, &facts)).await?;
-            match parse(&answer, &sent, &categories, &facts) {
+            let history = self.glean_history().await?;
+            let answer = self.ask_agent_hidden(agent, prompt(&sent, &categories, &facts, &history)).await?;
+            match parse(&answer, &sent, &categories, &facts, &history) {
                 Some(found) => self.merge_glean(found).await?,
                 None => tracing::warn!(run, "fact gleaning skipped: unreadable answer"),
             }
@@ -551,6 +651,30 @@ impl Core {
         Ok(())
     }
 
+    /// What earlier reviews left for the next: the newest facts seen once
+    /// and the newest the user rejected.
+    pub(crate) async fn glean_history(&self) -> Result<History, CoreError> {
+        let db = self.db()?;
+        let rows =
+            runtime::run(async move { Ok(db.read(|c| store::proposals(c, &["watching", "rejected"])).await?) }).await?;
+        let facts = || rows.iter().filter(|r| r.target == "fact" && r.op == "add" && r.kind.as_deref() == Some("fact"));
+        let payload = |r: &store::ProposalRow| {
+            r.payload_json.as_deref().and_then(|j| serde_json::from_str::<FactPayload>(j).ok())
+        };
+        let newest = |n: usize, status: &str| {
+            let mut of: Vec<&store::ProposalRow> = facts().filter(|r| r.status == status).collect();
+            of.drain(..of.len().saturating_sub(n));
+            of
+        };
+        Ok(History {
+            seen: newest(SEEN_SHOWN, "watching").into_iter().filter_map(|r| Some((r.id, payload(r)?))).collect(),
+            rejected: newest(REJECTED_SHOWN, "rejected")
+                .into_iter()
+                .filter_map(|r| payload(r).map(|p| format!("{}: {}", p.label, p.value)))
+                .collect(),
+        })
+    }
+
     pub(crate) async fn merge_glean(&self, found: Vec<Found>) -> Result<(), CoreError> {
         if found.is_empty() {
             return Ok(());
@@ -562,6 +686,10 @@ impl Core {
                 .write(move |tx| {
                     for f in &found {
                         store::upsert_counted(tx, &proposal(f), now)?;
+                        // Two messages in one review: two sightings.
+                        if matches!(f, Found::Add(p) if p.twice) {
+                            store::upsert_counted(tx, &proposal(f), now)?;
+                        }
                     }
                     Ok(())
                 })
@@ -838,9 +966,9 @@ mod tests {
         let answer = r#"{"facts": [
             {"op": "add", "category": "work", "label": "Log retention", "value": "30 days", "evidence": {"message_id": "m1", "quote": "we keep logs 30 days"}}
         ]}"#;
-        let found = parse(answer, &mail, &categories(), &[]).unwrap();
+        let found = parse(answer, &mail, &categories(), &[], &History::default()).unwrap();
         assert_eq!(found.len(), 1);
-        let p = prompt(&mail, &categories(), &[]);
+        let p = prompt(&mail, &categories(), &[], &History::default());
         assert!(p.contains("<told_kaluta>\nfine on the cap, we keep logs 30 days\n</told_kaluta>"));
     }
 
@@ -855,12 +983,12 @@ mod tests {
             {"op": "add", "category": "other", "label": "Password", "value": "x", "evidence": {"message_id": "m1", "quote": "Hi Ann"}},
             {"op": "add", "category": "work", "label": "Org", "value": "Acme", "evidence": {"message_id": "m9", "quote": "Hi"}}
         ], "categories": [{"name": "Hobbies", "facts": [1, 2]}], "starter_set": "business"}"#;
-        let found = parse(answer, &mail, &categories(), &[]).unwrap();
+        let found = parse(answer, &mail, &categories(), &[], &History::default()).unwrap();
         assert_eq!(found.len(), 3, "{found:#?}");
         let Found::Add(calendar) = &found[1] else { panic!() };
         assert_eq!((calendar.category.as_str(), calendar.as_of.is_some()), ("availability", true));
         assert!(matches!(&found[2], Found::Starter(p) if p.starter == "business"));
-        assert!(parse("no", &mail, &categories(), &[]).is_none());
+        assert!(parse("no", &mail, &categories(), &[], &History::default()).is_none());
     }
 
     fn known(id: i64, category: &str, label: &str, value: &str) -> FactInfo {
@@ -891,7 +1019,7 @@ mod tests {
             {"op": "add", "category": "work", "label": "team", "value": "Calendar", "evidence": {"message_id": "m1", "quote": "Our team is now Calendar"}},
             {"op": "add", "category": "work", "label": "Team", "value": "Mail", "evidence": {"message_id": "m1", "quote": "Our team"}}
         ]}"#;
-        let found = parse(answer, &mail, &categories(), &facts).unwrap();
+        let found = parse(answer, &mail, &categories(), &facts, &History::default()).unwrap();
         assert_eq!(found.len(), 1);
         assert!(
             matches!(&found[0], Found::Alter(p) if p.fact_id == Some(7) && p.value == "Calendar" && p.label == "Team")
@@ -913,11 +1041,144 @@ mod tests {
             {"op": "remove", "id": 2, "evidence": {"message_id": "m1", "quote": "We moved"}},
             {"op": "add", "category": "availability", "label": "Time zone", "value": "Pacific", "evidence": {"message_id": "m1", "quote": "We moved"}}
         ], "categories": [{"name": "Sailing", "description": "The user's boat", "facts": [2, 3, 4]}, {"name": "Contact info", "facts": [2, 3, 4]}]}"#;
-        let found = parse(answer, &mail, &categories(), &facts).unwrap();
+        let found = parse(answer, &mail, &categories(), &facts, &History::default()).unwrap();
         assert!(matches!(&found[0], Found::Alter(p) if p.fact_id == Some(1) && p.value == "Eastern"));
         assert!(matches!(&found[1], Found::Remove(p) if p.fact_id == Some(2)));
         assert!(matches!(&found[2], Found::Category(p) if p.name == "Sailing" && p.fact_ids == vec![2, 3, 4]));
         assert_eq!(found.len(), 3, "no change, a known fact again, and a name like Contact are dropped: {found:#?}");
+    }
+
+    fn mail_fact(message: &str, label: &str, value: &str, quote: &str) -> FactPayload {
+        FactPayload {
+            kind: "fact".into(),
+            category: "work".into(),
+            label: label.into(),
+            value: value.into(),
+            message_id: message.into(),
+            quote: quote.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_request_states_the_bar_and_shows_what_was_seen_once_and_what_was_rejected() {
+        let history = History {
+            seen: vec![(7, mail_fact("m0", "Team", "Platform", "on the Platform team"))],
+            rejected: vec!["CTO dinner: December 9".into()],
+        };
+        let p = prompt(&sent("I run the Platform team."), &categories(), &[], &history);
+        for words in ["durable", "reusable", "complete on its own", "a one-off event", "known by a single detail"] {
+            assert!(p.contains(words), "{words:?} in the request");
+        }
+        assert!(p.contains(&format!("at most {MAX_NEW_FACTS} new facts, the most useful first")));
+        assert!(p.contains("~7 [work]") && p.contains("Platform"), "seen once: {p}");
+        assert!(p.contains("The user rejected these") && p.contains("CTO dinner: December 9"));
+        let empty = prompt(&sent("Hello."), &categories(), &[], &History::default());
+        assert_eq!(empty.matches("(none)").count(), 3, "known, seen once and rejected");
+    }
+
+    #[test]
+    fn a_review_proposes_five_new_facts_at_most_and_counts_one_stated_twice() {
+        let mail = vec![
+            Sent {
+                message_id: "m1".into(),
+                text: "I lead the Platform team at Acme in Seattle.".into(),
+                asked: String::new(),
+            },
+            Sent {
+                message_id: "m2".into(),
+                text: "As lead of the Platform team, I can help.".into(),
+                asked: String::new(),
+            },
+            Sent { message_id: "m3".into(), text: "Short note.".into(), asked: "Say I am based in Seattle.".into() },
+        ];
+        let add = |label: &str, value: &str, message: &str, quote: &str, also: &str| {
+            format!(
+                r#"{{"op":"add","category":"work","label":"{label}","value":"{value}","evidence":{{"message_id":"{message}","quote":"{quote}"}}{also}}}"#
+            )
+        };
+        let facts = [
+            add(
+                "Team",
+                "Platform",
+                "m1",
+                "lead the Platform team",
+                r#","also":{"message_id":"m2","quote":"lead of the Platform team"}"#,
+            ),
+            add("City", "Seattle", "m3", "based in Seattle", ""),
+            add("Company", "Acme", "m1", "team at Acme", r#","also":{"message_id":"m1","quote":"team at Acme"}"#),
+            add("Role", "lead", "m1", "I lead the", ""),
+            add("Office", "Seattle", "m1", "Acme in Seattle", ""),
+            add("Sixth", "Platform", "m1", "the Platform team", ""),
+            add("Seventh", "Acme", "m1", "at Acme in", ""),
+        ]
+        .join(",");
+        let found =
+            parse(&format!(r#"{{"facts":[{facts}]}}"#), &mail, &categories(), &[], &History::default()).unwrap();
+        let adds: Vec<&FactPayload> =
+            found.iter().filter_map(|f| if let Found::Add(p) = f { Some(p) } else { None }).collect();
+        assert_eq!(
+            adds.iter().map(|p| p.label.as_str()).collect::<Vec<_>>(),
+            ["Team", "City", "Company", "Role", "Office"]
+        );
+        assert!(adds[0].twice && !adds[0].told, "two messages state it");
+        assert!(adds[1].told && !adds[1].twice, "the user told Kaluta");
+        assert!(!adds[2].twice, "the same message twice is one sighting");
+        assert_eq!(proposal(&found[0]).threshold, 2);
+        assert_eq!(proposal(&found[1]).threshold, 1);
+    }
+
+    #[test]
+    fn a_fact_seen_once_is_confirmed_by_another_message_only() {
+        let history =
+            History { seen: vec![(7, mail_fact("m0", "Team", "Platform", "on the Platform team"))], rejected: vec![] };
+        let mail = vec![
+            Sent { message_id: "m0".into(), text: "I am on the Platform team.".into(), asked: String::new() },
+            Sent { message_id: "m9".into(), text: "Ask anyone on the Platform team.".into(), asked: String::new() },
+        ];
+        let again = |id: i64, message: &str, quote: &str| {
+            format!(r#"{{"op":"again","id":{id},"evidence":{{"message_id":"{message}","quote":"{quote}"}}}}"#)
+        };
+        let answer = format!(
+            r#"{{"facts":[{},{},{},{}]}}"#,
+            again(7, "m9", "on the Platform team"),
+            again(7, "m0", "on the Platform team"),
+            again(8, "m9", "on the Platform team"),
+            again(7, "m9", "Ask anyone on"),
+        );
+        let found = parse(&answer, &mail, &categories(), &[], &history).unwrap();
+        assert_eq!(found.len(), 1, "its own message, an unknown id and a quote that does not say it are dropped");
+        let Found::Add(p) = &found[0] else { panic!() };
+        assert_eq!((p.label.as_str(), p.value.as_str(), p.message_id.as_str()), ("Team", "Platform", "m9"));
+        assert_eq!(proposal(&found[0]).match_key, proposal(&Found::Add(history.seen[0].1.clone())).match_key);
+    }
+
+    #[test]
+    fn a_fact_from_mail_waits_for_a_second_sighting_and_a_rejected_one_is_remembered() {
+        let s = scratch("glean-sightings");
+        let core = &s.1;
+        let shown = |core: &std::sync::Arc<Core>| {
+            block_on(core.analysis_queue()).unwrap().facts.iter().map(|f| f.label.clone()).collect::<Vec<_>>()
+        };
+        // Once, in one email: kept, not shown.
+        rt(core.merge_glean(vec![Found::Add(mail_fact("m1", "Team", "Platform", "the Platform team"))])).unwrap();
+        assert!(shown(core).is_empty());
+        let history = rt(core.glean_history()).unwrap();
+        assert_eq!(history.seen.len(), 1);
+        assert_eq!(history.seen[0].1.label, "Team");
+        // Again, in another: proposed.
+        rt(core.merge_glean(vec![Found::Add(mail_fact("m2", "Team", "Platform", "our Platform team"))])).unwrap();
+        assert_eq!(shown(core), ["Team"]);
+        assert!(rt(core.glean_history()).unwrap().seen.is_empty(), "no longer waiting");
+        // Two emails in one review, or told to Kaluta: at once.
+        let twice = FactPayload { twice: true, ..mail_fact("m3", "Company", "Acme", "work at Acme") };
+        let told = FactPayload { told: true, ..mail_fact("m4", "City", "Seattle", "based in Seattle") };
+        rt(core.merge_glean(vec![Found::Add(twice), Found::Add(told)])).unwrap();
+        assert_eq!(shown(core), ["City", "Company", "Team"], "the queue's order: newest first");
+        // Rejected: the next review is told so.
+        let id = block_on(core.analysis_queue()).unwrap().facts.iter().find(|f| f.label == "Company").unwrap().id;
+        block_on(core.decide_fact_analysis_proposals(vec![id], false, Default::default())).unwrap();
+        assert_eq!(rt(core.glean_history()).unwrap().rejected, ["Company: Acme"]);
     }
 
     fn scratch(name: &str) -> crate::guide::tests::Scratch {
@@ -944,7 +1205,8 @@ mod tests {
                     in_reply_to: None,
                     recipients: Recipients::new(["ann@example.com"], []),
                     subject: "Intro".into(),
-                    instruction: String::new(),
+                    // Told to Kaluta, so a fact in it is proposed at once.
+                    instruction: "Tell her I'm the CTO at Acme.".into(),
                     ai_text: "Hello Ann, I work at Acme.".into(),
                     ai_html: None,
                     guide_version: None,

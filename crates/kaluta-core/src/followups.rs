@@ -235,6 +235,9 @@ impl Core {
             let meetings: Vec<store::NewMeeting> = page
                 .meetings
                 .into_iter()
+                // A calendar entry is a meeting with no note yet: its note
+                // comes later under its own id (spec §14.14).
+                .filter(|m| !store::is_calendar_entry(&m.id))
                 .filter_map(|m| {
                     let people: Vec<MeetingPerson> =
                         m.participants.into_iter().map(|p| MeetingPerson { name: p.name, email: p.email }).collect();

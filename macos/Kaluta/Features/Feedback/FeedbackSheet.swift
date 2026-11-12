@@ -162,6 +162,8 @@ struct FeedbackToolbarMenu: View {
         .menuIndicator(.hidden)
         .help(ToolbarHelp.text(for: "Feedback", model: model) ?? "") // toolbar
     }
+
+    static let help = "Report a bug (⌥⌘B) or suggest a feature (⌥⇧⌘B), by email from your account"
 }
 
 /// The picture, with the areas the user dragged over painted black, as
