@@ -46,6 +46,14 @@ struct MainWindow: View {
             }
         }
         .focusedSceneValue(\.isMailWindow, true)
+        // On every screen of this window (spec §17.1). The mail view's own
+        // toolbar ends with it, so there it sits at the trailing end, by
+        // the search; an item added here would land before the others.
+        .toolbar {
+            if !showsMailToolbar {
+                ToolbarItem(placement: .primaryAction) { FeedbackToolbarMenu() }
+            }
+        }
         .sheet(item: Binding(get: { model.taskDraft }, set: { if $0 == nil { model.closeTaskDialog() } })) { draft in
             TaskDialog(draft: draft)
         }
@@ -111,6 +119,14 @@ struct MainWindow: View {
                 openSettings()
             }
             ToolbarToolTips.install(model: model)
+        }
+    }
+
+    /// The three-column mail view, with its own toolbar, is on screen.
+    private var showsMailToolbar: Bool {
+        switch model.accountState {
+        case .noAccount, .signingIn: false
+        default: model.reviewMode == nil && !model.showsWorkflows
         }
     }
 

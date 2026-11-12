@@ -66,13 +66,28 @@ struct FeedbackSheet: View {
                     }
                 }
                 if draft.includePicture {
-                    PictureCovers(image: image, covers: $draft.covers)
+                    HStack(spacing: Space.s) {
+                        Toggle("Hide all text in the picture", isOn: $draft.hideText)
+                            .hoverHelp("Paint over every piece of text your Mac can read in the picture: names, addresses, subjects and mail")
+                        if draft.findingText {
+                            ProgressView().controlSize(.small)
+                            Text("Finding the text…").font(TypeRole.meta).foregroundStyle(.secondary)
+                        }
+                    }
+                    PictureCovers(image: image, covers: $draft.covers,
+                                  hidden: draft.hideText ? draft.textAreas ?? [] : [])
                         .frame(maxWidth: .infinity, maxHeight: Self.pictureHeight)
-                    Text("Drag over anything private to cover it. Covered parts are painted out of the picture that is sent. If it is published, anyone can see it.")
+                    Text(pictureNote)
                         .font(TypeRole.meta)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+            // The picture is read for text when hiding is on, and again
+            // for a picture dropped in.
+            .task(id: TextSearch(hide: draft.hideText && draft.includePicture,
+                                 picture: draft.picture.map(ObjectIdentifier.init))) {
+                if draft.hideText, draft.includePicture { await draft.findText() }
             }
             .dropDestination(for: URL.self) { urls, _ in
                 urls.first(where: \.isFileURL).map(draft.usePicture(at:)) ?? false
@@ -86,6 +101,21 @@ struct FeedbackSheet: View {
                     urls.first(where: \.isFileURL).map(draft.usePicture(at:)) ?? false
                 }
         }
+    }
+
+    private struct TextSearch: Equatable {
+        let hide: Bool
+        let picture: ObjectIdentifier?
+    }
+
+    private var pictureNote: String {
+        let drag = "Drag over anything else private to cover it. What is hidden is painted out of the picture that is sent. If it is published, anyone can see it."
+        guard draft.hideText else {
+            return "Drag over anything private to cover it. What is covered is painted out of the picture that is sent. If it is published, anyone can see it."
+        }
+        guard let areas = draft.textAreas else { return drag }
+        return areas.isEmpty ? "No text was found in the picture. " + drag
+            : "Text your Mac could read is painted over. Check for any it missed. " + drag
     }
 
     @ViewBuilder private var details: some View {
@@ -116,11 +146,31 @@ struct FeedbackSheet: View {
     }
 }
 
+/// The toolbar's Feedback button, on every screen of the mail window: the
+/// Help menu's two commands, one click away.
+struct FeedbackToolbarMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Menu {
+            Button("Report a Bug…") { Task { await model.openFeedback(.bug) } }
+            Button("Suggest a Feature…") { Task { await model.openFeedback(.idea) } }
+        } label: {
+            Label("Feedback", systemImage: "exclamationmark.bubble")
+                .labelStyle(.titleAndIcon)
+        }
+        .menuIndicator(.hidden)
+        .help(ToolbarHelp.text(for: "Feedback", model: model) ?? "") // toolbar
+    }
+}
+
 /// The picture, with the areas the user dragged over painted black, as
 /// they will be in the file that is sent.
 struct PictureCovers: View {
     let image: CGImage
     @Binding var covers: [CGRect]
+    /// Text painted over, as it will be in the file (grey).
+    var hidden: [CGRect] = []
     @State private var dragging: CGRect?
 
     var body: some View {
@@ -131,6 +181,12 @@ struct PictureCovers: View {
                 GeometryReader { geometry in
                     let size = geometry.size
                     ZStack(alignment: .topLeading) {
+                        ForEach(Array(hidden.enumerated()), id: \.offset) { _, area in
+                            Rectangle()
+                                .fill(Color(white: FeedbackReport.hiddenTextGray))
+                                .frame(width: area.width * size.width, height: area.height * size.height)
+                                .offset(x: area.minX * size.width, y: area.minY * size.height)
+                        }
                         ForEach(Array((covers + [dragging].compactMap { $0 }).enumerated()), id: \.offset) { _, cover in
                             Rectangle()
                                 .fill(Color.black)

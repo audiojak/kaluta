@@ -37,7 +37,9 @@ account that can send mail.
 - **The picture is of Kaluta's own window, drawn by Kaluta.** No Screen
   Recording permission. The user can cover parts of it; the covered
   pixels are replaced in the file that is sent, not hidden by a layer.
-  A picture file dropped on the sheet can stand in for it.
+  A picture file dropped on the sheet can stand in for it. All text the
+  Mac can read in the picture is painted over unless the user unticks
+  that (amendment 2026-11-12).
 - **The message is the interface** (§17.1): the kind is the recipient,
   the title is the Subject, and the body is the description followed by
   two delimited plain-text blocks. A report typed by hand in any mail

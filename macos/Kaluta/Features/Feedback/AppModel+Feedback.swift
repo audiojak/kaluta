@@ -54,6 +54,10 @@ extension AppModel {
                                           body: draft.body)
         let files = DraftAttachments(directory: URL(filePath: core.dataDirectory)
             .appending(path: "DraftAttachments", directoryHint: .isDirectory))
+        if draft.includePicture, draft.picture != nil, draft.pictureToSend == nil {
+            draft.error = "The picture could not be prepared. Untick it to send without one."
+            return
+        }
         if let picture = draft.pictureToSend {
             let folder = FileManager.default.temporaryDirectory
                 .appending(path: "kaluta-report-\(UUID().uuidString)", directoryHint: .isDirectory)

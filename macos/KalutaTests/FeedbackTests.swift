@@ -113,6 +113,80 @@ struct FeedbackTests {
         #expect(png.starts(with: [0x89, 0x50, 0x4E, 0x47]))
     }
 
+    /// White, with a line of black text in the middle.
+    private func pictureOfText(_ text: String) throws -> CGImage {
+        let width = 600, height = 200
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpaceCreateDeviceRGB(),
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        let graphics = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphics
+        (text as NSString).draw(at: CGPoint(x: 40, y: 80), withAttributes: [
+            .font: NSFont.systemFont(ofSize: 32), .foregroundColor: NSColor.black,
+        ])
+        NSGraphicsContext.restoreGraphicsState()
+        return try #require(context.makeImage())
+    }
+
+    /// The darkest red component anywhere in the picture.
+    private func darkest(_ image: CGImage) throws -> UInt8 {
+        let rep = NSBitmapImageRep(cgImage: image)
+        var least: CGFloat = 1
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+            for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                least = min(least, try #require(rep.colorAt(x: x, y: y)).redComponent)
+            }
+        }
+        return UInt8((least * 255).rounded())
+    }
+
+    @Test func textInThePictureIsFoundAndPaintedOver() async throws {
+        let shot = try pictureOfText("alex.rivera@example.org")
+        #expect(try darkest(shot) < 40, "the text is there")
+        let areas = await TextHider.textAreas(in: shot)
+        #expect(!areas.isEmpty)
+        let hidden = try #require(FeedbackReport.covered(shot, by: [], hiding: areas))
+        let grey = Int((FeedbackReport.hiddenTextGray * 255).rounded())
+        #expect(abs(Int(try darkest(hidden)) - grey) <= 3, "nothing darker than the paint is left: no letter shows")
+        let blank = try picture(width: 200, height: 100)
+        #expect(await TextHider.textAreas(in: blank).isEmpty)
+    }
+
+    @Test func aTextAreaIsMeasuredFromTheTopAndReachesPastTheText() {
+        // Vision: 10% up from the bottom, 20% tall.
+        let area = TextHider.area(for: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.2))
+        #expect(abs(area.minY - 0.65) < 0.0001 && abs(area.maxY - 0.95) < 0.0001)
+        #expect(abs(area.minX - 0.15) < 0.0001 && abs(area.width - 0.5) < 0.0001)
+        let edge = TextHider.area(for: CGRect(x: 0, y: 0.9, width: 1, height: 0.1))
+        #expect(edge.minX == 0 && edge.minY == 0 && edge.maxX == 1, "kept inside the picture")
+    }
+
+    @Test func hiddenTextIsPaintedGreyUnderTheBlackCovers() throws {
+        let white = try picture(width: 100, height: 100)
+        let out = try #require(FeedbackReport.covered(white, by: [CGRect(x: 0, y: 0, width: 0.5, height: 0.5)],
+                                                      hiding: [CGRect(x: 0, y: 0, width: 1, height: 0.2)]))
+        #expect(try red(out, x: 10, y: 10) == 0, "a cover wins")
+        #expect(abs(Int(try red(out, x: 80, y: 10)) - Int((FeedbackReport.hiddenTextGray * 255).rounded())) <= 3)
+        #expect(try red(out, x: 80, y: 60) == 255)
+    }
+
+    @Test func aDroppedPictureIsReadForTextAgain() async throws {
+        let model = try await demo()
+        let draft = model.makeFeedbackDraft(.bug, picture: try picture(width: 60, height: 40))
+        await draft.findText()
+        #expect(draft.textAreas == [])
+        let file = CoreClient.testScratch().appending(path: "drop.png")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #require(WindowCapture.png(try pictureOfText("Onboarding plan"))).write(to: file)
+        #expect(draft.usePicture(at: file))
+        #expect(draft.textAreas == nil && draft.waitingForText)
+        await draft.findText()
+        #expect(draft.textAreas?.isEmpty == false)
+    }
+
     // MARK: The sheet's draft
 
     @Test func aBugOffersThePictureAndAnIdeaDoesNot() async throws {
@@ -124,7 +198,12 @@ struct FeedbackTests {
         #expect(bug.context.contains("Account: Demo"))
         #expect(!bug.canSend, "no title yet")
         bug.title = "  Archive jumps "
-        #expect(bug.canSend)
+        #expect(bug.hideText && bug.waitingForText && !bug.canSend, "not before its text is hidden")
+        #expect(bug.pictureToSend == nil, "never sent unhidden in the meantime")
+        await bug.findText()
+        #expect(bug.textAreas != nil && bug.canSend)
+        bug.hideText = false
+        #expect(bug.canSend && bug.pictureToSend === shot, "as it is, once the user says so")
         let idea = model.makeFeedbackDraft(.idea, picture: shot)
         #expect(!idea.includePicture && idea.pictureToSend == nil && idea.log.isEmpty)
         #expect(model.makeFeedbackDraft(.bug, picture: nil).includePicture == false)
@@ -147,6 +226,7 @@ struct FeedbackTests {
         draft.title = "Feedback test"
         draft.details = "The list jumps when I archive."
         draft.covers = [CGRect(x: 0, y: 0, width: 0.5, height: 0.5)]
+        await draft.findText()
         model.feedbackDraft = draft
         await model.sendFeedback(draft)
         #expect(draft.error == nil)

@@ -53,6 +53,7 @@
 		2FA115CCE33C512F13A323DB /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7877C3EC5080742BB0E238AF /* SidebarView.swift */; };
 		2FB56F5DA32C9933EF93602E /* RoutineModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 772167C885FCE55F5D9E22B6 /* RoutineModel.swift */; };
 		2FF4AF079095D24E64F3FFC0 /* Tokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A806DE50ED64E92E18F2208 /* Tokens.swift */; };
+		303E54B9B6B6DCF3FA2B8F27 /* TextHider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3601E86EA6406BE6ED217D33 /* TextHider.swift */; };
 		30626B98643525A88EFB647D /* AttachmentStrip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 270EA7FF62555DF87314CDDE /* AttachmentStrip.swift */; };
 		31282ACD0BB7233557BBB829 /* AccountAvatarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DB483C7EF48980C0BC3657A /* AccountAvatarTests.swift */; };
 		313FB149D2C2A68D1C43D351 /* ThreadReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73AE1B2D278C6E738F068E07 /* ThreadReaderView.swift */; };
@@ -291,6 +292,7 @@
 		2ED0997F878E320CD6C19656 /* FocusCycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCycle.swift; sourceTree = "<group>"; };
 		30BC7DE875CEB2E18604C286 /* AgentMailboxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentMailboxTests.swift; sourceTree = "<group>"; };
 		34C17BCF2C4AD0FA0E0EDB1E /* GuideProposals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideProposals.swift; sourceTree = "<group>"; };
+		3601E86EA6406BE6ED217D33 /* TextHider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextHider.swift; sourceTree = "<group>"; };
 		36379B6250E1BF92ECBAC872 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		370CF9C5D6F977AE4DE5A278 /* MailUndo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailUndo.swift; sourceTree = "<group>"; };
 		3901497900C11897C7046305 /* CleanUpStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanUpStore.swift; sourceTree = "<group>"; };
@@ -580,6 +582,7 @@
 				A1F69D5D8727BAABF17F018D /* AppModel+Feedback.swift */,
 				7CBB8853F2A7E799DA7D2754 /* FeedbackReport.swift */,
 				5FE6A103DEEDEEE4B09913BD /* FeedbackSheet.swift */,
+				3601E86EA6406BE6ED217D33 /* TextHider.swift */,
 			);
 			path = Feedback;
 			sourceTree = "<group>";
@@ -1310,6 +1313,7 @@
 				A0E331DBB25B7BFB1BE7238F /* TaskSettings.swift in Sources */,
 				2BCF65745E5EB1EADE17645A /* TaskSuggester.swift in Sources */,
 				405225E310153D29F2D42F63 /* TeachItemView.swift in Sources */,
+				303E54B9B6B6DCF3FA2B8F27 /* TextHider.swift in Sources */,
 				7E898954B81AB8FD92BAC3D8 /* ThreadListStore.swift in Sources */,
 				0F7C9E3B28C1432B461603F7 /* ThreadListView.swift in Sources */,
 				313FB149D2C2A68D1C43D351 /* ThreadReaderView.swift in Sources */,

@@ -5280,7 +5280,10 @@ crash reporter in MVP.
 ### 17.1 Bug reports and feature requests *(amendment 2026-11-12, ADR 0020)*
 
 **Help › Report a Bug…** and **Help › Suggest a Feature…** open a sheet on
-the mail window. What it sends is an ordinary email from the open account,
+the mail window. *(Amendment 2026-11-12:)* the same two commands are a
+**Feedback** button at the trailing end of the mail window's toolbar, on
+every screen of it (mail, the Dashboard, a workflow, Review mode,
+onboarding). What it sends is an ordinary email from the open account,
 through the outbox like any other (Undo Send included), and it is in Sent
 afterwards. The app contacts no Kaluta server; there is still no telemetry.
 
@@ -5296,6 +5299,15 @@ afterwards. The app contacts no Kaluta server; there is still no telemetry.
   Dragging over the picture covers that area: covers are painted into the
   PNG that is sent, so the pixels under them are gone. A picture file
   dropped on the sheet replaces the window's.
+- **Hide all text in the picture** *(amendment 2026-11-12)*, on to begin
+  with: every piece of text the Mac can read in the picture (the system's
+  on-device text recognition, lines of words and text-shaped areas both)
+  is painted grey in the PNG that is sent, a little past its edges, so
+  names, addresses, subjects and mail are gone and the layout still
+  reads. The sheet shows the picture as it will go. Send waits until the
+  picture has been read, so it never leaves unhidden while that runs.
+  Recognition can miss text (a lone digit, very faint type): the sheet
+  says to check, and covers still work on top.
 - **Recent warnings from the log** (bugs only, off until ticked): the
   newest 40 `WARN` and `ERROR` lines of `core.log`, each scrubbed
   (addresses, Google tokens, agent-mail keys, signed-URL parameters; the

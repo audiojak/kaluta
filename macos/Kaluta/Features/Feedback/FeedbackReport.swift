@@ -54,6 +54,8 @@ enum FeedbackReport {
     static let endMarker = "--- end ---"
     /// The picture's name in the mail.
     static let pictureName = "screenshot.png"
+    /// The grey that hidden text is painted: seen on light and dark windows.
+    static let hiddenTextGray: CGFloat = 0.55
     /// How many log lines a report offers.
     static let logLines: UInt32 = 40
 
@@ -96,23 +98,26 @@ enum FeedbackReport {
 
     /// The picture with each cover painted over it: the pixels under a
     /// cover are gone from what is sent, not hidden by a layer. `covers`
-    /// are fractions of the picture, measured from its top left.
-    static func covered(_ image: CGImage, by covers: [CGRect]) -> CGImage? {
-        guard !covers.isEmpty else { return image }
+    /// (painted black) and `text` (painted grey, so the layout still
+    /// reads) are fractions of the picture, measured from its top left.
+    static func covered(_ image: CGImage, by covers: [CGRect], hiding text: [CGRect] = []) -> CGImage? {
+        guard !covers.isEmpty || !text.isEmpty else { return image }
         let width = image.width, height = image.height
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
                                       space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        context.setFillColor(CGColor(gray: 0, alpha: 1))
-        for cover in covers {
-            let unit = cover.standardized.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-            guard !unit.isEmpty else { continue }
-            // Core Graphics measures from the bottom left; whole pixels,
-            // outwards, so no edge of the covered area shows through.
-            let rect = CGRect(x: unit.minX * CGFloat(width), y: (1 - unit.maxY) * CGFloat(height),
-                              width: unit.width * CGFloat(width), height: unit.height * CGFloat(height))
-            context.fill(rect.integral)
+        for (areas, gray) in [(text, hiddenTextGray), (covers, CGFloat(0))] {
+            context.setFillColor(CGColor(srgbRed: gray, green: gray, blue: gray, alpha: 1))
+            for area in areas {
+                let unit = area.standardized.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+                guard !unit.isEmpty else { continue }
+                // Core Graphics measures from the bottom left; whole pixels,
+                // outwards, so no edge of the covered area shows through.
+                let rect = CGRect(x: unit.minX * CGFloat(width), y: (1 - unit.maxY) * CGFloat(height),
+                                  width: unit.width * CGFloat(width), height: unit.height * CGFloat(height))
+                context.fill(rect.integral)
+            }
         }
         return context.makeImage()
     }
@@ -142,6 +147,13 @@ final class FeedbackDraft: Identifiable {
     var includePicture: Bool
     /// Areas the user covered, as fractions of the picture from its top left.
     var covers: [CGRect] = []
+    /// Paint over every piece of text the Mac can read in the picture.
+    /// On to begin with: a mail window's text is other people's mail.
+    var hideText = true
+    /// Where that text is, as fractions of the picture from its top left;
+    /// nil until the picture has been read.
+    private(set) var textAreas: [CGRect]?
+    private(set) var findingText = false
     var includeLog = false
     var sending = false
     var error: String?
@@ -160,7 +172,22 @@ final class FeedbackDraft: Identifiable {
     }
 
     var canSend: Bool {
-        cannotSend == nil && !sending && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        cannotSend == nil && !sending && !waitingForText
+            && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The picture is to go with its text hidden, and the text has not
+    /// been found yet: it is never sent unhidden in the meantime.
+    var waitingForText: Bool { includePicture && picture != nil && hideText && textAreas == nil }
+
+    /// Read the picture for text, once per picture.
+    func findText() async {
+        guard let picture, textAreas == nil, !findingText else { return }
+        findingText = true
+        let areas = await TextHider.textAreas(in: picture)
+        findingText = false
+        // A picture dropped in meanwhile is read on its own.
+        if self.picture === picture { textAreas = areas }
     }
 
     /// The mail's text, exactly as it will be sent.
@@ -171,7 +198,8 @@ final class FeedbackDraft: Identifiable {
     /// The picture as it will be sent, or nil for none.
     var pictureToSend: CGImage? {
         guard includePicture, let picture else { return nil }
-        return FeedbackReport.covered(picture, by: covers)
+        guard !waitingForText else { return nil }
+        return FeedbackReport.covered(picture, by: covers, hiding: hideText ? textAreas ?? [] : [])
     }
 
     /// A picture file dropped on the sheet replaces the window's.
@@ -181,6 +209,7 @@ final class FeedbackDraft: Identifiable {
         }
         picture = WindowCapture.scaledToFit(image)
         covers = []
+        textAreas = nil
         includePicture = true
         return true
     }
