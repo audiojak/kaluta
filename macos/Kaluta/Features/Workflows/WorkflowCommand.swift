@@ -73,9 +73,9 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
     case note
     /// The words typed are the email, as written: no drafting.
     case ownWords
-    /// ⌘Return on *What do you want to say?*: Kaluta writes the email from
+    /// ⌘G on *What do you want to say?*: Kaluta generates the email from
     /// what was typed, or, with nothing typed, the reply it finds likely;
-    /// it may still ask.
+    /// it may still ask. Never ⌘Return, which sends everywhere.
     case firstPass
     /// Esc: back one step; from an item, back to Mail.
     case back
@@ -126,9 +126,10 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .note: "M"
         case .back: "Esc"
         // Where it is offered (the answers, *What do you want to say?*):
-        // the words as written. Not ⌘Return, which sends.
+        // the words as written, to read before sending. Not ⌘Return,
+        // which sends them.
         case .ownWords: "⇧⌘M"
-        case .firstPass: "⌘Return"
+        case .firstPass: "⌘G"
         case .whatsLeft, .whereAmI: nil
         }
     }
@@ -154,6 +155,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         default: break
         }
         if modifiers == .command, characters.lowercased() == "e" { return .clearBucket }
+        if modifiers == .command, characters.lowercased() == "g" { return .firstPass }
         if modifiers == [.command, .shift], characters.lowercased() == "m" { return .ownWords }
         if modifiers == [.command, .shift], characters.lowercased() == "a" { return .attach }
         if modifiers == [.command, .shift], characters.lowercased() == "h" { return .holdTimes }
@@ -222,7 +224,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .holdTimes: "Hold these times"
         case .note: "Add a note"
         case .ownWords: "Use my words"
-        case .firstPass: "Generate it"
+        case .firstPass: "Generate the email"
         case .back: "Back"
         case .whatsLeft: "What's left?"
         case .whereAmI: "Where am I?"
