@@ -4869,7 +4869,11 @@ one decision with a one-line reason:
   one but the user and the sender is on it (its key does nothing then and
   the key list leaves it out), and *Forward* (F), always there. Neither
   moves a decision. Short of room, the two show as icons with their keys
-  (their names on hover). Amended 2026-10-21: *Forward* writes under the
+  (their names on hover). Amended 2026-11-13: the bar never asks for a
+  wider window. Short of room it gives up, in turn, its inset to the
+  card's left edge, the two names, some of the buttons' padding, and
+  last its right end, which scrolls sideways; the keys work whatever is
+  in view. Amended 2026-10-21: *Forward* writes under the
   card, as Reply does, not in a window: *To* (names from the mailbox
   offered as they are typed; ↑ and ↓ reach one, Return takes it, the
   first to start, or the address typed; Tab moves on to the note and

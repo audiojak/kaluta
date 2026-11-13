@@ -145,6 +145,7 @@
 		97BE873FEB0A2D39BE9AE9D0 /* FactsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41CA094E6C1388B1B4897233 /* FactsSettings.swift */; };
 		99BA01067CCEDBBC96B50DEF /* FactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC52E3F0BAAA632A75C55A49 /* FactsView.swift */; };
 		9C0BA5B80314844ACC04AC8F /* MergeGuideSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14AD26BB4626038CB7B81A9C /* MergeGuideSheet.swift */; };
+		9EBF76E5C625ED584BA232BC /* ColumnInsetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 710F41DE09765CD2D6087069 /* ColumnInsetTests.swift */; };
 		A0215ADFE4A543AC2B800534 /* AppModel+Facts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D009E48E568579CC59D26E /* AppModel+Facts.swift */; };
 		A0E331DBB25B7BFB1BE7238F /* TaskSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCD28543C3F48078C5F8779 /* TaskSettings.swift */; };
 		A2429D28FF1F1A71612B0F04 /* UpdaterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D366146E28C0759862B596A /* UpdaterTests.swift */; };
@@ -336,6 +337,7 @@
 		6CD3FA01672BD6042238B17D /* TaskListStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListStore.swift; sourceTree = "<group>"; };
 		6FDF9277113B659B161559FC /* WorkflowSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowSession.swift; sourceTree = "<group>"; };
 		70BC36B42AC599C682BF128D /* ImportMailbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportMailbox.swift; sourceTree = "<group>"; };
+		710F41DE09765CD2D6087069 /* ColumnInsetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnInsetTests.swift; sourceTree = "<group>"; };
 		739E07DF5DB114C7564F2B06 /* TeachItemView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeachItemView.swift; sourceTree = "<group>"; };
 		73AE1B2D278C6E738F068E07 /* ThreadReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadReaderView.swift; sourceTree = "<group>"; };
 		748FC77E34F53AAB7403B251 /* TaskDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDialog.swift; sourceTree = "<group>"; };
@@ -625,6 +627,7 @@
 				68917039126D76ED113A8178 /* ChangesQueueTests.swift */,
 				B4965814EF9A61955A1D6927 /* CleanUpTests.swift */,
 				05C013B8C226F6454B8DEBE7 /* CloudAgentTests.swift */,
+				710F41DE09765CD2D6087069 /* ColumnInsetTests.swift */,
 				0F87DA54E1A53B0DACD55D6B /* ComposerAssistantTests.swift */,
 				8BCD4D57392C74C2D62E1447 /* ComposerTests.swift */,
 				E2DE7A601C959081E36A2E3F /* CoreClientTests.swift */,
@@ -1140,6 +1143,7 @@
 				2E28E19F7E153926468DE834 /* ChangesQueueTests.swift in Sources */,
 				2035D71349CF4DA548B77473 /* CleanUpTests.swift in Sources */,
 				742BD58E62230A563EB42568 /* CloudAgentTests.swift in Sources */,
+				9EBF76E5C625ED584BA232BC /* ColumnInsetTests.swift in Sources */,
 				214E07D1168E2E435291FD83 /* ComposerAssistantTests.swift in Sources */,
 				194B0DBD353F1DF9608B6DB3 /* ComposerTests.swift in Sources */,
 				477956DDFE85A48B89FFC45A /* CoreClientTests.swift in Sources */,

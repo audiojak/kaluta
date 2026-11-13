@@ -139,6 +139,8 @@ struct WorkflowButton: View {
     /// Smaller, for what acts on the email beside the decisions; with an
     /// icon, the icon in place of the title when the bar is short of room.
     var compact = false
+    /// Less padding at its sides, when the bar is short of room.
+    var tight = false
     var icon: String?
     let action: () -> Void
 
@@ -152,7 +154,7 @@ struct WorkflowButton: View {
             .font(compact ? TypeRole.workflowContext : TypeRole.workflowControl)
             .foregroundStyle(style == .primary ? AnyShapeStyle(.white)
                              : style == .quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-            .padding(.horizontal, compact ? Space.l : Space.xxl)
+            .padding(.horizontal, compact || tight ? Space.l : Space.xxl)
             .frame(minHeight: Self.height)
             .background(background, in: Capsule())
             .overlay { if suggested { Capsule().strokeBorder(Tone.workflow(kind), lineWidth: Self.ring) } }
