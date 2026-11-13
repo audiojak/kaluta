@@ -718,25 +718,30 @@ extension AppModel {
             discard.shown = false
             // From the answers, Esc goes back to them.
             let back = a(.back, .quiet, writer.answers.isEmpty ? "Cancel" : "Back to the answers")
-            if writer.ownWordsOnly {
-                // ⌘Return (and ⇧⌘M) take the words as they are; Return is
-                // a new line.
-                var words = a(.ownWords, .plain, nil)
-                words.shown = false
-                return [a(.firstPass, .primary, "Use my words"), words, back, discard]
-            }
+            // ⌘Return sends, here as everywhere: the words typed go as
+            // they are (spec §14.13, amended 2026-11-13). With nothing
+            // typed there is nothing to send, and the button says so.
+            let typed = !writer.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let generates = !writer.ownWordsOnly && agent.isProviderReady
+            var send = a(.send, typed || !generates ? .primary : .plain,
+                         writer.taskID == nil ? "Send" : "Send and finish the task")
+            if !typed { send.unavailable = "Type or dictate your reply first" }
+            var keep = a(.sendKeepTask, .plain, nil)
+            keep.shown = false
+            if !typed { keep.unavailable = send.unavailable }
+            let sends = writer.taskID == nil ? [send] : [send, keep]
+            // ⇧⌘M: the words as they are, to read (and attach to) first.
+            var words = a(.ownWords, .plain, nil)
+            words.shown = false
+            guard generates else { return sends + [words, back, discard] }
             // 1–3 say an answer the email takes (hidden: the chips show them).
             let starters = zip([WorkflowCommand.pick1, .pick2, .pick3], writer.starters).map { command, starter in
                 var x = a(command, .plain, "Say “\(starter)”"); x.shown = false; return x
             }
-            guard agent.isProviderReady else {
-                return [a(.firstPass, .primary, "Use my words")] + starters + [back, discard]
-            }
-            // Return is a new line in the field; ⌘Return writes: from what
+            // Return is a new line in the field; ⌘G generates: from what
             // was typed, or, with nothing typed, the likely reply.
-            let typed = !writer.field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let write = a(.firstPass, .primary, typed ? "Generate the email from this" : "Generate a reply")
-            return [write] + (typed ? [a(.ownWords, .plain, nil)] : []) + starters + [back, discard]
+            let write = a(.firstPass, typed ? .plain : .primary, typed ? "Generate the email from this" : "Generate a reply")
+            return sends + [write] + (typed ? [words] : []) + starters + [back, discard]
         case .asking:
             // Return answers (the last answer writes); ⇧Return skips; 1–3
             // pick an answer offered; Esc goes to the question before.
@@ -806,13 +811,13 @@ extension AppModel {
             writer.backFromAsking()
         case (.say, .ownWords):
             await writer.write(model: self, asWritten: true)
-        case (.say, .firstPass), (.say, .send):
-            // Writing it oneself, or no agent: the words as they are.
-            if writer.ownWordsOnly || !agent.isProviderReady {
-                await writer.write(model: self, asWritten: true)
-            } else {
-                await writer.firstPass(model: self)
-            }
+        case (.say, .firstPass):
+            await writer.firstPass(model: self)
+        case (.say, .send), (.say, .sendKeepTask):
+            // The words typed are the email, and it goes.
+            await writer.write(model: self, asWritten: true)
+            guard writer.step == .final else { return }
+            await sendWritten(command, writer, item: item, session: session)
         case (.say, .pick1): await writer.pickStarter(0, model: self)
         case (.say, .pick2): await writer.pickStarter(1, model: self)
         case (.say, .pick3): await writer.pickStarter(2, model: self)
@@ -823,25 +828,32 @@ extension AppModel {
         case (.final, .holdTimes):
             await holdTimes(writer, session: session)
         case (.final, .send), (.final, .sendKeepTask):
-            let keep = command == .sendKeepTask
-            guard await writer.send(model: self, keepTask: keep) else { return }
-            if session.kind == .waiting {
-                // The nudge went: the wait starts again.
-                try? await core?.restartWaiting(writer.threadID)
-                await decide(item, "nudged", session: session, notice: nil)
-                return
-            }
-            let finished = writer.taskID != nil && !keep
-            // Replies: send and archive. Tasks: a finished task's email goes
-            // out of the Inbox with it (spec §14.13).
-            let archives = session.kind == .replies || (session.kind == .tasks && finished)
-            let token = archives ? try? await core?.archive([writer.threadID]) : nil
-            await decide(item, finished ? "done" : "reply", session: session, notice: nil,
-                         undoMail: { [core] in if let token { _ = try? await core?.undo(token) } },
-                         redoMail: { [core] in if let token { _ = try? await core?.redo(token) } })
+            await sendWritten(command, writer, item: item, session: session)
         default:
             break
         }
+    }
+
+    /// Send the email on screen (⌘Return; ⌥⌘Return keeps its task open)
+    /// and decide the item by it.
+    private func sendWritten(_ command: WorkflowCommand, _ writer: WorkflowWriter, item: WorkflowItem,
+                             session: WorkflowSession) async {
+        let keep = command == .sendKeepTask
+        guard await writer.send(model: self, keepTask: keep) else { return }
+        if session.kind == .waiting {
+            // The nudge went: the wait starts again.
+            try? await core?.restartWaiting(writer.threadID)
+            await decide(item, "nudged", session: session, notice: nil)
+            return
+        }
+        let finished = writer.taskID != nil && !keep
+        // Replies: send and archive. Tasks: a finished task's email goes
+        // out of the Inbox with it (spec §14.13).
+        let archives = session.kind == .replies || (session.kind == .tasks && finished)
+        let token = archives ? try? await core?.archive([writer.threadID]) : nil
+        await decide(item, finished ? "done" : "reply", session: session, notice: nil,
+                     undoMail: { [core] in if let token { _ = try? await core?.undo(token) } },
+                     redoMail: { [core] in if let token { _ = try? await core?.redo(token) } })
     }
 
     /// One implementation per command, whatever called it (spec §14.13).
@@ -887,9 +899,7 @@ extension AppModel {
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
             : command == .copyCode && !actions.contains(.copyCode) ? .conversation
-            // ⌘Return reaches the screen as Send (the field's own shortcut
-            // and the screen's key alike); on the words it generates.
-            : command == .send && !actions.contains(.send) && actions.contains(.firstPass) ? .firstPass : command
+            : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
             await performWriting(command, writer, item: item, session: session)

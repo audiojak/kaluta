@@ -586,7 +586,7 @@ struct WorkflowTests {
         #expect(await writer.pickStarter(0, model: model))
         #expect(writer.step == .final && !writer.text.isEmpty && writer.aiText != nil)
         #expect(writer.said == "Yes, but only until 3", "the answer, then the words typed")
-        #expect(WorkflowCommand.firstPass.keyLabel == "⌘Return" && WorkflowCommand.firstPass.title(in: .triage) == "Generate it")
+        #expect(WorkflowCommand.firstPass.keyLabel == "⌘G" && WorkflowCommand.firstPass.title(in: .triage) == "Generate the email")
         #expect(WorkflowWriteView.saidLine(WorkflowWriter.firstPassInstruction) == "Kaluta's draft, with nothing said")
     }
 
@@ -607,9 +607,10 @@ struct WorkflowTests {
         #expect(text.hasSuffix("keep it\n"))
     }
 
-    /// *What do you want to say?*: Return is a new line, so one action
-    /// writes, on ⌘Return, named for what it will do (2026-11-09).
-    @Test func theSayStepWritesOnCommandReturnNamedForWhatItDoes() async throws {
+    /// *What do you want to say?*: Return is a new line. ⌘Return sends the
+    /// words, as it sends everywhere; ⌘G generates, named for what it will
+    /// do (2026-11-13).
+    @Test func theSayStepSendsOnCommandReturnAndGeneratesOnCommandG() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
         await model.start(openDemo: true)
@@ -623,9 +624,11 @@ struct WorkflowTests {
         model.workflowSession = session
         let shown = { model.workflowActions().filter(\.shown).map { "\($0.title) \($0.command.keyLabel ?? "")" } }
         #expect(writer.step == .say)
-        #expect(shown() == ["Generate a reply ⌘Return", "Cancel Esc"])
+        #expect(shown() == ["Send ⌘Return", "Generate a reply ⌘G", "Cancel Esc"])
         writer.field = "yes\n\nbut only after 3"
-        #expect(shown() == ["Generate the email from this ⌘Return", "Use my words ⇧⌘M", "Cancel Esc"])
+        #expect(shown() == ["Send ⌘Return", "Generate the email from this ⌘G", "Cancel Esc"])
+        // ⇧⌘M still takes the words to the email, to read before sending.
+        #expect(model.workflowActions().contains { $0.command == .ownWords && !$0.shown })
         #expect(!model.workflowActions().contains { $0.command == .primary }, "Return is the field's new line")
     }
 

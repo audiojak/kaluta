@@ -482,6 +482,13 @@ enum Snapshot {
                 // Awaited: its set is fixed when this returns, and the
                 // snapshot's own delay (below) lets the item draw.
                 await model.beginWorkflow(kind)
+                // -KalutaSnapshotWorkflowSay <words>: Reply, on *What do
+                // you want to say?*, with these words typed ("" for none).
+                if let words = defaults.string(forKey: "KalutaSnapshotWorkflowSay") {
+                    await model.performWorkflow(.replyNow)
+                    if model.workflowSession?.writer?.step == .choose { await model.performWorkflow(.tellKaluta) }
+                    model.workflowSession?.writer?.field = words
+                }
             }
             if let kind = defaults.string(forKey: "KalutaSnapshotFeedback").flatMap(FeedbackKind.init(rawValue:)),
                let model = delegate.model {

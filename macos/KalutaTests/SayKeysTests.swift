@@ -8,12 +8,15 @@ private final class SayKeyWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 }
 
-/// ⌘Return on *What do you want to say?* generates the email (spec §14.13,
-/// amended 2026-11-10): a real key press, from inside the field, on the
-/// screen as the app draws it.
+/// On *What do you want to say?*, ⌘Return sends the words and ⌘G generates
+/// the email (spec §14.13, amended 2026-11-13): real key presses, from
+/// inside the field, on the screen as the app draws it.
 @MainActor
 struct SayKeysTests {
-    @Test func commandReturnInTheFieldGeneratesTheEmail() async throws {
+    /// A key pressed in the field of *What do you want to say?*, as the
+    /// app draws it; the writer it acted on.
+    private func press(_ characters: String, keyCode: UInt16, typed: String,
+                       until done: (WorkflowWriter, WorkflowSession) -> Bool) async throws -> (WorkflowWriter, AppModel) {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
         await model.start(openDemo: true)
@@ -30,26 +33,59 @@ struct SayKeysTests {
         let window = SayKeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 800), styleMask: [.titled],
                                   backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: WorkflowHostView(session: session).environment(model))
+        let hosting = NSHostingView(rootView: WorkflowHostView(session: session).environment(model))
+        // The window keeps its size, whatever the screen inside comes to
+        // want (after a send it shows the next item).
+        hosting.sizingOptions = []
+        window.contentView = hosting
         window.makeKeyAndOrderFront(nil)
-        defer { window.orderOut(nil) }
+        defer {
+            // Nothing goes on laying out in a window no test is looking at.
+            window.contentView = nil
+            window.orderOut(nil)
+        }
         for _ in 0..<100 where !(window.firstResponder is NSTextView) { try await Task.sleep(for: .milliseconds(20)) }
         #expect(window.firstResponder is NSTextView, "the field has the keyboard")
-        writer.field = "Hey Jake!\nThat's great"
+        writer.field = typed
         try await Task.sleep(for: .milliseconds(100))
 
-        let commandReturn = try #require(NSEvent.keyEvent(
+        let event = try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: .command, timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
-            isARepeat: false, keyCode: 36))
-        #expect(window.performKeyEquivalent(with: commandReturn))
-        for _ in 0..<100 where writer.step == .say { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(writer.step != .say, "⌘Return generated the email")
-        #expect(writer.said == "Hey Jake!\nThat's great")
+            windowNumber: window.windowNumber, context: nil, characters: characters,
+            charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode))
+        #expect(window.performKeyEquivalent(with: event))
+        for _ in 0..<150 where !done(writer, session) { try await Task.sleep(for: .milliseconds(20)) }
+        return (writer, model)
     }
 
-    /// The screen's own ⌘Return (Send) on the words generates, too.
-    @Test func sendOnTheWordsIsGenerate() async throws {
+    /// ⌘G in the field generates the email from what was typed, for the
+    /// user to read: nothing is sent.
+    @Test func commandGInTheFieldGeneratesTheEmail() async throws {
+        let (writer, model) = try await press("g", keyCode: 5, typed: "Hey Jake!\nThat's great") { writer, _ in
+            writer.step != .say
+        }
+        #expect(writer.step != .say && writer.step != .sending, "⌘G generated the email")
+        #expect(writer.said == "Hey Jake!\nThat's great")
+        #expect(model.workflowSession?.writer != nil, "still writing: not sent")
+        let sent = try await model.core!.threads(in: "SENT", limit: 50).rows
+        #expect(!sent.contains { $0.snippet.contains("Hey Jake!") })
+    }
+
+    /// ⌘Return in the field sends what was typed, as it is: the same key
+    /// that sends everywhere else.
+    @Test func commandReturnInTheFieldSendsTheWordsAsWritten() async throws {
+        let (writer, model) = try await press("\r", keyCode: 36, typed: "Hey Jake!\nThat's great") { _, session in
+            session.writer == nil
+        }
+        #expect(model.workflowSession?.writer == nil, "sent: back to the items")
+        #expect(writer.aiText == nil, "Kaluta wrote nothing")
+        let sent = try await model.core!.threads(in: "SENT", limit: 50).rows
+        #expect(sent.contains { $0.snippet.contains("Hey Jake!") }, "\(sent.map(\.snippet).prefix(3))")
+    }
+
+    /// What the words offer: Send on ⌘Return, Generate on ⌘G, and no key
+    /// that does both.
+    @Test func theWordsOfferSendAndGenerateOnTheirOwnKeys() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
                              defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
         await model.start(openDemo: true)
@@ -61,8 +97,23 @@ struct SayKeysTests {
         let writer = WorkflowWriter(threadID: row.id, messageID: "m", replyAll: false, taskID: nil, email: "Can you come?")
         session.writer = writer
         model.workflowSession = session
-        writer.field = "Yes, I'll be there."
+        #expect(WorkflowCommand.send.keyLabel == "⌘Return" && WorkflowCommand.firstPass.keyLabel == "⌘G")
+        #expect(WorkflowCommand.command(key: "g", characters: "g", modifiers: .command) == .firstPass)
+        #expect(WorkflowCommand.command(key: .return, characters: "\r", modifiers: .command) == .send)
+
+        // Nothing typed: Generate a reply leads; Send has nothing to send.
+        var shown = model.workflowActions().filter(\.shown)
+        #expect(shown.map(\.title) == ["Send", "Generate a reply", "Cancel"])
+        #expect(shown[0].unavailable != nil && shown[1].style == .primary)
         await model.performWorkflow(.send)
+        #expect(writer.step == .say, "⌘Return with nothing typed does nothing: it never generates")
+
+        // Typed: Send leads, Generate is beside it.
+        writer.field = "Yes, I'll be there."
+        shown = model.workflowActions().filter(\.shown)
+        #expect(shown.map(\.title) == ["Send", "Generate the email from this", "Cancel"])
+        #expect(shown[0].unavailable == nil && shown[0].style == .primary && shown[1].style == .plain)
+        await model.performWorkflow(.firstPass)
         #expect(writer.step != .say && writer.said == "Yes, I'll be there.")
     }
 }

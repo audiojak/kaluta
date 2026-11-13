@@ -4644,7 +4644,8 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | Key | Command |
 |---|---|
 | Return | in an item, always **Reply** (a nudge is a reply), and nothing where there is no reply; elsewhere, go on: start, next, make the task, write it. Return never archives, approves or sends |
-| ⌘Return | send (from an editable email) |
+| ⌘Return | send: the email on screen, or the words typed on *What do you want to say?*, as they are. ⌘Return never does anything but send *(amended 2026-11-13)* |
+| ⌘G | generate: Kaluta writes the email from the words typed, or the likely reply with nothing typed *(2026-11-13; ⌘Return before)* |
 | ⌥⌘Return | send and keep the conversation's task open |
 | E | done: archive, done, let it go, read and next, accept, approve |
 | T | make a task |
@@ -4737,7 +4738,18 @@ are looked for as each account opens.
   my words* (⇧⌘M) shows once something is typed. Writing it oneself, or
   with no agent ready, ⌘Return takes the words as written. *(Amended
   2026-11-10: the buttons say "Generate", and ⌘Return pressed inside the
-  field generates, as the button does.)* When Kaluta
+  field generates, as the button does.)* *(Amended 2026-11-13, from the
+  user's use: writing one's own reply had become the hard path, and
+  ⌘Return meant "generate" here and "send" everywhere else. Now the two
+  actions have a button and a key each, and no key does both.* **Send**
+  *(⌘Return, the app's send key; in Tasks,* Send and finish the task*,
+  with ⌥⌘Return to keep it open) sends the words typed, as they are,
+  through the outbox with Undo Send; with nothing typed it is greyed
+  and its key does nothing.* **Generate** *(⌘G) has Kaluta write: *
+  Generate the email from this* once anything is typed, else *Generate
+  a reply*. Send leads once something is typed, Generate before. *Use my
+  words* (⇧⌘M) keeps its key and loses its button: the words as the
+  email, to read or attach to before sending.)* When Kaluta
   would have to invent a fact, it asks instead (§14.9), in the session
   it was asked in, **one question at a time** on its own screen: *Kaluta
   asks* in the workflow's colour, "1 of 2", the question, a field
@@ -5190,6 +5202,15 @@ an option naming no one goes to everyone there but the user; a verdict
 with no usable option is no follow-up. A meeting that fails three times
 is given up. Store: `meeting_followups` (migration 36, which also adds
 `followups` to the workflow kinds, copying the sets and their decisions).
+
+*(Amendment 2026-11-12: no day named.)* A follow-up is sent a day or
+several days after its meeting, so the agent is told to write one that
+reads true whenever it is sent: never when the meeting was relative to
+now ("today", "yesterday", "this morning", a weekday), but "our
+conversation" or "when we spoke"; and anything promised for a day as its
+date, never "tomorrow" or "next week". Follow-ups written before this
+that are still waiting and name such a day are judged again, once, and
+keep their old words until they are rewritten.
 
 **The workflow.** *Follow-ups*, the eighth, on key 8, shown on the
 Dashboard only while Granola is connected: the meetings of the last 14

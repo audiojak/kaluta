@@ -125,12 +125,41 @@ pub fn drop_calendar_entries(tx: &Transaction<'_>) -> StoreResult<usize> {
     Ok(pairs.len())
 }
 
+/// Set once the follow-ups written before 2026-11-12 have been sent back.
+const UNDATED_KEY: &str = "followups_undated";
+/// Words that place an email on the day of its meeting.
+const DAY_WORDS: [&str; 7] =
+    ["today", "yesterday", "this morning", "this afternoon", "this evening", "tonight", "tomorrow"];
+
+/// Follow-ups used to be written as if sent on the day of the meeting
+/// ("Good to talk today"), and they are sent days later. Once: those
+/// still waiting on the user that name such a day are judged again, so
+/// they are rewritten without one. They keep their old words until then.
+/// How many were sent back.
+pub fn rewrite_dated(tx: &Transaction<'_>) -> StoreResult<usize> {
+    if crate::workflows::meta(tx, UNDATED_KEY)?.is_some() {
+        return Ok(0);
+    }
+    let names_a_day =
+        DAY_WORDS.iter().map(|w| format!("lower(options_json) LIKE '%{w}%'")).collect::<Vec<_>>().join(" OR ");
+    let n = tx.execute(
+        &format!(
+            "UPDATE meeting_followups SET judged_at = NULL, attempts = 0
+              WHERE follow_up = 1 AND decided IS NULL AND ({names_a_day})"
+        ),
+        [],
+    )?;
+    crate::workflows::set_meta(tx, UNDATED_KEY, "1")?;
+    Ok(n)
+}
+
 /// Keep meetings read from Granola; a meeting seen before keeps its
 /// verdict (its title and people are brought up to date). Calendar
 /// entries are left out, and any kept earlier are forgotten. How many
 /// were new.
 pub fn upsert_meetings(tx: &Transaction<'_>, meetings: &[NewMeeting], now: Millis) -> StoreResult<usize> {
     drop_calendar_entries(tx)?;
+    rewrite_dated(tx)?;
     let mut new = 0;
     let mut stmt = tx.prepare_cached(
         "INSERT INTO meeting_followups (meeting_id, title, meeting_at, participants_json, url, seen_at)
@@ -292,6 +321,31 @@ mod tests {
         assert_eq!(items, ["meeting:note-1", "meeting:note-2"]);
         assert_eq!(decided, ["meeting:note-1"]);
         assert_eq!(db.write_blocking(drop_calendar_entries).unwrap(), 0, "nothing left to forget");
+    }
+
+    #[test]
+    fn follow_ups_that_name_the_day_are_judged_again_once() {
+        let db = Db::open(&crate::db::tests::temp_db_path("followups-undated")).unwrap();
+        db.write_blocking(|tx| {
+            upsert_meetings(tx, &[meeting("a", 100), meeting("b", 200), meeting("c", 300), meeting("d", 400)], 1)?;
+            record_verdict(tx, "a", true, "Promised the deck.", r#"[{"body":"Good to talk Today."}]"#, 5)?;
+            record_verdict(tx, "b", true, "Next steps.", r#"[{"body":"Thanks for our conversation."}]"#, 5)?;
+            record_verdict(tx, "c", true, "Thanks.", r#"[{"body":"Great to meet this morning."}]"#, 5)?;
+            record_verdict(tx, "d", false, "A standup.", "[]", 5)?;
+            decide(tx, "c", Some("sent"), 6)?;
+            // As before this change: nothing has been sent back yet.
+            tx.execute("DELETE FROM workflow_meta WHERE key = ?1", [UNDATED_KEY])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(db.write_blocking(rewrite_dated).unwrap(), 1, "a: waiting, and it says today");
+        let again = db.read_blocking(|c| to_judge(c, 0, 1000, 10)).unwrap();
+        assert_eq!(again.iter().map(|m| m.meeting_id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(db.read_blocking(|c| waiting(c, 0)).unwrap().len(), 2, "a still shows, with its old words");
+        db.write_blocking(|tx| record_verdict(tx, "a", true, "Promised the deck.", r#"[{"body":"Still today."}]"#, 9))
+            .unwrap();
+        assert_eq!(db.write_blocking(rewrite_dated).unwrap(), 0, "once only, whatever the new words");
+        assert!(db.read_blocking(|c| to_judge(c, 0, 1000, 10)).unwrap().is_empty());
     }
 
     #[test]

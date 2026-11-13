@@ -58,6 +58,12 @@ struct WorkflowWriteView: View {
                         .keyboardShortcut(.return, modifiers: .shift)
                         .hidden()
                 }
+                // ⌘G from inside the field: Kaluta generates the email.
+                if writer.step == .say {
+                    Button("Generate the email") { perform(.firstPass) } // no-help: hidden
+                        .keyboardShortcut("g", modifiers: .command)
+                        .hidden()
+                }
                 // ⇧⌘M from inside the field: the words as written.
                 Button("Use my words") { perform(.ownWords) } // no-help: hidden
                     .keyboardShortcut("m", modifiers: [.command, .shift])
@@ -270,8 +276,8 @@ struct WorkflowWriteView: View {
                 Text(writer.ownWordsOnly ? "Write your email" : Self.askTitle(session.kind))
                     .font(TypeRole.workflowHeading)
                 Text(model.agent.isProviderReady && !writer.ownWordsOnly
-                     ? "Notes or whole sentences; Return starts a new line. ⌘Return and Kaluta generates the email from them, or, with nothing typed, the reply it thinks likely, for you to read and change before it goes."
-                     : "What you type is the email.")
+                     ? "Return starts a new line. ⌘Return sends what you typed, as it is. ⌘G has Kaluta generate the email from your notes (or, with nothing typed, the reply it thinks likely) for you to read before it goes."
+                     : "What you type is the email. Return starts a new line; ⌘Return sends it.")
                     .font(TypeRole.workflowContext).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: Space.m) {
