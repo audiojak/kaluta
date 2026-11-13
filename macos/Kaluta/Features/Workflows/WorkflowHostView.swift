@@ -11,8 +11,6 @@ struct WorkflowHostView: View {
     /// The item's scroll, for reading from the keyboard: ↑ ↓, Space and
     /// ⇧Space, Page Up and Down, Home and End.
     @State private var scroll = ScrollPosition()
-    /// The bar's width as laid out: its decisions keep to the card's edge.
-    @State private var barWidth: CGFloat = 0
     @State private var scrollGeometry: ScrollGeometry?
 
     var body: some View {
@@ -199,39 +197,43 @@ struct WorkflowHostView: View {
         let onEmail = actions.filter { $0.shown && $0.onEmail }
         // What acts on the email, apart and quieter, at the right: the
         // decisions never move, and line up with the card's left edge. The
-        // pair may use the room right of the reading column for its names;
-        // short of room, it shows as icons.
+        // pair may use the room right of the reading column for its names.
+        // Short of room the bar gives up, in turn: that inset, the pair's
+        // names (icons), the buttons' padding, and last its right end, which
+        // scrolls. It never asks for a wider window: a bar that did grew the
+        // window under the item being answered.
         let column = Self.readingWidth + Space.page * 2
         return ViewThatFits(in: .horizontal) {
-            bar(decisions, onEmail, icons: false)
-            bar(decisions, onEmail, icons: true)
+            ColumnInset(column: Self.readingWidth) { bar(decisions, onEmail, icons: false, tight: false) }
+            ColumnInset(column: Self.readingWidth) { bar(decisions, onEmail, icons: true, tight: false) }
+            ColumnInset(column: Self.readingWidth) { bar(decisions, onEmail, icons: true, tight: true) }
+            ScrollView(.horizontal) { bar(decisions, onEmail, icons: true, tight: true) }
+                .scrollIndicators(.hidden)
         }
-        .padding(.leading, max((barWidth - column) / 2, 0))
         .padding(.horizontal, Space.page)
         .padding(.vertical, Space.xl)
         .frame(maxWidth: column + Self.emailActionsRoom)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         .frame(maxWidth: .infinity)
     }
 
     /// Beyond the reading column, what the bar's email actions may take.
     static let emailActionsRoom: CGFloat = 360
 
-    private func bar(_ decisions: [WorkflowAction], _ onEmail: [WorkflowAction], icons: Bool) -> some View {
-        HStack(spacing: Space.m) {
-            ForEach(decisions) { button($0) }
+    private func bar(_ decisions: [WorkflowAction], _ onEmail: [WorkflowAction], icons: Bool, tight: Bool) -> some View {
+        HStack(spacing: tight ? Space.s : Space.m) {
+            ForEach(decisions) { button($0, tight: tight) }
             Spacer(minLength: 0)
             if !onEmail.isEmpty {
                 PaneDivider().frame(height: Space.xxl)
-                ForEach(onEmail) { button($0, icon: icons ? Self.icon(for: $0.command) : nil) }
+                ForEach(onEmail) { button($0, icon: icons ? Self.icon(for: $0.command) : nil, tight: tight) }
             }
         }
     }
 
-    private func button(_ action: WorkflowAction, icon: String? = nil) -> some View {
+    private func button(_ action: WorkflowAction, icon: String? = nil, tight: Bool = false) -> some View {
         WorkflowButton(title: action.title, key: action.command.keyLabel, style: action.style,
                        kind: session.kind, suggested: action.suggested, unavailable: action.unavailable,
-                       compact: action.onEmail, icon: icon) {
+                       compact: action.onEmail, tight: tight, icon: icon) {
             Task { await model.performWorkflow(action.command) }
         }
     }
@@ -287,6 +289,40 @@ struct WorkflowHostView: View {
     static let headerInset: CGFloat = 64
 
     private var writing: Bool { session.writer != nil || session.taskForm != nil }
+}
+
+/// Starts its content where a centred column of `column` points would
+/// start, in whatever width it is given. The inset is never part of what
+/// it needs: short of room it gives way to the content first.
+struct ColumnInset: Layout {
+    let column: CGFloat
+
+    /// How far in the content starts: half the room beyond the column, but
+    /// never so far that the content is left less than it needs.
+    static func inset(width: CGFloat, column: CGFloat, needed: CGFloat) -> CGFloat {
+        guard width.isFinite else { return 0 }
+        return max(0, min((width - column) / 2, width - needed))
+    }
+
+    private func inset(_ width: CGFloat, _ subview: LayoutSubview, height: CGFloat?) -> CGFloat {
+        let needed = subview.sizeThatFits(ProposedViewSize(width: 0, height: height)).width
+        return Self.inset(width: width, column: column, needed: needed)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        guard let width = proposal.width, width.isFinite else { return subview.sizeThatFits(proposal) }
+        let inset = inset(width, subview, height: proposal.height)
+        let size = subview.sizeThatFits(ProposedViewSize(width: width - inset, height: proposal.height))
+        return CGSize(width: size.width + inset, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let subview = subviews.first else { return }
+        let inset = inset(bounds.width, subview, height: bounds.height)
+        subview.place(at: CGPoint(x: bounds.minX + inset, y: bounds.minY), anchor: .topLeading,
+                      proposal: ProposedViewSize(width: bounds.width - inset, height: bounds.height))
+    }
 }
 
 /// The current item: a conversation (its sender, subject and latest
