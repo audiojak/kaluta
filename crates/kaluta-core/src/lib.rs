@@ -31,6 +31,7 @@ mod facts_io;
 mod feedback;
 pub mod ffi;
 mod followups;
+mod forward_rules;
 mod granola;
 mod guide;
 mod guide_ai;

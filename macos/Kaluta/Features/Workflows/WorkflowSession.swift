@@ -119,7 +119,9 @@ final class WorkflowSession {
     var choosingTime: TimeChoice?
     /// `remindOn` and `checkAgainOn`: *Pick a date…*, the day chosen on a
     /// calendar.
-    enum TimeChoice { case checkAgain, checkAgainOn, remind, remindOn }
+    /// `forwardMode`: accepting a forwarding rule (Teach Kaluta) asks
+    /// whether it forwards on its own (1) or asks each time (2).
+    enum TimeChoice { case checkAgain, checkAgainOn, remind, remindOn, forwardMode }
     /// The day *Pick a date…* shows chosen.
     var remindDay: Date = .now
     /// A conversation's reminder (Triage), by thread id, as each item is
@@ -129,6 +131,9 @@ final class WorkflowSession {
     var noteDraft: String?
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
+    /// The forward a forwarding rule set to ask suggests (Triage), by
+    /// thread id: marked on Forward, and taken with F.
+    var forwardSuggestions: [String: ForwardSuggestionInfo] = [:]
     /// What the user sent the sender since, in another conversation (Triage,
     /// Replies): they may have answered there. By thread id.
     var writtenSince: [String: WrittenSince] = [:]

@@ -346,6 +346,15 @@ impl Core {
     /// mailbox "sends" locally at once. Returns whether it is held, so can
     /// still be taken back with [`Core::cancel_send`].
     pub async fn send_draft(&self, id: i64) -> Result<bool, CoreError> {
+        self.send_draft_holding(id, None).await
+    }
+}
+
+impl Core {
+    /// [`Core::send_draft`], held for `hold_ms` rather than the Undo Send
+    /// delay when given: a forwarding rule's own forward has no one to
+    /// undo it and is not held (spec §14.15).
+    pub(crate) async fn send_draft_holding(&self, id: i64, hold_ms: Option<u64>) -> Result<bool, CoreError> {
         self.refuse_if_archive()?;
         let db = self.db()?;
         // An agent mailbox sends as the agent, within its service's limits
@@ -369,7 +378,8 @@ impl Core {
         // mailbox always goes through its outbox, so its mail reaches the
         // service whenever its sync next runs, never only this Mac.
         let always_queue = self.headless || agent.is_some();
-        let hold = if self.headless { 0 } else { self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed) };
+        let delay = hold_ms.unwrap_or_else(|| self.send_delay_ms.load(std::sync::atomic::Ordering::Relaxed));
+        let hold = if self.headless { 0 } else { delay };
         let hold = hold as mail_domain::Millis;
         runtime::run(async move {
             let queue = service.is_some() || always_queue;
@@ -387,7 +397,10 @@ impl Core {
         })
         .await
     }
+}
 
+#[uniffi::export]
+impl Core {
     /// Recipient suggestions for AppKit's token field, which asks
     /// synchronously on the main thread. A deliberate exception to "sync
     /// exports never block": it runs on a pooled read-only connection (no

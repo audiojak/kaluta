@@ -391,6 +391,13 @@ final class AppModel {
     var reviewMode: ReviewMode?
     /// Teach Kaluta's routine changes and its current item (spec §14.13).
     var routineProposals: [RoutineProposalInfo] = []
+    /// Forwarding rules (spec §14.15): what Kaluta proposes, the rules, and
+    /// a count that moves when a rule, a suggestion or a mark changes.
+    var forwardRuleProposals: [ForwardRuleProposalInfo] = []
+    var forwardRules: [ForwardRuleInfo] = []
+    var forwardRulesRevision = 0
+    /// A forwarding rule being edited from Teach Kaluta.
+    var forwardRuleSheet: ForwardRuleSheet?
     var teachSelection: String?
     /// What the window shows when no review is open (spec §14.13): the start
     /// screen (home) or the mail view.
@@ -584,6 +591,8 @@ final class AppModel {
             accountEmail = account.email
             needsReauthentication = false
             reauthenticationReason = nil
+            // Sync starts again below: what stopped it no longer holds.
+            if case .error = syncDisplay { syncDisplay = .idle }
             if adding {
                 selectedThreadIDs = []
                 selectedThreadID = nil
@@ -1490,6 +1499,18 @@ final class AppModel {
         if invites[threadID] != invite { invites[threadID] = invite }
     }
 
+    /// *Connect Calendar…* on an invitation: Google's consent in the
+    /// browser, then the invitation is read again and can be answered.
+    func connectCalendarForInvite(_ threadID: String) async {
+        guard let accountID = openAccountID, inviteWorking == nil else { return }
+        inviteWorking = threadID
+        defer { inviteWorking = nil }
+        if let problem = await connectCalendar() {
+            undo.show(problem, accountID: accountID, offersUndo: false)
+        }
+        await loadInvite(threadID)
+    }
+
     /// Accept, Maybe or Decline on the user's Google Calendar.
     func respondToInvite(_ threadID: String, _ response: InviteResponse) async {
         guard let core, let accountID = openAccountID, inviteWorking == nil else { return }
@@ -1800,6 +1821,9 @@ final class AppModel {
             break // above, for every account
         case .workflowsChanged:
             workflowsRevision += 1
+        case .forwardRulesChanged:
+            forwardRulesRevision += 1
+            await loadForwardRules()
         case .tasksChanged:
             tasksRevision += 1
             await tasks.load()

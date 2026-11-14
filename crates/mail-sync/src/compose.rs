@@ -81,6 +81,53 @@ pub async fn forward_draft(db: &Db, message_id: &MessageId) -> SyncResult<DraftR
     })
 }
 
+/// A message's attached files (not its inline pictures), fetched if need
+/// be and copied for a draft, which owns its files.
+async fn copy_attachments(
+    db: &Db,
+    provider: Option<&dyn provider_api::MailProvider>,
+    cache_dir: &std::path::Path,
+    drafts_dir: &std::path::Path,
+    of: &[mail_domain::Attachment],
+) -> SyncResult<Vec<drafts::DraftAttachment>> {
+    let mut attachments = Vec::new();
+    for a in of.iter().filter(|a| !a.is_inline) {
+        let Ok(attachment_id) = a.id.0.parse::<i64>() else { continue };
+        let file = crate::attachments::attachment_file(db, provider, cache_dir, attachment_id).await?;
+        let folder = drafts_dir.join(random_token());
+        std::fs::create_dir_all(&folder).map_err(|e| StoreError::Io(e.to_string()))?;
+        let copy = folder.join(crate::attachments::safe_filename(&file.filename));
+        std::fs::copy(&file.path, &copy).map_err(|e| StoreError::Io(format!("{}: {e}", file.filename)))?;
+        attachments.push(drafts::DraftAttachment {
+            path: copy.to_string_lossy().into_owned(),
+            filename: file.filename,
+            mime_type: file.mime_type,
+            size: a.size,
+        });
+    }
+    Ok(attachments)
+}
+
+/// A forward that carries the original's attached files too, as a
+/// forwarding rule sends it (spec §14.15): a receipt is often only its
+/// PDF. Fails when a file cannot be fetched, rather than forward without.
+pub async fn forward_draft_with_attachments(
+    db: &Db,
+    provider: Option<&dyn provider_api::MailProvider>,
+    cache_dir: &std::path::Path,
+    drafts_dir: &std::path::Path,
+    message_id: &MessageId,
+) -> SyncResult<DraftRecord> {
+    let mut draft = forward_draft(db, message_id).await?;
+    let id = message_id.clone();
+    let message = db
+        .read(move |c| read::get_message(c, &id))
+        .await?
+        .ok_or_else(|| StoreError::NotFound(format!("message {message_id}")))?;
+    draft.attachments = copy_attachments(db, provider, cache_dir, drafts_dir, &message.attachments).await?;
+    Ok(draft)
+}
+
 /// The MIME message for a draft: quote merged into the body, threading
 /// headers from the parent, attachment bytes read from disk. Returns the
 /// merged draft alongside.
@@ -160,21 +207,7 @@ pub async fn draft_for_editing(
         Some(rfc) => db.read(move |c| read::message_for_rfc822(c, &rfc)).await?,
         None => None,
     };
-    let mut attachments = Vec::new();
-    for a in message.attachments.iter().filter(|a| !a.is_inline) {
-        let Ok(attachment_id) = a.id.0.parse::<i64>() else { continue };
-        let file = crate::attachments::attachment_file(db, provider, cache_dir, attachment_id).await?;
-        let folder = drafts_dir.join(random_token());
-        std::fs::create_dir_all(&folder).map_err(|e| StoreError::Io(e.to_string()))?;
-        let copy = folder.join(crate::attachments::safe_filename(&file.filename));
-        std::fs::copy(&file.path, &copy).map_err(|e| StoreError::Io(format!("{}: {e}", file.filename)))?;
-        attachments.push(drafts::DraftAttachment {
-            path: copy.to_string_lossy().into_owned(),
-            filename: file.filename,
-            mime_type: file.mime_type,
-            size: a.size,
-        });
-    }
+    let attachments = copy_attachments(db, provider, cache_dir, drafts_dir, &message.attachments).await?;
     let record = DraftRecord {
         gmail_draft_id: server_draft,
         thread_id: Some(message.thread_id.0.clone()),

@@ -565,7 +565,8 @@ struct ReviewDecisionView: View {
             HStack(spacing: Space.l) {
                 actions()
                 Spacer(minLength: 0)
-                Text("Return accepts · ⌫ rejects · ⌘Z undoes")
+                // Each button says its own key; these have no button.
+                Text("J and K move · ⌘Z undoes")
                     .font(TypeRole.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -579,53 +580,71 @@ struct ReviewDecisionView: View {
 
     @ViewBuilder private func ruleActions(_ entry: GuideEntry) -> some View {
         if entry.contradictionOf != nil {
-            Button("Use This Instead") { model.reviewAct(.accept, on: AnalysisStore.tag(entry)) }
+            Button { model.reviewAct(.accept, on: AnalysisStore.tag(entry)) } label: { KeyedLabel(title: "Use This Instead", key: "⏎", onFill: true) }
                 .buttonStyle(.borderedProminent)
                 .hoverHelp("Replace your entry with this one (Return); Undo takes it back")
-            Button("Keep Mine") { model.reviewAct(.reject, on: AnalysisStore.tag(entry)) }
+            Button { model.reviewAct(.reject, on: AnalysisStore.tag(entry)) } label: { KeyedLabel(title: "Keep Mine", key: "⌫") }
                 .hoverHelp("Keep your entry as it is (⌫)")
         } else {
-            Button("Accept") { model.reviewAct(.accept, on: AnalysisStore.tag(entry)) }
+            Button { model.reviewAct(.accept, on: AnalysisStore.tag(entry)) } label: { KeyedLabel(title: "Accept", key: "⏎", onFill: true) }
                 .buttonStyle(.borderedProminent)
                 .hoverHelp("Add it to your writing guide (Return); Undo takes it back")
-            Button("Edit…") { model.reviewAct(.edit, on: AnalysisStore.tag(entry)) }
+            Button { model.reviewAct(.edit, on: AnalysisStore.tag(entry)) } label: { KeyedLabel(title: "Edit…", key: "E") }
                 .hoverHelp("Change it before adding it (e)")
-            Button("Reject") { model.reviewAct(.reject, on: AnalysisStore.tag(entry)) } // undoable
+            Button { model.reviewAct(.reject, on: AnalysisStore.tag(entry)) } label: { KeyedLabel(title: "Reject", key: "⌫") } // undoable
                 .hoverHelp("Leave it out; it will not be proposed again (⌫)")
         }
     }
 
     @ViewBuilder private func proposalActions(_ proposal: AnalysisProposalInfo) -> some View {
-        Button(proposal.op == .remove ? "Remove from Guide" : "Accept") {
-            model.reviewAct(.accept, on: AnalysisStore.tag(proposal))
+        Button { model.reviewAct(.accept, on: AnalysisStore.tag(proposal)) } label: {
+            KeyedLabel(title: proposal.op == .remove ? "Remove from Guide" : "Accept", key: "⏎", onFill: true)
         }
         .buttonStyle(.borderedProminent)
         .hoverHelp("Change your writing guide (Return); Undo takes it back")
         if proposal.op != .remove {
-            Button("Edit…") { model.reviewAct(.edit, on: AnalysisStore.tag(proposal)) }
+            Button { model.reviewAct(.edit, on: AnalysisStore.tag(proposal)) } label: { KeyedLabel(title: "Edit…", key: "E") }
                 .hoverHelp("Change it before accepting (e)")
         }
-        Button("Reject") { model.reviewAct(.reject, on: AnalysisStore.tag(proposal)) } // undoable
+        Button { model.reviewAct(.reject, on: AnalysisStore.tag(proposal)) } label: { KeyedLabel(title: "Reject", key: "⌫") } // undoable
             .hoverHelp("Leave the guide as it is; this will not be proposed again (⌫)")
     }
 
     @ViewBuilder private func routineActions(_ proposal: RoutineProposalInfo) -> some View {
-        Button("Accept") { model.reviewAct(.accept, on: ReviewItem.routineTag(proposal.id)) }
+        Button { model.reviewAct(.accept, on: ReviewItem.routineTag(proposal.id)) } label: { KeyedLabel(title: "Accept", key: "⏎", onFill: true) }
             .buttonStyle(.borderedProminent)
             .hoverHelp("Add it to the sorting routine's leave-alone rules (Return); Undo takes it out")
-        Button("Reject") { model.reviewAct(.reject, on: ReviewItem.routineTag(proposal.id)) } // undoable
+        Button { model.reviewAct(.reject, on: ReviewItem.routineTag(proposal.id)) } label: { KeyedLabel(title: "Reject", key: "⌫") } // undoable
             .hoverHelp("Leave the routine as it is; this will not be proposed again (⌫)")
     }
 
     @ViewBuilder private func factActions(_ proposal: AnalysisFactProposalInfo) -> some View {
-        Button("Accept") { model.reviewAct(.accept, on: AnalysisStore.tag(proposal)) }
+        Button { model.reviewAct(.accept, on: AnalysisStore.tag(proposal)) } label: { KeyedLabel(title: "Accept", key: "⏎", onFill: true) }
             .buttonStyle(.borderedProminent)
             .hoverHelp("Add it to your facts (Return); Undo takes it back")
-        Button("Reject") { model.reviewAct(.reject, on: AnalysisStore.tag(proposal)) } // undoable
+        Button { model.reviewAct(.reject, on: AnalysisStore.tag(proposal)) } label: { KeyedLabel(title: "Reject", key: "⌫") } // undoable
             .hoverHelp("Leave it out; it will not be proposed again (⌫)")
     }
 
     static let readingWidth: CGFloat = 680
+}
+
+/// A decision button's words with the key that presses it, as the
+/// workflows' buttons show theirs (oagc-t7d8).
+struct KeyedLabel: View {
+    let title: String
+    let key: String
+    /// On a filled (prominent) button.
+    var onFill = false
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            Text(title)
+            Keycap(key: key, onFill: onFill)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+    }
 }
 
 // MARK: - Cues
@@ -727,6 +746,38 @@ struct RoutineDecisionBody: View {
                     VStack(alignment: .leading, spacing: Space.hair) {
                         Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
                         Text("Was in \(e.bucket)").font(TypeRole.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A proposed forwarding rule (spec §14.15): what it would forward and
+/// where, and the mail the user forwarded that shows it.
+struct ForwardDecisionBody: View {
+    let proposal: ForwardRuleProposalInfo
+    /// The mail behind it (Teach Kaluta shows it on O).
+    var evidence = true
+
+    var body: some View {
+        CueRow(kind: "Forwarding rule", category: nil,
+               source: "From \(proposal.evidence.count) emails you forwarded")
+        Text(proposal.statement).font(TypeRole.display).fixedSize(horizontal: false, vertical: true)
+        Text("For mail that arrives after you accept. Accepting asks whether Kaluta forwards on its own or asks each time.")
+            .font(TypeRole.reading)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        if evidence {
+            VStack(alignment: .leading, spacing: Space.m) {
+                SectionLabel(text: "You forwarded these to \(proposal.recipient)")
+                ForEach(proposal.evidence, id: \.messageId) { e in
+                    VStack(alignment: .leading, spacing: Space.hair) {
+                        Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
+                        Text(Date(timeIntervalSince1970: TimeInterval(e.at) / 1000)
+                            .formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                            .font(TypeRole.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
             }

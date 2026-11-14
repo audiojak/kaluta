@@ -271,7 +271,7 @@ struct MainWindow: View {
     @ViewBuilder private var openColumn: some View {
             VStack(spacing: 0) {
                 if model.needsReauthentication {
-                    ReauthenticationBanner()
+                    SignInNotice().padding(Space.l)
                 }
                 if let failed = model.failedSends.first {
                     FailedSendBanner(draft: failed, more: model.failedSends.count - 1)
@@ -418,25 +418,6 @@ struct ThreadListArea: View {
                     .allowsHitTesting(false)
                 }
             }
-    }
-}
-
-/// Google rejected the stored credentials (revoked or expired); for an
-/// agent mailbox, its service key is missing or refused.
-private struct ReauthenticationBanner: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if model.isAgentMailbox {
-            Banner("This agent mailbox's key is missing or was refused, so it isn't syncing.",
-                   systemImage: "key.slash", intent: .attention)
-        } else {
-            Banner("Gmail needs you to sign in again.", systemImage: "person.crop.circle.badge.exclamationmark",
-                   intent: .attention) {
-                Button("Sign In") { Task { await model.signIn(with: .effective()) } }
-                    .hoverHelp("Sign in to Google again to keep syncing this account")
-            }
-        }
     }
 }
 

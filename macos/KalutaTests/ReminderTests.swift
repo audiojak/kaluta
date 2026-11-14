@@ -23,25 +23,44 @@ struct ReminderTests {
         #expect(WorkflowCommand.remind.title(in: .triage) == "Remind me later")
     }
 
-    @Test func theTimesAreInThreeHoursTomorrowMorningAndNextWeek() {
+    /// Gmail's Snooze choices: later today, tomorrow, next week, the weekend.
+    @Test func theTimesAreGmailsSnoozeChoices() {
         // Wednesday 11 November 2026, 10 AM.
         let wednesday = AppModel.reminderTimes(now: date(2026, 11, 11, 10), calendar: calendar)
-        #expect(wednesday.map(\.title) == ["In 3 hours", "Tomorrow morning", "Next week", "Next month"])
-        #expect(wednesday.map(\.date) == [date(2026, 11, 11, 13), date(2026, 11, 12, 8), date(2026, 11, 16, 8),
-                                          date(2026, 12, 11, 8)])
-        #expect(wednesday[3].phrase.hasPrefix("Friday, December 11 at"))
-        // From the 31st, next month's last day.
-        let january = AppModel.reminderTimes(now: date(2027, 1, 31, 10), calendar: calendar)
-        #expect(january[3].date == date(2027, 2, 28, 8))
+        #expect(wednesday.map(\.title) == ["Later today", "Tomorrow", "Next week", "This weekend"])
+        #expect(wednesday.map(\.date) == [date(2026, 11, 11, 18), date(2026, 11, 12, 8), date(2026, 11, 16, 8),
+                                          date(2026, 11, 14, 8)])
+        #expect(wednesday[0].phrase.hasPrefix("today at") && wednesday[3].phrase.hasPrefix("Saturday at"))
+        #expect(wednesday[0].detail.hasPrefix("Wed") && wednesday[0].detail.contains("6:00"))
+        // On a Saturday (as Gmail shows it): next weekend, a week on.
+        let saturday = AppModel.reminderTimes(now: date(2026, 11, 14, 10), calendar: calendar)
+        #expect(saturday.map(\.title) == ["Later today", "Tomorrow", "Next week", "Next weekend"])
+        #expect(saturday.map(\.date) == [date(2026, 11, 14, 18), date(2026, 11, 15, 8), date(2026, 11, 16, 8),
+                                         date(2026, 11, 21, 8)])
+        // On a Friday, the weekend is tomorrow.
+        let friday = AppModel.reminderTimes(now: date(2026, 11, 13, 10), calendar: calendar)
+        #expect(friday[3].date == date(2026, 11, 14, 8) && friday[3].phrase.hasPrefix("tomorrow at"))
         // On a Monday, next week is the Monday after.
         let monday = AppModel.reminderTimes(now: date(2026, 11, 16, 9), calendar: calendar)
         #expect(monday[2].date == date(2026, 11, 23, 8))
-        // On a Sunday, not tomorrow (that is Tomorrow morning).
+        // On a Sunday, not tomorrow (that is Tomorrow).
         let sunday = AppModel.reminderTimes(now: date(2026, 11, 15, 9), calendar: calendar)
         #expect(sunday[1].date == date(2026, 11, 16, 8) && sunday[2].date == date(2026, 11, 23, 8))
-        // Late in the evening, three hours is tomorrow.
+        #expect(sunday[3].date == date(2026, 11, 21, 8))
+        // With 6 PM under an hour away or past, later today is three hours on.
+        let evening = AppModel.reminderTimes(now: date(2026, 11, 11, 17, 30), calendar: calendar)
+        #expect(evening[0].date == date(2026, 11, 11, 20, 30))
         let late = AppModel.reminderTimes(now: date(2026, 11, 11, 23), calendar: calendar)
         #expect(late[0].phrase.hasPrefix("tomorrow at"))
+    }
+
+    @Test func aChosenDayAndTimeIsKeptAndNeverInThePast() {
+        let now = date(2026, 11, 11, 10)
+        let chosen = AppModel.reminderTime(at: date(2026, 12, 3, 15), now: now, calendar: calendar)
+        #expect(chosen.date == date(2026, 12, 3, 15))
+        #expect(chosen.title.hasPrefix("on Thursday, December 3 at 3:00"))
+        #expect(AppModel.reminderTime(at: date(2026, 11, 11, 9), now: now, calendar: calendar).date == date(2026, 11, 12, 8))
+        #expect(AppModel.firstReminderMoment(now: now, calendar: calendar) == date(2026, 11, 12, 8))
     }
 
     @Test func aChosenDayIsEightThatMorningAndNeverBeforeTomorrow() {
@@ -63,7 +82,8 @@ struct ReminderTests {
         #expect(WorkflowItemView.reminderLine(due, now: now) == "You asked to be reminded about this earlier today")
         let toCome = ReminderInfo(remindAt: ms(now.addingTimeInterval(3600)), setAt: ms(now))
         #expect(WorkflowItemView.reminderLine(toCome, now: now) == nil)
-        #expect(WorkflowItemView.remindQuestion().hasPrefix("Remind you when? 1 in 3 hours, 2 tomorrow morning"))
+        #expect(WorkflowItemView.remindQuestion().hasPrefix("Remind you when? 1 later today ("))
+        #expect(WorkflowItemView.remindQuestion().hasSuffix(", 5 pick date & time"))
     }
 
     /// Waiting on others' *Check again* has the same five choices as
@@ -115,7 +135,7 @@ struct ReminderTests {
         #expect(TaskMatchesView.keyLabel(1) == "⌘1")
     }
 
-    /// B, then 2: the email leaves the set until tomorrow morning; ⌘Z
+    /// B, then 2: the email leaves the set until tomorrow at 8 AM; ⌘Z
     /// takes the reminder off again.
     @Test func remindMeLaterPutsTheEmailOffAndUndoTakesItBack() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
@@ -134,7 +154,7 @@ struct ReminderTests {
         await model.performWorkflow(.remind)
         #expect(session.choosingTime == .remind)
         #expect(model.workflowActions().map(\.title)
-            == ["In 3 hours", "Tomorrow morning", "Next week", "Next month", "Pick a date…", "Cancel"])
+            == AppModel.reminderTimes().map(\.title) + ["Pick date & time…", "Cancel"])
         await model.performWorkflow(.pick2)
         #expect(session.choosingTime == nil)
         #expect(session.items.first { $0.key == item.key }?.decision == "remind")
@@ -146,7 +166,7 @@ struct ReminderTests {
         for _ in 0..<100 where (try? await core.reminder(thread)) != nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(try await core.reminder(thread) == nil)
 
-        // 5: a day on a calendar, then Return.
+        // 5: a day and time on a calendar, then Return.
         let next = try #require(session.current)
         let nextThread = try #require(model.threadID(of: next))
         await model.performWorkflow(.remind)
@@ -158,7 +178,7 @@ struct ReminderTests {
         await model.performWorkflow(.primary)
         #expect(session.choosingTime == nil)
         let chosen = try #require(try await core.reminder(nextThread))
-        #expect(chosen.remindAt == Int64(AppModel.reminderTime(on: day).date.timeIntervalSince1970 * 1000))
+        #expect(chosen.remindAt == Int64(AppModel.reminderTime(at: day).date.timeIntervalSince1970 * 1000))
         model.undo.undo(in: model.openAccountID)
         for _ in 0..<100 where (try? await core.reminder(nextThread)) != nil { try await Task.sleep(for: .milliseconds(20)) }
 

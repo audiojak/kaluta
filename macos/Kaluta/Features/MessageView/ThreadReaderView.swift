@@ -27,6 +27,8 @@ struct ThreadReaderView: View {
                 InviteBar(threadID: detail.thread.id)
                     .padding(.horizontal, Space.xxl)
                     .padding(.bottom, Space.s)
+                // A forwarding rule asks, or forwarded it (spec §14.15).
+                ForwardRuleBar(threadID: detail.thread.id)
                 if !reader.attachments.isEmpty {
                     // By the email each came with (each card lists its own too).
                     AttachmentStrip(groups: reader.attachmentGroups)

@@ -28,8 +28,11 @@ struct InviteTests {
 
     @Test func whyAnInvitationCannotBeAnsweredHere() {
         let i = invite(start: 0, end: nil)
-        #expect(InviteBar.why(invite(start: 0, end: nil, state: .notConnected))
-            == "Connect Google Calendar in Settings › Accounts to answer here")
+        #expect(InviteBar.why(invite(start: 0, end: nil, state: .notConnected)) == "Your Google Calendar is not connected")
+        // The calendar can be connected from the invitation itself.
+        #expect(InviteBar.offersConnect(.notConnected) && InviteBar.offersConnect(.noEventAccess))
+        #expect(!InviteBar.offersConnect(.answerable) && !InviteBar.offersConnect(.notOnCalendar))
+        #expect(!InviteBar.offersConnect(.past) && !InviteBar.offersConnect(.cancelled))
         #expect(InviteBar.why(invite(start: 0, end: nil, state: .past, response: .accepted)) == "Over · you accepted")
         #expect(InviteBar.why(invite(start: 0, end: nil, state: .cancelled)) == "Cancelled by the organiser")
         #expect(InviteBar.why(i).isEmpty)

@@ -1528,6 +1528,12 @@ impl SyncEngine {
         }
     }
 
+    /// Say where the download stands now (idle, or what is left): for a
+    /// status an error replaced that nothing since has corrected.
+    pub async fn report_now(&self) {
+        self.report(SyncPhase::Backfilling).await;
+    }
+
     async fn report(&self, phase: SyncPhase) {
         let (queued, headers) = self.db.read(queue::counts).await.unwrap_or((0, 0));
         // Clean Up's headers waiting for IMAP (the user said Not Now, or

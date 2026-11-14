@@ -48,6 +48,7 @@ The short version. Everything below elaborates on these.
 | Distribution | Direct download, Developer ID, notarized, Sparkle 2 auto-update; **not** sandboxed, **not** App Store |
 | Telemetry | None. *(Amendment 2026-11-12, ADR 0020:)* a bug report or feature request is an email the user reads and sends from their own account (§17.1) |
 | Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta; an eighth, Follow-ups, with Granola connected, §14.14), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
+| Forwarding rules | *(Amendment 2026-11-14, ADR 0021; built 2026-11-14.)* Kaluta proposes a rule when mail from one sender with one subject prefix is always forwarded to one address; an accepted rule forwards new matches automatically or asks each time, as the user chose when accepting it; matching is code in the core, never an agent (§14.15) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -563,6 +564,10 @@ set of message ids rather than per-row lookups. `inbox_history` (day as
 (key/value: the progress baseline and when it was taken) back the
 progress card.
 
+**Forwarding rules (Amendment 2026-11-14, migration `0039_forward_rules`).** For §14.15: `forward_rules`,
+`forward_rule_proposals` and `forward_rule_log` (unique on rule and
+message). Nothing here is synced.
+
 ### 6.3 Full-text search **(Verified)**
 
 Two FTS5 tables *(amended in M1)*:
@@ -837,6 +842,31 @@ were refused by Gmail, and nothing on screen said so.
   later changes wait behind one that is retrying.
 - *Back online.* When a sync round succeeds after one failed, changes
   waiting on a retry go at once (`outbox::retry_now`).
+- *Signed out (amended 2026-11-14).* From the user's daily use: Gmail
+  rejected the sign-in, a change made meanwhile was rolled back as
+  failed, and after signing in again the sidebar still said *Sync Paused
+  · Trying again shortly · not authorized*. A change refused because the
+  sign-in was rejected (`Unauthorized`) is not the change's fault: it
+  stays queued as made and goes when sync restarts after the user signs
+  in again. A send is the exception and goes back to Drafts as before,
+  rather than leave whenever that turns out to be. Signing in again
+  restarts sync (the old service stopped first), and the first round
+  that works reports where the download stands, so the footer no longer
+  keeps an error that nothing corrects when there is nothing to
+  download; the app drops the error as sign-in completes.
+- *Told plainly (amended 2026-11-14, oagc-8ssu).* While the sign-in is
+  rejected, a large notice heads the mail window and the Dashboard:
+  *Mail has stopped syncing*, for which account, that no new mail
+  arrives and changes wait, and *Sign In Again…*; it stays until fixed.
+  The footer says *Not Syncing · Sign in again to get new mail*, never
+  *Trying again shortly*: a rejected sign-in is not retried.
+- *The calendar is kept (amended 2026-11-14).* Signing in again asked
+  for mail access only, so the new token dropped the calendar and
+  invitations could no longer be answered (§14.9). Signing in again now
+  asks for the calendar access the account had (free/busy, events); a
+  user who unticks it at Google's consent still ends up unconnected. An
+  invitation whose calendar is not connected, or lacks event access,
+  offers *Connect Calendar…* on its own bar.
 - *Local copies stay out.* An optimistic copy of sent mail (`local-…`) is
   never named to the provider: Gmail answers a `batchModify` naming one
   with 400 "Invalid ids value" and changes nothing, which is how a thread
@@ -4818,11 +4848,16 @@ one decision with a one-line reason:
   *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Remind me
   later* (B), *Skip* (S).
 - **Remind me later** (B, Gmail's Snooze key; amended 2026-11-09): two
-  steps. B asks *Remind you when?*, and 1–5 answer: *In 3 hours*,
-  *Tomorrow morning* (8 AM), *Next week* (Monday, 8 AM; a week on when
-  tomorrow is Monday), *Next month* (the same day next month, 8 AM) and
-  *Pick a date…*, which shows a calendar (tomorrow onwards): Return
-  reminds at 8 AM on the day chosen (amended 2026-11-11); Esc cancels. The item is decided *remind* and the
+  steps. B asks *Remind you when?*, and 1–5 answer. *(Amended
+  2026-11-14: Gmail's Snooze choices, each named with its time, "1 later
+  today (Sat 6:00 PM)".)* *Later today* (6 PM; three hours on once 6 PM
+  is under an hour away or past), *Tomorrow* (8 AM), *Next week* (Monday,
+  8 AM; a week on when tomorrow is Monday), *This weekend* (the next
+  Saturday after today, 8 AM; *Next weekend* on a Saturday or Sunday) and
+  *Pick date & time…*, which shows a calendar and a clock, starting at
+  tomorrow, 8 AM: Return reminds at the day and time chosen (one already
+  past is tomorrow at 8 AM); Esc cancels. *Next month* is no longer
+  offered here. The item is decided *remind* and the
   set moves on (*Back in Triage tomorrow at 8:00 AM*); ⌘Z takes the
   reminder off. The email stays in the Inbox and nothing changes in
   Gmail; Triage leaves it out until then, unless someone writes in the
@@ -4990,7 +5025,8 @@ user asked.
   the user wrote; *Check again* offers tomorrow (1), in three days (2)
   or next week (3). *(Amendment 2026-11-12:)* and next month (4) or
   *Pick a date…* (5), a day on a calendar from tomorrow on, then Return,
-  the same keys as Triage's *Remind me later*; the conversation comes
+  the same keys as Triage's *Remind me later* (whose own choices became
+  Gmail's on 2026-11-14; these stay); the conversation comes
   back at the start of the day chosen.
 - Per item: **Nudge** (Return) with up to three follow-ups written ahead
   to pick from, then the editable email; sending starts the wait again.
@@ -5069,7 +5105,8 @@ holds says so.
 
 *(Amended 2026-10-13: a workflow like the others, one proposal at a time,
 no longer Review mode widened.)* The set holds, grouped by kind, the
-proposed routine changes, the learning run's and the daily review's
+proposed routine changes, proposed forwarding rules (§14.15, amended
+2026-11-14), the learning run's and the daily review's
 proposed rules, and the daily review's proposed facts (including those
 learned from what the user told Kaluta); patterns still collecting
 evidence wait for more, and facts merged from a file that differ wait on
@@ -5091,7 +5128,9 @@ it was decided.
   Facts page meanwhile leaves the set as decided.
 
 Review mode (§14.10, §14.11) stays the way to decide one page's queue
-from its band.
+from its band. *(Amended 2026-11-14, oagc-t7d8:)* its buttons show their
+keys (Accept ⏎, Edit… E, Reject ⌫), and the line beside them keeps only
+what has no button (*J and K move · ⌘Z undoes*).
 
 #### Background jobs
 
@@ -5230,6 +5269,120 @@ skip; **O** *Open in Granola*. ⌘Z undoes a decision. The rail lists the
 set's meetings by title, with whom or how each was decided. Kaluta never
 sends a follow-up itself.
 
+### 14.15 Forwarding rules **(Amendment 2026-11-14, ADR 0021)**
+
+*Built 2026-11-14 (oagc-djcf).* The user asked for receipt
+forwarding rules: when mail with a certain subject prefix is always
+forwarded to the same address for receipt processing, Kaluta proposes a
+rule, and once accepted the rule forwards such mail, on its own or after
+asking, as the user chose when accepting it.
+
+**A rule** is: mail *from* a sender (an address, or a whole domain),
+whose subject *starts with* a prefix (compared without case, after
+`Re:`/`Fwd:` are stripped; may be empty when the sender is an address),
+is forwarded *to* one address, in one of two **modes**: *Forward
+automatically* or *Ask each time*. A rule always names a sender: a
+subject alone never triggers a forward, since anyone can write a
+subject; a whole domain also needs a prefix. Rules are per account; an
+archive account (§7.8), which cannot send, has none.
+
+**Watching** (no agent, no prompt: SQL over the store). After a sync,
+at most every ten minutes, and when Teach Kaluta opens, Kaluta looks at
+the forwards the user sent in the last 90 days: a sent message whose
+subject starts `Fwd:` or `Fw:` (as built: the subject only, not a
+forwarded-message header in the body) to exactly one recipient, whose
+original is the newest received message before it in the same
+conversation. They are grouped by the original's sender and the
+recipient; the prefix is the longest run of leading words the group's
+subjects share, cut before the first word that holds a digit (order
+numbers, amounts, dates), and at most 60 characters. A group becomes a
+proposal when it has **three or more forwards** and **no received mail
+from that sender with that prefix in the same period was left
+unforwarded** (among what arrived up to the last one forwarded: later
+mail may not have been got to yet); with a counterexample it keeps
+watching and proposes nothing, and a proposal still waiting is
+withdrawn. A pattern rejected once is not raised again (its key: sender,
+prefix, recipient), nor one a rule already covers. Forwards a rule sent
+are never evidence.
+
+**The proposal** waits in Teach Kaluta (§14.13) as its own kind,
+*Forwarding*: "Forward mail from receipts@example.com starting “Your
+receipt from” to receipts@books.example", with its cues (how many
+forwards, since when). **O** shows the evidence: the conversations
+forwarded. *Accept* (E) asks one thing before anything takes effect,
+**Forward automatically** (1) or **Ask each time** (2), Esc to go back;
+neither is chosen ahead, so no rule starts sending by a stray key.
+*Edit…* (W) shows sender (address or domain), prefix, recipient and the
+same choice; saving accepts it as edited. *Reject* (⌫), *Skip* (S) as
+for the others. One ⌘Z undoes the decision and removes the rule
+together; forwards it sent meanwhile stay sent.
+
+**Settings › Forwarding** lists the account's rules: sender, prefix,
+recipient, mode, how many it has forwarded and when last. A rule can be
+added by hand (the same form as *Edit…*), edited, switched between the
+two modes, paused, or deleted. Changing a rule's recipient or sender is
+a new rule as far as "arrived after" goes (below).
+
+**Applying.** After each sync, in the core, for each enabled rule: the
+received messages that match, **arrived after the rule was accepted (or
+last had its sender, prefix or recipient changed)**, are not in Spam or
+Trash, were not sent by the user, and are not yet in the rule's log.
+Matching is code over the stored headers (the sender is the message's
+`From` address); no agent reads the mail or decides anything, and
+nothing in a message can change a rule.
+
+- *Forward automatically*: Kaluta builds the forward as *Forward* does
+  (§14.5: the forwarded-message header, the original below, its
+  attachments, downloaded first), with no note above, to the rule's
+  recipient, and queues it in the outbox. It is in Sent, in the
+  original's conversation, marked in the reader *Forwarded by a rule ·
+  receipts@books.example*. At most 20 a day per rule; past that the rule
+  asks instead, and Settings says so. Offline or failing, the outbox
+  retries as for any send; a message whose attachments cannot be
+  fetched waits and is tried at the next sync.
+- *Ask each time*: nothing is sent. The conversation carries a
+  suggestion, *Forward to receipts@books.example* (a band above the
+  message in the reader; in Triage the suggestion's mark is on
+  *Forward*, F, and takes the place of the triage job's own suggestion,
+  since it comes from a rule the user accepted). Taking it sends the
+  same forward at once; *Not This One* dismisses it. Either is logged,
+  so it is not asked twice. In Triage, F takes the suggestion rather
+  than opening the composer.
+
+No forward a rule makes waits out the undo-send delay (§14.6a): an
+automatic one has no one to press Undo, and one taken from a suggestion
+was just asked for by name *(as built; the plan had the usual delay
+there)*. Neither mode archives, labels or marks anything read.
+
+**Agents.** No MCP tool reads, creates or changes a forwarding rule,
+and a rule's forwards are not agent actions (§10.3 is unchanged:
+`mail.forward` from an agent is always approval-gated on a mail
+account). Published rules (§10.6) never include them.
+
+**Stored** (migration 39, per account, not synced): `forward_rules`
+(sender, whether it is a domain, prefix, recipient, mode `auto` or
+`ask`, enabled, created, effective-from, the proposal it came from),
+`forward_rule_proposals` (statement, sender, prefix, recipient, match
+key, status `proposed`/`accepted`/`rejected`, the evidence as
+`[{thread_id, message_id, subject, at}]`, times) and `forward_rule_log`
+(rule, message, conversation, the recipient at the time, outcome
+`sent`/`asked`/`dismissed`/`skipped` with the reason, when; one row per rule and
+message, which is what keeps a message from being forwarded twice
+across restarts and re-syncs). Core: `forward_rules.rs`
+(`forward_rules`, `save_forward_rule`, `delete_forward_rule`,
+`forward_rule_proposals`, `accept_`/`reject_`/`reopen_forward_rule_proposal`,
+`forward_suggestion`, `take_`/`dismiss_`/`restore_forward_suggestion`,
+`forward_marks`); event `ForwardRulesChanged`. A rule's forward carries
+the original's attached files (`mail_sync::forward_draft_with_attachments`);
+the composer's own *Forward* does not yet.
+
+**Limits, accepted.** Rules run only while Kaluta is open and syncing:
+mail that arrives while it is closed is forwarded at the next sync.
+Gmail's own server-side forwarding was not used: it needs the
+restricted `gmail.settings.sharing` scope and an address verified by
+the recipient (ADR 0021). A forged sender can trigger a rule (§15.4);
+the store keeps no authentication results to check it against.
+
 ## 15. Security Model and Threat Model
 
 ### 15.1 Assets
@@ -5268,6 +5421,7 @@ them.)
 | Tracking pixels | Remote images blocked by default |
 | Phishing links | Host mismatch confirmation; links open in system browser only |
 | Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web). Exception: an agent mailbox set to *Send freely* (§7.9) sends without asking, by the user's choice |
+| A forwarding rule sends mail nobody looked at *(amendment 2026-11-14, ADR 0021, §14.15)* | A rule exists only because the user accepted or wrote it, and is automatic only where the user chose that for that rule; the recipient is fixed in the rule and shown when accepting; a rule always names a sender, and applies only to mail that arrived after it was accepted; matching is code, with no agent and no tool that reads or changes rules, so nothing in a message can make, widen or redirect one; each message is forwarded at most once (`forward_rule_log`), at most 20 a day per rule; every forward is in Sent and marked in its conversation. A forged `From` can trigger a rule: what leaves is that message, to the address the user chose (accepted, §15.4) |
 | Prompt injection → destructive bulk actions | `delete` gated; bulk caps; reversible ops are actually reversible (archive not delete; trash not purge) |
 | Prompt injection → credential theft | Tokens never reach the agent process; Keychain only touched from Swift; MCP tools cannot read settings |
 | Agent escapes tool boundary | Claude: `--tools ""` + `dontAsk` + `--strict-mcp-config`; Codex: shell/exec/web tools disabled, read-only sandbox, `--ignore-user-config`; both are belt-and-braces — the real boundary is that Kaluta only ever *offers* mail tools |
@@ -5286,7 +5440,9 @@ them.)
 ### 15.4 What the MVP does *not* protect against
 
 Malware running as the user; a compromised agent CLI binary; the user
-approving a bad send. These are documented in `docs/security.md`.
+approving a bad send; mail with a forged sender matching a forwarding
+rule the user made automatic, which is forwarded to that rule's
+recipient (§14.15). These are documented in `docs/security.md`.
 
 *(Amendment 2026-10-08, oagc-cp3.6.)* Mailbox mode trusts the user's own
 processes: `kaluta-mcp --mailbox` carries no per-session token, so any

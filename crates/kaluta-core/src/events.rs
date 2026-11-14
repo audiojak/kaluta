@@ -162,6 +162,9 @@ pub enum CoreEvent {
     /// A workflow set started, changed or finished (spec §14.13); re-read
     /// the start screen's overview.
     WorkflowsChanged,
+    /// A forwarding rule was made, changed or removed, or a rule forwarded
+    /// or asked about a message (spec §14.15); re-read them.
+    ForwardRulesChanged,
     /// The writing guide changed (entries, groups, examples); re-read it.
     GuideChanged,
     /// A learning run moved on, paused or finished (spec §14.9).

@@ -893,6 +893,60 @@ final class CoreClient: Sendable {
         try await call { try await core.reopenRoutineProposal(id: id) }
     }
 
+    // MARK: Forwarding rules (spec §14.15)
+
+    func forwardRules() async throws(CoreClientError) -> [ForwardRuleInfo] {
+        try await call { try await core.forwardRules() }
+    }
+
+    /// Write a rule (`id` nil) or change one.
+    func saveForwardRule(_ id: Int64?, _ edit: ForwardRuleEdit) async throws(CoreClientError) -> ForwardRuleInfo {
+        try await call { try await core.saveForwardRule(id: id, edit: edit) }
+    }
+
+    func deleteForwardRule(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.deleteForwardRule(id: id) }
+    }
+
+    func forwardRuleProposals() async throws(CoreClientError) -> [ForwardRuleProposalInfo] {
+        try await call { try await core.forwardRuleProposals() }
+    }
+
+    /// Read the user's forwards for patterns now.
+    func refreshForwardRuleProposals() async throws(CoreClientError) {
+        try await call { try await core.refreshForwardRuleProposals() }
+    }
+
+    func acceptForwardRuleProposal(_ id: Int64, _ edit: ForwardRuleEdit) async throws(CoreClientError) -> ForwardRuleInfo {
+        try await call { try await core.acceptForwardRuleProposal(id: id, edit: edit) }
+    }
+
+    func rejectForwardRuleProposal(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.rejectForwardRuleProposal(id: id) }
+    }
+
+    func reopenForwardRuleProposal(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.reopenForwardRuleProposal(id: id) }
+    }
+
+    /// The forward a rule set to ask suggests for a conversation.
+    func forwardSuggestion(_ threadID: String) async throws(CoreClientError) -> ForwardSuggestionInfo? {
+        try await call { try await core.forwardSuggestion(threadId: threadID) }
+    }
+
+    func takeForwardSuggestion(_ s: ForwardSuggestionInfo) async throws(CoreClientError) {
+        _ = try await call { try await core.takeForwardSuggestion(ruleId: s.ruleId, messageId: s.messageId) }
+    }
+
+    func dismissForwardSuggestion(_ s: ForwardSuggestionInfo) async throws(CoreClientError) {
+        try await call { try await core.dismissForwardSuggestion(ruleId: s.ruleId, messageId: s.messageId) }
+    }
+
+    /// What rules forwarded in a conversation.
+    func forwardMarks(_ threadID: String) async throws(CoreClientError) -> [ForwardMarkInfo] {
+        try await call { try await core.forwardMarks(threadId: threadID) }
+    }
+
     // MARK: Agents (spec §14.13)
 
     func agentsWork() async throws(CoreClientError) -> AgentsWork {
@@ -2066,6 +2120,13 @@ typealias AgentsWork = KalutaCore.AgentsWork
 typealias AgentCode = KalutaCore.AgentCode
 typealias AgentSent = KalutaCore.AgentSent
 typealias RoutineProposalInfo = KalutaCore.RoutineProposalInfo
+typealias ForwardMode = KalutaCore.ForwardMode
+typealias ForwardRuleInfo = KalutaCore.ForwardRuleInfo
+typealias ForwardRuleEdit = KalutaCore.ForwardRuleEdit
+typealias ForwardRuleProposalInfo = KalutaCore.ForwardRuleProposalInfo
+typealias ForwardEvidenceInfo = KalutaCore.ForwardEvidenceInfo
+typealias ForwardSuggestionInfo = KalutaCore.ForwardSuggestionInfo
+typealias ForwardMarkInfo = KalutaCore.ForwardMarkInfo
 typealias RoutineEvidence = KalutaCore.RoutineEvidence
 typealias WaitingCheckInfo = KalutaCore.WaitingCheckInfo
 typealias DecisionCount = KalutaCore.DecisionCount
@@ -2111,6 +2172,8 @@ enum CoreClientEvent: Sendable, Equatable {
     case routinesChanged
     case tasksChanged
     case workflowsChanged
+    /// A forwarding rule, a suggestion or a mark changed (spec §14.15).
+    case forwardRulesChanged
     case guideChanged
     case guideProgress(GuideProgress)
     case analysisProgress(AnalysisProgress)
@@ -2203,6 +2266,8 @@ private extension CoreClientEvent {
             self = .tasksChanged
         case .workflowsChanged:
             self = .workflowsChanged
+        case .forwardRulesChanged:
+            self = .forwardRulesChanged
         case .guideChanged:
             self = .guideChanged
         case let .guideProgress(progress):

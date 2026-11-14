@@ -420,6 +420,11 @@ impl SyncService {
         let mut backoff = Duration::from_secs(5);
         // The last poll failed (offline, or Gmail unreachable).
         let mut down = false;
+        // The app may still show an error: from the service this one
+        // replaced (signing in again restarts sync), or from the last
+        // poll. A poll that works says where things stand, since an
+        // account with nothing to download reports nothing otherwise.
+        let mut stale = true;
         loop {
             self.status(SyncState::Checking, 0);
             match self.engine.sync_incremental().await {
@@ -432,6 +437,9 @@ impl SyncService {
                     // §14.10). A synced account with nothing to download
                     // never reports Idle, so this marks it too.
                     self.settled.store(true, Ordering::SeqCst);
+                    if std::mem::take(&mut stale) {
+                        self.engine.report_now().await;
+                    }
                     if !report.external_label_changes.is_empty()
                         && let Some(notify) = &self.external
                     {
@@ -453,6 +461,7 @@ impl SyncService {
                 }
                 Err(e) => {
                     down = true;
+                    stale = true;
                     self.offline_or_error(&e);
                     tokio::time::sleep(backoff).await;
                     backoff = (backoff * 2).min(MAX_BACKOFF);

@@ -440,24 +440,34 @@ impl Core {
             self.effective_account_id().ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no account is open"))?;
         // An agent mailbox that publishes pulls its cloud agents' reports
         // after each sync, so they meet the sent mail they describe.
-        let after_sync: Option<crate::sync::AfterSync> = self.is_agent(&account).then(|| {
+        // Every account applies its forwarding rules to what came in
+        // (spec §14.15).
+        let after_sync: Option<crate::sync::AfterSync> = Some({
             let weak = Arc::downgrade(self);
             let id = account.clone();
+            let agent = self.is_agent(&account);
             Arc::new(move || {
                 if let Some(core) = weak.upgrade() {
                     let id = id.clone();
                     runtime::runtime().spawn(crate::registry::scoped(Some(id.clone()), async move {
-                        core.rules_after_sync(&id).await;
+                        if agent {
+                            core.rules_after_sync(&id).await;
+                        }
+                        core.forward_rules_after_sync(&id).await;
                     }));
                 }
             }) as crate::sync::AfterSync
         });
-        let service =
-            SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), after_sync, settled);
-        let old = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).insert(account, service);
+        // The one it replaces stops first (signing in again restarts a
+        // sync that a rejected sign-in stopped), so nothing it still had
+        // under way reports an error over the new one's status.
+        let old = self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).remove(&account);
         if let Some(old) = old {
             old.stop();
         }
+        let service =
+            SyncService::start(engine, events, runtime::runtime().handle(), Some(attribute), after_sync, settled);
+        self.accounts.sync.lock().unwrap_or_else(|e| e.into_inner()).insert(account, service);
         Ok(())
     }
 
@@ -533,6 +543,37 @@ impl Core {
     }
 }
 
+/// The scopes a sign-in asks for: mail (with IMAP when `full_access`),
+/// and the calendar access the account already had (free/busy, events),
+/// so signing in again does not drop it.
+pub(crate) fn sign_in_scope(full_access: bool, calendar: Option<(bool, bool)>) -> String {
+    let mut scope = String::from(if full_access { oauth::SCOPE_WITH_IMAP } else { oauth::SCOPE });
+    if let Some((free_busy, events)) = calendar {
+        if free_busy {
+            scope.push(' ');
+            scope.push_str(provider_gcal::FREEBUSY_SCOPE);
+        }
+        if events {
+            scope.push(' ');
+            scope.push_str(provider_gcal::EVENTS_SCOPE);
+        }
+    }
+    scope
+}
+
+impl Core {
+    /// The calendar access (free/busy, events) of the Google account with
+    /// this address, if it is one of ours and its calendar is connected.
+    async fn calendar_access_of(&self, email: &str) -> Option<(bool, bool)> {
+        let entry = crate::registry::load_index(&self.data_path())
+            .into_iter()
+            .find(|e| e.kind == crate::registry::AccountKind::Gmail && e.email.eq_ignore_ascii_case(email))?;
+        let db = self.store_for(&entry.id).await.ok()?;
+        let access = db.read(mail_store::calendar::access).await.ok()??;
+        Some((access.free_busy, access.holds))
+    }
+}
+
 #[uniffi::export]
 impl Core {
     /// Begin Gmail sign-in: returns the URL Swift opens in the browser.
@@ -551,8 +592,16 @@ impl Core {
             client_id: client.client_id.trim().to_owned(),
             client_secret: client.client_secret.clone().filter(|s| !s.is_empty()).map(Redacted::new),
         };
+        // Signing in again asks for the calendar access the account had:
+        // without it the new token grants mail only, and the calendar was
+        // silently disconnected (invitations could no longer be answered).
+        let had = match &login_hint {
+            Some(email) => self.calendar_access_of(email).await,
+            None => None,
+        };
+        let scope = sign_in_scope(full_access, had);
         let pending =
-            runtime::run(async move { Ok(oauth::begin(&oauth_client, login_hint.as_deref(), full_access).await?) })
+            runtime::run(async move { Ok(oauth::begin_scoped(&oauth_client, login_hint.as_deref(), &scope).await?) })
                 .await?;
         let session_id = random_id()?;
         let url = pending.url.clone();
@@ -1095,6 +1144,21 @@ mod tests {
     use crate::{Core, CoreConfig, CoreEvent, EventListener, SyncState};
 
     use super::*;
+
+    /// Signing in again keeps the calendar: the scopes asked for include
+    /// what the account had (the user's invitations could not be answered
+    /// after a rejected sign-in was renewed with mail access only).
+    #[test]
+    fn signing_in_again_asks_for_the_calendar_access_the_account_had() {
+        assert_eq!(sign_in_scope(true, None), oauth::SCOPE_WITH_IMAP, "a new account: mail only");
+        assert_eq!(sign_in_scope(false, None), oauth::SCOPE);
+        let both = sign_in_scope(true, Some((true, true)));
+        assert!(both.starts_with(oauth::SCOPE_WITH_IMAP));
+        assert!(both.contains(provider_gcal::FREEBUSY_SCOPE) && both.contains(provider_gcal::EVENTS_SCOPE));
+        let free_busy = sign_in_scope(true, Some((true, false)));
+        assert!(free_busy.contains(provider_gcal::FREEBUSY_SCOPE) && !free_busy.contains(provider_gcal::EVENTS_SCOPE));
+        assert_eq!(sign_in_scope(true, Some((false, false))), oauth::SCOPE_WITH_IMAP);
+    }
 
     #[derive(Default)]
     struct Recorder(StdMutex<Vec<CoreEvent>>);

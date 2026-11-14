@@ -195,6 +195,10 @@ extension AppModel {
         if session.kind == .triage || session.kind == .replies {
             session.writtenSince[threadID] = await core.writtenSince(threadID)
         }
+        // A forwarding rule that asks (spec §14.15): looked up each time.
+        if session.kind == .triage {
+            session.forwardSuggestions[threadID] = (try? await core.forwardSuggestion(threadID)) ?? nil
+        }
         // Back from *Remind me later*?
         if session.kind == .triage {
             session.reminders[threadID] = try? await core.reminder(threadID)
@@ -507,9 +511,12 @@ extension AppModel {
                     a(.back, .quiet, "Cancel")]
         case .remind:
             return zip(Self.reminderPicks, Self.reminderTimes()).map { a($0, .plain, $1.title) }
-                + [a(.pick5, .plain, "Pick a date…"), a(.back, .quiet, "Cancel")]
+                + [a(.pick5, .plain, "Pick date & time…"), a(.back, .quiet, "Cancel")]
         case .remindOn:
-            return [a(.primary, .primary, "Remind me \(Self.reminderTime(on: session.remindDay).title)"),
+            return [a(.primary, .primary, "Remind me \(Self.reminderTime(at: session.remindDay).title)"),
+                    a(.back, .quiet, "Cancel")]
+        case .forwardMode:
+            return [a(.pick1, .plain, ForwardMode.automatic.title), a(.pick2, .plain, ForwardMode.askEachTime.title),
                     a(.back, .quiet, "Cancel")]
         case nil:
             break
@@ -621,10 +628,22 @@ extension AppModel {
     private func triageActions(_ session: WorkflowSession,
                                _ a: (WorkflowCommand, WorkflowButton.Style, String?) -> WorkflowAction) -> [WorkflowAction] {
         let suggested = session.current.flatMap(threadID(of:)).flatMap { session.suggestions[$0] }
-        let mark = suggested.map(Self.triageCommand)
+        // A forwarding rule the user accepted comes before Kaluta's guess:
+        // its forward is the suggestion, on Forward (F).
+        let forwarding = session.current.flatMap(threadID(of:)).flatMap { session.forwardSuggestions[$0] }
+        let mark = forwarding != nil ? WorkflowCommand.forward : suggested.map(Self.triageCommand)
         let all = [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
                    a(.remind, .plain, nil), a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
-        return all.map { var action = $0; action.suggested = action.command == mark; return action }
+        return all.map { action in
+            var action = action
+            if action.command == .forward, let forwarding {
+                let onEmail = action.onEmail
+                action = WorkflowAction(command: .forward, title: "Forward to \(forwarding.recipient)", style: action.style)
+                action.onEmail = onEmail
+            }
+            action.suggested = action.command == mark
+            return action
+        }
     }
 
     /// The keys behind the email's links (spec §14.13): O opens it in its
@@ -907,11 +926,18 @@ extension AppModel {
             withAnimation(Self.itemMotion) { session.showsReport = false }
             return
         }
+        if session.choosingTime == .forwardMode {
+            session.choosingTime = nil
+            if command == .pick1 || command == .pick2 {
+                await acceptForward(item, mode: command == .pick1 ? .automatic : .askEachTime, session: session)
+            }
+            return
+        }
         if session.choosingTime == .remind {
             session.choosingTime = nil
             if command == .pick5 {
-                // A day on a calendar: a month on, to start from.
-                session.remindDay = Self.earliestReminderDay()
+                // A day on a calendar and a time: tomorrow at 8 AM, to start from.
+                session.remindDay = Self.firstReminderMoment()
                 session.choosingTime = .remindOn
             } else if let index = Self.reminderPicks.firstIndex(of: command) {
                 await remindLater(item, at: Self.reminderTimes()[index], session: session)
@@ -921,7 +947,7 @@ extension AppModel {
         if session.choosingTime == .remindOn {
             session.choosingTime = nil
             if command == .primary {
-                await remindLater(item, at: Self.reminderTime(on: session.remindDay), session: session)
+                await remindLater(item, at: Self.reminderTime(at: session.remindDay), session: session)
             }
             return
         }
@@ -984,7 +1010,14 @@ extension AppModel {
         case (_, .nextMessage):
             await stepConversation(by: 1, item: item, session: session)
         case (_, .forward):
-            startForwarding(item, session: session)
+            // A forwarding rule's suggestion is taken as it stands; without
+            // one, Forward opens the composer.
+            if session.kind == .triage, let id = threadID(of: item), let suggestion = session.forwardSuggestions[id] {
+                session.forwardSuggestions[id] = nil
+                await takeForwardSuggestion(suggestion)
+            } else {
+                startForwarding(item, session: session)
+            }
         case (.replies, .task):
             if let id = threadID(of: item), let row = session.threads[id]?.thread {
                 await openTaskDialog(for: row)
@@ -1289,15 +1322,38 @@ extension AppModel {
         let title: String
         let phrase: String
         let date: Date
+        /// The time beside the title, as Gmail shows it: "Sat 6:00 PM".
+        var detail = ""
     }
 
-    /// The keys of *Remind me later*'s times, in their order; 5 is *Pick a
-    /// date…*.
+    /// The keys of *Remind me later*'s times, in their order; 5 is *Pick
+    /// date & time…* (*Pick a date…* for *Check again*).
     static let reminderPicks: [WorkflowCommand] = [.pick1, .pick2, .pick3, .pick4]
 
     /// The first day *Pick a date…* offers: tomorrow.
     static func earliestReminderDay(now: Date = .now, calendar: Calendar = .current) -> Date {
         calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+    }
+
+    /// *Pick date & time…* starts at tomorrow, 8 AM.
+    static func firstReminderMoment(now: Date = .now, calendar: Calendar = .current) -> Date {
+        let day = earliestReminderDay(now: now, calendar: calendar)
+        return calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day) ?? day
+    }
+
+    /// A chosen day and time's reminder; one already past is tomorrow at
+    /// 8 AM.
+    static func reminderTime(at moment: Date, now: Date = .now, calendar: Calendar = .current) -> ReminderTime {
+        let date = moment > now ? moment : firstReminderMoment(now: now, calendar: calendar)
+        var style = Date.FormatStyle.dateTime.weekday(.wide).month(.wide).day()
+        style.calendar = calendar
+        style.timeZone = calendar.timeZone
+        if !calendar.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
+        var clock = Date.FormatStyle(date: .omitted, time: .shortened)
+        clock.calendar = calendar
+        clock.timeZone = calendar.timeZone
+        let words = "\(date.formatted(style)) at \(date.formatted(clock))"
+        return ReminderTime(title: "on \(words)", phrase: words, date: date)
     }
 
     /// A chosen day's reminder: 8 AM that day, never before tomorrow.
@@ -1345,8 +1401,11 @@ extension AppModel {
         return ReminderTime(title: "on \(words)", phrase: words, date: chosen)
     }
 
-    /// *Remind me later*'s times: in three hours, tomorrow at 8 AM, next
-    /// Monday at 8 AM, a month from today at 8 AM.
+    /// *Remind me later*'s times, as Gmail's Snooze names them: later today
+    /// (6 PM; three hours on once that is under an hour away), tomorrow at
+    /// 8 AM, next week (Monday at 8 AM; a week on when tomorrow is Monday)
+    /// and the weekend (the next Saturday after today at 8 AM: *This
+    /// weekend* on a weekday, *Next weekend* on one).
     static func reminderTimes(now: Date = .now, calendar: Calendar = .current) -> [ReminderTime] {
         let today = calendar.startOfDay(for: now)
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? now
@@ -1355,19 +1414,33 @@ extension AppModel {
                                        matchingPolicy: .nextTime) ?? morning
         let week = calendar.isDate(monday, inSameDayAs: tomorrow)
             ? calendar.date(byAdding: .day, value: 7, to: monday) ?? monday : monday
-        // The same day next month (the 31st: that month's last).
-        let month = reminderTime(on: calendar.date(byAdding: .month, value: 1, to: today) ?? week,
-                                 now: now, calendar: calendar)
-        let inThree = now.addingTimeInterval(3 * 3600)
-        let clock = { (d: Date) in d.formatted(date: .omitted, time: .shortened) }
-        let threeAt = calendar.isDate(inThree, inSameDayAs: now) ? "today at \(clock(inThree))"
-            : "tomorrow at \(clock(inThree))"
+        let saturday = calendar.nextDate(after: tomorrow.addingTimeInterval(-1),
+                                         matching: DateComponents(hour: 8, weekday: 7),
+                                         matchingPolicy: .nextTime) ?? week
+        let six = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: today) ?? now
+        let later = now < six.addingTimeInterval(-3600) ? six : now.addingTimeInterval(3 * 3600)
+        var clockStyle = Date.FormatStyle(date: .omitted, time: .shortened)
+        clockStyle.calendar = calendar
+        clockStyle.timeZone = calendar.timeZone
+        var dayStyle = Date.FormatStyle.dateTime.weekday(.wide)
+        dayStyle.calendar = calendar
+        dayStyle.timeZone = calendar.timeZone
+        var shortStyle = Date.FormatStyle.dateTime.weekday(.abbreviated).hour().minute()
+        shortStyle.calendar = calendar
+        shortStyle.timeZone = calendar.timeZone
+        let clock = { (d: Date) in d.formatted(clockStyle) }
+        let time = { (title: String, phrase: String, date: Date) in
+            ReminderTime(title: title, phrase: phrase, date: date, detail: date.formatted(shortStyle))
+        }
+        let weekday = { (d: Date) in "\(d.formatted(dayStyle)) at \(clock(d))" }
         return [
-            ReminderTime(title: "In 3 hours", phrase: threeAt, date: inThree),
-            ReminderTime(title: "Tomorrow morning", phrase: "tomorrow at \(clock(morning))", date: morning),
-            ReminderTime(title: "Next week", phrase: "\(week.formatted(.dateTime.weekday(.wide))) at \(clock(week))",
-                         date: week),
-            ReminderTime(title: "Next month", phrase: month.phrase, date: month.date),
+            time("Later today", "\(calendar.isDate(later, inSameDayAs: now) ? "today" : "tomorrow") at \(clock(later))",
+                 later),
+            time("Tomorrow", "tomorrow at \(clock(morning))", morning),
+            time("Next week", weekday(week), week),
+            time(calendar.isDateInWeekend(now) ? "Next weekend" : "This weekend",
+                 calendar.isDate(saturday, inSameDayAs: tomorrow) ? "tomorrow at \(clock(saturday))" : weekday(saturday),
+                 saturday),
         ]
     }
 
