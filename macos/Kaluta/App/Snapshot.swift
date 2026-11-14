@@ -488,6 +488,10 @@ enum Snapshot {
                     await model.performWorkflow(.replyNow)
                     if model.workflowSession?.writer?.step == .choose { await model.performWorkflow(.tellKaluta) }
                     model.workflowSession?.writer?.field = words
+                    // -KalutaSnapshotWorkflowAttach <path>: a file with them.
+                    if let file = defaults.string(forKey: "KalutaSnapshotWorkflowAttach") {
+                        model.workflowSession?.writer?.attach([URL(filePath: file)])
+                    }
                 }
             }
             if let kind = defaults.string(forKey: "KalutaSnapshotFeedback").flatMap(FeedbackKind.init(rawValue:)),

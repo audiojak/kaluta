@@ -538,13 +538,13 @@ struct WorkflowTests {
         #expect(writer.step == .say)
     }
 
-    @Test func useMyWordsSendsWhatWasTyped() async throws {
+    @Test func wordsAsWrittenAreTheEmail() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         let writer = WorkflowWriter(threadID: "t", messageID: "m", replyAll: false, taskID: nil, email: "Chat?")
         writer.field = "Happy to, next Tuesday at 10."
         await writer.write(model: model, asWritten: true)
         #expect(writer.step == .final && writer.text == "Happy to, next Tuesday at 10." && writer.aiText == nil)
-        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Use my words" && WorkflowCommand.ownWords.keyLabel == "⇧⌘M")
+        #expect(WorkflowCommand.ownWords.title(in: .triage) == "Write it myself" && WorkflowCommand.ownWords.keyLabel == "⇧⌘M")
 
         // From the answers, Write it myself: the field's words are the email,
         // whatever agent is ready; Esc goes back to the answers.
@@ -627,8 +627,12 @@ struct WorkflowTests {
         #expect(shown() == ["Send ⌘Return", "Generate a reply ⌘G", "Cancel Esc"])
         writer.field = "yes\n\nbut only after 3"
         #expect(shown() == ["Send ⌘Return", "Generate the email from this ⌘G", "Cancel Esc"])
-        // ⇧⌘M still takes the words to the email, to read before sending.
-        #expect(model.workflowActions().contains { $0.command == .ownWords && !$0.shown })
+        // A file goes with the words from here (⇧⌘A, the paperclip); the
+        // words need no second screen, so ⇧⌘M has nothing to do here.
+        #expect(model.workflowActions().contains { $0.command == .attach && !$0.shown })
+        #expect(!model.workflowActions().contains { $0.command == .ownWords })
+        await model.performWorkflow(.attach)
+        #expect(writer.choosingFiles)
         #expect(!model.workflowActions().contains { $0.command == .primary }, "Return is the field's new line")
     }
 

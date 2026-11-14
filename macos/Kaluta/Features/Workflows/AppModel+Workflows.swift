@@ -730,10 +730,10 @@ extension AppModel {
             keep.shown = false
             if !typed { keep.unavailable = send.unavailable }
             let sends = writer.taskID == nil ? [send] : [send, keep]
-            // ⇧⌘M: the words as they are, to read (and attach to) first.
-            var words = a(.ownWords, .plain, nil)
-            words.shown = false
-            guard generates else { return sends + [words, back, discard] }
+            // Attach is the paperclip in the field; its key still answers.
+            var attach = a(.attach, .plain, nil)
+            attach.shown = false
+            guard generates else { return sends + [attach, back, discard] }
             // 1–3 say an answer the email takes (hidden: the chips show them).
             let starters = zip([WorkflowCommand.pick1, .pick2, .pick3], writer.starters).map { command, starter in
                 var x = a(command, .plain, "Say “\(starter)”"); x.shown = false; return x
@@ -741,7 +741,7 @@ extension AppModel {
             // Return is a new line in the field; ⌘G generates: from what
             // was typed, or, with nothing typed, the likely reply.
             let write = a(.firstPass, typed ? .plain : .primary, typed ? "Generate the email from this" : "Generate a reply")
-            return sends + [write] + (typed ? [words] : []) + starters + [back, discard]
+            return sends + [write, attach] + starters + [back, discard]
         case .asking:
             // Return answers (the last answer writes); ⇧Return skips; 1–3
             // pick an answer offered; Esc goes to the question before.
@@ -809,8 +809,6 @@ extension AppModel {
             if writer.pickChoice(index) { await writer.writeWithAnswers(model: self) }
         case (.asking, .back):
             writer.backFromAsking()
-        case (.say, .ownWords):
-            await writer.write(model: self, asWritten: true)
         case (.say, .firstPass):
             await writer.firstPass(model: self)
         case (.say, .send), (.say, .sendKeepTask):
@@ -823,7 +821,7 @@ extension AppModel {
         case (.say, .pick3): await writer.pickStarter(2, model: self)
         case (.final, .back):
             writer.changeWhatISaid()
-        case (.final, .attach):
+        case (.say, .attach), (.final, .attach):
             writer.choosingFiles = true
         case (.final, .holdTimes):
             await holdTimes(writer, session: session)

@@ -4749,7 +4749,12 @@ are looked for as each account opens.
   Generate the email from this* once anything is typed, else *Generate
   a reply*. Send leads once something is typed, Generate before. *Use my
   words* (⇧⌘M) keeps its key and loses its button: the words as the
-  email, to read or attach to before sending.)* When Kaluta
+  email, to read or attach to before sending.)* *(Amended 2026-11-14:
+  a file goes with the words from this screen: a paperclip in the field
+  (⇧⌘A, or dropped on the screen), shown as chips under it, and sent
+  with ⌘Return or kept if Kaluta generates. With that,* Use my words
+  *had nothing left to do here and is gone; ⇧⌘M is only the answers
+  screen's* Write it myself*.)* When Kaluta
   would have to invent a fact, it asks instead (§14.9), in the session
   it was asked in, **one question at a time** on its own screen: *Kaluta
   asks* in the workflow's colour, "1 of 2", the question, a field
@@ -4759,9 +4764,7 @@ are looked for as each account opens.
   question before, then back to the words. The answers go to Kaluta as
   its second turn and with the draft's directions; each is proposed in
   Facts, never added outright (amended 2026-10-26).
-  *Use my words*
-  (⇧⌘M; not ⌘Return, which sends) takes what was typed as the email,
-  unrewritten, to the same editable screen. The answers screen offers
+  The answers screen offers
   *Write it myself* (⇧⌘M) too: a field whose words are the email
   (Return), Kaluta writing nothing. Esc on the field goes back
   to the answers where there are any; *Change what I said* on the email

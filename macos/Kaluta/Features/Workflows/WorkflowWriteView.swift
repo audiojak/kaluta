@@ -64,14 +64,19 @@ struct WorkflowWriteView: View {
                         .keyboardShortcut("g", modifiers: .command)
                         .hidden()
                 }
-                // ⇧⌘M from inside the field: the words as written.
-                Button("Use my words") { perform(.ownWords) } // no-help: hidden
-                    .keyboardShortcut("m", modifiers: [.command, .shift])
-                    .hidden()
-                if writer.step == .final {
+                // ⇧⌘M, on the answers: write it myself.
+                if writer.step == .choose {
+                    Button("Write it myself") { perform(.ownWords) } // no-help: hidden
+                        .keyboardShortcut("m", modifiers: [.command, .shift])
+                        .hidden()
+                }
+                // ⇧⌘A from inside the text: a file to go with the email.
+                if writer.step == .say || writer.step == .final {
                     Button("Attach a file") { perform(.attach) } // no-help: hidden
                         .keyboardShortcut("a", modifiers: [.command, .shift])
                         .hidden()
+                }
+                if writer.step == .final {
                     Button("Hold these times") { perform(.holdTimes) } // no-help: hidden
                         .keyboardShortcut("h", modifiers: [.command, .shift])
                         .hidden()
@@ -313,9 +318,21 @@ struct WorkflowWriteView: View {
                 .buttonStyle(.plain)
                 .hoverHelp("Dictate (or press the dictation key, by default Fn twice)")
                 .accessibilityLabel("Dictate")
+                // A file to go with the words, as on the email itself.
+                Button { writer.choosingFiles = true } label: {
+                    Image(systemName: "paperclip")
+                        .font(TypeRole.workflowContent)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .hoverHelp("Attach a file, or drop one here (⇧⌘A)")
+                .accessibilityLabel("Attach a file")
             }
             .padding(Space.xl)
             .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
+            if !writer.attachments.isEmpty {
+                DraftAttachmentChips(attachments: writer.attachments, remove: writer.removeAttachment)
+            }
             // The answers the email takes (1–3): say one and Kaluta writes
             // from it. Writing it oneself, there are none.
             if !writer.starters.isEmpty, !writer.ownWordsOnly {
@@ -341,6 +358,7 @@ struct WorkflowWriteView: View {
                 }
             }
         }
+        .attachingFiles(choosing: $writer.choosingFiles, attach: writer.attach)
     }
 
     /// Kaluta asks before it writes (spec §14.9): one question at a time,
