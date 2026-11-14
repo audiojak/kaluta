@@ -281,7 +281,7 @@ final class WorkflowWriter {
         guard step == .say, !said.isEmpty else { return }
         directions = [said]
         field = ""
-        // Use my words, Write it myself, or no agent ready: what the user
+        // Sent as typed, Write it myself, or no agent ready: what the user
         // typed is the email.
         guard model.agent.isProviderReady, !asWritten, !ownWordsOnly else {
             text = said

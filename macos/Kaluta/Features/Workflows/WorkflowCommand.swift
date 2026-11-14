@@ -223,7 +223,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .attach: "Attach a file"
         case .holdTimes: "Hold these times"
         case .note: "Add a note"
-        case .ownWords: "Use my words"
+        case .ownWords: "Write it myself"
         case .firstPass: "Generate the email"
         case .back: "Back"
         case .whatsLeft: "What's left?"
