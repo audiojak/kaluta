@@ -472,6 +472,16 @@ struct SendRulesTextTests {
         #expect(paused?.title == "Sync Paused")
         #expect(paused?.detail == "Trying again shortly · HTTP 400: limit: Too big")
         #expect(SyncStatusView.footer(.error(), transport: nil, needsSignIn: false)?.detail == "Trying again shortly")
+        // A rejected sign-in is not retried, and the footer does not say it is (oagc-8ssu).
+        let signedOut = SyncStatusView.footer(.error(message: "not authorized; sign in again"), transport: nil,
+                                              needsSignIn: true)
+        #expect(signedOut?.title == "Not Syncing")
+        #expect(signedOut?.detail == "Sign in again to get new mail")
+        #expect(SyncStatusView.footer(.idle, transport: nil, needsSignIn: true)?.detail == "Sign in again to get new mail")
+        let notice = SignInNotice.text(email: "me@example.com", agentMailbox: false)
+        #expect(notice.title == "Mail has stopped syncing")
+        #expect(notice.detail.contains("sign in again for me@example.com") && notice.detail.contains("no new mail arrives"))
+        #expect(SignInNotice.text(email: nil, agentMailbox: true).title == "This agent mailbox has stopped syncing")
     }
 }
 

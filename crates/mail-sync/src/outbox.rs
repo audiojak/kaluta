@@ -430,6 +430,17 @@ impl SyncEngine {
                     // Later ops wait: order matters (archive then unarchive).
                     return Ok(report);
                 }
+                // The sign-in was rejected: the change is not wrong, so it
+                // is kept, and goes once the user has signed in again. A
+                // send goes back to Drafts instead (below) rather than
+                // leave whenever that turns out to be.
+                Err(e @ ProviderError::Unauthorized) if !matches!(queued.op, OutboxOp::Send { .. }) => {
+                    let message = e.to_string();
+                    self.db()
+                        .write(move |tx| if held(tx)? { outbox::retry_later(tx, id, now, &message) } else { Ok(()) })
+                        .await?;
+                    return Err(e.into());
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "outbox op failed permanently; rolling back");
                     // The provider's own words, shown in Drafts and the banner.

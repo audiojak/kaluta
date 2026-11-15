@@ -91,15 +91,20 @@ struct SyncStatusView: View {
         case .offline:
             return ("Offline", "Changes are sent when you reconnect")
         case let .error(message):
+            // A rejected sign-in is not retried: saying "trying again"
+            // sent the user away from the one thing that fixes it.
+            if needsSignIn { return ("Not Syncing", Self.signInAgain) }
             // The provider's words, so the pause can be understood and
             // reported (an HTTP status and what was wrong).
             return ("Sync Paused", message.map { "Trying again shortly · \($0)" } ?? "Trying again shortly")
         case .idle:
-            if needsSignIn { return ("Not Syncing", "Sign in again in Settings › Accounts") }
+            if needsSignIn { return ("Not Syncing", Self.signInAgain) }
             if let pause { return ("Waiting for \(service)", pause) }
             return note.map { ("Using the Gmail API", $0) }
         }
     }
+
+    static let signInAgain = "Sign in again to get new mail"
 
     /// "the mail service" → "The mail service".
     static func sentence(_ s: String) -> String { s.prefix(1).uppercased() + s.dropFirst() }

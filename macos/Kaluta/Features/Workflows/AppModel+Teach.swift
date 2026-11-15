@@ -8,18 +8,20 @@ extension AppModel {
     /// A Teach Kaluta item as the stores hold it.
     enum TeachItem {
         case routine(RoutineProposalInfo)
+        case forward(ForwardRuleProposalInfo)
         case rule(GuideEntry)
         case proposal(AnalysisProposalInfo)
         case fact(AnalysisFactProposalInfo)
     }
 
-    /// The item behind a set's key (`routine:`, `rule:`, `proposal:` or
-    /// `fact:` and its id); nil once it no longer waits.
+    /// The item behind a set's key (`routine:`, `forward:`, `rule:`,
+    /// `proposal:` or `fact:` and its id); nil once it no longer waits.
     func teachItem(_ item: WorkflowItem) -> TeachItem? {
         let parts = item.key.split(separator: ":", maxSplits: 1)
         guard parts.count == 2, let id = Int64(parts[1]) else { return nil }
         switch parts[0] {
         case "routine": return routineProposals.first { $0.id == id }.map(TeachItem.routine)
+        case "forward": return forwardRuleProposals.first { $0.id == id }.map(TeachItem.forward)
         case "rule": return guide.decisions.first { $0.id == id }.map(TeachItem.rule)
         case "proposal": return analysis.proposals.first { $0.id == id }.map(TeachItem.proposal)
         case "fact": return analysis.factProposals.first { $0.id == id }.map(TeachItem.fact)
@@ -38,6 +40,7 @@ extension AppModel {
     static func teachLine(_ t: TeachItem) -> TeachLine {
         switch t {
         case let .routine(p): TeachLine(title: p.statement, kind: "Routine change")
+        case let .forward(p): TeachLine(title: p.statement, kind: "Forwarding rule")
         case let .rule(entry): TeachLine(title: entry.statement, kind: entry.kind.title)
         case let .proposal(p): TeachLine(title: p.statement, kind: p.title)
         case let .fact(p): TeachLine(title: p.headline, kind: "Fact")
@@ -49,12 +52,16 @@ extension AppModel {
         await analysis.load()
         await guide.load()
         await loadRoutineProposals()
+        // The user's forwards, read now: a pattern does not wait on a sync.
+        try? await core?.refreshForwardRuleProposals()
+        await loadForwardRules()
     }
 
     /// The item's evidence, when it has some to show on O.
     static func hasEvidence(_ t: TeachItem) -> Bool {
         switch t {
         case let .routine(p): !p.evidence.isEmpty
+        case let .forward(p): !p.evidence.isEmpty
         case let .rule(entry): entry.evidence.contains { !$0.contradicts }
         case let .proposal(p): p.support > 0
         case let .fact(p): !p.quote.isEmpty
@@ -71,7 +78,7 @@ extension AppModel {
         }
         var actions = [a(.done, .primary, "Accept")]
         switch t {
-        case .rule: actions.append(a(.edit, .plain, nil))
+        case .rule, .forward: actions.append(a(.edit, .plain, nil))
         case let .proposal(p) where p.op != .remove: actions.append(a(.edit, .plain, nil))
         default: break
         }
@@ -96,6 +103,10 @@ extension AppModel {
         case .done:
             if t == nil {
                 await decideWorkflowItem(item, "elsewhere", session: session, notice: nil)
+            } else if case .forward = t {
+                // Accepting a forwarding rule asks how it should act first
+                // (1 or 2): none is chosen ahead.
+                withAnimation(Self.itemMotion) { session.choosingTime = .forwardMode }
             } else {
                 await decideTeach(item, accept: true, session: session)
             }
@@ -105,6 +116,7 @@ extension AppModel {
             switch t {
             case let .rule(entry): guideSheet = .edit(entry, category: entry.category)
             case let .proposal(p): guideSheet = .proposal(p)
+            case let .forward(p): forwardRuleSheet = .proposal(p)
             default: break
             }
         case .openInFull:
@@ -135,6 +147,13 @@ extension AppModel {
                 undoStep = { try? await core.reopenRoutineProposal(p.id) }
                 redoStep = { try? await core.decideRoutineProposal(p.id, accept: accept) }
                 notice = accept ? "The routine now leaves this mail alone" : "Left the routine as it is"
+            case let .forward(p):
+                // Accepting goes through `acceptForwardProposal`, with a mode.
+                guard !accept else { return }
+                try await core.rejectForwardRuleProposal(p.id)
+                undoStep = { try? await core.reopenForwardRuleProposal(p.id) }
+                redoStep = { try? await core.rejectForwardRuleProposal(p.id) }
+                notice = "No rule; it will not be proposed again"
             case let .rule(entry):
                 var edits: [GuideEdit] = [.decide(id: entry.id, status: accept ? .accepted : .rejected)]
                 // One that goes against an accepted entry replaces it.
@@ -169,6 +188,44 @@ extension AppModel {
                                  redoMail: { [weak self] in await redoStep(); await self?.teachChanged() })
     }
 
+    /// Accept a proposed forwarding rule in the mode chosen (1 or 2).
+    func acceptForward(_ item: WorkflowItem, mode: ForwardMode, session: WorkflowSession) async {
+        guard let accountID = openAccountID, case let .forward(p) = teachItem(item) else { return }
+        if let message = await acceptForwardProposal(p, edit: p.edit(mode: mode)) {
+            undo.show(message, accountID: accountID, offersUndo: false)
+        }
+    }
+
+    /// Accept a proposal as the rule given (its own words, or the user's
+    /// edit of them), and decide its item if Teach Kaluta is on it; one ⌘Z
+    /// takes the rule away and puts the proposal back. The reason, when it
+    /// is refused.
+    func acceptForwardProposal(_ p: ForwardRuleProposalInfo, edit: ForwardRuleEdit) async -> String? {
+        guard let core else { return "No account is open." }
+        do {
+            _ = try await core.acceptForwardRuleProposal(p.id, edit)
+        } catch {
+            return error.message
+        }
+        let key = "forward:\(p.id)"
+        let session = workflowSession.flatMap { $0.kind == .teach ? $0 : nil }
+        let item = session?.items.first { $0.key == key && $0.decision == nil }
+        await teachChanged()
+        guard let session, let item else { return nil }
+        let notice = edit.mode == .automatic ? "Kaluta now forwards this mail to \(edit.recipient)"
+            : "Kaluta will ask before forwarding this mail"
+        await decideWorkflowItem(item, "accepted", session: session, notice: notice,
+                                 undoMail: { [weak self] in
+                                     try? await core.reopenForwardRuleProposal(p.id)
+                                     await self?.teachChanged()
+                                 },
+                                 redoMail: { [weak self] in
+                                     _ = try? await core.acceptForwardRuleProposal(p.id, edit)
+                                     await self?.teachChanged()
+                                 })
+        return nil
+    }
+
     /// The guide, the facts and the routine changes as they are now.
     func teachChanged() async {
         await guide.load()
@@ -176,5 +233,6 @@ extension AppModel {
         await analysisChanged()
         await facts.load()
         await loadRoutineProposals()
+        await loadForwardRules()
     }
 }

@@ -3,7 +3,7 @@ import SwiftUI
 /// The Settings window's tabs; `AppModel.settingsTab` picks one before
 /// the window opens (the agent column's Agent Settings…).
 enum SettingsTab: String, Hashable {
-    case general, accounts, agents, permissions, tasks, analysis, facts, routines, integrations, privacy
+    case general, accounts, agents, permissions, tasks, analysis, facts, routines, forwarding, integrations, privacy
 }
 
 struct SettingsView: View {
@@ -12,38 +12,50 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var model = model
         TabView(selection: $model.settingsTab) {
-            Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
-                GeneralSettings()
-            }
-            Tab("Accounts", systemImage: "person.crop.circle", value: SettingsTab.accounts) {
-                AccountSettings()
-            }
-            Tab("Agents", systemImage: "sparkles", value: SettingsTab.agents) {
-                AgentSettings()
-            }
-            Tab("Permissions", systemImage: "hand.raised", value: SettingsTab.permissions) {
-                AgentPermissionsSettings()
-            }
-            Tab("Tasks", systemImage: "checklist", value: SettingsTab.tasks) {
-                TaskSettings()
-            }
-            Tab("Learning", systemImage: "sparkle.magnifyingglass", value: SettingsTab.analysis) {
-                AnalysisSettingsView()
-            }
-            Tab("Facts", systemImage: "globe", value: SettingsTab.facts) {
-                FactsSettings()
-            }
-            Tab("Routines", systemImage: "clock.arrow.2.circlepath", value: SettingsTab.routines) {
-                RoutineSettings()
-            }
-            Tab("Integrations", systemImage: "puzzlepiece.extension", value: SettingsTab.integrations) {
-                IntegrationSettings()
-            }
-            Tab("Privacy", systemImage: "lock.shield", value: SettingsTab.privacy) {
-                PrivacySettings()
-            }
+            mailTabs
+            learningTabs
         }
         .frame(width: 640, height: 520)
+    }
+
+    // In two groups: a tab view's builder takes ten at most.
+    @TabContentBuilder<SettingsTab> private var mailTabs: some TabContent<SettingsTab> {
+        Tab("General", systemImage: "gearshape", value: SettingsTab.general) {
+            GeneralSettings()
+        }
+        Tab("Accounts", systemImage: "person.crop.circle", value: SettingsTab.accounts) {
+            AccountSettings()
+        }
+        Tab("Agents", systemImage: "sparkles", value: SettingsTab.agents) {
+            AgentSettings()
+        }
+        Tab("Permissions", systemImage: "hand.raised", value: SettingsTab.permissions) {
+            AgentPermissionsSettings()
+        }
+        Tab("Tasks", systemImage: "checklist", value: SettingsTab.tasks) {
+            TaskSettings()
+        }
+    }
+
+    @TabContentBuilder<SettingsTab> private var learningTabs: some TabContent<SettingsTab> {
+        Tab("Learning", systemImage: "sparkle.magnifyingglass", value: SettingsTab.analysis) {
+            AnalysisSettingsView()
+        }
+        Tab("Facts", systemImage: "globe", value: SettingsTab.facts) {
+            FactsSettings()
+        }
+        Tab("Routines", systemImage: "clock.arrow.2.circlepath", value: SettingsTab.routines) {
+            RoutineSettings()
+        }
+        Tab("Forwarding", systemImage: "arrowshape.turn.up.right", value: SettingsTab.forwarding) {
+            ForwardingSettings()
+        }
+        Tab("Integrations", systemImage: "puzzlepiece.extension", value: SettingsTab.integrations) {
+            IntegrationSettings()
+        }
+        Tab("Privacy", systemImage: "lock.shield", value: SettingsTab.privacy) {
+            PrivacySettings()
+        }
     }
 }
 

@@ -11,6 +11,10 @@ struct StartScreenView: View {
         let overview = model.workflowOverview
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxxl) {
+                // Nothing new arrives until this is fixed: said first.
+                if model.needsReauthentication {
+                    SignInNotice()
+                }
                 header(overview)
                 if let overview, let next = overview.next,
                    let summary = overview.workflows.first(where: { $0.kind == next }) {

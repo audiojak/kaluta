@@ -378,15 +378,17 @@ pub fn teach_count(conn: &Connection) -> StoreResult<u32> {
 }
 
 /// Each Teach Kaluta key's prefix and the proposed ones of its kind.
-const TEACH_SOURCES: [(&str, &str); 4] = [
+const TEACH_SOURCES: [(&str, &str); 5] = [
     ("routine", "SELECT id FROM routine_proposals WHERE status = 'proposed' ORDER BY id"),
+    ("forward", "SELECT id FROM forward_rule_proposals WHERE status = 'proposed' ORDER BY id"),
     ("rule", "SELECT id FROM guide_entries WHERE status = 'proposed' ORDER BY id"),
     ("proposal", "SELECT id FROM analysis_proposals WHERE status = 'proposed' AND target = 'guide' ORDER BY id"),
     ("fact", "SELECT id FROM analysis_proposals WHERE status = 'proposed' AND target = 'fact' ORDER BY id"),
 ];
 
 /// Teach Kaluta's items, grouped by kind: changes to the sorting routine
-/// (`routine:<id>`), proposed rules (`rule:<id>` from the learning run,
+/// (`routine:<id>`), proposed forwarding rules (`forward:<id>`, spec
+/// §14.15), proposed rules (`rule:<id>` from the learning run,
 /// `proposal:<id>` from the daily review), then the daily review's
 /// proposed facts (`fact:<id>`, also an analysis proposal). Facts merged
 /// from a file that differ wait on the Facts page, not here.

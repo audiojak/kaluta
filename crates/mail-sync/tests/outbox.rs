@@ -95,6 +95,26 @@ async fn a_permanent_failure_rolls_the_change_back() {
     assert!(db.read(consistency::check).await.unwrap().is_empty());
 }
 
+/// A rejected sign-in is not the change's fault: it is kept as made, and
+/// goes at the next drain once the user has signed in again.
+#[tokio::test]
+async fn a_change_refused_for_the_sign_in_waits_and_goes_after_signing_in_again() {
+    let (fake, db, _recorder, engine) = setup("unauthorized").await;
+    engine.apply_change(LocalChange::archive(vec![ThreadId::new("a")]), true).await.unwrap();
+    fake.fail_next_writes(vec![ProviderError::Unauthorized]);
+    assert!(matches!(engine.drain_outbox().await, Err(mail_sync::SyncError::Provider(ProviderError::Unauthorized))));
+    let counts = engine.outbox_counts().await.unwrap();
+    assert_eq!((counts.pending, counts.failed), (1, 0), "waiting, not failed");
+    assert_eq!(inbox(&db).await, vec!["b"], "not rolled back");
+    assert_eq!(labels(&fake, "m1"), vec!["INBOX", "UNREAD"]);
+
+    // Signed in again: sync restarts and drains at once.
+    assert_eq!(engine.drain_outbox().await.unwrap().sent, 1);
+    assert_eq!(labels(&fake, "m1"), vec!["UNREAD"]);
+    assert_eq!(engine.outbox_counts().await.unwrap(), outbox::OutboxCounts::default());
+    assert!(db.read(consistency::check).await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_transient_failure_is_retried_in_order() {
     let (fake, db, _recorder, engine) = setup("retry").await;

@@ -35,6 +35,15 @@ struct InviteBar: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
+                // The calendar is what is missing: connect it from here,
+                // rather than send the user to Settings to find out how.
+                if Self.offersConnect(invite.state) {
+                    Button("Connect Calendar…") { Task { await model.connectCalendarForInvite(threadID) } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(model.inviteWorking != nil)
+                        .hoverHelp("Give Kaluta access to your Google Calendar in the browser, then answer here")
+                }
             }
         }
         .padding(Space.l)
@@ -98,12 +107,17 @@ struct InviteBar: View {
         return "\(start.formatted(day)), \(start.formatted(time)) – \(end.formatted(day)), \(end.formatted(time))"
     }
 
+    /// Whether connecting the calendar is what would let it be answered.
+    static func offersConnect(_ state: InviteState) -> Bool {
+        state == .notConnected || state == .noEventAccess
+    }
+
     /// Why it cannot be answered here.
     static func why(_ i: CalendarInvite) -> String {
         switch i.state {
         case .answerable: ""
-        case .notConnected: "Connect Google Calendar in Settings › Accounts to answer here"
-        case .noEventAccess: "Connect the calendar again with holds to answer here"
+        case .notConnected: "Your Google Calendar is not connected"
+        case .noEventAccess: "Answering needs access to your calendar's events"
         case .notOnCalendar: "Not on your Google Calendar"
         case .notAGuest: "You organise this event"
         case .cancelled: "Cancelled by the organiser"

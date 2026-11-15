@@ -167,6 +167,16 @@ pub async fn begin(client: &OAuthClient, login_hint: Option<&str>, imap: bool) -
     begin_with(client, AUTH_URL, login_hint, if imap { SCOPE_WITH_IMAP } else { SCOPE }).await
 }
 
+/// Begin with exactly these scopes (signing in again asks for what the
+/// account had, its calendar included).
+pub async fn begin_scoped(
+    client: &OAuthClient,
+    login_hint: Option<&str>,
+    scope: &str,
+) -> ProviderResult<PendingAuthorization> {
+    begin_with(client, AUTH_URL, login_hint, scope).await
+}
+
 pub async fn begin_with(
     client: &OAuthClient,
     auth_url: &str,
