@@ -3663,7 +3663,11 @@ already existed.
   drops its added conversations; undoing the delete brings them back.
   The Tasks workflow's item says "2 more emails on this task", opening
   them. Core: `add_thread_to_task`, `remove_thread_from_task`;
-  `TaskItem.linked_thread_ids`.
+  `TaskItem.linked_thread_ids`. *(Amendment 2026-11-17:)* starting a task
+  for a conversation that has an open one, its own or one it was added
+  to, shows that task to change instead of making a second, in the mail
+  view's dialog as in Triage's form; Triage's form says so under its
+  heading, since no other task is offered there.
 - *Finding the task.* As soon as a task is started for an email (T in
   Triage's form, `t`'s dialog in the mail view), Kaluta looks for an open
   task it may belong to, in the background, with a progress bar under the
@@ -4854,10 +4858,23 @@ one decision with a one-line reason:
 - The bar is the same for every conversation: *Reply* (Return or R),
   *Make a task* (T), *Archive* (E), *Leave in Inbox* (L), *Remind me
   later* (B), *Skip* (S).
+  *(Amendment 2026-11-18: the bar is* Reply *(Return or R),* Reply all
+  *(A),* Forward *(F),* Make a task *(T),* Archive *(E),* Later *(L),*
+  Skip *(S). The three ways to answer lead it, in words; Reply all is
+  greyed out when no one but the user and the sender is on the email.*
+  Later *replaces both* Remind me later *and* Leave in Inbox*: L asks*
+  Remind you when?*, where 1–5 answer as before and L again is* No
+  reminder*, which leaves the email in the Inbox and ends Triage's
+  question about it (the old* Leave in Inbox*). B still opens the same
+  step but is no longer listed. Where Kaluta suggested* Leave in Inbox*,
+  it now suggests* Later*.)*
 - **Remind me later** (B, Gmail's Snooze key; amended 2026-11-09): two
   steps. B asks *Remind you when?*, and 1–5 answer. *(Amended
   2026-11-14: Gmail's Snooze choices, each named with its time, "1 later
-  today (Sat 6:00 PM)".)* *Later today* (6 PM; three hours on once 6 PM
+  today (Sat 6:00 PM)".)* *(Amended 2026-11-18: the choices are listed
+  one to a row, each led by its key, with its time beside it, not run
+  together in one sentence; *Check again* in Waiting on others lists its
+  days the same way.)* *Later today* (6 PM; three hours on once 6 PM
   is under an hour away or past), *Tomorrow* (8 AM), *Next week* (Monday,
   8 AM; a week on when tomorrow is Monday), *This weekend* (the next
   Saturday after today, 8 AM; *Next weekend* on a Saturday or Sunday) and
@@ -4914,7 +4931,9 @@ one decision with a one-line reason:
   one but the user and the sender is on it (its key does nothing then and
   the key list leaves it out), and *Forward* (F), always there. Neither
   moves a decision. Short of room, the two show as icons with their keys
-  (their names on hover). Amended 2026-11-13: the bar never asks for a
+  (their names on hover). *(Amendment 2026-11-18: in Triage the two are
+  no longer apart or icons; they follow Reply at the left, as above.
+  Other workflows keep the two parts.)* Amended 2026-11-13: the bar never asks for a
   wider window. Short of room it gives up, in turn, its inset to the
   card's left edge, the two names, some of the buttons' padding, and
   last its right end, which scrolls sideways; the keys work whatever is
@@ -4924,7 +4943,11 @@ one decision with a one-line reason:
   first to start, or the address typed; Tab moves on to the note and
   ⇧Tab back) and a note, optional; Send (⌘Return, or Return in the note)
   sends the note with the email as it was sent below it. Once it has
-  gone the item stays, for its decision.
+  gone the item stays, for its decision. *(Amendment 2026-11-17:)* the
+  names are offered one to a row, each with its address beside it, so two
+  people of one name or one person's two addresses are told apart; Tab
+  and ⇧Tab go round them as ↓ and ↑ do, and with none offered Tab moves
+  on to the note. ⇧Tab in the note goes back to *To* for another name.
   **P** and **N** (Gmail's keys) go message by message: P opens the
   stack if needed and the message before, alone and answered; N the one
   after, and past the last, the card's email with the stack closed. The
@@ -4995,7 +5018,9 @@ end's score says "done elsewhere". The due line reads *Due today*,
 week) or *Carried over from 3 Oct*; "3 more later this week" is the
 header's pill. Replies archives the conversation when the reply is sent;
 Tasks does when *Send and finish the task* finishes it; ⌘Z puts it
-back. The starters for a question that offers a choice are the choices
+back. *(Amendment 2026-11-17:)* Triage archives it too, and a reply sent
+from any of the three marks the conversation read, since Gmail does not
+do so for a reply sent through its API; ⌘Z takes both back. The starters for a question that offers a choice are the choices
 as things to do ("Go for Tuesday", "Push to Thursday").
 
 #### Waiting on others

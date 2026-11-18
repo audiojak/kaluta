@@ -13,8 +13,24 @@ struct WorkflowWriteView: View {
     @State private var sayCursor: TextSelection?
     @FocusState private var textFocused: Bool
     @FocusState private var toFocused: Bool
-    /// Which of the names offered ↑ and ↓ have reached; Return takes it.
+    /// Which of the names offered ↑ and ↓ or Tab have reached; Return takes it.
     @State private var pick = 0
+
+    /// ⇧Tab arrives as its own character on the Mac, not as Tab with Shift.
+    static let backtab = KeyEquivalent("\u{19}")
+
+    /// The name reached next among `count` offered, going round.
+    static func nextPick(_ pick: Int, count: Int, back: Bool) -> Int {
+        guard count > 0 else { return 0 }
+        return (min(pick, count - 1) + (back ? count - 1 : 1)) % count
+    }
+
+    /// What a name offered shows: the name with its address beside it, or
+    /// the address alone when the mailbox has no name for it.
+    static func offered(_ address: AddressInfo) -> (title: String, address: String?) {
+        let name = address.name?.trimmingCharacters(in: .whitespaces) ?? ""
+        return name.isEmpty ? (address.email, nil) : (name, address.email)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xl) {
@@ -149,18 +165,25 @@ struct WorkflowWriteView: View {
                         }
                         .onKeyPress(.downArrow) {
                             guard !suggestions.isEmpty else { return .ignored }
-                            pick = (pick + 1) % suggestions.count
+                            pick = Self.nextPick(pick, count: suggestions.count, back: false)
                             return .handled
                         }
                         .onKeyPress(.upArrow) {
                             guard !suggestions.isEmpty else { return .ignored }
-                            pick = (pick + suggestions.count - 1) % suggestions.count
+                            pick = Self.nextPick(pick, count: suggestions.count, back: true)
                             return .handled
                         }
                         .onChange(of: writer.recipientText) { pick = 0 }
-                        // Tab: on to the note, taking an address typed.
-                        .onKeyPress(.tab, phases: .down) { press in
-                            guard !press.modifiers.contains(.shift) else { return .ignored }
+                        // Tab and ⇧Tab: through the names offered; with
+                        // none, Tab goes on to the note, taking an address
+                        // typed.
+                        .onKeyPress(keys: [.tab, Self.backtab], phases: .down) { press in
+                            let back = press.key == Self.backtab || press.modifiers.contains(.shift)
+                            if !suggestions.isEmpty {
+                                pick = Self.nextPick(pick, count: suggestions.count, back: back)
+                                return .handled
+                            }
+                            guard !back else { return .ignored }
                             _ = writer.takeTypedRecipient()
                             focusNote()
                             return .handled
@@ -171,22 +194,32 @@ struct WorkflowWriteView: View {
                 .padding(Space.xl)
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
                 if !suggestions.isEmpty {
-                    HStack(spacing: Space.s) {
-                        // Names, with the address on hover; the address when
-                        // names repeat or there is none.
-                        let names = Dictionary(grouping: suggestions, by: { $0.name ?? "" })
+                    // One row a name, with its address: two people of one
+                    // name, or one person's two addresses, are told apart.
+                    VStack(alignment: .leading, spacing: Space.hair) {
                         ForEach(Array(suggestions.enumerated()), id: \.element.email) { i, s in
-                            let name = s.name ?? ""
+                            let shown = Self.offered(s)
                             let reached = i == min(pick, suggestions.count - 1)
                             Button { take(s) } label: {
-                                Text(name.isEmpty || names[name]?.count ?? 0 > 1 ? s.email : name).lineLimit(1)
+                                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                                    Text(shown.title).lineLimit(1)
+                                    if let address = shown.address {
+                                        Text(address).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.horizontal, Space.m).padding(.vertical, Space.xs)
+                                .background(reached ? Tone.workflow(session.kind).opacity(0.14) : .clear,
+                                            in: RoundedRectangle(cornerRadius: Radius.control))
+                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.bordered)
-                            .tint(reached ? Tone.workflow(session.kind) : nil)
-                            .hoverHelp("Forward to \(name.isEmpty ? s.email : "\(name) (\(s.email))") (↑↓ then Return)")
+                            .buttonStyle(.plain)
+                            .hoverHelp("Forward to \(shown.title) (↑↓ or Tab, then Return)")
+                            .accessibilityLabel(shown.address.map { "\(shown.title), \($0)" } ?? shown.title)
                             .accessibilityAddTraits(reached ? .isSelected : [])
                         }
-                        Text("↑↓ then Return").foregroundStyle(.secondary).fixedSize()
+                        Text("↑↓ or Tab to move, Return to choose")
+                            .foregroundStyle(.secondary).padding(.horizontal, Space.m).padding(.top, Space.xs)
                     }
                     .font(TypeRole.workflowContext)
                 }
@@ -198,9 +231,10 @@ struct WorkflowWriteView: View {
                     .lineLimit(2...6)
                     .focused($fieldFocused)
                     .onSubmit { perform(.primary) }
-                    // ⇧Tab: back to To.
-                    .onKeyPress(.tab, phases: .down) { press in
-                        guard press.modifiers.contains(.shift) else { return .ignored }
+                    // ⇧Tab: back to To, for another name.
+                    .onKeyPress(keys: [.tab, Self.backtab], phases: .down) { press in
+                        guard press.key == Self.backtab || press.modifiers.contains(.shift) else { return .ignored }
+                        fieldFocused = false
                         toFocused = true
                         return .handled
                     }

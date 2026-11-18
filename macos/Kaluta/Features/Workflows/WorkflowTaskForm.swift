@@ -28,7 +28,14 @@ struct WorkflowTaskFormView: View {
         @Bindable var draft = form.draft
         @Bindable var form = form
         VStack(alignment: .leading, spacing: Space.l) {
-            Text(form.isExisting ? "This conversation's task" : "The task").font(TypeRole.workflowHeading)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text(form.isExisting ? "This conversation's task" : "The task").font(TypeRole.workflowHeading)
+                if form.isExisting {
+                    // Why no other task is offered: this email is on one.
+                    Text("This email already has a task, so you are changing it, not making another.")
+                        .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                }
+            }
             TextField("What to do", text: $draft.title)
                 .font(TypeRole.workflowContent)
                 .textFieldStyle(.plain)

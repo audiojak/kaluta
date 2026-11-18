@@ -468,6 +468,20 @@ struct WorkflowTests {
         #expect(writer.recipients.isEmpty)
     }
 
+    /// The names offered under To show their addresses, and ↑↓ or Tab and
+    /// ⇧Tab go round them.
+    @Test func aForwardsNamesShowTheirAddressesAndGoRound() {
+        let named = WorkflowWriteView.offered(AddressInfo(name: "Austin Born", email: "austin@example.com"))
+        #expect(named.title == "Austin Born" && named.address == "austin@example.com")
+        let bare = WorkflowWriteView.offered(AddressInfo(name: " ", email: "a@example.com"))
+        #expect(bare.title == "a@example.com" && bare.address == nil)
+        #expect(WorkflowWriteView.nextPick(0, count: 3, back: false) == 1)
+        #expect(WorkflowWriteView.nextPick(2, count: 3, back: false) == 0)
+        #expect(WorkflowWriteView.nextPick(0, count: 3, back: true) == 2)
+        #expect(WorkflowWriteView.nextPick(7, count: 3, back: true) == 1, "a pick past the end counts as the last")
+        #expect(WorkflowWriteView.nextPick(0, count: 0, back: false) == 0)
+    }
+
     /// Kaluta asks before it writes (spec §14.9, §14.13): one question at
     /// a time; Return answers, ⇧Return skips, 1–3 pick an answer offered,
     /// Esc goes to the question before and then back to the words.

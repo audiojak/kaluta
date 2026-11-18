@@ -15,6 +15,31 @@ struct TaskMatchTests {
         #expect(TaskMatchesView.detail(match) == "Review · 3 emails already · Same subject and sender")
     }
 
+    /// A conversation with an open task, its own or one it was added to,
+    /// shows that task to change: `t` does not make a second.
+    @Test func aConversationWithATaskShowsItRatherThanMakingASecond() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()),
+                             defaults: try #require(UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let rows = try await core.threads(in: "INBOX", limit: 50).rows
+        let (own, added, free) = (try #require(rows.first), try #require(rows.dropFirst().first),
+                                  try #require(rows.dropFirst(2).first))
+        let made = try await core.createTasks([NewTask(threadId: own.id, messageId: nil, title: "Sign it", notes: "",
+                                                       category: "Review", dueDay: nil, action: .reply, why: "",
+                                                       fromAi: false)])
+        let task = try #require(made.first)
+        try await core.addThreadToTask(task.id, threadID: added.id)
+        await model.tasks.load()
+        #expect(model.openTask(onThread: own.id)?.id == task.id)
+        #expect(model.openTask(onThread: added.id)?.id == task.id, "an added conversation counts")
+        #expect(model.openTask(onThread: free.id) == nil)
+
+        await model.openTaskDialog(for: added)
+        #expect(model.taskDraft?.editing?.id == task.id, "the task it is on, to change")
+        model.closeTaskDialog()
+    }
+
     /// The dialog's email finds the task made for a like one, is added to
     /// it, and ⌘Z takes it off again.
     @Test func theDialogsEmailIsAddedToTheTaskItBelongsTo() async throws {
