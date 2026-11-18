@@ -18,6 +18,18 @@ ignore = [
   # used by the IMAP backfill. Drop this when async-imap moves off it.
   # Accepted 2026-11-09.
   { id = "RUSTSEC-2026-0441", reason = "unmaintained, no vulnerability; via async-imap, no maintained release" },
+  # chrono is declared unmaintained (no known vulnerability; every version
+  # is affected, so there is nothing to upgrade to). Kaluta uses it for
+  # calendar and schedule arithmetic, and it also arrives through
+  # async-imap, rrule, chrono-tz and rmcp, so moving Kaluta's own code off
+  # it would not remove it. Drop this when those crates move to jiff or
+  # time, and move Kaluta's own uses with them. Accepted 2026-11-17.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; also required by async-imap, rrule, chrono-tz and rmcp" },
+  # chrono-tz (time zones for chrono) is declared unmaintained with it: no
+  # known vulnerability, no version to upgrade to. Kaluta and provider-gcal
+  # use it for calendar time zones, and rrule requires it. It goes when
+  # chrono goes. Accepted 2026-11-17.
+  { id = "RUSTSEC-2026-0555", reason = "unmaintained, no vulnerability; goes with chrono, also required by rrule" },
 ]
 
 [licenses]
