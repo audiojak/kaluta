@@ -1906,6 +1906,13 @@ Session flow: `initialize` (clientInfo `kaluta`, `experimentalApi: true`) →
 `AgentEvent`. Cancel: `turn/interrupt {threadId, turnId}`. Thread IDs are
 persisted for `thread/resume`.
 
+*(Amendment 2026-11-17.)* Read-only sessions (writing help, task
+suggestions and the background jobs of §14) are one-off jobs that nobody
+continues, so they start with `ephemeral: true`: Codex does not save
+them, which keeps them out of the user's ChatGPT history. No thread id
+is kept for them. Conversations in the agent panel and routine runs stay
+`ephemeral: false`, because they can be resumed.
+
 MCP tool approvals are set to `auto` on the Codex side because Kaluta's
 own permission engine gates inside the tool (§10); we do not depend on
 Codex's approval request (its exact server-request for MCP tools is not

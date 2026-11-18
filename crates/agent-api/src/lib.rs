@@ -88,6 +88,10 @@ pub struct SessionConfig {
     /// The provider's id for a session to continue (Claude session id,
     /// Codex thread id).
     pub resume: Option<String>,
+    /// A one-off job nobody continues: the provider does not save the
+    /// conversation, where it can avoid it. Codex would otherwise list
+    /// each one in the user's ChatGPT history.
+    pub ephemeral: bool,
     /// Extra environment, e.g. an `ANTHROPIC_API_KEY` from the Keychain.
     pub env: Vec<(String, String)>,
 }

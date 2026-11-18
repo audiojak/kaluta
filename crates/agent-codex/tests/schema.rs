@@ -45,6 +45,7 @@ async fn requests_match_the_codex_schema() {
         max_turns: 40,
         max_budget_usd: None,
         resume: None,
+        ephemeral: true,
         env: vec![],
     };
     let (tx, mut rx) = mpsc::unbounded_channel();

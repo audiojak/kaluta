@@ -39,6 +39,7 @@ fn config(dir: &Path) -> SessionConfig {
         max_turns: 40,
         max_budget_usd: None,
         resume: None,
+        ephemeral: false,
         env: vec![("ANTHROPIC_API_KEY".into(), "sk-test".into())],
     }
 }
