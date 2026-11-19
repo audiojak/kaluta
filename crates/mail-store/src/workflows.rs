@@ -234,6 +234,21 @@ fn inbox_candidates(conn: &Connection, since: Millis, asking: bool, limit: u32) 
         .collect())
 }
 
+/// What came in since the user last looked (spec §14.13 amendment
+/// 2026-11-18): Inbox conversations whose latest message is someone
+/// else's, from `since`; and how many of them the triage job suggested
+/// answering or making a task of. No new inference.
+pub fn catch_up(conn: &Connection, since: Millis) -> StoreResult<(u32, u32)> {
+    let new = inbox_candidates(conn, since, false, 5_000)?;
+    let mut needs_you = 0;
+    for c in &new {
+        if suggestion(conn, &c.thread_id)?.is_some_and(|s| s.kind == "reply" || s.kind == "task") {
+            needs_you += 1;
+        }
+    }
+    Ok((new.len() as u32, needs_you))
+}
+
 /// One Inbox conversation as a candidate, if its latest message is
 /// someone else's.
 pub(crate) fn inbox_candidate(conn: &Connection, thread_id: &str) -> StoreResult<Option<Candidate>> {
@@ -708,6 +723,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
         Store(dir, db)
+    }
+
+    #[test]
+    fn catching_up_counts_what_came_in_and_what_kaluta_said_needs_the_user() {
+        let Store(_, db) = &store("catch-up");
+        crate::demo_workflows::generate(db, NOW).unwrap();
+        let (all, none_suggested) = db.read_blocking(|c| catch_up(c, 0)).unwrap();
+        assert!(all > 2, "the demo's Inbox");
+        assert_eq!(none_suggested, 0, "nothing suggested yet");
+        assert_eq!(db.read_blocking(|c| catch_up(c, NOW + 1)).unwrap(), (0, 0), "nothing since now");
+        let found = db.read_blocking(|c| triage_candidates(c, 0, 10)).unwrap();
+        let suggest = |c: &Candidate, kind: &str| SuggestionRow {
+            thread_id: c.thread_id.clone(),
+            message_id: c.message_id.clone(),
+            kind: kind.into(),
+            seconds: None,
+            reason: String::new(),
+            answers_json: "[]".into(),
+            task_json: None,
+            agent: None,
+            created_at: NOW,
+            summary: String::new(),
+            category: String::new(),
+            needs_reply: kind == "reply",
+            options_json: "[]".into(),
+            answers_by: "triage".into(),
+        };
+        let rows = [suggest(&found[0], "reply"), suggest(&found[1], "task"), suggest(&found[2], "archive")];
+        db.write_blocking(move |tx| rows.iter().try_for_each(|r| save_suggestion(tx, r))).unwrap();
+        assert_eq!(db.read_blocking(|c| catch_up(c, 0)).unwrap(), (all, 2), "a reply and a task; not an archive");
     }
 
     fn keys(items: &[&str]) -> Vec<String> {

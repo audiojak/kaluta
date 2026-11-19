@@ -128,7 +128,9 @@ struct ThreadListView: NSViewRepresentable {
                 ?? ThreadRowView()
             let written = model.threads.mailboxID == "DRAFT" && model.kalutaWritten.contains(rows[row].id)
             let chips = ThreadRowView.chips(for: rows[row], labels: model.chipLabels, excluding: model.threads.mailboxID)
-            view.configure(with: rows[row], chips: (written ? [ThreadRowView.kalutaWrote] : []) + chips,
+            let related = model.threads.related.contains(rows[row].id)
+            view.configure(with: rows[row],
+                           chips: (written ? [ThreadRowView.kalutaWrote] : []) + (related ? [ThreadRowView.related] : []) + chips,
                            me: model.ownAddresses,
                            markImportant: !(model.threads.mailboxID ?? "").split(separator: "+").contains("IMPORTANT"))
             view.setAccessibilityCustomActions(accessibilityActions(for: rows[row]))
@@ -287,6 +289,10 @@ final class ThreadTableView: NSTableView {
         labels.submenu = labelMenu()
         menu.addItem(labels)
         menu.addItem(ActionItem("Remind Me…", key: "b") { [weak self] in self?.showRemindPicker() })
+        let watching = model.actionTargets.allSatisfy(model.watched.contains)
+        menu.addItem(ActionItem(watching ? "Stop Telling Me About Replies" : "Tell Me When They Reply") {
+            Task { await model.toggleWatchSelection() }
+        })
         menu.addItem(.separator())
         menu.addItem(ActionItem("New Task from Email…", key: "t") { Task { await model.openTaskDialog() } })
         menu.addItem(ActionItem("Create Tasks…", key: "T") { Task { await model.openBulkTasks() } })

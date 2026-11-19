@@ -44,6 +44,10 @@ extension AppModel {
             MailCommand(id: "junk", title: isSpamMailbox ? "Not Junk" : "Mark as Junk", keys: "!", listKey: "!",
                         unavailable: none ?? (canJunk ? nil : "Not for mail you sent")) { self.toggleJunkSelection() },
             MailCommand(id: "inbox", title: "Move to Inbox", unavailable: none) { self.moveSelectionToInbox() },
+            MailCommand(id: "watch",
+                        title: !actionTargets.isEmpty && actionTargets.allSatisfy(watched.contains)
+                            ? "Stop Telling Me About Replies" : "Tell Me When They Reply",
+                        unavailable: none) { Task { await self.toggleWatchSelection() } },
             MailCommand(id: "task", title: "New Task from Email…", keys: "T", listKey: "t", unavailable: none) {
                 Task { await self.openTaskDialog() }
             },

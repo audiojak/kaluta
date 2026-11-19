@@ -3124,6 +3124,11 @@ away, unchanged except where §14.13 says.)*
   `⌃⌘A` archive, `⌘⌫` trash, `⌘⇧U` read/unread, `⌘⇧L` star, `⌘R`
   reply, `⌘⇧R` reply-all, `⌘⇧F` forward, `⌘N` new, `⌘F` search,
   `⌘1`–`⌘6` mailboxes, `⌘⇧N` check for new mail, `⌘K` agent prompt.
+  *(Amendment 2026-11-18, ADR 0023, search by meaning: a search with
+  plain words shows, after all its word matches, the conversations near
+  its meaning, marked Related, from vectors Apple's on-device sentence
+  model computes in the background. Operators ask for exact matches and
+  get none. Nothing leaves the Mac.)*
   *(Amendment 2026-11-18, ADR 0025: `⌘K` is the command palette, a
   field over every mail-window command, workflow, mailbox and label by
   name; ↑↓ select, Return runs, Esc closes. A command that cannot run
@@ -3595,6 +3600,15 @@ above the capsule. Settings › Agents › Clear Suggestions History forgets
 the recent prompts (UserDefaults, per account).
 
 ### 14.7 Other native behaviors
+
+*(Amendment 2026-11-18, reply-landed alerts: *Tell Me When They Reply*
+(the row's menu, ⌘K) watches the selected conversations, with Undo. When
+someone else writes in a watched conversation, the user is told once,
+even with Kaluta in front and with new-mail notifications off: "Sam
+answered", the subject and the start of the message, with *Reply* (opens
+the conversation with a reply) and *Remind Me Tomorrow* (back in Triage
+at 8 AM). The watch then ends. Only the mail window's account is
+watched for now. Store: `watches` (thread id, `set_at`), migration 0042.)*
 
 Standard menu bar with all commands and shortcuts; `NSUserNotification` via
 `UNUserNotificationCenter` for new mail in Inbox (opt-in per sender
@@ -5061,6 +5075,13 @@ one decision with a one-line reason:
   when the conversation has one.
 - Making the task, Return saves it (or the conversation's task, changed),
   archives the email if ticked, and moves on; ⌘Z takes all of it back.
+- **Catch-up line** *(Amendment 2026-11-18).* Under the Dashboard's
+  headline: "18 new since 9:00 · 3 need you": the Inbox conversations
+  whose latest message from someone else came since the user last left
+  the Dashboard (the first time, the last day), and how many of them the
+  triage job suggested answering or making a task of. No new inference.
+  A click starts Triage. Nothing new: no line. The time is kept per
+  account in its store.
 - **Arrivals wait for the end.** The set does not grow; at its end, mail
   that arrived meanwhile is the next thing offered (*Triage 3 that
   arrived*, Return) before the next workflow.
@@ -5315,6 +5336,12 @@ synced; the labels are.
 ---
 
 ### 14.14 Granola and Follow-ups **(Amendment 2026-11-04)**
+
+*(Amendment 2026-11-18, meeting prep, ADR 0024: with Granola connected,
+the `prep` job writes a short brief for each meeting on the calendar in
+the next 24 hours, from the user's own mail with each person there. The
+Dashboard shows the next one ("Next: … at 10:00 · brief ready"), opening
+to the brief, and a notification with it comes 15 minutes before.)*
 
 *Implemented 2026-11-04.* The user asked for an optional Granola
 integration: with it on, a workflow where Kaluta has read meeting

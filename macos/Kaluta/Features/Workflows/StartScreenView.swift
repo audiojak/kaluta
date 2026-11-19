@@ -51,6 +51,8 @@ struct StartScreenView: View {
         // Taken a turn after appearing: focus set while a view appears
         // is lost to the one it replaces.
         .onAppear { Task { @MainActor in focused = true } }
+        // Leaving the Dashboard: the next catch-up counts from now.
+        .onDisappear { Task { try? await model.core?.markLooked() } }
         .task(id: [model.workflowsRevision, model.tasksRevision, model.inboxRevision, model.guideRevision,
                    model.factsRevision]) {
             // Counts settle as mail, tasks and proposals change: at most
@@ -96,6 +98,16 @@ struct StartScreenView: View {
                 .foregroundStyle(.secondary)
             Text(Self.headline(overview))
                 .font(TypeRole.workflowHeadline)
+            if let brief = model.meetingBriefs.first {
+                MeetingBriefLine(brief: brief)
+            }
+            if let catchUp = model.catchUp, let line = Self.catchUpLine(catchUp) {
+                Button { start(.triage) } label: {
+                    Text(line).font(TypeRole.workflowContent)
+                }
+                .buttonStyle(.link)
+                .hoverHelp("Start Triage with what came in")
+            }
             if let next = overview?.next {
                 Text(next == .triage ? "Start with what's new: answer what takes 30 seconds, make tasks of the rest."
                                      : "Start with \(next.title.lowercased()).")
@@ -126,6 +138,17 @@ struct StartScreenView: View {
         let minutes = (Int(overview.estimateSecs) + 30) / 60
         if overview.next == nil { return "You're all caught up." }
         return minutes < 1 ? "A minute or two of mail today." : "About \(minutes) minutes of mail today."
+    }
+
+    /// "18 new since 9:00 · 3 need you"; nil when nothing came in.
+    static func catchUpLine(_ c: CatchUp, now: Date = .now, calendar: Calendar = .current) -> String? {
+        guard c.new > 0 else { return nil }
+        let since = CoreClient.date(c.since)
+        let when = calendar.isDate(since, inSameDayAs: now)
+            ? since.formatted(date: .omitted, time: .shortened)
+            : since.formatted(.dateTime.weekday(.wide).hour().minute())
+        let needs = c.needsYou > 0 ? " · \(c.needsYou) need\(c.needsYou == 1 ? "s" : "") you" : ""
+        return "\(c.new) new since \(when)\(needs)"
     }
 
     static func doneToday(_ overview: WorkflowOverview) -> String {
@@ -340,5 +363,39 @@ enum TriageCardText {
             out += ". Worth a look: \(w.name), \(w.subject)" + (reasons(w.reasons).map { ", \($0)" } ?? "")
         }
         return out
+    }
+}
+
+/// The next meeting with its brief (meeting prep): one line on the
+/// Dashboard, opening to the brief.
+struct MeetingBriefLine: View {
+    let brief: MeetingBrief
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Button { open.toggle() } label: {
+                Label(Self.line(brief), systemImage: "person.2")
+                    .font(TypeRole.workflowContent)
+            }
+            .buttonStyle(.link)
+            .hoverHelp(open ? "Hide the brief" : "Show what Kaluta found in your mail about this meeting")
+            if open {
+                Text(brief.brief)
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// "Next: Pricing call with Reese at 10:00 AM · brief ready".
+    static func line(_ brief: MeetingBrief, now: Date = .now) -> String {
+        let at = CoreClient.date(brief.meetingAt)
+        let when = Calendar.current.isDate(at, inSameDayAs: now)
+            ? at.formatted(date: .omitted, time: .shortened)
+            : "tomorrow at " + at.formatted(date: .omitted, time: .shortened)
+        return "Next: \(brief.title) at \(when) · brief ready".replacingOccurrences(of: "at tomorrow at", with: "tomorrow at")
     }
 }

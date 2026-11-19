@@ -68,6 +68,10 @@ final class AppModel {
     /// The conversations whose drafts Kaluta wrote, not sent yet: marked
     /// in the Drafts list.
     var kalutaWritten: Set<String> = []
+    /// Vectors for search by meaning, computed on the Mac.
+    @ObservationIgnored lazy var indexer: EmbeddingIndexer? = core.map { EmbeddingIndexer(core: $0) }
+    /// Conversations watched for an answer (reply-landed alerts).
+    var watched: Set<String> = []
     /// The command palette (⌘K) is showing.
     var paletteShown = false
     /// The snippets the palette offers as new messages, read as it opens.
@@ -423,6 +427,10 @@ final class AppModel {
     }
     /// The start screen's counts, estimates and Done today.
     var workflowOverview: WorkflowOverview?
+    /// The Dashboard's catch-up line: what came in since the user last looked.
+    var catchUp: CatchUp?
+    /// Briefs for the next day's meetings (meeting prep).
+    var meetingBriefs: [MeetingBrief] = []
     /// The Dashboard's *Tidy the Inbox* card (spec §14.12, on the
     /// Dashboard), and the suggestion being archived.
     var inboxTidy: InboxTidy?
@@ -531,6 +539,12 @@ final class AppModel {
                 self.openGuideDecisionsNow()
             }
         }
+        notifier.replyInThread = { [weak self] thread, account in
+            Task { await self?.replyFromNotification(threadID: thread, accountID: account) }
+        }
+        notifier.remindTomorrow = { [weak self] thread, account in
+            Task { await self?.remindTomorrow(threadID: thread, accountID: account) }
+        }
         notifier.openAnalysis = { [weak self] account in
             guard let self else { return }
             Task {
@@ -556,8 +570,13 @@ final class AppModel {
         } else {
             accountState = .noAccount
         }
+        // Search by meaning: its matches after the others, and the index
+        // filled in the background (not in tests, which ask for it).
+        threads.meaning = { [weak self] query in await self?.indexer?.related(to: query) ?? [] }
+        if !CoreClient.isRunningTests { indexer?.start() }
         // Anything scheduled to send while Kaluta was not running.
         await sendDueScheduled()
+        await loadWatched()
     }
 
     /// Which Drafts rows to mark as written by Kaluta.
@@ -1020,6 +1039,9 @@ final class AppModel {
         searchText = ""
         selectedMailboxIDSilently(place?.mailbox ?? "INBOX")
         await open(accountID: accountID, startingSync: false)
+        // The index is the open account's: start on this one's backlog.
+        if !CoreClient.isRunningTests { indexer?.start() }
+        await loadWatched()
         routinesRevision += 1
         if let thread = place?.thread, threads.rows.contains(where: { $0.id == thread }) {
             selectedThreadID = thread
@@ -1813,6 +1835,7 @@ final class AppModel {
             await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))
+            await announceReplies(mail, accountID: tagged.accountID)
         case let .agent(sessionID, events):
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:

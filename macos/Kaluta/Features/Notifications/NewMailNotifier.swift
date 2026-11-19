@@ -28,6 +28,14 @@ final class NewMailNotifier: NSObject {
     var openGuideDecisions: ((String?) -> Void)?
     /// Opens Analysis, in this account (or the open one).
     var openAnalysis: ((String?) -> Void)?
+    /// A reply-landed alert's buttons: reply in the conversation, or be
+    /// reminded of it tomorrow (thread, account).
+    var replyInThread: ((String, String?) -> Void)?
+    var remindTomorrow: ((String, String?) -> Void)?
+
+    nonisolated static let replyCategory = "reply-landed"
+    nonisolated static let replyAction = "reply"
+    nonisolated static let remindAction = "remind-tomorrow"
 
     private let defaults: UserDefaults
     private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "notifications")
@@ -45,7 +53,57 @@ final class NewMailNotifier: NSObject {
 
     /// Call once at launch so clicks on earlier notifications route here.
     func install() {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        center.setNotificationCategories([Self.replyLandedCategory])
+    }
+
+    /// Meeting prep: a reminder with the brief, 15 minutes before the
+    /// meeting. Scheduled again whenever the briefs load; the same id
+    /// replaces it, so a moved meeting moves its reminder.
+    func scheduleBrief(_ brief: MeetingBrief, accountID: String?, now: Date = .now) {
+        guard let request = Self.briefRequest(brief, accountID: accountID, now: now) else { return }
+        post(request)
+    }
+
+    static let briefLead: TimeInterval = 15 * 60
+
+    static func briefRequest(_ brief: MeetingBrief, accountID: String?, now: Date = .now) -> UNNotificationRequest? {
+        let wait = CoreClient.date(brief.meetingAt).addingTimeInterval(-briefLead).timeIntervalSince(now)
+        guard wait > 1 else { return nil }
+        let content = UNMutableNotificationContent()
+        content.title = "\(brief.title) in 15 minutes"
+        content.body = brief.brief
+        content.threadIdentifier = "meeting-prep"
+        content.userInfo = ["accountID": accountID ?? "", "brief": brief.meetingId]
+        return UNNotificationRequest(identifier: "brief-\(brief.meetingId)", content: content,
+                                     trigger: UNTimeIntervalNotificationTrigger(timeInterval: wait, repeats: false))
+    }
+
+    static var replyLandedCategory: UNNotificationCategory {
+        UNNotificationCategory(identifier: replyCategory, actions: [
+            UNNotificationAction(identifier: replyAction, title: "Reply", options: [.foreground]),
+            UNNotificationAction(identifier: remindAction, title: "Remind Me Tomorrow", options: []),
+        ], intentIdentifiers: [])
+    }
+
+    /// Someone answered a conversation the user watches: told even with
+    /// Kaluta in front, and even with new-mail notifications off (the user
+    /// asked for this one).
+    func announceReply(_ mail: CoreClientEvent.NewMail, accountID: String?) {
+        post(Self.replyRequest(mail, accountID: accountID))
+    }
+
+    static func replyRequest(_ mail: CoreClientEvent.NewMail, accountID: String?) -> UNNotificationRequest {
+        let content = UNMutableNotificationContent()
+        content.title = "\(mail.senderName) answered"
+        content.subtitle = mail.subject.isEmpty ? "(no subject)" : mail.subject
+        content.body = mail.snippet
+        content.sound = .default
+        content.categoryIdentifier = replyCategory
+        content.threadIdentifier = mail.threadID
+        content.userInfo = ["threadID": mail.threadID, "accountID": accountID ?? "", "replyLanded": true]
+        return UNNotificationRequest(identifier: "reply-\(mail.messageID)", content: content, trigger: nil)
     }
 
     // MARK: Notifications
@@ -176,6 +234,19 @@ extension NewMailNotifier: UNUserNotificationCenterDelegate {
         let accountID = info["accountID"] as? String
         let guide = info["guide"] as? Bool ?? false
         let analysis = info["analysis"] as? Bool ?? false
+        let action = response.actionIdentifier
+        let account = accountID.flatMap { $0.isEmpty ? nil : $0 }
+        if action == Self.remindAction, let threadID {
+            await MainActor.run { remindTomorrow?(threadID, account) }
+            return
+        }
+        if action == Self.replyAction, let threadID {
+            await MainActor.run {
+                NSApp.activate()
+                replyInThread?(threadID, account)
+            }
+            return
+        }
         await MainActor.run {
             NSApp.activate()
             if guide { openGuideDecisions?(accountID.flatMap { $0.isEmpty ? nil : $0 }) }
@@ -184,9 +255,10 @@ extension NewMailNotifier: UNUserNotificationCenterDelegate {
         }
     }
 
-    /// Mail arriving while the app is frontmost is already visible.
+    /// Mail arriving while the app is frontmost is already visible; an
+    /// answer the user asked to hear about is shown anyway.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        []
+        notification.request.content.categoryIdentifier == Self.replyCategory ? [.banner, .sound] : []
     }
 }

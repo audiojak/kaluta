@@ -498,12 +498,25 @@ pub fn followup_answer(prompt: &str) -> Option<String> {
     })
 }
 
+/// The fake's answer to a Kaluta meeting prep prompt: a brief naming each
+/// person it was given, or `None` for any other prompt.
+pub fn prep_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta meeting prep") {
+        return None;
+    }
+    let names: Vec<&str> = prompt.split("<person name=\"").skip(1).filter_map(|p| p.split('"').next()).collect();
+    let mut lines: Vec<String> = names.iter().map(|n| format!("- {n}: last wrote about the proposal.")).collect();
+    lines.push("- You owe: the pricing for 50 seats.".into());
+    Some(lines.join("\n"))
+}
+
 /// The scripted answer to one of Kaluta's own prompts (tasks, the writing
 /// guide, analysis, facts, writing help's questions), or `None`.
 pub fn scripted_answer(prompt: &str) -> Option<String> {
     task_answer(prompt)
         .or_else(|| task_match_answer(prompt))
         .or_else(|| followup_answer(prompt))
+        .or_else(|| prep_answer(prompt))
         .or_else(|| triage_answer(prompt))
         .or_else(|| reply_answers_answer(prompt))
         .or_else(|| waiting_answer(prompt))

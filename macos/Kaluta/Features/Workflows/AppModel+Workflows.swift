@@ -78,6 +78,9 @@ extension AppModel {
     func refreshWorkflowOverview() async {
         guard let core else { return }
         workflowOverview = try? await core.workflowOverview()
+        catchUp = try? await core.catchUp()
+        meetingBriefs = (try? await core.meetingBriefs()) ?? []
+        for brief in meetingBriefs { notifier.scheduleBrief(brief, accountID: openAccountID) }
         await refreshInboxTidy()
     }
 

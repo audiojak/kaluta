@@ -14,6 +14,11 @@ final class ThreadListStore {
     private(set) var mailboxID: String?
     /// Non-nil while showing search results instead of the mailbox.
     private(set) var searchQuery: String?
+    /// Search results found by meaning rather than by words, after the
+    /// others (spec §14.3 amendment 2026-11-18): marked Related.
+    private(set) var related: Set<String> = []
+    /// Finds conversations by a query's meaning; nil leaves it out.
+    @ObservationIgnored var meaning: ((String) async -> [ThreadRow])?
     /// Why the current query could not run (shown under the field).
     private(set) var searchError: String?
     /// Bumped whenever `rows` is replaced wholesale (new mailbox, refresh),
@@ -33,11 +38,18 @@ final class ThreadListStore {
 
     var hasMore: Bool { nextCursor != nil }
 
+    /// Returns once the search under way has run (its words, then its
+    /// meaning), so what follows sees its results.
+    func searchSettled() async {
+        await searchTask?.value
+    }
+
     func show(mailboxID: String) async {
         self.mailboxID = mailboxID
         searchTask?.cancel()
         searchQuery = nil
         searchError = nil
+        related = []
         nextCursor = nil
         await load(replacing: true, limit: Self.pageSize)
     }
@@ -58,8 +70,10 @@ final class ThreadListStore {
             try? await Task.sleep(for: Self.searchDebounce)
             guard !Task.isCancelled else { return }
             searchQuery = query
+            related = []
             nextCursor = nil
             await load(replacing: true, limit: Self.pageSize)
+            await addRelated(query)
             await searchServerIfNeeded(query)
         }
     }
@@ -81,6 +95,22 @@ final class ThreadListStore {
         guard !Task.isCancelled, searchQuery == query, arrived > 0 else { return }
         nextCursor = nil
         await load(replacing: true, limit: Self.pageSize)
+        await addRelated(query)
+    }
+
+    /// After the matches by words, once all are shown, the conversations
+    /// near the query's meaning that are not among them. Only for plain
+    /// words: operators (`from:`, `label:`) ask for exact matches.
+    func addRelated(_ query: String) async {
+        guard let meaning, searchError == nil, !hasMore, Self.hasFreeText(query), !query.contains(":") else { return }
+        let found = await meaning(query)
+        guard !Task.isCancelled, searchQuery == query else { return }
+        let shown = Set(rows.map(\.id))
+        let more = found.filter { !shown.contains($0.id) }
+        guard !more.isEmpty else { return }
+        related = Set(more.map(\.id))
+        rows += more
+        generation += 1
     }
 
     /// Whether a query has words to find in bodies, not only operators
@@ -177,6 +207,7 @@ final class ThreadListStore {
         if replacing {
             if page.rows != rows {
                 rows = page.rows
+                related = []
                 generation += 1
             }
         } else {

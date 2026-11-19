@@ -75,6 +75,8 @@ final class ThreadRowView: NSTableCellView {
     /// The mark on a Drafts row whose draft Kaluta wrote and the user has
     /// not sent (spec §14.5 amendment 2026-11-18).
     static let kalutaWrote = Chip(path: "Written by Kaluta", color: nil)
+    /// A search result found by its meaning, not its words.
+    static let related = Chip(path: "Related", color: nil)
 
     /// The labels to chip on a row: user labels other than the mailbox
     /// being shown, in path order, at most `limit`.

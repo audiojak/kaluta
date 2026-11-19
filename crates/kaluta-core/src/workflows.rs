@@ -132,6 +132,18 @@ pub struct WorkflowDay {
     pub decisions: u32,
 }
 
+/// What came in since the user last looked (spec §14.13 amendment 2026-11-18).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CatchUp {
+    /// When the user last looked (Unix ms).
+    pub since: i64,
+    pub new: u32,
+    pub needs_you: u32,
+}
+
+/// Where the Dashboard's catch-up line counts from.
+const LAST_LOOKED_KEY: &str = "dashboard_last_looked";
+
 /// The start screen (spec §14.13).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct WorkflowOverview {
@@ -344,6 +356,35 @@ impl Core {
     /// The start screen: each workflow's count, estimate and first names,
     /// which comes next, and what was done today; for Triage, the people
     /// the user knows and what is worth a look.
+    /// What came in since the user last looked at the Dashboard (spec
+    /// §14.13 amendment 2026-11-18): the time, the new conversations, and
+    /// how many of them the triage job said need the user. A first look
+    /// counts the last day.
+    pub async fn catch_up(&self) -> Result<CatchUp, CoreError> {
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        runtime::run(async move {
+            Ok(db
+                .read(move |c| {
+                    let since = store::meta(c, LAST_LOOKED_KEY)?.and_then(|v| v.parse().ok()).unwrap_or(now - DAY_MS);
+                    let (new, needs_you) = store::catch_up(c, since)?;
+                    Ok(CatchUp { since, new, needs_you })
+                })
+                .await?)
+        })
+        .await
+    }
+
+    /// The user looked at the Dashboard now: the next catch-up counts from here.
+    pub async fn mark_looked(&self) -> Result<(), CoreError> {
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        runtime::run(
+            async move { Ok(db.write(move |tx| store::set_meta(tx, LAST_LOOKED_KEY, &now.to_string())).await?) },
+        )
+        .await
+    }
+
     pub async fn workflow_overview(&self) -> Result<WorkflowOverview, CoreError> {
         let db = self.db()?;
         let now = mail_sync::now_millis();

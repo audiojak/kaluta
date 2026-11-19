@@ -861,6 +861,52 @@ final class CoreClient: Sendable {
     // MARK: Workflows (spec §14.13)
 
     /// The start screen: each workflow's count, estimate and first names.
+    // MARK: Reply-landed alerts (spec §14.7 amendment 2026-11-18)
+
+    /// Watch a conversation for an answer, or no longer; whether it was.
+    @discardableResult
+    func watchThread(_ threadID: String, _ on: Bool) async throws(CoreClientError) -> Bool {
+        try await call { try await core.watchThread(threadId: threadID, on: on) }
+    }
+
+    func watchedThreads() async throws(CoreClientError) -> Set<String> {
+        Set(try await call { try await core.watchedThreads() })
+    }
+
+    /// Of these conversations, the watched ones someone answered (told once).
+    func repliesLanded(_ threadIDs: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.repliesLanded(threadIds: threadIDs) }
+    }
+
+    // MARK: Search by meaning (spec §14.3 amendment 2026-11-18, ADR 0023)
+
+    func embeddingBacklog(model: String, limit: UInt32) async throws(CoreClientError) -> [EmbeddingInput] {
+        try await call { try await core.embeddingBacklog(model: model, limit: limit) }
+    }
+
+    @discardableResult
+    func storeEmbeddings(model: String, _ vectors: [EmbeddingVector]) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.storeEmbeddings(model: model, vectors: vectors) }
+    }
+
+    func searchByMeaning(model: String, vector: [Float], limit: UInt32 = 20) async throws(CoreClientError) -> [ThreadRow] {
+        try await call { try await core.searchByMeaning(model: model, vector: vector, limit: limit) }
+    }
+
+    /// Briefs for the next day's meetings, soonest first (meeting prep).
+    func meetingBriefs() async throws(CoreClientError) -> [MeetingBrief] {
+        try await call { try await core.meetingBriefs() }
+    }
+
+    /// What came in since the Dashboard was last looked at.
+    func catchUp() async throws(CoreClientError) -> CatchUp {
+        try await call { try await core.catchUp() }
+    }
+
+    func markLooked() async throws(CoreClientError) {
+        try await call { try await core.markLooked() }
+    }
+
     func workflowOverview() async throws(CoreClientError) -> WorkflowOverview {
         try await call { try await core.workflowOverview() }
     }
@@ -2059,6 +2105,10 @@ typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias TaskMatch = KalutaCore.TaskMatch
 typealias ReminderInfo = KalutaCore.ReminderInfo
 typealias ScheduledSendInfo = KalutaCore.ScheduledSendInfo
+typealias CatchUp = KalutaCore.CatchUp
+typealias EmbeddingInput = KalutaCore.EmbeddingInput
+typealias EmbeddingVector = KalutaCore.EmbeddingVector
+typealias MeetingBrief = KalutaCore.MeetingBrief
 typealias SnippetInfo = KalutaCore.SnippetInfo
 typealias ScheduledDue = KalutaCore.ScheduledDue
 typealias CalendarInvite = KalutaCore.CalendarInvite
