@@ -14,6 +14,7 @@ struct ComposerView: View {
     /// Discarding cannot be undone: asked first when the draft has anything in it.
     @State private var confirmingDiscard = false
     @State private var choosingTime = false
+    @State private var calendarConnected = false
     @State private var assistant = ComposerAssistant()
     @State private var rewriter = SelectionRewriter()
     @State private var formatting = RichTextCommands()
@@ -53,6 +54,7 @@ struct ComposerView: View {
                 store.findTask(in: open)
             }
             if model.agent.providers.isEmpty { await model.agent.loadProviders() }
+            calendarConnected = (try? await model.core?.calendarStatus())?.connected == true
             await assistant.loadAudiences(model.core)
         }
         .onChange(of: store?.phase) { _, phase in
@@ -228,6 +230,9 @@ struct ComposerView: View {
                     if store.hasContent { confirmingDiscard = true } else { Task { await discard(store) } }
                 }
                 .help(ToolbarHelp.composer("Discard")) // toolbar
+                Button("Insert Free Times", systemImage: "calendar") { Task { await insertFreeTimes() } }
+                    .disabled(!calendarConnected)
+                    .help(ToolbarHelp.composer("Insert Free Times")) // toolbar
                 if request.agentAction == nil {
                     Button("Send Later", systemImage: "clock") { choosingTime = true }
                         .keyboardShortcut("d", modifiers: [.command, .option, .shift])
@@ -375,6 +380,18 @@ struct ComposerView: View {
     }
 
     /// Writing help: ask the agent to write or change the message.
+    /// Insert Free Times: the next free times, a line each, at the cursor
+    /// (spec §14.9 amendment 2026-11-18). Only free times, no events.
+    private func insertFreeTimes() async {
+        guard let core = model.core, let textView = formatting.textView,
+              let found = try? await core.calendarFreeSlots() else { return }
+        let text = FreeTimes.insertion(FreeTimes.shown(found.slots, limit: 3), zone: found.timeZone)
+        guard !text.isEmpty else { return }
+        textView.window?.makeFirstResponder(textView)
+        textView.insertText(NSAttributedString(string: text, attributes: textView.typingAttributes),
+                            replacementRange: textView.selectedRange())
+    }
+
     /// Rewrite in place (⌘J): while Kaluta writes, and why it could not.
     @ViewBuilder private var rewriteStatus: some View {
         switch rewriter.state {

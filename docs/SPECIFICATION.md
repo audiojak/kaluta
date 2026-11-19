@@ -2100,6 +2100,14 @@ Default policy:
 | Reversible | Allow | RequireApproval (per tool) |
 | External | RequireApproval | — (cannot be set to Allow in MVP; *amended 2026-10-06:* `send` and `forward` are Allow on an agent mailbox set to send freely, §7.9) |
 
+*(Amendment 2026-11-18: `mail_attach_to_draft` is Reversible. It puts a
+file from the user's mail on a draft made in the same session: the
+`attachment_id` of a message the session may read, which must belong to
+that message. A file on disk can never be named, the user's own drafts
+cannot be given files, and a draft under review cannot be changed. The
+file is a copy; the user reviews the draft with its files before it is
+sent, as for every send.)*
+
 Every tool call passes through `decide` **inside the core, before the store
 is touched**. This is the only enforcement point; nothing in the agent CLIs
 is trusted to enforce anything.
@@ -3397,6 +3405,13 @@ left tools that need no approval open). Sending stays the user's.
 
 ### 14.6 Agent panel
 
+*(Amendment 2026-11-18, receipts: a request that did or asked more than
+one thing ends with a **This request** card: one line for each thing it
+changed (a draft written, a file attached, a time held, labels changed;
+reads are not listed) and for each proposal with its state, and one
+*Approve These* for the waiting proposals that are not sends. Sends
+keep their own card and open the email to read first (§10.4).)*
+
 Not a chat window. The prompt bar sits under the thread list; a session
 opens an inspector column on the right with: a compact transcript
 (assistant text, collapsed tool calls "Searched mail — 18 threads"),
@@ -3465,6 +3480,16 @@ when you mean undo": all these actions are reversible).
 - The outbox runs strictly in order: an op waiting to retry holds back
   the ones after it (an undo must never reach Gmail before the action it
   reverses); held sends alone step aside until their time.
+- **Free times** *(Amendment 2026-11-18).* With Google Calendar
+  connected (§14.9, ADR 0019), a conversation whose subject or latest
+  received message asks to meet shows *You're free* over the message:
+  the free times in the next three days (else the first after), at most
+  six, each a menu with *Hold on Your Calendar* (where holds are allowed)
+  and *Copy*. The composer's toolbar has *Insert Free Times*, which
+  writes the next three at the cursor, a line each, with the time zone;
+  writing help answering an email that asks to meet is given the free
+  times to offer, as the workflows' answers are. Only free times are
+  read and shown; events and their titles never are.
 - **Rewrite in place** *(Amendment 2026-11-18).* ⌘J in the composer
   offers, at the selection (the cursor's paragraph when nothing is
   selected): *Improve the writing*, *Fix spelling and grammar*, *Make it

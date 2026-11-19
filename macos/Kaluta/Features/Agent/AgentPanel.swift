@@ -372,7 +372,60 @@ private struct EntryView: View {
                 .foregroundStyle(Tone.failure)
         case let .proposal(actionID, tool, summary, draftID, state):
             ProposalCard(actionID: actionID, tool: tool, summary: summary, draftID: draftID, state: state)
+        case let .receipt(turn):
+            ReceiptCard(turn: turn)
         }
+    }
+}
+
+/// What one request did and asks, together (spec §14.6 amendment
+/// 2026-11-18): each thing done, each thing waiting, and one Approve for
+/// the waiting ones that are not sends. Sends keep their own card, which
+/// opens the email to read first.
+private struct ReceiptCard: View {
+    let turn: Int
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let lines = model.agent.receipt(turn: turn)
+        let approvable = model.agent.approvable(inTurn: turn)
+        let sendsWaiting = lines.contains { $0.pending } && lines.filter(\.pending).count > approvable.count
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text("This request").font(TypeRole.meta.weight(.semibold)).accessibilityAddTraits(.isHeader)
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Image(systemName: line.pending ? "hand.raised" : "checkmark.circle")
+                        .foregroundStyle(line.pending ? AnyShapeStyle(Tone.caution) : AnyShapeStyle(Tone.approved))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Space.hair) {
+                        Text(line.title).fixedSize(horizontal: false, vertical: true)
+                        if !line.detail.isEmpty {
+                            Text(line.detail).font(TypeRole.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+                .font(TypeRole.meta)
+                .accessibilityElement(children: .combine)
+            }
+            if sendsWaiting {
+                Text("Messages to send open for you to read first, from their own cards.")
+                    .font(TypeRole.caption).foregroundStyle(.secondary)
+            }
+            if !approvable.isEmpty {
+                HStack {
+                    Spacer()
+                    Button(approvable.count == 1 ? "Approve" : "Approve These (\(approvable.count))") {
+                        model.agent.approveTurn(turn)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .hoverHelp("Let the agent do the waiting actions of this request, except sends")
+                }
+            }
+        }
+        .card(approvable.isEmpty ? .neutral : .attention, padding: Space.m)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What this request did")
     }
 }
 

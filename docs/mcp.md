@@ -107,6 +107,18 @@ Replace fields of a draft created in this session. Omitted fields are unchanged.
 | `subject` | string |  |  |
 | `to` | array of string |  |  |
 
+## `mail_attach_to_draft`
+
+Attach a file from the user's mail to a draft created in this session: the attachment_id of a message you can read (from mail_get_message). Files on disk cannot be attached. The user reviews the draft, with its files, before it is sent.
+
+**Risk:** Reversible — allowed unless you ask to approve it
+
+| Argument | Type | Required | Notes |
+|---|---|---|---|
+| `attachment_id` | string | yes |  |
+| `draft_id` | integer | yes |  |
+| `message_id` | string | yes |  |
+
 ## `mail_archive`
 
 Archive threads (remove them from the Inbox; they stay searchable).

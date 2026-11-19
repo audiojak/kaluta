@@ -258,3 +258,41 @@ struct ApprovalCardTests {
         #expect(AgentStore.isSend("mail_send") && AgentStore.isSend("mail_forward") && !AgentStore.isSend("mail_archive"))
     }
 }
+
+/// One request that did several things gets a receipt (spec §14.6
+/// amendment 2026-11-18): what it did, what waits, and one Approve for the
+/// waiting actions that are not sends.
+@MainActor
+struct AgentReceiptTests {
+    @Test func aRequestThatDidSeveralThingsGetsOneReceipt() async {
+        let store = AgentStore(core: nil, defaults: UserDefaults(suiteName: "kaluta-tests-\(UUID().uuidString)")!)
+        await store.ingest([
+            .turnStarted,
+            .toolCallStarted(callId: "1", tool: "mail_search", argsSummary: "invoices"),
+            .toolCallFinished(callId: "1", ok: true, summary: "3 threads"),
+            .toolCallStarted(callId: "2", tool: "mail_create_draft", argsSummary: ""),
+            .toolCallFinished(callId: "2", ok: true, summary: "Draft to Sam"),
+            .toolCallStarted(callId: "3", tool: "calendar_hold", argsSummary: ""),
+            .toolCallFinished(callId: "3", ok: true, summary: "Thu 10:00"),
+            .actionProposed(actionId: 7, tool: "mail_archive", summary: "Archive 2 threads", draftId: nil),
+            .actionProposed(actionId: 8, tool: "mail_send", summary: "Send the reply to Sam", draftId: 41),
+            .turnCompleted(inputTokens: nil, outputTokens: nil, costUsd: nil),
+        ])
+        let lines = store.receipt(turn: 1)
+        #expect(lines.map(\.title) == ["Wrote a draft", "Held a time on your calendar", "Archive 2 threads",
+                                       "Send the reply to Sam"], "reads are not listed")
+        #expect(lines.map(\.pending) == [false, false, true, true])
+        #expect(store.approvable(inTurn: 1) == [7], "the send opens to be read first")
+        #expect(store.entries.last?.kind == .receipt(turn: 1))
+
+        // A request that did one thing needs no receipt.
+        await store.ingest([
+            .turnStarted,
+            .toolCallStarted(callId: "4", tool: "mail_archive", argsSummary: ""),
+            .toolCallFinished(callId: "4", ok: true, summary: "Archived 1"),
+            .turnCompleted(inputTokens: nil, outputTokens: nil, costUsd: nil),
+        ])
+        #expect(!store.entries.contains { $0.kind == .receipt(turn: 2) })
+        #expect(store.approvable(inTurn: 2).isEmpty)
+    }
+}
