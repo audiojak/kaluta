@@ -3465,6 +3465,36 @@ when you mean undo": all these actions are reversible).
 - The outbox runs strictly in order: an op waiting to retry holds back
   the ones after it (an undo must never reach Gmail before the action it
   reverses); held sends alone step aside until their time.
+- **Rewrite in place** *(Amendment 2026-11-18).* ⌘J in the composer
+  offers, at the selection (the cursor's paragraph when nothing is
+  selected): *Improve the writing*, *Fix spelling and grammar*, *Make it
+  shorter*, *Make it longer* (⌘1–⌘4), or a request typed in. Kaluta
+  rewrites only that passage, with the message as context and the
+  writing guide when one applies, in a read-only session that can change
+  no mail (as writing help, §14.9). The rewrite replaces the passage in
+  its own style; the rest of the message is untouched, and ⌘Z (the text
+  view's own undo) takes it back. If the passage was edited while Kaluta
+  wrote, nothing is replaced and the composer says so. The message as
+  left is recorded as writing help (§14.10).
+- **Snippets** *(Amendment 2026-11-18).* Saved text to put into a
+  message. Typing `/` at the start of a line in the composer opens a
+  picker of snippets by name (↑↓, Return inserts in place of the `/`,
+  Esc leaves the `/`); the insertion is one undoable edit. `{first
+  name}` becomes the first To recipient's first name (or the address
+  before the @). Selected text's menu has *Save as Snippet*, named by
+  its first line, with Undo. Settings › Snippets lists, renames, edits
+  and deletes them; editing the text there keeps it plain, and text
+  saved from a message keeps its formatting unless changed. ⌘K offers
+  *New Message with “name”*. Snippets live in the global store beside
+  global facts (ADR 0012), so every account has them (migration 0041).
+- **Kaluta's drafts are marked** *(Amendment 2026-11-18).* In the
+  Drafts list, a conversation whose draft Kaluta wrote (writing help, an
+  agent or a routine, as recorded in §14.10) and the user has not sent
+  starts its snippet line with a *Written by Kaluta* chip. Where the
+  text followed the writing guide, the composer's note and the
+  workflow's answers carry a *Your Writing Guide* link that opens the
+  guide in the mail window. The mark relies on the composition record,
+  which an account keeps only after its first writing-guide run.
 - **Send later** *(Amendment 2026-11-18, ADR 0022).* The composer's
   *Send Later* (⌥⇧⌘D) asks *Send when?* with the time picker (the ready
   choices, or a typed time). The message is saved and stays a draft,

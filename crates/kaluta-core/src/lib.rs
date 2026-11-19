@@ -56,6 +56,7 @@ mod rules_publish;
 mod runtime;
 mod scheduled;
 pub mod secrets;
+mod snippets;
 mod sync;
 mod task_match;
 mod tasks;

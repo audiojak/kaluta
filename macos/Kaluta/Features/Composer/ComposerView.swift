@@ -15,6 +15,7 @@ struct ComposerView: View {
     @State private var confirmingDiscard = false
     @State private var choosingTime = false
     @State private var assistant = ComposerAssistant()
+    @State private var rewriter = SelectionRewriter()
     @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
     @State private var factAnswers: [String: String] = [:]
@@ -69,7 +70,10 @@ struct ComposerView: View {
         }
         .onDisappear {
             guard let store else { return }
-            Task { await store.close() }
+            Task {
+                await store.close()
+                if model.selectedMailboxID == "DRAFT" { await model.loadKalutaWritten() }
+            }
         }
     }
 
@@ -146,6 +150,12 @@ struct ComposerView: View {
                                 .hidden()
                         }
                     }
+                    // ⌘J: Kaluta rewrites the selection (or the paragraph) in place.
+                    Button("Rewrite Selection") { // no-help: hidden
+                        if let textView = formatting.textView { rewriter.present(in: textView, store: store, model: model) }
+                    }
+                    .keyboardShortcut("j", modifiers: .command)
+                    .hidden()
                 }
             if let task = store.task, request.agentName == nil {
                 taskBar(task, store)
@@ -195,6 +205,7 @@ struct ComposerView: View {
                     quoteToggle
                 }
             }
+            rewriteStatus
             assistantBar(store)
             if !store.attachments.isEmpty {
                 attachmentStrip(store)
@@ -281,7 +292,15 @@ struct ComposerView: View {
         @Bindable var store = store
         return VStack(alignment: .leading, spacing: 0) {
             RichTextEditor(text: $store.body, focusOnAppear: !store.to.isEmpty, onTab: { assistantFocused = true },
-                           commands: formatting)
+                           commands: formatting,
+                           onSlash: { textView, at in
+                               Task {
+                                   let snippets = (try? await model.core?.snippets()) ?? []
+                                   SnippetPopover.show(in: textView, slashAt: at, snippets: snippets,
+                                                       recipient: store.to.first)
+                               }
+                           },
+                           onSaveSnippet: { selection in Task { await model.saveSnippet(from: selection) } })
             FormattingBar(commands: formatting)
                 .padding(Space.m)
         }
@@ -356,6 +375,21 @@ struct ComposerView: View {
     }
 
     /// Writing help: ask the agent to write or change the message.
+    /// Rewrite in place (⌘J): while Kaluta writes, and why it could not.
+    @ViewBuilder private var rewriteStatus: some View {
+        switch rewriter.state {
+        case .working:
+            Banner("Kaluta is rewriting the selection…", systemImage: "sparkles", intent: .info) {
+                Button("Stop") { rewriter.cancel() }
+                    .hoverHelp("Stop and leave the text as it is")
+            }
+        case let .failed(message):
+            Banner(message, systemImage: "exclamationmark.triangle.fill", intent: .caution)
+        case .idle:
+            EmptyView()
+        }
+    }
+
     private func assistantBar(_ store: ComposerStore) -> some View {
         @Bindable var assistant = assistant
         let ready = model.agent.isProviderReady
@@ -411,6 +445,11 @@ struct ComposerView: View {
                     Text(assistant.followsGuide
                          ? "Written by \(name), following your writing guide. Read it before sending."
                          : "Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                    if assistant.followsGuide {
+                        Button("Your Writing Guide") { model.showWritingGuide() }
+                            .buttonStyle(.link)
+                            .hoverHelp("See the writing guide it followed, in the mail window")
+                    }
                     audienceMenu(store)
                     Button("Undo") { assistant.undo() }
                         .buttonStyle(.link)

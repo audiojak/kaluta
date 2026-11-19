@@ -1237,6 +1237,32 @@ final class CoreClient: Sendable {
         }
     }
 
+    // MARK: Snippets (spec §14.5 amendment 2026-11-18)
+
+    func snippets() async throws(CoreClientError) -> [SnippetInfo] {
+        try await call { try await core.snippets() }
+    }
+
+    @discardableResult
+    func saveSnippet(_ snippet: SnippetInfo) async throws(CoreClientError) -> Int64 {
+        try await call { try await core.saveSnippet(snippet: snippet) }
+    }
+
+    /// The snippet it was, for undo.
+    @discardableResult
+    func deleteSnippet(_ id: Int64) async throws(CoreClientError) -> SnippetInfo? {
+        try await call { try await core.deleteSnippet(id: id) }
+    }
+
+    func restoreSnippet(_ snippet: SnippetInfo) async throws(CoreClientError) {
+        try await call { try await core.restoreSnippet(snippet: snippet) }
+    }
+
+    /// The conversations whose drafts Kaluta wrote, not sent yet.
+    func kalutaWrittenThreads() async throws(CoreClientError) -> Set<String> {
+        Set(try await call { try await core.kalutaWrittenThreads() })
+    }
+
     func aiCompositions(limit: UInt32 = 50) async throws(CoreClientError) -> [AiCompositionInfo] {
         try await call { try await core.aiCompositions(limit: limit) }
     }
@@ -2033,6 +2059,7 @@ typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias TaskMatch = KalutaCore.TaskMatch
 typealias ReminderInfo = KalutaCore.ReminderInfo
 typealias ScheduledSendInfo = KalutaCore.ScheduledSendInfo
+typealias SnippetInfo = KalutaCore.SnippetInfo
 typealias ScheduledDue = KalutaCore.ScheduledDue
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse

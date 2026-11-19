@@ -64,6 +64,7 @@ extension AppModel {
         commands += WorkflowKind.all.map { kind in
             MailCommand(id: "workflow-\(kind)", title: "Start \(kind.title)") { Task { await self.beginWorkflow(kind) } }
         }
+        commands += snippetCommands(paletteSnippets)
         commands += (mailboxes.systemMailboxes + mailboxes.labels).map { mailbox in
             MailCommand(id: "go-\(mailbox.id)", title: "Go to \(mailbox.name)") { self.selectedMailboxID = mailbox.id }
         }
@@ -82,6 +83,7 @@ extension AppModel {
             main.makeKeyAndOrderFront(nil)
         }
         paletteShown = true
+        Task { paletteSnippets = (try? await core?.snippets()) ?? [] }
     }
 
     /// The palette's last row: what was typed, asked of Kaluta.

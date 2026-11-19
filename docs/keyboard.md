@@ -63,6 +63,9 @@ times a year). Ticks, not the highlight, are what these act on.
 | Keys | Action |
 |---|---|
 | `⇧⌘D` | Send |
+| `⌥⇧⌘D` | Send later |
+| `⌘J` | Rewrite the selection (or paragraph) in place |
+| `/` | At the start of a line: insert a snippet |
 | `⇧⌘A` | Attach files |
 | `⌘B  ⌘I  ⌘U` | Bold, italic, underline |
 

@@ -124,6 +124,18 @@ impl Core {
 
 #[uniffi::export]
 impl Core {
+    /// The conversations whose drafts Kaluta wrote and the user has not
+    /// sent yet, for the Drafts list's mark (spec §14.5 amendment
+    /// 2026-11-18). Thread ids reach Swift as their text, as `ThreadRow`'s
+    /// do: UniFFI carries no `mail_domain` types.
+    pub async fn kaluta_written_threads(&self) -> Result<Vec<String>, CoreError> {
+        let db = self.db()?;
+        runtime::run(
+            async move { Ok(db.read(compositions::written_threads).await?.into_iter().map(|t| t.0).collect()) },
+        )
+        .await
+    }
+
     /// Writing help put `ai_text` into draft `draft_id` (spec §14.10).
     /// Called after the draft is saved; a later text for the same draft
     /// replaces it. Nothing is kept before the account's first finished

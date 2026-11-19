@@ -158,6 +158,8 @@ is only for "approved". Orange is text or a band's fill, never an error.
   `MailCommand`, each row its name and `Keycap`, greyed out with the
   reason when it cannot run; the last row asks Kaluta what was typed.
   `KeyHints` below.
+- **`SnippetPickerView`**: the `/` popover in the composer: a filter
+  field over the snippets by name, `KeyHints` ("Esc Type /").
 - **`ScheduledStrip`**: over the Drafts list, a line per draft that will
   be sent later (a clock, its subject and time); a click opens the draft.
 - **`Banner`**: icon, one line and optional small buttons, by intent.

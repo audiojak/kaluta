@@ -65,8 +65,13 @@ final class AppModel {
     /// for the footer's countdown; nil when it has not.
     private(set) var syncPausedUntil: Date?
 
+    /// The conversations whose drafts Kaluta wrote, not sent yet: marked
+    /// in the Drafts list.
+    var kalutaWritten: Set<String> = []
     /// The command palette (⌘K) is showing.
     var paletteShown = false
+    /// The snippets the palette offers as new messages, read as it opens.
+    var paletteSnippets: [SnippetInfo] = []
     /// Drafts to be sent later, in every open account, soonest first.
     var scheduledSends: [ScheduledSendInfo] = []
     /// The wait for the next scheduled send's time.
@@ -553,6 +558,20 @@ final class AppModel {
         }
         // Anything scheduled to send while Kaluta was not running.
         await sendDueScheduled()
+    }
+
+    /// Which Drafts rows to mark as written by Kaluta.
+    func loadKalutaWritten() async {
+        kalutaWritten = (try? await core?.kalutaWrittenThreads()) ?? []
+    }
+
+    /// The writing guide, in the mail window (from a composer's "your
+    /// writing guide" link).
+    func showWritingGuide() {
+        if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+            main.makeKeyAndOrderFront(nil)
+        }
+        selectedMailboxID = Self.guideMailboxID
     }
 
     func openDemoMailbox() async {
@@ -1655,6 +1674,7 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
+        if selectedMailboxID == "DRAFT" { Task { await loadKalutaWritten() } }
         if isGuide { Task { await guide.load(); await proposalsShown(.rules) } }
         if isFacts { Task { await proposalsShown(.facts) } }
         guard case .open = accountState, let id = listMailboxID else { return }

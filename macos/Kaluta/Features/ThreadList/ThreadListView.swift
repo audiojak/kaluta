@@ -126,8 +126,9 @@ struct ThreadListView: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             let view = tableView.makeView(withIdentifier: ThreadRowView.identifier, owner: nil) as? ThreadRowView
                 ?? ThreadRowView()
-            view.configure(with: rows[row], chips: ThreadRowView.chips(for: rows[row], labels: model.chipLabels,
-                                                                     excluding: model.threads.mailboxID),
+            let written = model.threads.mailboxID == "DRAFT" && model.kalutaWritten.contains(rows[row].id)
+            let chips = ThreadRowView.chips(for: rows[row], labels: model.chipLabels, excluding: model.threads.mailboxID)
+            view.configure(with: rows[row], chips: (written ? [ThreadRowView.kalutaWrote] : []) + chips,
                            me: model.ownAddresses,
                            markImportant: !(model.threads.mailboxID ?? "").split(separator: "+").contains("IMPORTANT"))
             view.setAccessibilityCustomActions(accessibilityActions(for: rows[row]))
