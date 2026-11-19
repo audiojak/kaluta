@@ -184,7 +184,7 @@ enum WorkflowCommand: String, CaseIterable, Identifiable {
         case .task: "Make a task"
         case .later:
             switch kind {
-            case .triage: "Leave in Inbox"
+            case .triage: "Later"
             case .tasks: "Tomorrow"
             case .waiting: "Check again later"
             case .reading: "Keep for later"

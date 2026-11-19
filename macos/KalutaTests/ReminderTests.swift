@@ -82,8 +82,12 @@ struct ReminderTests {
         #expect(WorkflowItemView.reminderLine(due, now: now) == "You asked to be reminded about this earlier today")
         let toCome = ReminderInfo(remindAt: ms(now.addingTimeInterval(3600)), setAt: ms(now))
         #expect(WorkflowItemView.reminderLine(toCome, now: now) == nil)
-        #expect(WorkflowItemView.remindQuestion().hasPrefix("Remind you when? 1 later today ("))
-        #expect(WorkflowItemView.remindQuestion().hasSuffix(", 5 pick date & time"))
+        // The choices are one to a row, each with its key and its time.
+        let choices = WorkflowItemView.remindChoices(now: now)
+        #expect(choices.map(\.key) == ["1", "2", "3", "4", "5", "L"])
+        #expect(choices[0].title == "Later today" && !choices[0].detail.isEmpty)
+        #expect(choices[4] == TimeChoice(key: "5", title: "Pick date & time…", detail: ""))
+        #expect(choices[5] == TimeChoice(key: "L", title: "No reminder", detail: "stays in the Inbox"))
     }
 
     /// Waiting on others' *Check again* has the same five choices as
@@ -105,8 +109,10 @@ struct ReminderTests {
         #expect(picked.date == calendar.date(from: DateComponents(year: 2027, month: 1, day: 5))!)
         #expect(picked.title.hasPrefix("on ") && picked.title.contains("2027"), "another year is named")
         #expect(AppModel.checkAgainTime(on: now, now: now, calendar: calendar).date == day(11, 12))
-        #expect(WorkflowItemView.checkAgainQuestion()
-            == "Check again when? 1 tomorrow, 2 in 3 days, 3 next week, 4 next month, 5 pick a date")
+        let choices = WorkflowItemView.checkAgainChoices(now: now)
+        #expect(choices.map(\.title) == ["Tomorrow", "In 3 days", "Next week", "Next month", "Pick a date…"])
+        #expect(choices[0].detail.isEmpty, "tomorrow needs no date")
+        #expect(!choices[1].detail.isEmpty, "the others name their day")
     }
 
     /// L, then the keys: 5 opens the calendar, Esc leaves it.
@@ -149,12 +155,19 @@ struct ReminderTests {
         let session = try #require(model.workflowSession)
         let item = try #require(session.current)
         let thread = try #require(model.threadID(of: item))
-        #expect(model.workflowActions().contains { $0.command == .remind && $0.title == "Remind me later" })
+        // The bar: the three ways to answer first, in words, then the
+        // decisions. Later (L) asks when; Leave in Inbox is its last choice.
+        let bar = model.workflowActions().filter(\.shown)
+        #expect(bar.first { $0.command == .replyAll }?.title == "Reply all")
+        #expect(Array(bar.map(\.command).prefix(3)) == [.replyNow, .replyAll, .forward])
+        #expect(Array(bar.map(\.command).dropFirst(3)) == [.task, .done, .later, .skip])
+        #expect(bar.allSatisfy { !$0.onEmail })
+        #expect(bar.first { $0.command == .later }?.title == "Later")
 
         await model.performWorkflow(.remind)
         #expect(session.choosingTime == .remind)
         #expect(model.workflowActions().map(\.title)
-            == AppModel.reminderTimes().map(\.title) + ["Pick date & time…", "Cancel"])
+            == AppModel.reminderTimes().map(\.title) + ["Pick date & time…", "No reminder", "Cancel"])
         await model.performWorkflow(.pick2)
         #expect(session.choosingTime == nil)
         #expect(session.items.first { $0.key == item.key }?.decision == "remind")
@@ -186,5 +199,15 @@ struct ReminderTests {
         await model.performWorkflow(.remind)
         await model.performWorkflow(.back)
         #expect(session.choosingTime == nil && model.workflowSession != nil)
+
+        // L, then L again: no reminder, left in the Inbox.
+        let kept = try #require(session.current)
+        let keptThread = try #require(model.threadID(of: kept))
+        await model.performWorkflow(.later)
+        #expect(session.choosingTime == .remind)
+        await model.performWorkflow(.later)
+        #expect(session.choosingTime == nil)
+        #expect(session.items.first { $0.key == kept.key }?.decision == "leave")
+        #expect(try await core.reminder(keptThread) == nil)
     }
 }

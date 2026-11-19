@@ -378,7 +378,7 @@ impl CodexSession {
                 ("thread/resume", params)
             }
             None => {
-                params["ephemeral"] = json!(false);
+                params["ephemeral"] = json!(cfg.ephemeral);
                 ("thread/start", params)
             }
         };
@@ -388,7 +388,9 @@ impl CodexSession {
             .ok_or_else(|| AgentError::Protocol("Codex did not return a thread id".into()))?
             .to_owned();
         session.state.lock().unwrap_or_else(|e| e.into_inner()).thread_id = thread_id.clone();
-        session.sink.emit(AgentEvent::SessionStarted { external_id: Some(thread_id) });
+        // An unsaved thread cannot be resumed, so its id is not kept.
+        let resumable = cfg.resume.is_some() || !cfg.ephemeral;
+        session.sink.emit(AgentEvent::SessionStarted { external_id: resumable.then_some(thread_id) });
         Ok(session)
     }
 

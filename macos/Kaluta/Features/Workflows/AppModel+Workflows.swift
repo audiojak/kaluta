@@ -511,7 +511,8 @@ extension AppModel {
                     a(.back, .quiet, "Cancel")]
         case .remind:
             return zip(Self.reminderPicks, Self.reminderTimes()).map { a($0, .plain, $1.title) }
-                + [a(.pick5, .plain, "Pick date & time…"), a(.back, .quiet, "Cancel")]
+                + [a(.pick5, .plain, "Pick date & time…"), a(.later, .plain, Self.noReminderTitle),
+                   a(.back, .quiet, "Cancel")]
         case .remindOn:
             return [a(.primary, .primary, "Remind me \(Self.reminderTime(at: session.remindDay).title)"),
                     a(.back, .quiet, "Cancel")]
@@ -632,8 +633,18 @@ extension AppModel {
         // its forward is the suggestion, on Forward (F).
         let forwarding = session.current.flatMap(threadID(of:)).flatMap { session.forwardSuggestions[$0] }
         let mark = forwarding != nil ? WorkflowCommand.forward : suggested.map(Self.triageCommand)
-        let all = [a(.replyNow, .primary, nil), a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil),
-                   a(.remind, .plain, nil), a(.skip, .quiet, nil)] + emailLinks(session, a, opens: true)
+        // The three ways to answer lead the bar, in words: Reply, Reply all
+        // (greyed out with no one else on the email) and Forward.
+        let links = emailLinks(session, a, opens: true)
+        let answers = links.filter(\.onEmail).map { link in
+            var link = link
+            link.onEmail = false
+            link.style = .plain
+            return link
+        }
+        let all = [a(.replyNow, .primary, nil)] + answers
+            + [a(.task, .plain, nil), a(.done, .plain, nil), a(.later, .plain, nil), a(.skip, .quiet, nil)]
+            + links.filter { !$0.onEmail }
         return all.map { action in
             var action = action
             if action.command == .forward, let forwarding {
@@ -864,13 +875,21 @@ extension AppModel {
             return
         }
         let finished = writer.taskID != nil && !keep
-        // Replies: send and archive. Tasks: a finished task's email goes
-        // out of the Inbox with it (spec §14.13).
-        let archives = session.kind == .replies || (session.kind == .tasks && finished)
+        // An answered conversation has been read, whatever Gmail was told
+        // when it arrived. Triage and Replies: send and archive. Tasks: a
+        // finished task's email goes out of the Inbox with it (spec §14.13).
+        let read = try? await core?.setRead([writer.threadID], true)
+        let archives = session.kind == .triage || session.kind == .replies || (session.kind == .tasks && finished)
         let token = archives ? try? await core?.archive([writer.threadID]) : nil
         await decide(item, finished ? "done" : "reply", session: session, notice: nil,
-                     undoMail: { [core] in if let token { _ = try? await core?.undo(token) } },
-                     redoMail: { [core] in if let token { _ = try? await core?.redo(token) } })
+                     undoMail: { [core] in
+                         if let token { _ = try? await core?.undo(token) }
+                         if let read { _ = try? await core?.undo(read) }
+                     },
+                     redoMail: { [core] in
+                         if let read { _ = try? await core?.redo(read) }
+                         if let token { _ = try? await core?.redo(token) }
+                     })
     }
 
     /// One implementation per command, whatever called it (spec §14.13).
@@ -916,6 +935,9 @@ extension AppModel {
         // copies a code where there is one, and is the conversation elsewhere.
         let command = command == .primary && !actions.contains(.primary) ? WorkflowCommand.replyNow
             : command == .copyCode && !actions.contains(.copyCode) ? .conversation
+            // B (Gmail's Snooze key) is Later (L) where Later asks when.
+            : command == .remind && !actions.contains(.remind) && actions.contains(.later)
+                && session.kind == .triage ? .later
             : command
         guard let item = session.current, actions.contains(command) else { return }
         if let writer = session.writer {
@@ -939,6 +961,9 @@ extension AppModel {
                 // A day on a calendar and a time: tomorrow at 8 AM, to start from.
                 session.remindDay = Self.firstReminderMoment()
                 session.choosingTime = .remindOn
+            } else if command == .later {
+                // No reminder: it stays in the Inbox and Triage is done with it.
+                await decide(item, "leave", session: session, notice: "Left in the Inbox")
             } else if let index = Self.reminderPicks.firstIndex(of: command) {
                 await remindLater(item, at: Self.reminderTimes()[index], session: session)
             }
@@ -997,9 +1022,7 @@ extension AppModel {
             }
         case (.triage, .done), (.replies, .done):
             await archiveCurrent(item, session: session)
-        case (.triage, .later):
-            await decide(item, "leave", session: session, notice: "Left in the Inbox")
-        case (.triage, .remind):
+        case (.triage, .later), (.triage, .remind):
             session.choosingTime = .remind
         case (.triage, .replyNow), (.replies, .replyNow), (.tasks, .replyNow), (.waiting, .replyNow):
             startWriting(item, session: session)
@@ -1326,6 +1349,10 @@ extension AppModel {
         var detail = ""
     }
 
+    /// *Later*'s last choice (L again): no reminder, the email stays in the
+    /// Inbox and Triage does not ask about it again.
+    static let noReminderTitle = "No reminder"
+
     /// The keys of *Remind me later*'s times, in their order; 5 is *Pick
     /// date & time…* (*Pick a date…* for *Check again*).
     static let reminderPicks: [WorkflowCommand] = [.pick1, .pick2, .pick3, .pick4]
@@ -1444,9 +1471,10 @@ extension AppModel {
         ]
     }
 
-    /// The conversation's open task, if it has one.
+    /// The conversation's open task, if it has one: the task made from it,
+    /// or one it was added to (spec §14.8).
     func openTask(onThread threadID: String) -> TaskItem? {
-        tasks.tasks.first { $0.threadId == threadID && !$0.done }
+        tasks.tasks.first { !$0.done && ($0.threadId == threadID || $0.linkedThreadIds.contains(threadID)) }
     }
 
     /// T in Triage: the task on the item's screen, filled in from Kaluta's

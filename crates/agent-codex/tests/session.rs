@@ -37,6 +37,7 @@ fn config(d: &Path, resume: Option<&str>) -> SessionConfig {
         max_turns: 40,
         max_budget_usd: None,
         resume: resume.map(str::to_owned),
+        ephemeral: false,
         env: vec![],
     }
 }
@@ -112,11 +113,27 @@ async fn a_turn_maps_codex_notifications_and_refuses_approval_requests() {
     assert_eq!(got[2]["method"], "thread/start");
     assert_eq!(got[2]["params"]["sandbox"], "read-only");
     assert_eq!(got[2]["params"]["approvalPolicy"], "never");
+    assert_eq!(got[2]["params"]["ephemeral"], false, "a conversation the user can continue is saved");
     assert_eq!(got[2]["params"]["developerInstructions"], "mail rules");
     assert_eq!(got[3]["method"], "turn/start");
     assert_eq!(got[3]["params"]["threadId"], "thr_1");
     let refusal = got.iter().find(|m| m["id"] == 900).expect("answered the approval request");
     assert_eq!(refusal["error"]["code"], -32601);
+    session.close().await;
+}
+
+/// A one-off job is not saved by Codex, so it stays out of the user's
+/// ChatGPT history, and no thread id is kept to resume.
+#[tokio::test]
+async fn a_one_off_job_is_not_saved() {
+    let d = setup("unsaved");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let provider = CodexProvider::new(Locator::only(vec![d.clone()]));
+    let cfg = SessionConfig { ephemeral: true, ..config(&d, None) };
+    let mut session = provider.start_session(cfg, EventSink::new(SessionId("agent-3".into()), tx)).await.unwrap();
+    assert_eq!(rx.recv().await.unwrap().1, AgentEvent::SessionStarted { external_id: None });
+    let start = received(&d).into_iter().find(|m| m["method"] == "thread/start").unwrap();
+    assert_eq!(start["params"]["ephemeral"], true);
     session.close().await;
 }
 

@@ -101,6 +101,12 @@ extension AppModel {
         // come first.
         if agent.providers.isEmpty { await agent.loadProviders() }
         let categories = (try? await core.taskCategories()) ?? []
+        // A conversation that has a task shows it to change, as Triage
+        // does, rather than making a second (spec §14.8).
+        if let existing = openTask(onThread: row.id) {
+            taskDraft = TaskDraft(editing: existing, categories: categories)
+            return
+        }
         let draft = TaskDraft(threadID: row.id, subject: row.subject.isEmpty ? "(no subject)" : row.subject,
                               sender: ThreadRowView.senderLine(row), categories: categories, now: now)
         taskDraft = draft

@@ -421,12 +421,13 @@ impl Core {
     ) -> Result<String, CoreError> {
         let provider = provider_id(&provider)?;
         let id = self.agent_runtime().manager.new_session_id();
-        self.start_session_with_id(provider, id, selection, resume, true).await
+        self.start_session_with_id(provider, id, selection, resume, true, false).await
     }
 
     /// A session whose tools may only read (spec §14.5, §14.8): the
     /// composer's writing help and task suggestions. Anything that would
     /// change mail is refused by the core, whatever the agent is told.
+    /// These are one-off jobs, so the provider is asked not to save them.
     pub async fn start_read_only_agent_session(
         self: Arc<Self>,
         provider: String,
@@ -434,7 +435,7 @@ impl Core {
     ) -> Result<String, CoreError> {
         let provider = provider_id(&provider)?;
         let id = self.agent_runtime().manager.new_session_id();
-        let session = self.clone().start_session_with_id(provider, id, Some(selection), None, false).await?;
+        let session = self.clone().start_session_with_id(provider, id, Some(selection), None, false, true).await?;
         self.agents.with_session(&session, |s| s.read_only = true);
         Ok(session)
     }
@@ -452,7 +453,7 @@ impl Core {
             .await?
             .ok_or_else(|| CoreError::new(ErrorKind::NotFound, "no such conversation"))?;
         let provider = provider_id(&row.provider)?;
-        self.start_session_with_id(provider, SessionId(session_id), None, row.external_id, true).await
+        self.start_session_with_id(provider, SessionId(session_id), None, row.external_id, true, false).await
     }
 
     /// Stored conversations, newest first.
@@ -576,6 +577,7 @@ impl Core {
         selection: Option<Vec<String>>,
         resume: Option<String>,
         with_guide: bool,
+        ephemeral: bool,
     ) -> Result<String, CoreError> {
         let db = self.db()?; // an account must be open: the tools read it
         // Sessions that may draft mail follow the account's writing guide
@@ -613,6 +615,7 @@ impl Core {
             max_turns: SessionConfig::DEFAULT_MAX_TURNS,
             max_budget_usd: None,
             resume,
+            ephemeral,
             env,
         };
         let core = self.clone();

@@ -550,8 +550,7 @@ struct WorkflowItemView: View {
                 .background(Tone.workflowSurface, in: RoundedRectangle(cornerRadius: Radius.panel))
                 switch session.choosingTime {
                 case .checkAgain:
-                    Text(Self.checkAgainQuestion())
-                        .font(TypeRole.workflowHeading)
+                    TimeChoices(question: "Check again when?", choices: Self.checkAgainChoices())
                         .id(WorkflowWriteView.scrollID)
                 case .checkAgainOn:
                     VStack(alignment: .leading, spacing: Space.l) {
@@ -566,8 +565,7 @@ struct WorkflowItemView: View {
                     }
                     .id(WorkflowWriteView.scrollID)
                 case .remind:
-                    Text(Self.remindQuestion())
-                        .font(TypeRole.workflowHeading)
+                    TimeChoices(question: "Remind you when?", choices: Self.remindChoices())
                         .id(WorkflowWriteView.scrollID)
                 case .remindOn:
                     VStack(alignment: .leading, spacing: Space.l) {
@@ -601,21 +599,26 @@ struct WorkflowItemView: View {
 
     /// A long email's summary, from its triage suggestion; the text itself
     /// when it is short enough to read.
-    /// "Check again when? 1 tomorrow, 2 in 3 days, 3 next week, 4 next
-    /// month, 5 pick a date".
-    static func checkAgainQuestion(now: Date = .now) -> String {
-        let days = AppModel.checkAgainTimes(now: now).enumerated().map { "\($0.offset + 1) \($0.element.title.lowercased())" }
-        return "Check again when? " + (days + ["\(days.count + 1) pick a date"]).joined(separator: ", ")
+    /// *Check again*'s choices, one to a row: "1 Tomorrow", "2 In 3 days
+    /// (Saturday 14 Nov)" … "5 Pick a date…".
+    static func checkAgainChoices(now: Date = .now) -> [TimeChoice] {
+        let days = AppModel.checkAgainTimes(now: now).enumerated().map {
+            TimeChoice(key: "\($0.offset + 1)", title: $0.element.title,
+                       detail: $0.element.phrase.lowercased() == $0.element.title.lowercased() ? "" : $0.element.phrase)
+        }
+        return days + [TimeChoice(key: "\(days.count + 1)", title: "Pick a date…", detail: "")]
     }
 
-    /// "Remind you when? 1 later today (Sat 6:00 PM), 2 tomorrow (Sun 8:00
-    /// AM), 3 next week (…), 4 next weekend (…), 5 pick date & time": Gmail's
-    /// Snooze choices, each with its time.
-    static func remindQuestion(now: Date = .now) -> String {
+    /// *Remind me later*'s choices, one to a row: Gmail's Snooze choices,
+    /// each with its time ("1 Later today, Sat 6:00 PM"), then "5 Pick
+    /// date & time…" and "L No reminder", which leaves it in the Inbox.
+    static func remindChoices(now: Date = .now) -> [TimeChoice] {
         let times = AppModel.reminderTimes(now: now).enumerated().map {
-            "\($0.offset + 1) \($0.element.title.lowercased()) (\($0.element.detail))"
+            TimeChoice(key: "\($0.offset + 1)", title: $0.element.title, detail: $0.element.detail)
         }
-        return "Remind you when? " + (times + ["\(times.count + 1) pick date & time"]).joined(separator: ", ")
+        return times + [TimeChoice(key: "\(times.count + 1)", title: "Pick date & time…", detail: ""),
+                        TimeChoice(key: WorkflowCommand.later.keyLabel ?? "L", title: AppModel.noReminderTitle,
+                                   detail: "stays in the Inbox")]
     }
 
     /// A reminder that brought the email back: "You asked to be reminded
@@ -1107,7 +1110,7 @@ struct TriageSuggestionLine: View {
         }
     }
 
-    /// "Quick reply · about 20 seconds", "Make a task", "Archive", "Leave in Inbox".
+    /// "Quick reply · about 20 seconds", "Make a task", "Archive", "Later".
     static func verb(_ s: TriageSuggestion) -> String {
         switch s.kind {
         case .quickReply:
@@ -1115,7 +1118,7 @@ struct TriageSuggestionLine: View {
             return "Quick reply · about \(max(5, (Int(seconds) + 4) / 5 * 5)) seconds"
         case .task: return "Make a task"
         case .archive: return "Archive"
-        case .leave: return "Leave in Inbox"
+        case .leave: return "Later"
         }
     }
 }
@@ -1359,5 +1362,41 @@ struct WrittenSinceLine: View {
         let more = w.count > 1 ? " and \(w.count - 1) more" : ""
         let subject = w.subject.isEmpty ? "(no subject)" : w.subject
         return "You wrote to \(name) \(when) · \(subject)\(more)"
+    }
+}
+
+/// One answer to "Remind you when?": its key, its name and its time.
+struct TimeChoice: Equatable {
+    let key: String
+    let title: String
+    let detail: String
+}
+
+/// A time question with its answers one to a row, each led by its key, so
+/// they read as a list rather than a sentence. The keys answer; the rows
+/// are not buttons (the decision bar's are).
+struct TimeChoices: View {
+    let question: String
+    let choices: [TimeChoice]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            Text(question)
+                .font(TypeRole.workflowHeading)
+            ForEach(choices, id: \.key) { choice in
+                HStack(alignment: .firstTextBaseline, spacing: Space.m) {
+                    Keycap(key: choice.key)
+                    Text(choice.title)
+                        .font(TypeRole.workflowContent)
+                    if !choice.detail.isEmpty {
+                        Text(choice.detail)
+                            .font(TypeRole.workflowContent)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(choice.key): \(choice.title)" + (choice.detail.isEmpty ? "" : ", \(choice.detail)"))
+            }
+        }
     }
 }

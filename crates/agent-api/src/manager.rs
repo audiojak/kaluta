@@ -181,6 +181,7 @@ mod tests {
             max_turns: SessionConfig::DEFAULT_MAX_TURNS,
             max_budget_usd: None,
             resume: None,
+            ephemeral: false,
             env: vec![],
         }
     }
