@@ -306,6 +306,10 @@ pub async fn send_draft(
             let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
             w.upsert_message(&copy)?;
             let changes = w.finish()?;
+            // Going now, whatever time it was to be sent at (send later,
+            // ADR 0022): in this transaction, so a send taken back is an
+            // ordinary draft and cannot go again by itself.
+            mail_store::scheduled::set(tx, draft_id, None, now)?;
             if queue {
                 drafts::set_state(tx, draft_id, DraftState::Sending, None)?;
                 drafts::set_rfc822_id(tx, draft_id, &rfc822_id)?;

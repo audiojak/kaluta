@@ -65,6 +65,15 @@ final class AppModel {
     /// for the footer's countdown; nil when it has not.
     private(set) var syncPausedUntil: Date?
 
+    /// The command palette (⌘K) is showing.
+    var paletteShown = false
+    /// Drafts to be sent later, in every open account, soonest first.
+    var scheduledSends: [ScheduledSendInfo] = []
+    /// The wait for the next scheduled send's time.
+    @ObservationIgnored var scheduledWait: Task<Void, Never>?
+    /// Asks what to do with a scheduled send found long after its time.
+    @ObservationIgnored var overduePrompt: (ScheduledSendInfo) async -> OverdueChoice = AppModel.askAboutOverdue
+
     static let demoAccountID = "demo"
     static let demoThreadCount: UInt32 = 2_000
 
@@ -542,6 +551,8 @@ final class AppModel {
         } else {
             accountState = .noAccount
         }
+        // Anything scheduled to send while Kaluta was not running.
+        await sendDueScheduled()
     }
 
     func openDemoMailbox() async {
@@ -1605,7 +1616,11 @@ final class AppModel {
             core?.setAppActive(false)
         }))
         subscriptions.observers.append((workspace, workspace.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core] _ in core?.syncNow() }))
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core, weak self] _ in
+            core?.syncNow()
+            // A scheduled send's time may have passed while asleep.
+            Task { @MainActor in await self?.sendDueScheduled() }
+        }))
         subscriptions.network.pathUpdateHandler = { [weak core] path in
             if path.status == .satisfied { core?.syncNow() }
         }

@@ -1340,6 +1340,38 @@ extension AppModel {
                      redoMail: { _ = try? await core.remindLater(id, at: time.date) })
     }
 
+    /// Remind (`b` in the mail window): the selected conversations come
+    /// back to the top of Triage at `time`, or when someone writes in them.
+    /// They stay where they are meanwhile; ⌘Z takes the reminders back.
+    func remindSelection(_ time: ReminderTime) async {
+        let ids = actionTargets
+        guard let core, let accountID = openAccountID, !ids.isEmpty else { return }
+        var before: [(String, ReminderInfo?)] = []
+        for id in ids {
+            do {
+                before.append((id, try await core.remindLater(id, at: time.date)))
+            } catch {
+                workflowLog.error("remind: \(error.message, privacy: .public)")
+            }
+        }
+        guard !before.isEmpty else { return }
+        let set = before
+        undo.record(accountID: accountID, actionName: "Remind Me",
+                    noticeText: Self.remindNotice(count: set.count, phrase: time.phrase),
+                    undo: { for (id, was) in set { try? await core.restoreReminder(id, was) } },
+                    redo: { for (id, _) in set { _ = try? await core.remindLater(id, at: time.date) } })
+    }
+
+    /// When a reminder comes due, as a date.
+    static func date(of reminder: ReminderInfo) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(reminder.remindAt) / 1000)
+    }
+
+    /// "Back in Triage tomorrow", "3 conversations back in Triage tomorrow".
+    static func remindNotice(count: Int, phrase: String) -> String {
+        count == 1 ? "Back in Triage \(phrase)" : "\(count.formatted()) conversations back in Triage \(phrase)"
+    }
+
     /// A time to be reminded at: its button, and the notice's words.
     struct ReminderTime: Equatable {
         let title: String

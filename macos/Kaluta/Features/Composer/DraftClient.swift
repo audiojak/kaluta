@@ -47,6 +47,18 @@ struct DraftClient: Sendable {
         return try await CoreClient.bridge { try await pinned.sendDraft(id: id) }
     }
 
+    /// Send the draft at `date`, or (nil) no longer; the time it had before.
+    @discardableResult
+    func scheduleSend(_ id: Int64, at date: Date?) async throws(CoreClientError) -> Date? {
+        guard let accountID else { return try await core.scheduleSend(id, at: date) }
+        return try await core.scheduleSend(id, at: date, in: accountID)
+    }
+
+    /// When the draft is to be sent, if it is scheduled.
+    func scheduledSend(_ id: Int64) async throws(CoreClientError) -> Date? {
+        try await core.scheduledSend(id, in: accountID)
+    }
+
     func deleteDraft(_ id: Int64) async throws(CoreClientError) {
         guard let pinned else { return try await core.deleteDraft(id) }
         try await CoreClient.bridge { try await pinned.deleteDraft(id: id) }

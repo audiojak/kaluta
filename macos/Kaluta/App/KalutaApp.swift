@@ -281,8 +281,12 @@ struct MailCommands: Commands {
                 .disabled(!mailKey || model.isTaskList || model.threads.rows.isEmpty)
             Divider() // menu
             // From every window, not only the mail window: it comes forward.
-            Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
+            // ⌘K: every command by name; what matches none is asked of the agent.
+            Button("Command Palette…") { model.showPalette() }
                 .keyboardShortcut("k")
+                .disabled(!model.isMailOpen)
+            Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
+                .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(!model.isMailOpen)
             Button(model.agent.isPresented ? "Hide Agent" : "Show Agent") { model.agent.isPresented.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])

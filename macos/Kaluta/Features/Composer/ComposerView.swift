@@ -13,6 +13,7 @@ struct ComposerView: View {
     @State private var importing = false
     /// Discarding cannot be undone: asked first when the draft has anything in it.
     @State private var confirmingDiscard = false
+    @State private var choosingTime = false
     @State private var assistant = ComposerAssistant()
     @State private var formatting = RichTextCommands()
     @FocusState private var assistantFocused: Bool
@@ -55,6 +56,9 @@ struct ComposerView: View {
         }
         .onChange(of: store?.phase) { _, phase in
             guard phase == .sent else { return }
+            if let store, let scheduled = store.scheduledNow, let account = store.accountID ?? model.openAccountID {
+                model.sendScheduled(draftID: store.draftID, at: scheduled.at, before: scheduled.before, accountID: account)
+            }
             if let store, store.didSend, let account = store.accountID ?? model.openAccountID {
                 Task {
                     await model.messageSent(heldDraftID: store.heldSend, taskID: store.taskID,
@@ -146,6 +150,13 @@ struct ComposerView: View {
             if let task = store.task, request.agentName == nil {
                 taskBar(task, store)
             }
+            if let at = store.scheduledAt {
+                Banner("Sends \(AppModel.reminderTime(at: at).phrase), if Kaluta is running then.",
+                       systemImage: "clock", intent: .info) {
+                    Button("Don't Send Later") { Task { await store.unschedule() } }
+                        .hoverHelp("Keep it as an ordinary draft")
+                }
+            }
             if let error = store.saveError {
                 Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
@@ -206,6 +217,18 @@ struct ComposerView: View {
                     if store.hasContent { confirmingDiscard = true } else { Task { await discard(store) } }
                 }
                 .help(ToolbarHelp.composer("Discard")) // toolbar
+                if request.agentAction == nil {
+                    Button("Send Later", systemImage: "clock") { choosingTime = true }
+                        .keyboardShortcut("d", modifiers: [.command, .option, .shift])
+                        .disabled(!store.canSend)
+                        .help(ToolbarHelp.composer("Send Later")) // toolbar
+                        .popover(isPresented: $choosingTime, arrowEdge: .bottom) {
+                            TimePickerView(title: "Send when?", presets: AppModel.reminderTimes(), verb: "Send") { time in
+                                choosingTime = false
+                                Task { await store.sendLater(at: time.date) }
+                            }
+                        }
+                }
                 Button(store.task == nil || request.agentName != nil ? "Send" : "Send and Finish Task",
                        systemImage: "paperplane.fill") {
                     send(store)

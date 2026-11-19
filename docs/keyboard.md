@@ -70,7 +70,8 @@ times a year). Ticks, not the highlight, are what these act on.
 
 | Keys | Action |
 |---|---|
-| `⌘K` | Ask the agent |
+| `⌘K` | Command palette: run any command by name, go to a mailbox, or ask the agent |
+| `⌥⌘K` | Ask the agent |
 | `⌥⌘I` | Show or hide the agent panel |
 | `⌥⌘R` | Routines |
 

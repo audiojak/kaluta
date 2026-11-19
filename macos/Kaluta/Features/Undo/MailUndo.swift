@@ -173,6 +173,12 @@ final class MailUndo {
         return manager(for: accountID).redoMenuItemTitle
     }
 
+    /// Returns once the last undo or redo has been applied (it runs after
+    /// ⌘Z returns), so what follows sees its result.
+    func settled() async {
+        await replaying?.value
+    }
+
     func undo(in accountID: String?) {
         guard canUndo(in: accountID), let accountID else { return }
         manager(for: accountID).undo()

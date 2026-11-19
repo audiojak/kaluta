@@ -146,6 +146,20 @@ is only for "approved". Orange is text or a band's fill, never an error.
 - **`PaneDivider`**: a vertical rule between two panes that share a
   column (the reader and the agent column), or between a sheet's content
   and its button bar.
+- **`KeyHints`**: a picker's footer: the keys that work in it, each a
+  `Keycap` and a word ("↑↓ Select", "Return Choose", "Esc Close"). It
+  lists only keys that do work there, and says what Return does for what
+  is typed (the label picker: Apply first, Remove first, Create).
+- **`TimePickerView`**: a field that reads a typed time ("8am", "in 3
+  days", "Aug 7") over the ready choices, with `KeyHints`. The typed time
+  is read by the system's date detector (`TimeInput`); Kaluta has no
+  grammar of its own, and the field's prompt names only what reads.
+- **`PaletteView`**: the command palette (⌘K): a field over every
+  `MailCommand`, each row its name and `Keycap`, greyed out with the
+  reason when it cannot run; the last row asks Kaluta what was typed.
+  `KeyHints` below.
+- **`ScheduledStrip`**: over the Drafts list, a line per draft that will
+  be sent later (a clock, its subject and time); a click opens the draft.
 - **`Banner`**: icon, one line and optional small buttons, by intent.
   `inset:` lines it up with the content it sits over (the reader uses
   `Space.xxl`).

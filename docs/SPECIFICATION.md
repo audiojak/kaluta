@@ -3116,6 +3116,13 @@ away, unchanged except where §14.13 says.)*
   `⌃⌘A` archive, `⌘⌫` trash, `⌘⇧U` read/unread, `⌘⇧L` star, `⌘R`
   reply, `⌘⇧R` reply-all, `⌘⇧F` forward, `⌘N` new, `⌘F` search,
   `⌘1`–`⌘6` mailboxes, `⌘⇧N` check for new mail, `⌘K` agent prompt.
+  *(Amendment 2026-11-18, ADR 0025: `⌘K` is the command palette, a
+  field over every mail-window command, workflow, mailbox and label by
+  name; ↑↓ select, Return runs, Esc closes. A command that cannot run
+  now is listed greyed out with the reason. The last row asks Kaluta
+  what was typed, so `⌘K`, a question and Return still asks the agent;
+  `⌥⌘K` puts the cursor in the agent's prompt as `⌘K` did. The thread
+  list's single keys run the same command definitions.)*
   *(Amended in M2: `r` is reply, Gmail-style; `u` toggles read either
   way.)*
 - Thread view: one locked-down `WKWebView` renders the whole thread as a
@@ -3458,6 +3465,20 @@ when you mean undo": all these actions are reversible).
 - The outbox runs strictly in order: an op waiting to retry holds back
   the ones after it (an undo must never reach Gmail before the action it
   reverses); held sends alone step aside until their time.
+- **Send later** *(Amendment 2026-11-18, ADR 0022).* The composer's
+  *Send Later* (⌥⇧⌘D) asks *Send when?* with the time picker (the ready
+  choices, or a typed time). The message is saved and stays a draft,
+  editable and listed over the Drafts list with its time ("“Subject”
+  sends Thursday, November 19 at 8:00 AM"); opening it shows the time
+  and *Don't Send Later*. The notice "Will send …" offers Undo. Kaluta
+  sends it at its time if it is running, with no Undo Send hold, and
+  says so ("Sent “Subject” as scheduled"). Kaluta has no server: a
+  message found more than an hour after its time (at launch, on waking)
+  is not sent; a dialog asks *Send Now*, *Keep as a Draft* or *Ask Me
+  Later*. Sending a scheduled draft by hand unschedules it. Nothing
+  scheduled waits in the outbox, so quitting neither sends nor loses it.
+  Store: `scheduled_sends` (draft id, `send_at`, `set_at`), removed with
+  its draft.
 - The demo mailbox sends locally at once, so it offers no Undo Send.
   Agent sends are held for the same delay. *(Amended 2026-09-28,
   implemented:)* an approved agent send or forward that the core holds
@@ -4874,7 +4895,18 @@ one decision with a one-line reason:
   today (Sat 6:00 PM)".)* *(Amended 2026-11-18: the choices are listed
   one to a row, each led by its key, with its time beside it, not run
   together in one sentence; *Check again* in Waiting on others lists its
-  days the same way.)* *Later today* (6 PM; three hours on once 6 PM
+  days the same way.)* *(Amendment 2026-11-18, typed times: the
+  calendar step of both (5) has a field over the calendar that reads a
+  time typed in words, "friday 3pm", "in 3 days", "Aug 7", by the
+  system's date detector; what it reads shows on the calendar and Return
+  takes it. A day with no time is 8 AM; a time already past today is
+  that time tomorrow. In the mail window* b *(Gmail's Snooze key, also*
+  Remind Me… *in the row's menu) opens the same choices with the same
+  field for the selected conversations: they stay where they are and come
+  back to the top of Triage then; ⌘Z takes the reminders back. Pickers
+  end with a line of the keys that work in them. A reminder already
+  comes back as soon as someone writes in the conversation, so there is
+  no separate "if no reply" choice.)* *Later today* (6 PM; three hours on once 6 PM
   is under an hour away or past), *Tomorrow* (8 AM), *Next week* (Monday,
   8 AM; a week on when tomorrow is Monday), *This weekend* (the next
   Saturday after today, 8 AM; *Next weekend* on a Saturday or Sunday) and

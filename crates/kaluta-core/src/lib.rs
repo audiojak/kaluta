@@ -54,6 +54,7 @@ mod reply_answers;
 mod routines;
 mod rules_publish;
 mod runtime;
+mod scheduled;
 pub mod secrets;
 mod sync;
 mod task_match;

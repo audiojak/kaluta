@@ -434,3 +434,35 @@ struct TipCard: View {
         .accessibilityLabel(title)
     }
 }
+
+/// One key and what it does, for a picker's footer.
+struct KeyHint: Equatable {
+    let keys: String
+    let does: String
+}
+
+/// The footer of a picker (a filter field over a list): the keys that work
+/// in it, so the list need not be learned ("↑↓ Select · Return Choose").
+/// It lists only keys that do work there.
+struct KeyHints: View {
+    let hints: [KeyHint]
+
+    static let choose = [KeyHint(keys: "↑↓", does: "Select"), KeyHint(keys: "Return", does: "Choose"),
+                         KeyHint(keys: "Esc", does: "Close")]
+
+    var body: some View {
+        HStack(spacing: Space.l) {
+            ForEach(hints, id: \.keys) { hint in
+                HStack(spacing: Space.xs) {
+                    Keycap(key: hint.keys)
+                    Text(hint.does)
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(hints.map { "\($0.keys): \($0.does)" }.joined(separator: ", "))
+    }
+}

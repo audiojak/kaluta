@@ -247,22 +247,16 @@ final class ThreadTableView: NSTableView {
             super.keyDown(with: event)
             return
         }
+        // The commands with a single key: one definition with the palette.
+        if let key = event.charactersIgnoringModifiers, let command = model.listCommand(for: key) {
+            command.run()
+            return
+        }
         switch event.charactersIgnoringModifiers {
-        case "e": model.archiveSelection()
-        case "u": model.toggleReadSelection()
-        case "s": model.toggleStarSelection()
         case "l": showLabelMenu()
-        case "#": model.trashSelection()
-        case "!": model.toggleJunkSelection()
-        case "r": model.reply(all: false)
-        case "a": model.reply(all: true)
-        case "f": model.forward()
-        case "c": model.compose(.new(to: nil))
-        case "t": Task { await model.openTaskDialog() }
-        case "T": Task { await model.openBulkTasks() }
+        case "b": showRemindPicker()
         case "j": moveSelection(by: 1)
         case "k": moveSelection(by: -1)
-        case "/": model.focusSearch()
         default:
             if event.keyCode == 36 || event.keyCode == 76 { // return, enter: open, as in Apple Mail
                 model.openThreads()
@@ -291,6 +285,7 @@ final class ThreadTableView: NSTableView {
         let labels = NSMenuItem(title: "Label", action: nil, keyEquivalent: "")
         labels.submenu = labelMenu()
         menu.addItem(labels)
+        menu.addItem(ActionItem("Remind Me…", key: "b") { [weak self] in self?.showRemindPicker() })
         menu.addItem(.separator())
         menu.addItem(ActionItem("New Task from Email…", key: "t") { Task { await model.openTaskDialog() } })
         menu.addItem(ActionItem("Create Tasks…", key: "T") { Task { await model.openBulkTasks() } })
@@ -350,6 +345,14 @@ final class ThreadTableView: NSTableView {
 
     private func showLabelMenu() {
         showLabelPicker()
+    }
+
+    /// The `b` popover (Gmail's Snooze key): when to be reminded of the
+    /// selected conversations.
+    private func showRemindPicker() {
+        guard let model, !model.actionTargets.isEmpty else { return }
+        let row = selectedRow >= 0 ? selectedRow : 0
+        RemindPopover.show(relativeTo: numberOfRows > 0 ? rect(ofRow: row) : visibleRect, of: self, model: model)
     }
 
     /// The `l` popover: the label tree with a filter and "Create …".

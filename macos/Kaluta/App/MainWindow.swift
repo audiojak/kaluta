@@ -311,6 +311,7 @@ struct MainWindow: View {
             // is empty (it floated to the middle with a short VStack).
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .bottom) { UndoNoticeView() }
+            .background { PaletteHost() }
             // No drawn rule under the header: the column runs beneath the
             // floating sidebar, and a full-width rule showed through its
             // glass (oagc-0cw). The bar sits in the column's safe area.
@@ -324,6 +325,7 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             categoryTabs
             taskTabs
+            ScheduledStrip()
             if model.isGuide { GuideActivityStrip() }
             if model.isGuide { ReviewBand(mode: .rules) }
             if model.isFacts { ReviewBand(mode: .facts) }

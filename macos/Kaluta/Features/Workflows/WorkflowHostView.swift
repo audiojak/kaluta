@@ -556,6 +556,7 @@ struct WorkflowItemView: View {
                     VStack(alignment: .leading, spacing: Space.l) {
                         Text("Check again on which day?")
                             .font(TypeRole.workflowHeading)
+                        TypedTimeField(session: session, dayOnly: true)
                         DatePicker("Day to check again", selection: Binding(get: { session.remindDay },
                                                                            set: { session.remindDay = $0 }),
                                    in: AppModel.earliestReminderDay()..., displayedComponents: .date)
@@ -571,6 +572,7 @@ struct WorkflowItemView: View {
                     VStack(alignment: .leading, spacing: Space.l) {
                         Text("Remind you when?")
                             .font(TypeRole.workflowHeading)
+                        TypedTimeField(session: session, dayOnly: false)
                         DatePicker("Day and time to be reminded", selection: Binding(get: { session.remindDay },
                                                                                      set: { session.remindDay = $0 }),
                                    in: Date.now..., displayedComponents: [.date, .hourAndMinute])
@@ -1398,5 +1400,43 @@ struct TimeChoices: View {
                 .accessibilityLabel("\(choice.key): \(choice.title)" + (choice.detail.isEmpty ? "" : ", \(choice.detail)"))
             }
         }
+    }
+}
+
+/// A time typed in words over a workflow's calendar ("friday 3pm", "in 3
+/// days"): what it reads as shows on the calendar below, and Return takes
+/// it. Esc goes back, as on the calendar.
+struct TypedTimeField: View {
+    @Environment(AppModel.self) private var model
+    let session: WorkflowSession
+    /// *Check again* takes a day; *Remind me* a day and a time.
+    let dayOnly: Bool
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            TextField(dayOnly ? "Try: friday, in 3 days, Aug 7" : TimeInput.prompt, text: $text)
+                .textFieldStyle(.roundedBorder)
+                .font(TypeRole.workflowContext)
+                .frame(maxWidth: 320)
+                .focused($focused)
+                .onChange(of: text) { _, typed in
+                    guard let date = TimeInput.date(from: typed) else { return }
+                    session.remindDay = dayOnly ? Calendar.current.startOfDay(for: date) : date
+                }
+                .onSubmit { Task { await model.performWorkflow(.primary) } }
+                .onKeyPress(.escape) {
+                    Task { await model.performWorkflow(.back) }
+                    return .handled
+                }
+                .accessibilityLabel(dayOnly ? "The day, in words" : "The day and time, in words")
+            if !text.trimmingCharacters(in: .whitespaces).isEmpty, TimeInput.date(from: text) == nil {
+                Text("Not a time Kaluta can read")
+                    .font(TypeRole.workflowKey)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear { focused = true }
     }
 }

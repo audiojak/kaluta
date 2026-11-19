@@ -759,11 +759,61 @@ final class CoreClient: Sendable {
         try await call { try await core.sendDraft(id: id) }
     }
 
+    /// Send a draft of `accountID` now; whether it is held for Undo Send.
+    func sendDraft(_ id: Int64, in accountID: String) async -> Bool {
+        let composer = composer(for: accountID)
+        return (try? await CoreClient.bridge { try await composer.sendDraft(id: id) }) ?? false
+    }
+
     /// Undo Send: take back a held send in `accountID`; false if it went.
     func cancelSend(_ draftID: Int64, in accountID: String) async -> Bool {
         let composer = composer(for: accountID)
         return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
     }
+
+    // MARK: Send later (spec §14.5 amendment 2026-11-18, ADR 0022)
+
+    /// Send a draft of `accountID` at `date`, or (nil) no longer; the time
+    /// it had before, for undo.
+    @discardableResult
+    func scheduleSend(_ draftID: Int64, at date: Date?, in accountID: String) async throws(CoreClientError) -> Date? {
+        let composer = composer(for: accountID)
+        let ms = date.map(Self.millis)
+        return try await CoreClient.bridge { try await composer.scheduleSend(draftId: draftID, sendAt: ms) }
+            .map(Self.date)
+    }
+
+    /// The same in the window's current account (tests, the demo).
+    @discardableResult
+    func scheduleSend(_ draftID: Int64, at date: Date?) async throws(CoreClientError) -> Date? {
+        let ms = date.map(Self.millis)
+        return try await call { try await core.scheduleSend(draftId: draftID, sendAt: ms) }.map(Self.date)
+    }
+
+    /// When a draft is to be sent, if it is scheduled.
+    func scheduledSend(_ draftID: Int64, in accountID: String? = nil) async throws(CoreClientError) -> Date? {
+        guard let accountID else {
+            return try await call { try await core.scheduledSend(draftId: draftID) }.map(Self.date)
+        }
+        let composer = composer(for: accountID)
+        return try await CoreClient.bridge { try await composer.scheduledSend(draftId: draftID) }.map(Self.date)
+    }
+
+    /// Every open account's scheduled drafts, soonest first.
+    func scheduledSends() async throws(CoreClientError) -> [ScheduledSendInfo] {
+        try await call { try await core.scheduledSends() }
+    }
+
+    /// Send the scheduled drafts whose time has come; one more than
+    /// `grace` late is reported, not sent.
+    func sendScheduledDue(grace: Duration) async throws(CoreClientError) -> ScheduledDue {
+        let ms = Int64(grace.components.seconds) * 1000
+        return try await call { try await core.sendScheduledDue(graceMs: ms) }
+    }
+
+    /// Times cross to the core as Unix milliseconds, and nowhere else.
+    nonisolated static func millis(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
+    nonisolated static func date(_ millis: Int64) -> Date { Date(timeIntervalSince1970: TimeInterval(millis) / 1000) }
 
     /// The local draft that edits a draft from the Drafts mailbox (made on
     /// first open, with its attachments).
@@ -1982,6 +2032,8 @@ typealias QueuedChange = KalutaCore.QueuedChange
 typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias TaskMatch = KalutaCore.TaskMatch
 typealias ReminderInfo = KalutaCore.ReminderInfo
+typealias ScheduledSendInfo = KalutaCore.ScheduledSendInfo
+typealias ScheduledDue = KalutaCore.ScheduledDue
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse
 typealias InviteState = KalutaCore.InviteState
