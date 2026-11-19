@@ -2788,6 +2788,13 @@ template version, and are snapshot-tested (§18).
 
 ### 11.5 Client UX
 
+*(Amendment 2026-11-18: an enabled routine's bucket labels show first
+among a row's label chips, tinted in the bucket's colour, wherever the
+row is listed (All Mail, search) except the label's own mailbox. The
+Routines list shows each routine as a card: its name, one sentence from
+its buckets ("Files mail into Newsletters, Receipts and 2 more."), its
+schedule in words, its last run and its switch; a paused one is dimmed.)*
+
 *(Amended 2026-10-11, §14.13: Kaluta summarises what a run sorts, for
 the Weekly reading workflow; moving sorted mail back to the Inbox
 proposes a routine change, decided in Teach Kaluta.)*
@@ -4178,6 +4185,13 @@ draft, send or change mail.
 
 ### 14.11 Facts **(Amendment 2026-10-05)**
 
+*(Amendment 2026-11-18, What Kaluta Knows: a sidebar entry under Facts
+lists the accepted facts and the writing guide's accepted entries
+together, with tabs All, Preferences and People (with counts) and a scope
+on each row: Global, This account, or the people or groups it is for. A
+row opens where it lives: a fact in Facts, an entry in its Writing Guide
+category. Nothing moves in storage.)*
+
 Facts about the user, their work and the people they mention have a place
 of their own, used by every AI that composes for the user. They replace
 the writing guide's category F3; accepted F3 entries were moved into
@@ -5075,6 +5089,14 @@ one decision with a one-line reason:
   when the conversation has one.
 - Making the task, Return saves it (or the conversation's task, changed),
   archives the email if ticked, and moves on; ⌘Z takes all of it back.
+- **Correct it once** *(Amendment 2026-11-18).* *Move to Inbox* in the
+  mail window on one conversation a routine filed does what Weekly
+  reading's *Back to the Inbox* does: out of its bucket, into the Inbox,
+  and a proposed change to the routine (leave such mail alone) in Teach
+  Kaluta. The notice has a field, *Tell Kaluta why*; what is typed stays
+  with that conversation on the proposal ("You said: …"). The move is
+  one undoable change; ⌘Z also takes the conversation off the proposal.
+  The routine changes only when the proposal is accepted.
 - **Catch-up line** *(Amendment 2026-11-18).* Under the Dashboard's
   headline: "18 new since 9:00 · 3 need you": the Inbox conversations
   whose latest message from someone else came since the user last left

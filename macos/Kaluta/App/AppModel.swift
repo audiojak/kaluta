@@ -72,6 +72,14 @@ final class AppModel {
     @ObservationIgnored lazy var indexer: EmbeddingIndexer? = core.map { EmbeddingIndexer(core: $0) }
     /// Conversations watched for an answer (reply-landed alerts).
     var watched: Set<String> = []
+    /// The undo notice asks why a routine's conversation came back to the
+    /// Inbox (Correct it once): which notice, proposal and conversation.
+    struct ReasonRequest: Equatable {
+        let noticeID: UUID
+        let proposalID: Int64
+        let threadID: String
+    }
+    var reasonRequest: ReasonRequest?
     /// The command palette (⌘K) is showing.
     var paletteShown = false
     /// The snippets the palette offers as new messages, read as it opens.
@@ -222,7 +230,7 @@ final class AppModel {
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID,
-              id != Self.factsMailboxID else { return nil }
+              id != Self.factsMailboxID, id != Self.knowsMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -1312,6 +1320,14 @@ final class AppModel {
     func moveSelectionToInbox() {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
+        // One conversation a routine filed: back to the Inbox, and Kaluta
+        // proposes a change to the routine (spec §14.13 amendment 2026-11-18).
+        if ids.count == 1, let row = threads.rows.first(where: { $0.id == ids[0] }),
+           row.labelIds.contains(where: { chipLabels[$0]?.routine == true }) {
+            if selectedMailboxID != "INBOX" { dropFromList(ids) }
+            Task { await correctRoutine(threadID: ids[0]) }
+            return
+        }
         if selectedMailboxID != "INBOX" { dropFromList(ids) }
         Task { await perform(UndoableAction(kind: .moveToInbox, count: ids.count)) { try await core.moveToInbox(ids) } }
     }
@@ -1507,7 +1523,28 @@ final class AppModel {
 
     /// User labels by id, for the chips on thread rows.
     var chipLabels: [String: ThreadRowView.Chip] {
-        model_chipLabels(mailboxes)
+        var chips = model_chipLabels(mailboxes)
+        let buckets = Self.routineBucketColors(routines.routines)
+        for (id, chip) in chips {
+            if let color = buckets[chip.path.lowercased()] {
+                chips[id] = ThreadRowView.Chip(path: chip.path, color: color, routine: true)
+            }
+        }
+        return chips
+    }
+
+    /// Each routine bucket's label path (lowercased) and its colour as hex.
+    static func routineBucketColors(_ routines: [RoutineInfo]) -> [String: String] {
+        var out: [String: String] = [:]
+        for routine in routines where routine.enabled {
+            guard let definition = try? RoutineDefinition.decode(routine.definitionJson) else { continue }
+            let parent = definition.parentLabel.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+            for bucket in definition.buckets {
+                let path = parent.isEmpty ? bucket.labelName : "\(parent)/\(bucket.labelName)"
+                out[path.lowercased()] = RoutineEditorColors.hex(bucket.color)
+            }
+        }
+        return out
     }
 
     /// Create a label (a `/` path creates missing parents) and apply it to

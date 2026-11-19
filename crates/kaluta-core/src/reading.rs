@@ -305,6 +305,8 @@ pub struct RoutineEvidence {
     pub subject: String,
     pub bucket: String,
     pub at: i64,
+    /// Why the user moved it back, if they said.
+    pub reason: String,
 }
 
 /// What *Back to the Inbox* did: the move (for Undo) and the proposal it
@@ -323,7 +325,13 @@ fn proposal_info(p: mail_store::routine_proposals::Proposal) -> RoutineProposalI
         evidence: p
             .evidence
             .into_iter()
-            .map(|e| RoutineEvidence { thread_id: e.thread_id, subject: e.subject, bucket: e.bucket, at: e.at })
+            .map(|e| RoutineEvidence {
+                thread_id: e.thread_id,
+                subject: e.subject,
+                bucket: e.bucket,
+                at: e.at,
+                reason: e.reason,
+            })
             .collect(),
     }
 }
@@ -400,6 +408,7 @@ impl Core {
                             subject: f.subject,
                             bucket: f.bucket,
                             at: f.at,
+                            reason: String::new(),
                         },
                         now,
                     )
@@ -409,6 +418,26 @@ impl Core {
         .await?;
         self.account_events().emit(CoreEvent::WorkflowsChanged);
         Ok(BackToInbox { undo, proposal_id })
+    }
+
+    /// Why the user moved a conversation back (spec §14.13 amendment
+    /// 2026-11-18), kept with the proposal for when they decide it.
+    pub async fn explain_routine_evidence(
+        &self,
+        proposal_id: i64,
+        thread_id: String,
+        reason: String,
+    ) -> Result<bool, CoreError> {
+        let db = self.db()?;
+        let now = mail_sync::now_millis();
+        let found = runtime::run(async move {
+            Ok(db
+                .write(move |tx| mail_store::routine_proposals::explain(tx, proposal_id, &thread_id, &reason, now))
+                .await?)
+        })
+        .await?;
+        self.account_events().emit(CoreEvent::WorkflowsChanged);
+        Ok(found)
     }
 
     /// Undo of *Back to the Inbox*'s proposal: the conversation no longer
@@ -563,9 +592,18 @@ mod tests {
         // No routine yet: accepting waits for one.
         assert!(rt(core.decide_routine_proposal(id, true)).is_err());
         rt(core.create_routine_from_template("claude_cloud".into())).unwrap();
+        let fingerprint = |json: &str| {
+            let r: agent_api::routines::Routine = serde_json::from_str(json).unwrap();
+            agent_api::routines::prompt_fingerprint(&agent_api::routines::generate_prompt(
+                &r,
+                agent_api::routines::PromptTarget::Runner(agent_api::routines::Runner::ClaudeCloud),
+            ))
+        };
+        let before = fingerprint(&rt(core.list_routines()).unwrap()[0].definition_json);
         rt(core.decide_routine_proposal(id, true)).unwrap();
         let routine = rt(core.list_routines()).unwrap().remove(0);
         assert!(routine.definition_json.contains(&proposals[0].rule));
+        assert_ne!(fingerprint(&routine.definition_json), before, "accepting changes the routine's prompt");
         assert!(rt(core.routine_proposals()).unwrap().is_empty());
         rt(core.reopen_routine_proposal(id)).unwrap();
         let routine = rt(core.list_routines()).unwrap().remove(0);

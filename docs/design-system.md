@@ -154,6 +154,8 @@ is only for "approved". Orange is text or a band's fill, never an error.
   days", "Aug 7") over the ready choices, with `KeyHints`. The typed time
   is read by the system's date detector (`TimeInput`); Kaluta has no
   grammar of its own, and the field's prompt names only what reads.
+- **`KnowledgeView`**: What Kaluta Knows: `CapsuleTabs` over one list of
+  facts and guide entries, each row's scope in a quiet tag at its right.
 - **`PaletteView`**: the command palette (⌘K): a field over every
   `MailCommand`, each row its name and `Keycap`, greyed out with the
   reason when it cannot run; the last row asks Kaluta what was typed.

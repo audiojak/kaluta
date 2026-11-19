@@ -384,7 +384,7 @@ struct WorkflowTests {
         model.routineProposals = [
             RoutineProposalInfo(id: 7, statement: "Leave mail from news@example.com in the Inbox",
                                 rule: "Mail from news@example.com: leave it in the Inbox",
-                                evidence: [RoutineEvidence(threadId: "t", subject: "Issue 42", bucket: "2-Weekly", at: 0)]),
+                                evidence: [RoutineEvidence(threadId: "t", subject: "Issue 42", bucket: "2-Weekly", at: 0, reason: "")]),
         ]
         model.enterReview(.teach)
         #expect(model.reviewMode == .teach)

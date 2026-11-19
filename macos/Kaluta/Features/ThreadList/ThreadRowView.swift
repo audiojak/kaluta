@@ -70,6 +70,9 @@ final class ThreadRowView: NSTableCellView {
     struct Chip: Equatable {
         let path: String
         let color: String?
+        /// A routine's bucket: shown before other labels (spec §11.5
+        /// amendment 2026-11-18).
+        var routine = false
     }
 
     /// The mark on a Drafts row whose draft Kaluta wrote and the user has
@@ -84,7 +87,10 @@ final class ThreadRowView: NSTableCellView {
         row.labelIds
             .filter { $0 != mailboxID }
             .compactMap { labels[$0] }
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            .sorted {
+                $0.routine != $1.routine ? $0.routine
+                    : $0.path.localizedStandardCompare($1.path) == .orderedAscending
+            }
             .prefix(limit)
             .map { $0 }
     }

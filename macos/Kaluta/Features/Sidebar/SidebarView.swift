@@ -68,6 +68,10 @@ struct SidebarView: View {
                 .badge(model.analysis.factProposals.count)
                 .tag(AppModel.factsMailboxID)
                 .hoverHelp("Facts about you that AI drafts may use, and the facts proposed from your mail")
+                // Facts and guide entries in one list (spec §14.11 amendment 2026-11-18).
+                Label("What Kaluta Knows", systemImage: "brain")
+                    .tag(AppModel.knowsMailboxID)
+                    .hoverHelp("Everything AI drafts rely on, facts and writing guide together, and whom each is for")
             }
             Section(model.accountSectionTitle) {
                 ForEach(model.mailboxes.accountMailboxes, id: \.id) { mailbox in

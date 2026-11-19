@@ -973,6 +973,11 @@ final class CoreClient: Sendable {
         try await call { try await core.backToInbox(threadId: threadID) }
     }
 
+    @discardableResult
+    func explainRoutineEvidence(_ proposalID: Int64, threadID: String, reason: String) async throws(CoreClientError) -> Bool {
+        try await call { try await core.explainRoutineEvidence(proposalId: proposalID, threadId: threadID, reason: reason) }
+    }
+
     func withdrawRoutineEvidence(_ proposalID: Int64, threadID: String) async throws(CoreClientError) {
         try await call { try await core.withdrawRoutineEvidence(proposalId: proposalID, threadId: threadID) }
     }

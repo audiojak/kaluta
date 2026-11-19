@@ -196,6 +196,7 @@ struct MainWindow: View {
         if model.isTaskList { return "Tasks" }
         if model.isGuide { return "Writing Guide" }
         if model.isFacts { return "Facts" }
+        if model.isKnows { return "What Kaluta Knows" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "Kaluta"
     }
 
@@ -301,6 +302,8 @@ struct MainWindow: View {
                     GuideView()
                 } else if model.isFacts {
                     FactsList(store: model.facts)
+                } else if model.isKnows {
+                    KnowledgeView()
                 } else if model.isTaskList {
                     TaskListView()
                 } else {
@@ -372,6 +375,9 @@ struct MainWindow: View {
             GuideDetailView()
         } else if model.isFacts {
             FactsDetailView()
+        } else if model.isKnows {
+            ContentUnavailableView("Choose One to Open It", systemImage: "brain",
+                                   description: Text("Facts open in Facts, writing guide entries in the Writing Guide."))
         } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {
