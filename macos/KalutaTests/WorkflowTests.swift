@@ -244,6 +244,23 @@ struct WorkflowTests {
         #expect(session.progress == "3 of 3")
     }
 
+    @Test func triageNamesTheGroupOnScreenAndWhereInItItIs() {
+        let item = { (key: String, group: TriageGroup?, decision: String?) in
+            WorkflowItem(key: "thread:\(key)", threadId: key, taskId: nil, decision: decision, group: group)
+        }
+        let items = [item("r", .due, "archive"), item("a", .worth, "archive"), item("b", .worth, nil),
+                     item("c", .worth, nil), item("p", .people, nil), item("n", .automated, nil)]
+        let session = WorkflowSession(set: WorkflowSet(id: 1, kind: .triage, items: items, startedAt: 0, resumed: false))
+        #expect(session.groupLine == "Worth a look · 2 of 3")
+        #expect(TriageGroup.due.title == "Due again" && TriageGroup.people.title == "From people")
+        // Without groups (other workflows), nothing.
+        let plain = WorkflowSession(set: WorkflowSet(id: 2, kind: .replies, items: [item("x", nil, nil)],
+                                                     startedAt: 0, resumed: false))
+        #expect(plain.groupLine == nil)
+        session.score = WorkflowScore(kind: .triage, decided: 6, items: 6, millis: 0, counts: [])
+        #expect(session.groupLine == nil, "not at the end")
+    }
+
     @Test func anEmailReadsAsParagraphsWithoutItsQuotedHistory() {
         let text = "Hi Jo,\nCan you do Thursday?\nSam\nOn an earlier day, Jo wrote:\n> Hello"
         #expect(AppModel.readingText(text) == "Hi Jo,\n\nCan you do Thursday?\n\nSam")

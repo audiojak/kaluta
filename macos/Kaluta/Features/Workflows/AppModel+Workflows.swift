@@ -14,6 +14,10 @@ extension AppModel {
     static let workflowsEnabledKey = "workflowsEnabled"
     /// Triage starts with what matters most (spec §14.13); off by default.
     static let triageByPriorityKey = "triageByPriority"
+
+    /// Triage puts what matters most first unless the user turned it off
+    /// (spec §14.13 amendment 2026-11-19: on by default).
+    var triageByPriority: Bool { defaults.object(forKey: Self.triageByPriorityKey) as? Bool ?? true }
     /// Which of start screen and mail showed last, and on which day.
     static let workflowHomeKey = "workflowHome"
 
@@ -28,7 +32,7 @@ extension AppModel {
         workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         // Kaluta's background jobs run only while workflows are on.
         core?.setWorkflowJobsOn(workflowsEnabled)
-        core?.setTriageByPriority(defaults.bool(forKey: Self.triageByPriorityKey))
+        core?.setTriageByPriority(triageByPriority)
         let saved = defaults.string(forKey: Self.workflowHomeKey)?.split(separator: "@").map(String.init) ?? []
         if saved.count == 2, saved[1] == DueDay.string(now), let home = WorkflowHome(rawValue: saved[0]) {
             self.home = home
@@ -58,7 +62,7 @@ extension AppModel {
     func workflowsSettingChanged() {
         workflowsPreference = defaults.bool(forKey: Self.workflowsEnabledKey)
         core?.setWorkflowJobsOn(workflowsEnabled)
-        core?.setTriageByPriority(defaults.bool(forKey: Self.triageByPriorityKey))
+        core?.setTriageByPriority(triageByPriority)
         Task { await refreshWorkflowOverview() }
     }
 
@@ -1658,7 +1662,8 @@ extension AppModel {
         if let task = task(of: item) { return "\(session.kind.title), \(session.progress): \(task.title)." }
         if let id = threadID(of: item), let detail = session.threads[id] {
             let from = Self.latestReceived(detail)?.from.map { $0.name ?? $0.email } ?? ""
-            return "\(session.kind.title), \(session.progress): \(detail.thread.subject), from \(from)."
+            let group = session.groupLine.map { ", \($0)" } ?? ""
+            return "\(session.kind.title), \(session.progress)\(group): \(detail.thread.subject), from \(from)."
         }
         return "\(session.kind.title), \(session.progress)."
     }

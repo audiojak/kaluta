@@ -4942,10 +4942,22 @@ are looked for as each account opens.
 
 New conversations since the user last finished a triage set, people
 first, then automated mail grouped by kind; or, with Settings › General
-› *Triage what matters most first* (off by default), the highest score
-first (as Worth a look scores them), equals in that order. A set started
-today keeps its order. For each, Kaluta suggests
-one decision with a one-line reason:
+› *Triage what matters most first* (on by default, amended 2026-11-19),
+those worth a look first, the highest score first (as Worth a look
+scores them, a score of 4 or more), then the people by score, then
+automated mail grouped by sender; equals keep their order. Reminders
+that came due come before all of it. A set started today keeps its
+order.
+
+*(Amendment 2026-11-19.)* Each conversation is in one group, kept with
+the set: *Due again*, *Worth a look* (only when what matters most comes
+first), *From people* or *Automated*. The header's pill names the group
+of the conversation on screen and where it is in it ("Worth a look · 2
+of 5"), and VoiceOver's *Where am I* says it. A skipped conversation
+keeps its group; a reminder that comes due in an open set joins *Due
+again*.
+
+For each, Kaluta suggests one decision with a one-line reason:
 
 - **The 30-second rule.** *Quick reply* when Kaluta judges the answer
   takes 30 seconds or less to check and send (the estimate is shown,

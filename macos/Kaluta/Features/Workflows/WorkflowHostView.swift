@@ -1236,8 +1236,10 @@ extension AppModel {
         return nil
     }
 
-    /// The header's one pill: Tasks says what waits for later this week.
+    /// The header's one pill: Tasks says what waits for later this week,
+    /// Triage which group the conversation on screen is in.
     func workflowPill(_ session: WorkflowSession) -> String? {
+        if session.kind == .triage { return session.groupLine }
         if session.kind == .agents {
             // What agent mailboxes sent on their own since the last look.
             let n = session.agentsWork?.sentOnTheirOwn.reduce(0) { $0 + Int($1.count) } ?? 0

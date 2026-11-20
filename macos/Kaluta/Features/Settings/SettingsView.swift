@@ -68,7 +68,7 @@ private struct GeneralSettings: View {
     @AppStorage(Updater.betaKey, store: CoreClient.appDefaults()) private var betas = false
     @AppStorage(AppModel.workflowsEnabledKey, store: CoreClient.appDefaults()) private var workflows = false
     @AppStorage(WorkflowSound.playSoundsKey, store: CoreClient.appDefaults()) private var sounds = true
-    @AppStorage(AppModel.triageByPriorityKey, store: CoreClient.appDefaults()) private var triageByPriority = false
+    @AppStorage(AppModel.triageByPriorityKey, store: CoreClient.appDefaults()) private var triageByPriority = true
     /// Per account, in its store (spec §14.13).
     @State private var waitingDays = 3
     @Environment(AppModel.self) private var model

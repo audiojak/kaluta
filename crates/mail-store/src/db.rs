@@ -61,6 +61,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0042_watches.sql"),
     include_str!("../migrations/0043_meeting_briefs.sql"),
     include_str!("../migrations/0044_message_embeddings.sql"),
+    include_str!("../migrations/0045_workflow_groups.sql"),
 ];
 
 pub const READER_COUNT: usize = 4;

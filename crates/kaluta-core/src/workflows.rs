@@ -155,6 +155,34 @@ pub struct WorkflowOverview {
     pub done_today: Vec<WorkflowDay>,
 }
 
+/// Which part of a Triage set an item is in (spec §14.13 amendment
+/// 2026-11-19), shown above it so the user knows what they are looking at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, uniffi::Enum)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageGroup {
+    /// Its reminder came due (*Remind me later*).
+    Due,
+    /// It likely matters most: it answers the user, asks something, is
+    /// starred or due, or is from someone they write to. Only when Triage
+    /// puts what matters most first.
+    Worth,
+    /// From a person, newest first.
+    People,
+    /// Automated mail, grouped by sender.
+    Automated,
+}
+
+impl TriageGroup {
+    /// As kept in `workflow_sets.groups_json`.
+    fn key(self) -> String {
+        serde_json::to_value(self).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default()
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(key.to_owned())).ok()
+    }
+}
+
 /// One item of a set: a conversation, a task, or a proposal.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct WorkflowItem {
@@ -164,6 +192,9 @@ pub struct WorkflowItem {
     pub task_id: Option<i64>,
     /// How it was decided, once it was.
     pub decision: Option<String>,
+    /// Triage: the group it is in.
+    #[uniffi(default = None)]
+    pub group: Option<TriageGroup>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -193,13 +224,14 @@ pub struct WorkflowScore {
     pub counts: Vec<DecisionCount>,
 }
 
-fn item_from_key(key: &str, decision: Option<String>) -> WorkflowItem {
+fn item_from_key(key: &str, decision: Option<String>, group: Option<TriageGroup>) -> WorkflowItem {
     let (kind, id) = key.split_once(':').unwrap_or((key, ""));
     WorkflowItem {
         key: key.to_owned(),
         thread_id: (kind == "thread").then(|| id.to_owned()),
         task_id: (kind == "task").then(|| id.parse().ok()).flatten(),
         decision,
+        group,
     }
 }
 
@@ -274,6 +306,28 @@ fn rank(conn: &mail_store::Connection, found: Vec<store::Candidate>) -> mail_sto
     Ok(out)
 }
 
+/// Triage's new conversations in order, each with its group (spec §14.13).
+/// They come people first, newest first, then automated mail grouped by
+/// sender. Putting what matters most first moves those worth a look (a
+/// score of `WORTH_SCORE` or more) ahead, the highest first, and ranks
+/// the people by score; equals keep their order, and automated mail stays
+/// grouped by sender.
+fn triage_groups(ranked: &[Ranked], by_priority: bool) -> Vec<(&Ranked, TriageGroup)> {
+    let (mut worth, rest): (Vec<&Ranked>, Vec<&Ranked>) =
+        ranked.iter().partition(|r| by_priority && r.score >= WORTH_SCORE);
+    let (mut people, automated): (Vec<&Ranked>, Vec<&Ranked>) = rest.into_iter().partition(|r| r.candidate.person);
+    if by_priority {
+        worth.sort_by_key(|r| std::cmp::Reverse(r.score));
+        people.sort_by_key(|r| std::cmp::Reverse(r.score));
+    }
+    worth
+        .into_iter()
+        .map(|r| (r, TriageGroup::Worth))
+        .chain(people.into_iter().map(|r| (r, TriageGroup::People)))
+        .chain(automated.into_iter().map(|r| (r, TriageGroup::Automated)))
+        .collect()
+}
+
 /// The start screen's Triage card: who the user knows among the senders,
 /// and what is worth a look first.
 fn triage_card(ranked: &[Ranked]) -> (Vec<String>, u32, u32, Vec<WorthLook>) {
@@ -317,6 +371,8 @@ struct Fresh {
     later: u32,
     /// Triage's card (people, how many more, from others, worth a look).
     card: Option<(Vec<String>, u32, u32, Vec<WorthLook>)>,
+    /// Triage: each item's group, kept with the set.
+    groups: Vec<(String, TriageGroup)>,
 }
 
 impl Core {
@@ -335,7 +391,13 @@ impl Core {
         let items = set
             .items
             .iter()
-            .map(|k| item_from_key(k, decided.iter().find(|d| d.item == *k).map(|d| d.decision.clone())))
+            .map(|k| {
+                item_from_key(
+                    k,
+                    decided.iter().find(|d| d.item == *k).map(|d| d.decision.clone()),
+                    set.groups.get(k).and_then(|g| TriageGroup::from_key(g)),
+                )
+            })
             .collect();
         Ok(WorkflowSet { id: set.id, kind, items, started_at: set.started_at, resumed })
     }
@@ -347,8 +409,8 @@ impl Core {
 
 #[uniffi::export]
 impl Core {
-    /// Triage sets start with what matters most, or in arrival order (the
-    /// default): the app's setting.
+    /// Triage sets start with what matters most (the app's default), or
+    /// in arrival order: the app's setting.
     pub fn set_triage_by_priority(&self, on: bool) {
         self.agents.triage_by_priority.store(on, Ordering::Relaxed);
     }
@@ -502,6 +564,11 @@ impl Core {
                     }
                     let fresh = fresh_from.fresh(tx, kind, now)?;
                     let id = store::create_set(tx, kind.key(), &today, &fresh.keys, now)?;
+                    if !fresh.groups.is_empty() {
+                        let groups: Vec<(String, String)> =
+                            fresh.groups.iter().map(|(k, g)| (k.clone(), g.key())).collect();
+                        store::set_groups(tx, id, groups.iter().map(|(k, g)| (k.as_str(), g.as_str())))?;
+                    }
                     let set = store::get_set(tx, id)?
                         .ok_or_else(|| mail_store::StoreError::NotFound(format!("workflow set {id}")))?;
                     Core::set_info(tx, set, false)
@@ -641,7 +708,7 @@ struct WorkflowFresh {
 impl WorkflowFresh {
     fn fresh(&self, conn: &mail_store::Connection, kind: WorkflowKind, now: i64) -> mail_store::StoreResult<Fresh> {
         if kind == WorkflowKind::Agents {
-            return Ok(Fresh { keys: self.agent_keys.clone(), preview: vec![], later: 0, card: None });
+            return Ok(Fresh { keys: self.agent_keys.clone(), preview: vec![], later: 0, card: None, groups: vec![] });
         }
         fresh_set(conn, kind, now, self.triage_by_priority)
     }
@@ -694,18 +761,21 @@ fn fresh_set(
             // (*Remind me later*); those still to come wait.
             let due = mail_store::reminders::due(conn, now)?;
             let found = store::triage_new(conn, since, now, MAX_SET, &due)?;
-            let mut ranked = rank(conn, found)?;
+            let ranked = rank(conn, found)?;
             let card = triage_card(&ranked);
-            if by_priority {
-                // Stable: equals keep people first, newest first.
-                ranked.sort_by_key(|r| std::cmp::Reverse(r.score));
-            }
-            let first = due.iter().chain(ranked.iter().map(|r| &r.candidate));
+            let ordered: Vec<(&store::Candidate, TriageGroup)> = due
+                .iter()
+                .map(|c| (c, TriageGroup::Due))
+                .chain(triage_groups(&ranked, by_priority).into_iter().map(|(r, g)| (&r.candidate, g)))
+                .collect();
+            let groups: Vec<(String, TriageGroup)> =
+                ordered.iter().map(|(c, g)| (format!("thread:{}", c.thread_id), *g)).collect();
             Fresh {
-                preview: first.clone().take(5).map(name_of).collect(),
-                keys: first.map(|c| format!("thread:{}", c.thread_id)).collect(),
+                preview: ordered.iter().take(5).map(|(c, _)| name_of(c)).collect(),
+                keys: groups.iter().map(|(k, _)| k.clone()).collect(),
                 later: mail_store::reminders::pending(conn, now)?,
                 card: Some(card),
+                groups,
             }
         }
         WorkflowKind::Replies => {
@@ -715,6 +785,7 @@ fn fresh_set(
                 keys: found.iter().map(|c| format!("thread:{}", c.thread_id)).collect(),
                 later: 0,
                 card: None,
+                groups: vec![],
             }
         }
         WorkflowKind::Tasks => {
@@ -724,9 +795,12 @@ fn fresh_set(
                 keys: due.iter().map(|t| format!("task:{}", t.id)).collect(),
                 later: store::tasks_due_later(conn, &today, &day_after(&today, 6))?,
                 card: None,
+                groups: vec![],
             }
         }
-        WorkflowKind::Teach => Fresh { keys: store::teach_items(conn)?, preview: vec![], later: 0, card: None },
+        WorkflowKind::Teach => {
+            Fresh { keys: store::teach_items(conn)?, preview: vec![], later: 0, card: None, groups: vec![] }
+        }
         // Waiting a few days, the longest first (spec §14.13).
         WorkflowKind::Waiting => {
             let due = mail_store::waiting::due(conn, now, mail_store::waiting::days(conn)?)?;
@@ -739,6 +813,7 @@ fn fresh_set(
                 preview,
                 later: 0,
                 card: None,
+                groups: vec![],
             }
         }
         // The buckets due today, their unread mail (spec §14.13).
@@ -749,14 +824,15 @@ fn fresh_set(
                 keys: due.iter().map(|f| format!("thread:{}", f.thread_id)).collect(),
                 later: 0,
                 card: None,
+                groups: vec![],
             }
         }
         // Agents is the caller's.
-        WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0, card: None },
+        WorkflowKind::Agents => Fresh { keys: vec![], preview: vec![], later: 0, card: None, groups: vec![] },
         // Meetings that deserve a follow-up, newest first (spec §14.14).
         WorkflowKind::Followups => {
             let (keys, preview) = crate::followups::waiting_keys(conn, now)?;
-            Fresh { keys, preview, later: 0, card: None }
+            Fresh { keys, preview, later: 0, card: None, groups: vec![] }
         }
     })
 }
@@ -867,8 +943,18 @@ mod tests {
         assert!(triage.from_others > 0, "automated mail is from no one the user writes to");
         assert!(!triage.worth.is_empty() && triage.worth.len() <= WORTH);
         assert!(triage.worth.iter().all(|w| !w.reasons.is_empty() || !w.name.is_empty()));
-        // Off by default: arrival order, people first.
+        // Off until the app says: arrival order, people first, then
+        // automated mail, each item marked with its group.
         let arrival = block_on(core.start_workflow(WorkflowKind::Triage)).unwrap();
+        let groups: Vec<TriageGroup> = arrival.items.iter().filter_map(|i| i.group).collect();
+        assert_eq!(groups.len(), arrival.items.len(), "every triage item has a group");
+        assert!(!groups.contains(&TriageGroup::Worth), "worth a look only when it comes first");
+        assert!(groups.contains(&TriageGroup::People) && groups.contains(&TriageGroup::Automated));
+        assert!(groups.windows(2).all(|w| w[0] == w[1] || w[1] == TriageGroup::Automated), "in one run each");
+        // A resumed set keeps them.
+        let resumed = block_on(core.start_workflow(WorkflowKind::Triage)).unwrap();
+        assert!(resumed.resumed);
+        assert_eq!(resumed.items.iter().filter_map(|i| i.group).collect::<Vec<_>>(), groups);
         block_on(core.finish_workflow(arrival.id)).ok();
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -878,6 +964,14 @@ mod tests {
         let worth = summary(&o, WorkflowKind::Triage).worth.clone();
         let set = block_on(core.start_workflow(WorkflowKind::Triage)).unwrap();
         assert_eq!(set.items[0].thread_id.as_deref(), Some(worth[0].thread_id.as_str()), "what matters most first");
+        assert_eq!(set.items[0].group, Some(TriageGroup::Worth));
+        let order = |g: Option<TriageGroup>| match g {
+            Some(TriageGroup::Due) => 0,
+            Some(TriageGroup::Worth) => 1,
+            Some(TriageGroup::People) => 2,
+            _ => 3,
+        };
+        assert!(set.items.windows(2).all(|w| order(w[0].group) <= order(w[1].group)), "groups in order");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
