@@ -65,6 +65,32 @@ final class AppModel {
     /// for the footer's countdown; nil when it has not.
     private(set) var syncPausedUntil: Date?
 
+    /// The conversations whose drafts Kaluta wrote, not sent yet: marked
+    /// in the Drafts list.
+    var kalutaWritten: Set<String> = []
+    /// Vectors for search by meaning, computed on the Mac.
+    @ObservationIgnored lazy var indexer: EmbeddingIndexer? = core.map { EmbeddingIndexer(core: $0) }
+    /// Conversations watched for an answer (reply-landed alerts).
+    var watched: Set<String> = []
+    /// The undo notice asks why a routine's conversation came back to the
+    /// Inbox (Correct it once): which notice, proposal and conversation.
+    struct ReasonRequest: Equatable {
+        let noticeID: UUID
+        let proposalID: Int64
+        let threadID: String
+    }
+    var reasonRequest: ReasonRequest?
+    /// The command palette (⌘K) is showing.
+    var paletteShown = false
+    /// The snippets the palette offers as new messages, read as it opens.
+    var paletteSnippets: [SnippetInfo] = []
+    /// Drafts to be sent later, in every open account, soonest first.
+    var scheduledSends: [ScheduledSendInfo] = []
+    /// The wait for the next scheduled send's time.
+    @ObservationIgnored var scheduledWait: Task<Void, Never>?
+    /// Asks what to do with a scheduled send found long after its time.
+    @ObservationIgnored var overduePrompt: (ScheduledSendInfo) async -> OverdueChoice = AppModel.askAboutOverdue
+
     static let demoAccountID = "demo"
     static let demoThreadCount: UInt32 = 2_000
 
@@ -204,7 +230,7 @@ final class AppModel {
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID,
-              id != Self.factsMailboxID else { return nil }
+              id != Self.factsMailboxID, id != Self.knowsMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -409,6 +435,10 @@ final class AppModel {
     }
     /// The start screen's counts, estimates and Done today.
     var workflowOverview: WorkflowOverview?
+    /// The Dashboard's catch-up line: what came in since the user last looked.
+    var catchUp: CatchUp?
+    /// Briefs for the next day's meetings (meeting prep).
+    var meetingBriefs: [MeetingBrief] = []
     /// The Dashboard's *Tidy the Inbox* card (spec §14.12, on the
     /// Dashboard), and the suggestion being archived.
     var inboxTidy: InboxTidy?
@@ -517,6 +547,12 @@ final class AppModel {
                 self.openGuideDecisionsNow()
             }
         }
+        notifier.replyInThread = { [weak self] thread, account in
+            Task { await self?.replyFromNotification(threadID: thread, accountID: account) }
+        }
+        notifier.remindTomorrow = { [weak self] thread, account in
+            Task { await self?.remindTomorrow(threadID: thread, accountID: account) }
+        }
         notifier.openAnalysis = { [weak self] account in
             guard let self else { return }
             Task {
@@ -542,6 +578,27 @@ final class AppModel {
         } else {
             accountState = .noAccount
         }
+        // Search by meaning: its matches after the others, and the index
+        // filled in the background (not in tests, which ask for it).
+        threads.meaning = { [weak self] query in await self?.indexer?.related(to: query) ?? [] }
+        if !CoreClient.isRunningTests { indexer?.start() }
+        // Anything scheduled to send while Kaluta was not running.
+        await sendDueScheduled()
+        await loadWatched()
+    }
+
+    /// Which Drafts rows to mark as written by Kaluta.
+    func loadKalutaWritten() async {
+        kalutaWritten = (try? await core?.kalutaWrittenThreads()) ?? []
+    }
+
+    /// The writing guide, in the mail window (from a composer's "your
+    /// writing guide" link).
+    func showWritingGuide() {
+        if let main = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
+            main.makeKeyAndOrderFront(nil)
+        }
+        selectedMailboxID = Self.guideMailboxID
     }
 
     func openDemoMailbox() async {
@@ -990,6 +1047,9 @@ final class AppModel {
         searchText = ""
         selectedMailboxIDSilently(place?.mailbox ?? "INBOX")
         await open(accountID: accountID, startingSync: false)
+        // The index is the open account's: start on this one's backlog.
+        if !CoreClient.isRunningTests { indexer?.start() }
+        await loadWatched()
         routinesRevision += 1
         if let thread = place?.thread, threads.rows.contains(where: { $0.id == thread }) {
             selectedThreadID = thread
@@ -1260,6 +1320,14 @@ final class AppModel {
     func moveSelectionToInbox() {
         let ids = actionTargets
         guard let core, !ids.isEmpty else { return }
+        // One conversation a routine filed: back to the Inbox, and Kaluta
+        // proposes a change to the routine (spec §14.13 amendment 2026-11-18).
+        if ids.count == 1, let row = threads.rows.first(where: { $0.id == ids[0] }),
+           row.labelIds.contains(where: { chipLabels[$0]?.routine == true }) {
+            if selectedMailboxID != "INBOX" { dropFromList(ids) }
+            Task { await correctRoutine(threadID: ids[0]) }
+            return
+        }
         if selectedMailboxID != "INBOX" { dropFromList(ids) }
         Task { await perform(UndoableAction(kind: .moveToInbox, count: ids.count)) { try await core.moveToInbox(ids) } }
     }
@@ -1455,7 +1523,28 @@ final class AppModel {
 
     /// User labels by id, for the chips on thread rows.
     var chipLabels: [String: ThreadRowView.Chip] {
-        model_chipLabels(mailboxes)
+        var chips = model_chipLabels(mailboxes)
+        let buckets = Self.routineBucketColors(routines.routines)
+        for (id, chip) in chips {
+            if let color = buckets[chip.path.lowercased()] {
+                chips[id] = ThreadRowView.Chip(path: chip.path, color: color, routine: true)
+            }
+        }
+        return chips
+    }
+
+    /// Each routine bucket's label path (lowercased) and its colour as hex.
+    static func routineBucketColors(_ routines: [RoutineInfo]) -> [String: String] {
+        var out: [String: String] = [:]
+        for routine in routines where routine.enabled {
+            guard let definition = try? RoutineDefinition.decode(routine.definitionJson) else { continue }
+            let parent = definition.parentLabel.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+            for bucket in definition.buckets {
+                let path = parent.isEmpty ? bucket.labelName : "\(parent)/\(bucket.labelName)"
+                out[path.lowercased()] = RoutineEditorColors.hex(bucket.color)
+            }
+        }
+        return out
     }
 
     /// Create a label (a `/` path creates missing parents) and apply it to
@@ -1605,7 +1694,11 @@ final class AppModel {
             core?.setAppActive(false)
         }))
         subscriptions.observers.append((workspace, workspace.addObserver(
-            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core] _ in core?.syncNow() }))
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak core, weak self] _ in
+            core?.syncNow()
+            // A scheduled send's time may have passed while asleep.
+            Task { @MainActor in await self?.sendDueScheduled() }
+        }))
         subscriptions.network.pathUpdateHandler = { [weak core] path in
             if path.status == .satisfied { core?.syncNow() }
         }
@@ -1640,6 +1733,7 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
+        if selectedMailboxID == "DRAFT" { Task { await loadKalutaWritten() } }
         if isGuide { Task { await guide.load(); await proposalsShown(.rules) } }
         if isFacts { Task { await proposalsShown(.facts) } }
         guard case .open = accountState, let id = listMailboxID else { return }
@@ -1778,6 +1872,7 @@ final class AppModel {
             await refreshFailedSends()
         case let .newMail(mail):
             notifier.announce(mail, account: notificationTag(for: tagged.accountID))
+            await announceReplies(mail, accountID: tagged.accountID)
         case let .agent(sessionID, events):
             await agent.apply(sessionID: sessionID, events: events)
         case .routinesChanged:

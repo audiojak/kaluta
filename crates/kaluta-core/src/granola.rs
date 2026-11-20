@@ -126,6 +126,20 @@ impl MeetingSource for FakeGranola {
                     ],
                     url: Some("https://notes.granola.ai/d/fake-pilot".into()),
                 },
+                // On the calendar, still to come: no note yet (meeting prep).
+                provider_granola::Meeting {
+                    id: "evt_fake-pricing".into(),
+                    title: "Pricing call with Reese".into(),
+                    meeting_at: Some(self.at(-3)),
+                    participants: vec![
+                        me.clone(),
+                        provider_granola::Participant {
+                            name: "Reese Park".into(),
+                            email: Some("reese@example.org".into()),
+                        },
+                    ],
+                    url: None,
+                },
                 provider_granola::Meeting {
                     id: "fake-focus".into(),
                     title: "Focus time".into(),

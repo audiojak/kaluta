@@ -483,6 +483,14 @@ impl AccountComposer {
         self.scoped(self.core.cancel_send(draft_id)).await
     }
 
+    pub async fn schedule_send(&self, draft_id: i64, send_at: Option<i64>) -> Result<Option<i64>, CoreError> {
+        self.scoped(self.core.schedule_send(draft_id, send_at)).await
+    }
+
+    pub async fn scheduled_send(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
+        self.scoped(self.core.scheduled_send(draft_id)).await
+    }
+
     pub async fn send_held_until(&self, draft_id: i64) -> Result<Option<i64>, CoreError> {
         self.scoped(self.core.send_held_until(draft_id)).await
     }

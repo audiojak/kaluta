@@ -93,19 +93,33 @@ async fn copy_attachments(
     let mut attachments = Vec::new();
     for a in of.iter().filter(|a| !a.is_inline) {
         let Ok(attachment_id) = a.id.0.parse::<i64>() else { continue };
-        let file = crate::attachments::attachment_file(db, provider, cache_dir, attachment_id).await?;
-        let folder = drafts_dir.join(random_token());
-        std::fs::create_dir_all(&folder).map_err(|e| StoreError::Io(e.to_string()))?;
-        let copy = folder.join(crate::attachments::safe_filename(&file.filename));
-        std::fs::copy(&file.path, &copy).map_err(|e| StoreError::Io(format!("{}: {e}", file.filename)))?;
-        attachments.push(drafts::DraftAttachment {
-            path: copy.to_string_lossy().into_owned(),
-            filename: file.filename,
-            mime_type: file.mime_type,
-            size: a.size,
-        });
+        attachments.push(copy_attachment(db, provider, cache_dir, drafts_dir, attachment_id, a.size).await?);
     }
     Ok(attachments)
+}
+
+/// One attachment from the user's mail, copied for a draft: fetched first
+/// if it is not cached, then copied into a folder of its own.
+pub async fn copy_attachment(
+    db: &Db,
+    provider: Option<&dyn provider_api::MailProvider>,
+    cache_dir: &std::path::Path,
+    drafts_dir: &std::path::Path,
+    attachment_id: i64,
+    size: u64,
+) -> SyncResult<drafts::DraftAttachment> {
+    let file = crate::attachments::attachment_file(db, provider, cache_dir, attachment_id).await?;
+    let folder = drafts_dir.join(random_token());
+    std::fs::create_dir_all(&folder).map_err(|e| StoreError::Io(e.to_string()))?;
+    let copy = folder.join(crate::attachments::safe_filename(&file.filename));
+    std::fs::copy(&file.path, &copy).map_err(|e| StoreError::Io(format!("{}: {e}", file.filename)))?;
+    let size = if size > 0 { size } else { std::fs::metadata(&copy).map(|m| m.len()).unwrap_or(0) };
+    Ok(drafts::DraftAttachment {
+        path: copy.to_string_lossy().into_owned(),
+        filename: file.filename,
+        mime_type: file.mime_type,
+        size,
+    })
 }
 
 /// A forward that carries the original's attached files too, as a
@@ -306,6 +320,10 @@ pub async fn send_draft(
             let mut w = MailWriter::new(tx).with_sanitizer_version(mail_mime::SANITIZER_VERSION);
             w.upsert_message(&copy)?;
             let changes = w.finish()?;
+            // Going now, whatever time it was to be sent at (send later,
+            // ADR 0022): in this transaction, so a send taken back is an
+            // ordinary draft and cannot go again by itself.
+            mail_store::scheduled::set(tx, draft_id, None, now)?;
             if queue {
                 drafts::set_state(tx, draft_id, DraftState::Sending, None)?;
                 drafts::set_rfc822_id(tx, draft_id, &rfc822_id)?;

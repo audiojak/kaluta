@@ -5,6 +5,7 @@
 
 pub mod agents;
 pub mod analysis;
+pub mod briefs;
 pub mod calendar;
 pub mod cleanup;
 pub mod cloud_reports;
@@ -14,6 +15,7 @@ mod db;
 pub mod demo;
 pub mod demo_workflows;
 pub mod drafts;
+pub mod embeddings;
 mod error;
 pub mod facts;
 pub mod followups;
@@ -27,10 +29,13 @@ pub mod reading;
 pub mod reminders;
 pub mod routine_proposals;
 pub mod routines;
+pub mod scheduled;
 pub mod search;
+pub mod snippets;
 pub mod tasks;
 pub mod undo;
 pub mod waiting;
+pub mod watches;
 pub mod workflows;
 mod write;
 

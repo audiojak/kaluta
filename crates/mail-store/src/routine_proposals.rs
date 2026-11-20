@@ -15,6 +15,10 @@ pub struct Evidence {
     /// The bucket it had been filed in (its label's name).
     pub bucket: String,
     pub at: Millis,
+    /// Why the user moved it back, in their words, if they said
+    /// (spec §14.13 amendment 2026-11-18).
+    #[serde(default)]
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +111,19 @@ pub fn withdraw(tx: &Transaction, id: i64, thread_id: &str, now: Millis) -> Stor
     Ok(())
 }
 
+/// The user's reason for one conversation behind a proposal; whether it
+/// was found there.
+pub fn explain(tx: &Transaction, id: i64, thread_id: &str, reason: &str, now: Millis) -> StoreResult<bool> {
+    let Some(mut p) = get(tx, id)? else { return Ok(false) };
+    let Some(e) = p.evidence.iter_mut().find(|e| e.thread_id == thread_id) else { return Ok(false) };
+    e.reason = reason.trim().chars().take(500).collect();
+    tx.execute(
+        "UPDATE routine_proposals SET evidence_json = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, serde_json::to_string(&p.evidence).unwrap_or_else(|_| "[]".into()), now],
+    )?;
+    Ok(true)
+}
+
 pub fn get(conn: &Connection, id: i64) -> StoreResult<Option<Proposal>> {
     Ok(conn
         .prepare_cached(&format!("SELECT {COLUMNS} FROM routine_proposals WHERE id = ?1"))?
@@ -143,8 +160,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kaluta-routine-proposals-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
-        let ev =
-            |t: &str| Evidence { thread_id: t.into(), subject: "Issue 42".into(), bucket: "2-Weekly".into(), at: 1 };
+        let ev = |t: &str| Evidence {
+            thread_id: t.into(),
+            subject: "Issue 42".into(),
+            bucket: "2-Weekly".into(),
+            at: 1,
+            reason: String::new(),
+        };
         let add = |t: &'static str| {
             let e = ev(t);
             db.write_blocking(move |tx| {
@@ -164,6 +186,14 @@ mod tests {
         assert_eq!(add("t2"), Some(id));
         assert_eq!(add("t2"), Some(id), "the same conversation once");
         assert_eq!(db.read_blocking(move |c| get(c, id)).unwrap().unwrap().evidence.len(), 2);
+        // The user says why, for one conversation.
+        assert!(db.write_blocking(move |tx| explain(tx, id, "t2", "  It's my bank, not a newsletter. ", 2)).unwrap());
+        let p = db.read_blocking(move |c| get(c, id)).unwrap().unwrap();
+        assert_eq!(
+            p.evidence.iter().map(|e| e.reason.as_str()).collect::<Vec<_>>(),
+            ["", "It's my bank, not a newsletter."]
+        );
+        assert!(!db.write_blocking(move |tx| explain(tx, id, "nope", "x", 2)).unwrap());
         db.write_blocking(move |tx| withdraw(tx, id, "t2", 2)).unwrap();
         assert_eq!(db.read_blocking(proposed).unwrap()[0].evidence.len(), 1);
         db.write_blocking(move |tx| set_status(tx, id, "rejected", None, 3)).unwrap();

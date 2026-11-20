@@ -11,7 +11,8 @@ pub mod transport;
 
 pub use attachments::{AttachmentFile, attachment_file, safe_filename};
 pub use compose::{
-    draft_for_editing, forward_draft, forward_draft_with_attachments, reply_draft, schedule_draft_sync, send_draft,
+    copy_attachment, draft_for_editing, forward_draft, forward_draft_with_attachments, reply_draft,
+    schedule_draft_sync, send_draft,
 };
 pub use convert::to_incoming;
 pub use engine::{

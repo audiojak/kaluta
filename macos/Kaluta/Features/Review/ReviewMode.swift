@@ -746,6 +746,9 @@ struct RoutineDecisionBody: View {
                     VStack(alignment: .leading, spacing: Space.hair) {
                         Text(e.subject.isEmpty ? "(no subject)" : e.subject).font(TypeRole.reading)
                         Text("Was in \(e.bucket)").font(TypeRole.caption).foregroundStyle(.secondary)
+                        if !e.reason.isEmpty {
+                            Text("You said: \(e.reason)").font(TypeRole.caption)
+                        }
                     }
                 }
             }

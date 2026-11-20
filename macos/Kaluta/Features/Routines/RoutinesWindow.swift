@@ -56,6 +56,15 @@ private struct RoutineList: View {
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: Space.hair) {
                         Text(routine.name).font(TypeRole.heading)
+                        // What it does and when, in words (spec §11.5 amendment 2026-11-18).
+                        if let definition = try? RoutineDefinition.decode(routine.definitionJson) {
+                            Text(RoutinesStore.summary(definition))
+                                .font(TypeRole.meta)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(model.core?.describeSchedule(definition.schedule.rrule) ?? "")
+                                .font(TypeRole.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         HStack(spacing: Space.s) {
                             Text(RoutineRunner(rawValue: routine.runner)?.badge ?? routine.runner)
                             if routine.changedSincePublish { Text("· unpublished changes").foregroundStyle(Tone.caution) }
@@ -75,7 +84,9 @@ private struct RoutineList: View {
                         .controlSize(.mini)
                         .hoverHelp("\(routine.enabled ? "Pause" : "Resume") this routine's schedule")
                 }
-                .padding(.vertical, Space.hair)
+                .padding(Space.m)
+                .background(Tone.controlFill, in: RoundedRectangle(cornerRadius: Radius.card))
+                .opacity(routine.enabled ? 1 : 0.6)
                 .tag(routine.id)
             }
         }
@@ -443,6 +454,22 @@ private struct PreviewRowView: View {
 }
 
 enum RoutineEditorColors {
+    /// A bucket's colour as hex, for its label's chip on rows.
+    static func hex(_ name: String) -> String {
+        switch name {
+        case "red": "#FF3B30"
+        case "orange": "#FF9500"
+        case "yellow": "#FFCC00"
+        case "green": "#34C759"
+        case "teal": "#30B0C7"
+        case "blue": "#007AFF"
+        case "purple": "#AF52DE"
+        case "pink": "#FF2D55"
+        case "brown": "#A2845E"
+        default: "#8E8E93"
+        }
+    }
+
     static func color(_ name: String) -> Color {
         switch name {
         case "red": .red

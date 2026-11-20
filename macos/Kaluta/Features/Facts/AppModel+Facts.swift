@@ -10,6 +10,10 @@ extension AppModel {
 
     var isFacts: Bool { selectedMailboxID == Self.factsMailboxID && threads.searchQuery == nil }
 
+    /// The sidebar's What Kaluta Knows entry: facts and guide entries together.
+    static let knowsMailboxID = "@knows"
+    var isKnows: Bool { selectedMailboxID == Self.knowsMailboxID && threads.searchQuery == nil }
+
     /// Open Facts; with `proposed`, Review mode on its proposed facts.
     func openFacts(proposed: Bool = false) {
         guidePrompt = nil

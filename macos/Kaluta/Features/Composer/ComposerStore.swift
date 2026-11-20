@@ -66,6 +66,11 @@ final class ComposerStore {
     private(set) var heldSend: Int64?
     /// Sent (rather than discarded), for what follows a send.
     private(set) var didSend = false
+    /// When this draft is to be sent, if it is scheduled (Send Later).
+    private(set) var scheduledAt: Date?
+    /// Scheduled just now, and the time it had before: the window closes
+    /// and the notice offers Undo.
+    private(set) var scheduledNow: (at: Date, before: Date?)?
     /// The task this message answers (spec §14.8): the one it was started
     /// from, else the conversation's open task (§14.13).
     private(set) var taskID: Int64?
@@ -140,6 +145,7 @@ final class ComposerStore {
             }
             apply(draft)
             phase = .editing
+            if draft.id != 0 { scheduledAt = try? await core.scheduledSend(draft.id) }
             // A failed send comes back as an editable draft with the reason.
             if draft.status == .failed { saveError = draft.error ?? "Sending failed." }
         } catch {
@@ -260,6 +266,34 @@ final class ComposerStore {
             phase = .sent
         } catch {
             phase = .editing
+            saveError = error.message
+        }
+    }
+
+    /// Send Later: the draft is saved and stays a draft until `date`, when
+    /// Kaluta sends it if it is running (spec §14.5, ADR 0022).
+    func sendLater(at date: Date) async {
+        guard canSend, let core else { return }
+        isDirty = true
+        await save()
+        guard saveError == nil, draftID != 0 else { return }
+        do {
+            let before = try await core.scheduleSend(draftID, at: date)
+            scheduledAt = date
+            scheduledNow = (date, before)
+            phase = .sent
+        } catch {
+            saveError = error.message
+        }
+    }
+
+    /// Not to be sent later after all: an ordinary draft again.
+    func unschedule() async {
+        guard let core, draftID != 0, scheduledAt != nil else { return }
+        do {
+            try await core.scheduleSend(draftID, at: nil)
+            scheduledAt = nil
+        } catch {
             saveError = error.message
         }
     }

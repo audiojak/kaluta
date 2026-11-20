@@ -145,6 +145,19 @@ fn spec(tool: Tool) -> ToolSpec {
                 &["draft_id"],
             ),
         ),
+        Tool::AttachToDraft => (
+            "Attach a file from the user's mail to a draft created in this session: the attachment_id of a \
+             message you can read (from mail_get_message). Files on disk cannot be attached. The user reviews \
+             the draft, with its files, before it is sent.",
+            object(
+                json!({
+                    "draft_id": { "type": "integer" },
+                    "message_id": { "type": "string" },
+                    "attachment_id": { "type": "string" },
+                }),
+                &["draft_id", "message_id", "attachment_id"],
+            ),
+        ),
         Tool::Archive => (
             "Archive threads (remove them from the Inbox; they stay searchable).",
             object(json!({ "thread_ids": thread_ids("Threads to archive.") }), &["thread_ids"]),

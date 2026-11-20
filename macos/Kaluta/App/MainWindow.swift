@@ -196,6 +196,7 @@ struct MainWindow: View {
         if model.isTaskList { return "Tasks" }
         if model.isGuide { return "Writing Guide" }
         if model.isFacts { return "Facts" }
+        if model.isKnows { return "What Kaluta Knows" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "Kaluta"
     }
 
@@ -301,6 +302,8 @@ struct MainWindow: View {
                     GuideView()
                 } else if model.isFacts {
                     FactsList(store: model.facts)
+                } else if model.isKnows {
+                    KnowledgeView()
                 } else if model.isTaskList {
                     TaskListView()
                 } else {
@@ -311,6 +314,7 @@ struct MainWindow: View {
             // is empty (it floated to the middle with a short VStack).
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .overlay(alignment: .bottom) { UndoNoticeView() }
+            .background { PaletteHost() }
             // No drawn rule under the header: the column runs beneath the
             // floating sidebar, and a full-width rule showed through its
             // glass (oagc-0cw). The bar sits in the column's safe area.
@@ -324,6 +328,7 @@ struct MainWindow: View {
         VStack(spacing: 0) {
             categoryTabs
             taskTabs
+            ScheduledStrip()
             if model.isGuide { GuideActivityStrip() }
             if model.isGuide { ReviewBand(mode: .rules) }
             if model.isFacts { ReviewBand(mode: .facts) }
@@ -370,6 +375,9 @@ struct MainWindow: View {
             GuideDetailView()
         } else if model.isFacts {
             FactsDetailView()
+        } else if model.isKnows {
+            ContentUnavailableView("Choose One to Open It", systemImage: "brain",
+                                   description: Text("Facts open in Facts, writing guide entries in the Writing Guide."))
         } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {

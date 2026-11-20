@@ -50,6 +50,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "u", action: "Mark as read or unread", inThreadList: true),
             .init(keys: "s", action: "Star or unstar", inThreadList: true),
             .init(keys: "l", action: "Label…", inThreadList: true),
+            .init(keys: "b", action: "Remind me… (back in Triage then)", inThreadList: true),
             .init(keys: "r", action: "Reply", inThreadList: true),
             .init(keys: "a", action: "Reply all", inThreadList: true),
             .init(keys: "f", action: "Forward", inThreadList: true),
@@ -74,7 +75,8 @@ enum KeyboardShortcutGuide {
             .init(keys: "⌘\\", action: "Clear formatting", inThreadList: false),
         ]),
         Group(title: "Agents and routines", shortcuts: [
-            .init(keys: "⌘K", action: "Ask the agent, from any window", inThreadList: false),
+            .init(keys: "⌘K", action: "Command palette: run any command by name, or ask the agent", inThreadList: false),
+            .init(keys: "⌥⌘K", action: "Ask the agent, from any window", inThreadList: false),
             .init(keys: "Tab", action: "Next column: sidebar, list, message, search", inThreadList: false),
             .init(keys: "⌥Tab", action: "Previous column (⇧Tab too)", inThreadList: false),
             .init(keys: "⌥⌘I", action: "Show or hide the agent panel", inThreadList: false),

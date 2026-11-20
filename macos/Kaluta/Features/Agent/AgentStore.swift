@@ -21,6 +21,10 @@ final class AgentStore {
             case error(String)
             /// Something the agent wants to do that the user decides.
             case proposal(actionID: Int64, tool: String, summary: String, draftID: Int64?, state: ProposalState)
+            /// What one request did and asks, together (spec §14.6
+            /// amendment 2026-11-18): shown after a turn that did or asked
+            /// more than one thing.
+            case receipt(turn: Int)
         }
 
         enum ProposalState: Equatable {
@@ -38,7 +42,23 @@ final class AgentStore {
 
         let id: Int
         var kind: Kind
+        /// The request (agent turn) it came from.
+        var turn = 0
     }
+
+    /// One line of a request's receipt: what was done, or is asked.
+    struct ReceiptLine: Equatable {
+        let title: String
+        let detail: String
+        /// Waiting for the user's answer.
+        let pending: Bool
+    }
+
+    /// Tools that change something, so a receipt lists what they did.
+    static let changingTools: Set<String> = [
+        "mail_create_draft", "mail_update_draft", "mail_attach_to_draft", "mail_archive", "mail_mark_read",
+        "mail_mark_unread", "mail_add_label", "mail_remove_label", "mail_create_label", "calendar_hold",
+    ]
 
     private(set) var providers: [AgentProviderInfo] = []
     var providerID: String {
@@ -64,6 +84,8 @@ final class AgentStore {
     /// just after the approval.
     @ObservationIgnored var holdLookup: Duration = .seconds(3)
     @ObservationIgnored private var nextID = 0
+    /// The current request's number, for its receipt.
+    @ObservationIgnored private var turn = 0
     @ObservationIgnored private var toolEntries: [String: Int] = [:]
     @ObservationIgnored private let logger = Logger(subsystem: "org.kaluta.Kaluta", category: "agent")
 
@@ -211,6 +233,53 @@ final class AgentStore {
         for id in approvableProposals { resolve(id, approve: true) }
     }
 
+    // MARK: Receipts
+
+    /// What request `turn` did and asks, in order.
+    func receipt(turn: Int) -> [ReceiptLine] {
+        entries.filter { $0.turn == turn }.compactMap { entry in
+            switch entry.kind {
+            case let .tool(name, _, .succeeded, summary) where Self.changingTools.contains(name):
+                ReceiptLine(title: Self.toolTitle(name), detail: summary, pending: false)
+            case let .proposal(_, _, summary, _, state):
+                ReceiptLine(title: summary, detail: Self.stateText(state), pending: state == .pending)
+            default:
+                nil
+            }
+        }
+    }
+
+    /// The proposals of request `turn` its receipt may approve together:
+    /// not sends, which open to be read first (spec §10.4).
+    func approvable(inTurn turn: Int) -> [Int64] {
+        let ids = Set(entries.filter { $0.turn == turn }.compactMap { entry -> Int64? in
+            if case let .proposal(id, _, _, _, .pending) = entry.kind { id } else { nil }
+        })
+        return approvableProposals.filter(ids.contains)
+    }
+
+    func approveTurn(_ turn: Int) {
+        for id in approvable(inTurn: turn) { resolve(id, approve: true) }
+    }
+
+    /// A receipt for a request that did or asked more than one thing.
+    private func addReceipt() {
+        guard turn > 0, receipt(turn: turn).count > 1, !entries.contains(where: { $0.kind == .receipt(turn: turn) })
+        else { return }
+        append(.receipt(turn: turn))
+    }
+
+    static func stateText(_ state: Entry.ProposalState) -> String {
+        switch state {
+        case .pending: "Waiting for you"
+        case .approved: "Approved"
+        case .rejected: "Declined"
+        case .sending: "Sending…"
+        case .undoing: "Taking it back…"
+        case .takenBack: "Not sent"
+        }
+    }
+
     /// A pending proposal was decided (here or by the core's event, which
     /// may come second). An approved send or forward that the core holds
     /// for Undo Send shows "Sending… Undo" until it goes.
@@ -327,13 +396,14 @@ final class AgentStore {
         }
     }
 
-    private func ingest(_ events: [AgentEventInfo]) async {
+    func ingest(_ events: [AgentEventInfo]) async {
         for event in events {
             switch event {
             case .sessionStarted, .sessionEnded:
                 break
             case .turnStarted:
                 isRunning = true
+                turn += 1
             case let .textDelta(text):
                 appendText(text, thinking: false)
             case let .thinkingDelta(text):
@@ -355,10 +425,12 @@ final class AgentStore {
                 if !rows.isEmpty { append(.results(title: title, rows: rows)) }
             case let .turnCompleted(input, output, cost):
                 isRunning = false
+                addReceipt()
                 lastUsage = Self.usageText(input: input, output: output, cost: cost)
             case let .turnFailed(message):
                 isRunning = false
                 append(.error(message))
+                addReceipt()
             }
         }
     }
@@ -375,7 +447,7 @@ final class AgentStore {
     @discardableResult
     private func append(_ kind: Entry.Kind) -> Int {
         nextID += 1
-        entries.append(Entry(id: nextID, kind: kind))
+        entries.append(Entry(id: nextID, kind: kind, turn: turn))
         return nextID
     }
 
@@ -423,6 +495,7 @@ final class AgentStore {
         case "mail_present_threads": "Showed threads"
         case "mail_create_draft": "Wrote a draft"
         case "mail_update_draft": "Edited a draft"
+        case "mail_attach_to_draft": "Attached a file to a draft"
         case "mail_archive": "Archived"
         case "mail_mark_read": "Marked read"
         case "mail_mark_unread": "Marked unread"

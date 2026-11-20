@@ -96,10 +96,21 @@ struct LabelPickerView: View {
             if let error {
                 Text(error).font(TypeRole.caption).foregroundStyle(Tone.failure)
             }
+            KeyHints(hints: Self.hints(picker.returnAction))
         }
         .padding(Space.m)
         .frame(width: 280)
         .onAppear { focused = true }
+    }
+
+    /// What Return does for what is typed, and Esc.
+    static func hints(_ action: LabelPickerModel.ReturnAction) -> [KeyHint] {
+        let close = KeyHint(keys: "Esc", does: "Close")
+        switch action {
+        case let .toggle(row): return [KeyHint(keys: "Return", does: row.state == .on ? "Remove first" : "Apply first"), close]
+        case .create: return [KeyHint(keys: "Return", does: "Create"), close]
+        case .nothing: return [close]
+        }
     }
 
     @ViewBuilder private func rowView(_ row: LabelPickerModel.Row) -> some View {

@@ -216,6 +216,8 @@ enum ToolbarHelp {
         case "Attach": "Attach files (⇧⌘A)"
         case "Discard": "Delete this draft"
         case "Send": "Send (⇧⌘D or ⌘Return)"
+        case "Send Later": "Send at a time you choose, if Kaluta is running then (⌥⇧⌘D)"
+        case "Insert Free Times": "Write your next free times into the message (needs Google Calendar connected)"
         case "Send and Finish Task": "Send and finish the task (⇧⌘D or ⌘Return); ⌥⌘Return keeps it open"
         default: label
         }
@@ -223,7 +225,7 @@ enum ToolbarHelp {
 
     static func text(for label: String, model: AppModel) -> String? {
         switch label {
-        case "Attach", "Discard", "Send", "Send and Finish Task": composer(label)
+        case "Attach", "Discard", "Send", "Send Later", "Insert Free Times", "Send and Finish Task": composer(label)
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
         case "Check for New Mail": "Check for New Mail (⇧⌘N)"
         case "Reply": "Reply (⌘R)"

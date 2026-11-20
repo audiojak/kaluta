@@ -8,6 +8,8 @@ struct UndoNoticeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appearsActive) private var appearsActive
     @FocusState private var focused: Bool
+    @FocusState private var reasonFocused: Bool
+    @State private var reason = ""
     /// Which window this is: each shows the notices of its own actions.
     var origin: UndoNotice.Origin = .mail
 
@@ -19,6 +21,15 @@ struct UndoNoticeView: View {
                     Text(notice.text)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    // Correct it once: why this conversation came back.
+                    if model.reasonRequest?.noticeID == notice.id {
+                        TextField("Tell Kaluta why", text: $reason)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 200)
+                            .focused($reasonFocused)
+                            .onSubmit { Task { await model.saveRoutineReason(reason); reason = "" } }
+                            .accessibilityLabel("Why it belongs in the Inbox")
+                    }
                     if notice.offersUndo {
                         Button {
                             model.undoMailAction()
@@ -55,7 +66,8 @@ struct UndoNoticeView: View {
         }
         .frame(maxWidth: .infinity)
         .animation(reduceMotion ? nil : .snappy(duration: 0.25), value: undo.notice?.id)
-        .onChange(of: focused) { _, isFocused in undo.setPaused(.focus, isFocused) }
+        .onChange(of: focused) { _, isFocused in undo.setPaused(.focus, isFocused || reasonFocused) }
+        .onChange(of: reasonFocused) { _, isFocused in undo.setPaused(.focus, isFocused || focused) }
         .onChange(of: appearsActive, initial: true) { _, active in undo.setPaused(.inactiveWindow, !active) }
     }
 }

@@ -275,8 +275,16 @@ struct WorkflowWriteView: View {
         VStack(alignment: .leading, spacing: Space.m) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text("Kaluta's answers").font(TypeRole.workflowHeading)
-                Text(Self.answersNote(byWriter: writer.answersByWriter))
-                    .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                HStack(spacing: Space.m) {
+                    Text(Self.answersNote(byWriter: writer.answersByWriter))
+                        .font(TypeRole.workflowContext).foregroundStyle(.secondary)
+                    if writer.answersByWriter {
+                        Button("Your Writing Guide") { model.showWritingGuide() }
+                            .buttonStyle(.link)
+                            .font(TypeRole.workflowContext)
+                            .hoverHelp("See the writing guide these answers followed")
+                    }
+                }
             }
             ForEach(Array(writer.answers.enumerated()), id: \.element.id) { i, answer in
                 Button { perform([.pick1, .pick2, .pick3][i]) } label: {

@@ -47,6 +47,9 @@ pub enum Tool {
     PresentThreads,
     CreateDraft,
     UpdateDraft,
+    /// Put a file already in the user's mail on a draft made in this
+    /// session (spec §10.3 amendment 2026-11-18): never a file on disk.
+    AttachToDraft,
     Archive,
     MarkRead,
     MarkUnread,
@@ -63,7 +66,7 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 20] = [
+    pub const ALL: [Tool; 21] = [
         Tool::Search,
         Tool::GetThread,
         Tool::GetMessage,
@@ -73,6 +76,7 @@ impl Tool {
         Tool::PresentThreads,
         Tool::CreateDraft,
         Tool::UpdateDraft,
+        Tool::AttachToDraft,
         Tool::Archive,
         Tool::MarkRead,
         Tool::MarkUnread,
@@ -99,6 +103,7 @@ impl Tool {
             Tool::PresentThreads => "mail_present_threads",
             Tool::CreateDraft => "mail_create_draft",
             Tool::UpdateDraft => "mail_update_draft",
+            Tool::AttachToDraft => "mail_attach_to_draft",
             Tool::Archive => "mail_archive",
             Tool::MarkRead => "mail_mark_read",
             Tool::MarkUnread => "mail_mark_unread",
@@ -129,6 +134,7 @@ impl Tool {
             | Tool::CalendarFreeSlots => Risk::ReadOnly,
             Tool::CreateDraft
             | Tool::UpdateDraft
+            | Tool::AttachToDraft
             | Tool::Archive
             | Tool::MarkRead
             | Tool::MarkUnread

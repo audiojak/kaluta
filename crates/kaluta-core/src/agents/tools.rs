@@ -63,7 +63,7 @@ pub(crate) async fn call(core: &Arc<Core>, session: &str, tool: Tool, arguments:
     }
     // An archive has no server to send through (spec §7.8): a clear, final
     // answer so the agent stops instead of retrying.
-    if matches!(tool, Tool::CreateDraft | Tool::UpdateDraft | Tool::Send | Tool::Forward)
+    if matches!(tool, Tool::CreateDraft | Tool::UpdateDraft | Tool::AttachToDraft | Tool::Send | Tool::Forward)
         && core.refuse_if_archive().is_err()
     {
         return Outcome::error("cannot_send", crate::archive::CANNOT_SEND);
@@ -117,6 +117,7 @@ async fn run(core: &Arc<Core>, session: &str, tool: Tool, arguments: Value) -> O
         Tool::FactsLookup => facts_lookup(core, arguments).await,
         Tool::CreateDraft => create_draft(core, session, arguments).await,
         Tool::UpdateDraft => update_draft(core, session, arguments).await,
+        Tool::AttachToDraft => attach_to_draft(core, session, arguments).await,
         Tool::Archive => change_threads(core, arguments, ThreadChange::Archive).await,
         Tool::MarkRead => change_threads(core, arguments, ThreadChange::Read(true)).await,
         Tool::MarkUnread => change_threads(core, arguments, ThreadChange::Read(false)).await,
@@ -854,6 +855,67 @@ struct UpdateDraftArgs {
     cc: Option<Vec<String>>,
     subject: Option<String>,
     body_markdown: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AttachToDraftArgs {
+    draft_id: i64,
+    message_id: String,
+    attachment_id: String,
+}
+
+/// A file from the user's mail onto a draft this session made (spec §10.3
+/// amendment 2026-11-18). The message must be one the session may read and
+/// the attachment one of its own; nothing on disk can be named.
+async fn attach_to_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Result<Outcome, Outcome> {
+    let a: AttachToDraftArgs = args(arguments)?;
+    let owns = core.agents.with_session(session, |s| s.guard.owns_draft(a.draft_id)).unwrap_or(false);
+    if !owns {
+        return Err(Outcome::error("denied", "only drafts created in this conversation can be changed"));
+    }
+    if core.agents.approvals.is_frozen(core.effective_account_id().as_deref(), a.draft_id) {
+        return Err(Outcome::error("denied", "the user is reviewing this draft; wait for their answer"));
+    }
+    let not_found = || Outcome::error("not_found", "no such attachment on that message");
+    let row: i64 = a.attachment_id.parse().map_err(|_| not_found())?;
+    let db = core.db().map_err(failed)?;
+    let named = MessageId(a.message_id.clone());
+    let lookup = named.clone();
+    let message = db.read(move |c| read::get_message(c, &lookup)).await.map_err(|e| failed(e.into()))?;
+    let message = message.filter(|m| in_scope(core, session, &m.thread_id)).ok_or_else(not_found)?;
+    if message.body_state != mail_domain::BodyState::Full {
+        ensure_bodies(core, vec![named]).await;
+    }
+    // The attachment must belong to the message named.
+    let source = db.read(move |c| read::attachment_source(c, row)).await.map_err(|e| failed(e.into()))?;
+    source.filter(|s| s.message_id.as_str() == a.message_id).ok_or_else(not_found)?;
+    let mut draft = core
+        .get_draft(a.draft_id)
+        .await
+        .map_err(failed)?
+        .ok_or_else(|| Outcome::error("not_found", "that draft no longer exists"))?;
+    let cache = core.attachment_cache_dir().map_err(failed)?;
+    let drafts_dir = core.data_path().join("DraftAttachments");
+    let service = core.sync_service();
+    let copied = crate::runtime::run(async move {
+        let provider = service.as_ref().map(|s| s.engine().provider());
+        Ok::<_, CoreError>(mail_sync::copy_attachment(&db, provider, &cache, &drafts_dir, row, 0).await?)
+    })
+    .await
+    .map_err(failed)?;
+    let filename = copied.filename.clone();
+    draft.attachments.push(crate::compose::DraftAttachmentInfo {
+        path: copied.path,
+        filename: copied.filename,
+        mime_type: copied.mime_type,
+        size: copied.size,
+    });
+    core.save_draft(draft.clone()).await.map_err(failed)?;
+    Ok(Outcome::json(json!({
+        "draft_id": a.draft_id,
+        "attached": filename,
+        "attachments": draft.attachments.iter().map(|f| f.filename.clone()).collect::<Vec<_>>(),
+    })))
 }
 
 async fn update_draft(core: &Arc<Core>, session: &str, arguments: Value) -> Result<Outcome, Outcome> {

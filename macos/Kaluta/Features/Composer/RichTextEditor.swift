@@ -11,6 +11,11 @@ struct RichTextEditor: NSViewRepresentable {
     var onTab: (() -> Void)?
     /// The formatting bar's commands act on this editor.
     var commands: RichTextCommands?
+    /// A `/` was typed at the start of a line, at this location: offer
+    /// the snippets.
+    var onSlash: ((NSTextView, Int) -> Void)?
+    /// The selected text, to save as a snippet (its context menu).
+    var onSaveSnippet: ((NSAttributedString) -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
@@ -38,6 +43,8 @@ struct RichTextEditor: NSViewRepresentable {
         textView.textStorage?.setAttributedString(Self.display(text))
         context.coordinator.lastText = text
         context.coordinator.onTab = onTab
+        context.coordinator.onSlash = onSlash
+        context.coordinator.onSaveSnippet = onSaveSnippet
         context.coordinator.commands = commands
         commands?.textView = textView
         if focusOnAppear {
@@ -49,6 +56,8 @@ struct RichTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
         context.coordinator.onTab = onTab
+        context.coordinator.onSlash = onSlash
+        context.coordinator.onSaveSnippet = onSaveSnippet
         // Only replace the text when it changed from outside (a draft load).
         if text !== context.coordinator.lastText, !text.isEqual(to: textView.attributedString()) {
             textView.textStorage?.setAttributedString(Self.display(text))
@@ -68,7 +77,11 @@ struct RichTextEditor: NSViewRepresentable {
         var text: Binding<NSAttributedString>
         var lastText: NSAttributedString?
         var onTab: (() -> Void)?
+        var onSlash: ((NSTextView, Int) -> Void)?
+        var onSaveSnippet: ((NSAttributedString) -> Void)?
         weak var commands: RichTextCommands?
+        /// Where a `/` is being typed at the start of a line.
+        private var slashAt: Int?
 
         func textViewDidChangeSelection(_ notification: Notification) {
             commands?.refresh()
@@ -85,11 +98,39 @@ struct RichTextEditor: NSViewRepresentable {
             return true
         }
 
+        func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString: String?) -> Bool {
+            slashAt = replacementString == "/" && range.length == 0
+                && Self.startsLine(textView.string as NSString, at: range.location) ? range.location : nil
+            return true
+        }
+
+        /// Whether `location` is at the start of a line.
+        nonisolated static func startsLine(_ text: NSString, at location: Int) -> Bool {
+            guard location > 0 else { return true }
+            guard location <= text.length else { return false }
+            let before = text.character(at: location - 1)
+            return before == 0x0A || before == 0x0D || before == 0x2028 || before == 0x2029
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             let snapshot = NSAttributedString(attributedString: textView.attributedString())
             lastText = snapshot
             text.wrappedValue = snapshot
+            if let at = slashAt, let onSlash {
+                slashAt = nil
+                DispatchQueue.main.async { onSlash(textView, at) }
+            }
+        }
+
+        func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+            let range = view.selectedRange()
+            guard range.length > 0, let onSaveSnippet else { return menu }
+            let selection = view.attributedString().attributedSubstring(from: range)
+            let item = ActionItem("Save as Snippet") { onSaveSnippet(selection) }
+            menu.insertItem(item, at: 0)
+            menu.insertItem(.separator(), at: 1)
+            return menu
         }
     }
 }

@@ -41,6 +41,17 @@ final class RoutinesStore {
     var selected: RoutineInfo? { routines.first { $0.id == selectedID } }
     var runner: RoutineRunner { RoutineRunner(rawValue: draft?.runner ?? "local") ?? .local }
 
+    /// One sentence from a routine's buckets: "Files mail into
+    /// Newsletters, Receipts and 2 more."
+    static func summary(_ definition: RoutineDefinition) -> String {
+        let names = definition.buckets.map { $0.title.isEmpty ? $0.labelName : $0.title }
+        switch names.count {
+        case 0: return "Files nothing yet: it has no buckets."
+        case 1, 2, 3: return "Files mail into \(ListFormatter.localizedString(byJoining: names))."
+        default: return "Files mail into \(names.prefix(2).joined(separator: ", ")) and \(names.count - 2) more."
+        }
+    }
+
     // MARK: Loading
 
     func load() async {

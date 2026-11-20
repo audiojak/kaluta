@@ -155,9 +155,16 @@ final class ComposerAssistant {
                                                                    selection: store.threadID.map { [$0] } ?? [])
             sessionID = session
             model.agentSinks[session] = { [weak self] events in await self?.ingest(events) }
+            // Answering an email that asks to meet: the free times to offer
+            // (spec §14.9), as the workflows' answers have them.
+            var freeTimes: (zone: String, labels: [String])?
+            if WritingText.asksToMeet(original), (try? await core.calendarStatus())?.connected == true,
+               let found = try? await core.calendarFreeSlots(), !found.slots.isEmpty {
+                freeTimes = (found.timeZone, Array(found.slots.prefix(8)).map(\.label))
+            }
             let prompt = Self.prompt(instruction: text, from: store.from, to: store.to.map(\.email),
                                      subject: store.subject, draft: base, original: original,
-                                     guide: guide?.text ?? "", facts: givenFacts)
+                                     guide: guide?.text ?? "", facts: givenFacts, freeTimes: freeTimes)
             try await core.sendAgentPrompt(session, prompt)
         } catch let error as CoreClientError {
             fail(error.message)

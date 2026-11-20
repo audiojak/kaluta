@@ -27,6 +27,9 @@ struct ThreadReaderView: View {
                 InviteBar(threadID: detail.thread.id)
                     .padding(.horizontal, Space.xxl)
                     .padding(.bottom, Space.s)
+                // It asks to meet: when the user is free (spec §14.9).
+                FreeTimesBar(threadID: detail.thread.id, subject: detail.thread.subject,
+                             text: detail.messages.last { !$0.isSentByMe }?.snippet ?? "")
                 // A forwarding rule asks, or forwarded it (spec §14.15).
                 ForwardRuleBar(threadID: detail.thread.id)
                 if !reader.attachments.isEmpty {

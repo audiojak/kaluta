@@ -268,6 +268,25 @@ pub fn record(tx: &Transaction<'_>, c: &NewComposition, now: Millis) -> StoreRes
     Ok(tx.last_insert_rowid())
 }
 
+/// The conversations whose drafts Kaluta wrote and the user has not sent
+/// yet (spec §14.5 amendment 2026-11-18): their Drafts rows are marked. A
+/// reply's conversation is the draft's own; a new message's is the one
+/// its mirrored server draft is in.
+pub fn written_threads(conn: &Connection) -> StoreResult<std::collections::BTreeSet<mail_domain::ThreadId>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT d.thread_id FROM ai_compositions c JOIN drafts d ON d.id = c.draft_id
+          WHERE c.status = 'waiting' AND d.thread_id IS NOT NULL
+         UNION
+         SELECT t.gmail_id FROM ai_compositions c JOIN drafts d ON d.id = c.draft_id
+           JOIN server_drafts s ON s.gmail_draft_id = d.gmail_draft_id
+           JOIN messages m ON m.gmail_id = s.gmail_message_id
+           JOIN threads t ON t.id = m.thread_id
+          WHERE c.status = 'waiting'",
+    )?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0).map(mail_domain::ThreadId))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// What a cloud agent reported sending (spec §10.6): recorded as its AI
 /// composition, with no draft (it was written and sent elsewhere).
 #[derive(Debug, Clone, PartialEq)]
@@ -535,6 +554,28 @@ mod tests {
             guide_version: Some(3),
             audiences: vec!["Friends".into()],
         }
+    }
+
+    #[test]
+    fn the_conversations_with_a_draft_kaluta_wrote_until_it_is_sent() {
+        let (db, dir) = db("written");
+        let mine = DraftRecord { thread_id: Some("t-mine".into()), ..Default::default() };
+        let mine = db.write_blocking(move |tx| drafts::save(tx, &mine, 1)).unwrap();
+        let kaluta = DraftRecord { thread_id: Some("t-kaluta".into()), ..Default::default() };
+        let kaluta = db.write_blocking(move |tx| drafts::save(tx, &kaluta, 1)).unwrap();
+        assert!(db.read_blocking(written_threads).unwrap().is_empty());
+        db.write_blocking(move |tx| record(tx, &composition(kaluta, "Yes."), 10)).unwrap();
+        let written = db.read_blocking(written_threads).unwrap();
+        assert_eq!(
+            written.into_iter().collect::<Vec<_>>(),
+            [mail_domain::ThreadId("t-kaluta".into())],
+            "not the user's own draft {mine}"
+        );
+        // Sent: no longer a draft Kaluta wrote.
+        db.write_blocking(move |tx| draft_sent(tx, kaluta, "m@x")).unwrap();
+        db.write_blocking(move |tx| draft_gone(tx, kaluta, true, 20)).unwrap();
+        assert!(db.read_blocking(written_threads).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

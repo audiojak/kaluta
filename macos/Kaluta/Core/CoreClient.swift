@@ -759,11 +759,61 @@ final class CoreClient: Sendable {
         try await call { try await core.sendDraft(id: id) }
     }
 
+    /// Send a draft of `accountID` now; whether it is held for Undo Send.
+    func sendDraft(_ id: Int64, in accountID: String) async -> Bool {
+        let composer = composer(for: accountID)
+        return (try? await CoreClient.bridge { try await composer.sendDraft(id: id) }) ?? false
+    }
+
     /// Undo Send: take back a held send in `accountID`; false if it went.
     func cancelSend(_ draftID: Int64, in accountID: String) async -> Bool {
         let composer = composer(for: accountID)
         return (try? await CoreClient.bridge { try await composer.cancelSend(draftId: draftID) }) ?? false
     }
+
+    // MARK: Send later (spec §14.5 amendment 2026-11-18, ADR 0022)
+
+    /// Send a draft of `accountID` at `date`, or (nil) no longer; the time
+    /// it had before, for undo.
+    @discardableResult
+    func scheduleSend(_ draftID: Int64, at date: Date?, in accountID: String) async throws(CoreClientError) -> Date? {
+        let composer = composer(for: accountID)
+        let ms = date.map(Self.millis)
+        return try await CoreClient.bridge { try await composer.scheduleSend(draftId: draftID, sendAt: ms) }
+            .map(Self.date)
+    }
+
+    /// The same in the window's current account (tests, the demo).
+    @discardableResult
+    func scheduleSend(_ draftID: Int64, at date: Date?) async throws(CoreClientError) -> Date? {
+        let ms = date.map(Self.millis)
+        return try await call { try await core.scheduleSend(draftId: draftID, sendAt: ms) }.map(Self.date)
+    }
+
+    /// When a draft is to be sent, if it is scheduled.
+    func scheduledSend(_ draftID: Int64, in accountID: String? = nil) async throws(CoreClientError) -> Date? {
+        guard let accountID else {
+            return try await call { try await core.scheduledSend(draftId: draftID) }.map(Self.date)
+        }
+        let composer = composer(for: accountID)
+        return try await CoreClient.bridge { try await composer.scheduledSend(draftId: draftID) }.map(Self.date)
+    }
+
+    /// Every open account's scheduled drafts, soonest first.
+    func scheduledSends() async throws(CoreClientError) -> [ScheduledSendInfo] {
+        try await call { try await core.scheduledSends() }
+    }
+
+    /// Send the scheduled drafts whose time has come; one more than
+    /// `grace` late is reported, not sent.
+    func sendScheduledDue(grace: Duration) async throws(CoreClientError) -> ScheduledDue {
+        let ms = Int64(grace.components.seconds) * 1000
+        return try await call { try await core.sendScheduledDue(graceMs: ms) }
+    }
+
+    /// Times cross to the core as Unix milliseconds, and nowhere else.
+    nonisolated static func millis(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
+    nonisolated static func date(_ millis: Int64) -> Date { Date(timeIntervalSince1970: TimeInterval(millis) / 1000) }
 
     /// The local draft that edits a draft from the Drafts mailbox (made on
     /// first open, with its attachments).
@@ -811,6 +861,52 @@ final class CoreClient: Sendable {
     // MARK: Workflows (spec §14.13)
 
     /// The start screen: each workflow's count, estimate and first names.
+    // MARK: Reply-landed alerts (spec §14.7 amendment 2026-11-18)
+
+    /// Watch a conversation for an answer, or no longer; whether it was.
+    @discardableResult
+    func watchThread(_ threadID: String, _ on: Bool) async throws(CoreClientError) -> Bool {
+        try await call { try await core.watchThread(threadId: threadID, on: on) }
+    }
+
+    func watchedThreads() async throws(CoreClientError) -> Set<String> {
+        Set(try await call { try await core.watchedThreads() })
+    }
+
+    /// Of these conversations, the watched ones someone answered (told once).
+    func repliesLanded(_ threadIDs: [String]) async throws(CoreClientError) -> [String] {
+        try await call { try await core.repliesLanded(threadIds: threadIDs) }
+    }
+
+    // MARK: Search by meaning (spec §14.3 amendment 2026-11-18, ADR 0023)
+
+    func embeddingBacklog(model: String, limit: UInt32) async throws(CoreClientError) -> [EmbeddingInput] {
+        try await call { try await core.embeddingBacklog(model: model, limit: limit) }
+    }
+
+    @discardableResult
+    func storeEmbeddings(model: String, _ vectors: [EmbeddingVector]) async throws(CoreClientError) -> UInt32 {
+        try await call { try await core.storeEmbeddings(model: model, vectors: vectors) }
+    }
+
+    func searchByMeaning(model: String, vector: [Float], limit: UInt32 = 20) async throws(CoreClientError) -> [ThreadRow] {
+        try await call { try await core.searchByMeaning(model: model, vector: vector, limit: limit) }
+    }
+
+    /// Briefs for the next day's meetings, soonest first (meeting prep).
+    func meetingBriefs() async throws(CoreClientError) -> [MeetingBrief] {
+        try await call { try await core.meetingBriefs() }
+    }
+
+    /// What came in since the Dashboard was last looked at.
+    func catchUp() async throws(CoreClientError) -> CatchUp {
+        try await call { try await core.catchUp() }
+    }
+
+    func markLooked() async throws(CoreClientError) {
+        try await call { try await core.markLooked() }
+    }
+
     func workflowOverview() async throws(CoreClientError) -> WorkflowOverview {
         try await call { try await core.workflowOverview() }
     }
@@ -875,6 +971,11 @@ final class CoreClient: Sendable {
 
     func backToInbox(_ threadID: String) async throws(CoreClientError) -> BackToInbox {
         try await call { try await core.backToInbox(threadId: threadID) }
+    }
+
+    @discardableResult
+    func explainRoutineEvidence(_ proposalID: Int64, threadID: String, reason: String) async throws(CoreClientError) -> Bool {
+        try await call { try await core.explainRoutineEvidence(proposalId: proposalID, threadId: threadID, reason: reason) }
     }
 
     func withdrawRoutineEvidence(_ proposalID: Int64, threadID: String) async throws(CoreClientError) {
@@ -1185,6 +1286,32 @@ final class CoreClient: Sendable {
             try await core.recordWritingHelp(draftId: draftID, agent: agent, instruction: instruction, aiText: text,
                                              guideVersion: guideVersion, audiences: audiences)
         }
+    }
+
+    // MARK: Snippets (spec §14.5 amendment 2026-11-18)
+
+    func snippets() async throws(CoreClientError) -> [SnippetInfo] {
+        try await call { try await core.snippets() }
+    }
+
+    @discardableResult
+    func saveSnippet(_ snippet: SnippetInfo) async throws(CoreClientError) -> Int64 {
+        try await call { try await core.saveSnippet(snippet: snippet) }
+    }
+
+    /// The snippet it was, for undo.
+    @discardableResult
+    func deleteSnippet(_ id: Int64) async throws(CoreClientError) -> SnippetInfo? {
+        try await call { try await core.deleteSnippet(id: id) }
+    }
+
+    func restoreSnippet(_ snippet: SnippetInfo) async throws(CoreClientError) {
+        try await call { try await core.restoreSnippet(snippet: snippet) }
+    }
+
+    /// The conversations whose drafts Kaluta wrote, not sent yet.
+    func kalutaWrittenThreads() async throws(CoreClientError) -> Set<String> {
+        Set(try await call { try await core.kalutaWrittenThreads() })
     }
 
     func aiCompositions(limit: UInt32 = 50) async throws(CoreClientError) -> [AiCompositionInfo] {
@@ -1982,6 +2109,13 @@ typealias QueuedChange = KalutaCore.QueuedChange
 typealias QueuedChangeState = KalutaCore.QueuedChangeState
 typealias TaskMatch = KalutaCore.TaskMatch
 typealias ReminderInfo = KalutaCore.ReminderInfo
+typealias ScheduledSendInfo = KalutaCore.ScheduledSendInfo
+typealias CatchUp = KalutaCore.CatchUp
+typealias EmbeddingInput = KalutaCore.EmbeddingInput
+typealias EmbeddingVector = KalutaCore.EmbeddingVector
+typealias MeetingBrief = KalutaCore.MeetingBrief
+typealias SnippetInfo = KalutaCore.SnippetInfo
+typealias ScheduledDue = KalutaCore.ScheduledDue
 typealias CalendarInvite = KalutaCore.CalendarInvite
 typealias InviteResponse = KalutaCore.InviteResponse
 typealias InviteState = KalutaCore.InviteState
