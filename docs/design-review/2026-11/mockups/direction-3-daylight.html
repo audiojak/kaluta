@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Direction 3: Daylight</title><style>
+*{box-sizing:border-box;margin:0}
+:root{
+  --page:#e9e9ec; --ink:#1d1d1f; --ink2:#6e6e73; --ink3:#a1a1a6;
+  --win:#ffffff; --side:#f2f2f4; --line:#e3e3e6; --sel:#e4e4e8; --card:#f5f5f7;
+  --accent:#0a66d8; --accent-ink:#ffffff; --unread:#0a66d8;
+  --ok:#2f7d6d; --warn:#b4691f; --chip:#e8e8ed; --shadow:0 18px 50px rgba(0,0,0,.18);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+  --display:var(--font); --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --radius:8px; --row-pad:10px;
+}
+:root[data-theme=dark]{
+  --page:#111113; --ink:#f2f2f4; --ink2:#a1a1a8; --ink3:#6c6c73;
+  --win:#1c1c1f; --side:#232326; --line:#323236; --sel:#34343a; --card:#27272b;
+  --accent:#4c9dff; --accent-ink:#06121f; --unread:#4c9dff;
+  --ok:#5fc2ad; --warn:#e0a060; --chip:#34343a; --shadow:0 18px 50px rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme=light]){
+  --page:#111113; --ink:#f2f2f4; --ink2:#a1a1a8; --ink3:#6c6c73;
+  --win:#1c1c1f; --side:#232326; --line:#323236; --sel:#34343a; --card:#27272b;
+  --accent:#4c9dff; --accent-ink:#06121f; --unread:#4c9dff;
+  --ok:#5fc2ad; --warn:#e0a060; --chip:#34343a; --shadow:0 18px 50px rgba(0,0,0,.6);
+}}
+body{background:var(--page);color:var(--ink);font:13px/1.45 var(--font);padding:28px 16px 60px;-webkit-font-smoothing:antialiased}
+.intro{max-width:1200px;margin:0 auto 18px}
+.intro h1{font:600 22px/1.2 var(--font);margin-bottom:6px}
+.intro p{color:var(--ink2);max-width:780px;font-size:14px}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px;max-width:900px;margin-top:12px;font-size:13px}
+.pros h2{font:600 11px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin-bottom:4px}
+.pros li{margin-left:16px;color:var(--ink)}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+.controls button{font:500 12px var(--font);padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--win);color:var(--ink);cursor:pointer}
+.controls button[aria-pressed=true]{background:var(--ink);color:var(--win);border-color:var(--ink)}
+.stage{overflow-x:auto;padding:6px 0 30px}
+.window{width:1200px;height:760px;margin:0 auto;background:var(--win);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--line);position:relative;transition:width .25s}
+.narrow .window{width:820px}
+.bar{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid var(--line)}
+.lights{display:flex;gap:8px;margin-right:6px}.lights i{width:12px;height:12px;border-radius:50%;background:var(--ink3);opacity:.55}
+.bar .title{font-weight:600;font-size:14px}.bar .sub{color:var(--ink2);font-size:12px}
+.bar .grow{flex:1}
+.tool{color:var(--ink2);font-size:12px;padding:4px 9px;border-radius:6px;white-space:nowrap}
+.tool.primary{background:var(--accent);color:var(--accent-ink);font-weight:600}
+kbd{font:500 10.5px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--ink2);background:var(--win);margin-left:5px}
+.body{flex:1;display:flex;min-height:0}
+.sidebar{width:200px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:12px 8px;overflow:hidden}
+.sidebar h3{font:600 11px var(--font);color:var(--ink2);margin:14px 8px 4px;letter-spacing:.02em}
+.sidebar a{display:flex;justify-content:space-between;padding:5px 8px;border-radius:6px;color:var(--ink);text-decoration:none}
+.sidebar a.on{background:var(--sel);font-weight:600}.sidebar a span{color:var(--ink2);font-variant-numeric:tabular-nums}
+.list{width:350px;flex:none;border-right:1px solid var(--line);overflow:hidden;display:flex;flex-direction:column}
+.listhead{padding:12px 16px 8px;display:flex;align-items:baseline;gap:8px}
+.listhead b{font-size:15px}.listhead span{color:var(--ink2);font-size:12px}
+.row{padding:var(--row-pad) 16px;border-bottom:1px solid var(--line);position:relative}
+.row.on{background:var(--sel)}
+.row .top{display:flex;justify-content:space-between;gap:8px}
+.row .from{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row.unread .from{font-weight:700}
+.row.unread::before{content:"";position:absolute;left:5px;top:16px;width:7px;height:7px;border-radius:50%;background:var(--unread)}
+.row .when{color:var(--ink2);font-size:12px;white-space:nowrap}
+.row .subj{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .prev{color:var(--ink2);font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chip{display:inline-block;font:500 11px var(--font);padding:0 6px;border-radius:4px;background:var(--chip);color:var(--ink2);margin-right:5px}
+.reader{flex:1;min-width:0;display:flex;flex-direction:column}
+.reader .scroll{flex:1;overflow:hidden;padding:26px 36px}
+.reader .inner{max-width:680px;margin:0 auto}
+.reader h2{font:600 22px/1.25 var(--display);margin-bottom:4px}
+.reader .meta{color:var(--ink2);font-size:12.5px;margin-bottom:18px}
+.reader p{font-size:15px;line-height:1.55;margin-bottom:12px}
+.suggest{display:flex;gap:8px;align-items:center;color:var(--ok);font-size:12.5px;margin:0 0 14px}
+.answers{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.answer{border:1px solid var(--line);border-radius:var(--radius);padding:9px 12px;font-size:13.5px;display:flex;gap:10px;align-items:baseline}
+.answer kbd{margin:0}
+.ask{flex:none;border-top:1px solid var(--line);padding:10px 16px;color:var(--ink2);display:flex;justify-content:space-between;font-size:13px}
+.actions{flex:none;display:flex;gap:8px;padding:12px 36px;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
+.btn{padding:7px 14px;border-radius:999px;background:var(--card);font-weight:600;font-size:13px;white-space:nowrap}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}.btn.primary kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:15px}
+.hide{display:none!important}
+.note{max-width:1200px;margin:8px auto 0;color:var(--ink2);font-size:12.5px}
+
+.tile{max-width:1200px;margin:0 auto 26px;background:var(--win);border:1px solid var(--line);border-radius:14px;padding:26px 30px;display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:28px}
+.tile h2{font:600 11px var(--font);letter-spacing:.07em;text-transform:uppercase;color:var(--ink2);margin-bottom:10px}
+.tile .big{font:var(--display-weight,600) 40px/1.05 var(--display);letter-spacing:var(--display-track,0)}
+.tile .mid{font:500 20px/1.3 var(--display);margin-top:8px}.tile .txt{font-size:15px;line-height:1.55;margin-top:8px;color:var(--ink)}
+.sw{display:flex;gap:8px;flex-wrap:wrap}.sw i{width:54px;height:54px;border-radius:var(--radius);display:block;border:1px solid var(--line)}
+.sw span{display:block;font:11px var(--mono);color:var(--ink2);margin-top:3px;width:54px}
+.voice p{margin-bottom:8px;font-size:14px}.voice p b{display:block;font:600 11px var(--font);color:var(--ink2);letter-spacing:.04em;text-transform:uppercase}
+.label{max-width:1200px;margin:22px auto 8px;font:600 12px var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2)}
+.dash{flex:1;overflow:hidden;padding:40px 104px}
+.dash .date{color:var(--ink2);font-size:13px}.dash h1{font:var(--display-weight,700) 34px/1.15 var(--display);letter-spacing:var(--display-track,0);margin:4px 0 6px}
+.dash .lead{color:var(--ink2);font-size:15px;margin-bottom:20px}
+.hero{background:var(--hero);color:var(--hero-ink);border-radius:calc(var(--radius) * 2);padding:22px 26px;display:flex;justify-content:space-between;align-items:center}
+.hero small{font:600 11px var(--font);letter-spacing:.08em;opacity:.85}.hero h2{font:var(--display-weight,700) 28px/1.2 var(--display);margin:4px 0}
+.hero p{opacity:.92;font-size:15px}.hero .worth{margin-top:12px;font-size:13.5px;opacity:.95}
+.hero .go{border:1.5px solid currentColor;border-radius:999px;padding:10px 18px;font-weight:700;white-space:nowrap}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:16px}
+.wcard{border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px;background:var(--card);position:relative}
+.wcard b{font:600 15px var(--display)}.wcard p{font-size:13px;margin-top:2px}.wcard small{color:var(--ink2);font-size:12px}
+.wcard kbd{position:absolute;right:12px;top:12px}.wcard.quiet{opacity:.5}
+.foot{display:flex;justify-content:space-between;color:var(--ink2);font-size:12.5px;margin-top:18px}
+.narrow .dash{padding:28px 36px}.narrow .cards{grid-template-columns:repeat(2,1fr)}
+:root{--page:#ecebf3;--win:#fdfcff;--side:#f4f2fa;--card:#f4f2fa;--line:#e4e1ee;--sel:#ebe7f7;--ink:#211f2b;--ink2:#6b677a;--ink3:#a39fb3;--accent:#6a5acd;--accent-ink:#ffffff;--unread:#2f8f7f;--ok:#2f8f7f;--chip:#ebe7f7;--hero:linear-gradient(120deg,#2f8f7f,#3c7f9f);--hero-ink:#ffffff;--display:ui-rounded,'SF Pro Rounded',var(--font);--display-weight:700;--display-track:-.01em;--radius:12px;--row-pad:12px}:root[data-theme=dark]{--page:#0f0e15;--win:#191721;--side:#1f1d29;--card:#221f2d;--line:#322e42;--sel:#2c2840;--ink:#f1eefb;--ink2:#a7a2b9;--ink3:#6b677a;--accent:#a99cf5;--accent-ink:#1a1535;--unread:#66c7b6;--ok:#66c7b6;--chip:#2c2840;--hero:linear-gradient(120deg,#256f63,#2b5d77);--hero-ink:#f4fffc}@media (prefers-color-scheme: dark){:root:not([data-theme=light]){--page:#0f0e15;--win:#191721;--side:#1f1d29;--card:#221f2d;--line:#322e42;--sel:#2c2840;--ink:#f1eefb;--ink2:#a7a2b9;--ink3:#6b677a;--accent:#a99cf5;--accent-ink:#1a1535;--unread:#66c7b6;--ok:#66c7b6;--chip:#2c2840;--hero:linear-gradient(120deg,#256f63,#2b5d77);--hero-ink:#f4fffc}}.row{border-bottom:none;margin:2px 8px;border-radius:10px}.row.unread::before{left:-2px}.wcard:nth-child(1){border-top:3px solid #2f8f7f}.wcard:nth-child(2){border-top:3px solid #c7812f}.wcard:nth-child(3){border-top:3px solid #b0596f}.wcard:nth-child(6){border-top:3px solid #4f8f4a}.reader h2{font-family:var(--display)}.dash h1{font-size:36px}</style></head><body>
+<div class="intro"><h1>Direction 3: Daylight</h1><p>A companion with a sense of time. It grows from what is already Kaluta's own: each workflow's colour. Those colours come into the mail window (what to answer is teal, what to decide is violet, tasks are amber), type is large and rounded, corners are soft, and the Dashboard greets the part of the day it is.</p>
+<div class="pros"><div><h2>Gains</h2><ul><li>Builds on what exists (workflow colours, pills, large type), so it is the cheapest to adopt</li><li>Colour means something everywhere: the same teal says answer in the list, the workflow and the Dashboard</li><li>The friendliest of the three; suits an assistant that proposes and is corrected</li></ul></div><div><h2>Loses</h2><ul><li>Five meaning-bearing colours must each pass contrast in light, dark and Increase Contrast, and cannot be the only signal</li><li>Rounded and soft can read as less serious for work mail</li><li>Colour competes with label colours from the mail service; one of the two has to go quiet</li></ul></div></div>
+<div class="controls">
+<button data-g="theme" data-v="light" aria-pressed="false">Light</button>
+<button data-g="theme" data-v="dark" aria-pressed="false">Dark</button>
+<button data-g="width" data-v="wide" aria-pressed="true">1200 wide</button>
+<button data-g="width" data-v="narrow" aria-pressed="false">820 wide</button>
+</div></div>
+<div class="stage"><div class="tile"><div><h2>Type</h2><div class="big">About 20 minutes of mail today.</div>
+<div class="mid">Interview feedback for the designer role</div>
+<div class="txt">Strong portfolio and great with the team; a little light on systems work. I'd lean towards an offer.</div>
+<div class="txt" style="color:var(--ink2);font-size:12.5px">A rounded face (the system's SF Rounded) for headlines and names; the system sans for reading. Large sizes, generous space.</div></div>
+<div><h2>Colour and shape</h2><div class="sw"><div><i style="background:#2f8f7f"></i><span>answer</span></div><div><i style="background:#6a5acd"></i><span>decide</span></div><div><i style="background:#c7812f"></i><span>tasks</span></div><div><i style="background:#b0596f"></i><span>waiting</span></div><div><i style="background:#4f8f4a"></i><span>teach</span></div></div>
+<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="btn primary">Reply<kbd>R</kbd></span><span class="btn">Archive<kbd>E</kbd></span><span class="chip">Customers</span></div></div>
+<div class="voice"><h2>Voice</h2><p><b>Headline</b>Good morning. About 20 minutes of mail today.</p><p><b>Suggestion</b>Kaluta thinks a quick yes will do.</p><p><b>End of a set</b>All caught up. Nine decided, nicely done.</p><p><b>Tone</b>Warm, encouraging, plain.</p></div></div><div class="label">The Dashboard</div><div class="window"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="title">Kaluta</span><span class="grow"></span><span class="tool">Mail<kbd>M</kbd></span></div>
+<div class="dash"><div class="date">Friday, November 20 · 8:40 AM</div><h1>About 20 minutes of mail today.</h1>
+<div class="lead">12 new since 9:00 yesterday · 3 need you</div>
+<div class="hero"><div><small>NEXT</small><h2>Triage what's new</h2><p>From Taylor Chen, Avery Kim and 2 others you know · 8 from others</p>
+<div class="worth"><b>Taylor Chen</b> — Interview feedback for the designer role · <i>asks you · due Friday</i></div></div><span class="go">Return ↵</span></div>
+<div class="cards"><div class="wcard"><kbd>2</kbd><b>Replies</b><p>6 waiting on your answer</p><small>about 5 min</small></div><div class="wcard"><kbd>3</kbd><b>Tasks</b><p>3 for today · 2 later this week</p><small>about 6 min</small></div><div class="wcard"><kbd>4</kbd><b>Waiting on others</b><p>2 to chase</p><small>about 2 min</small></div><div class="wcard quiet"><kbd>5</kbd><b>Weekly reading</b><p>Nothing due</p><small></small></div><div class="wcard quiet"><kbd>6</kbd><b>Agents</b><p>Nothing waiting</p><small></small></div><div class="wcard"><kbd>7</kbd><b>Teach Kaluta</b><p>5 to decide</p><small>about 2 min</small></div></div>
+<div class="foot"><span>Done today: 1 set · 9 decided</span><span>Return starts · 1–7 chooses · M opens Mail</span></div></div></div><div class="label">The mail window</div><div class="window"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="tool" style="border:1px solid var(--line)">Inbox ▾<kbd>⌘K</kbd></span><span class="sub">12 new · 3 need you</span><span class="grow"></span><span class="tool">Reply</span><span class="tool">Archive</span><span class="tool">Label</span><span class="tool">Search</span><span class="tool primary">New Message</span></div>
+<div class="body"><div class="list" style="width:400px"><div class="row on unread"><div class="top"><span class="from">Taylor Chen</span><span class="when">7:17 PM</span></div><div class="subj">Interview feedback for the designer role</div><div class="prev">Strong portfolio and great with the team; a little light on systems work. I'd lean towards an offer.</div></div><div class="row unread"><div class="top"><span class="from">Avery Kim</span><span class="when">9:17 PM</span></div><div class="subj">Launch date — go or no-go?</div><div class="prev">QA signed off this morning. The only open item is the pricing page copy. Are we go for Tuesday?</div></div><div class="row"><div class="top"><span class="from">Emerson Silva</span><span class="when">4:02 PM</span></div><div class="subj">Onboarding plan</div><div class="prev">I've attached the latest version for your review. Can we find thirty minutes on Thursday?</div></div><div class="row unread"><div class="top"><span class="from">Reese Schmidt</span><span class="when">2:40 PM</span></div><div class="subj">Customer escalation</div><div class="prev"><span class="chip">Customers</span>Following up on our conversation from last week. The numbers look better than we expected.</div></div><div class="row"><div class="top"><span class="from">Logan Schmidt</span><span class="when">1:15 PM</span></div><div class="subj">Security review</div><div class="prev"><span class="chip">Customers</span>I'll send an updated draft once the team has weighed in. Let me know if anything is unclear.</div></div><div class="row"><div class="top"><span class="from">Alex Kim</span><span class="when">11:30 AM</span></div><div class="subj">Contract review</div><div class="prev">Thanks again for the quick turnaround. Adding a couple of people who should be in the loop.</div></div><div class="row"><div class="top"><span class="from">Skyler Rivera</span><span class="when">Yesterday</span></div><div class="subj">Q3 planning</div><div class="prev">I'll send an updated draft once the team has weighed in. I've attached the latest version.</div></div><div class="row"><div class="top"><span class="from">Weekly Digest</span><span class="when">Yesterday</span></div><div class="subj">This week in design systems</div><div class="prev"><span class="chip">Newsletters</span>Tokens that travel, a field guide to density, and what a calm interface costs.</div></div></div><section class="reader"><div class="scroll"><div class="inner">
+<div class="suggest">✦ Kaluta suggests a quick reply · about 20 seconds</div>
+<h2>Interview feedback for the designer role</h2>
+<div class="meta">Taylor Chen · today at 7:17 PM · to you</div>
+<p>Hi Jo,</p>
+<p>Strong portfolio and great with the team; a little light on systems work. I'd lean towards an offer.
+Do you want to meet them once more, or should I start on the offer?</p>
+<p>Taylor</p><div class="answers">
+<div class="answer"><kbd>1</kbd>Go ahead with the offer.</div>
+<div class="answer"><kbd>2</kbd>Let's meet them once more first.</div>
+<div class="answer"><kbd>3</kbd>Hold until I've seen the portfolio again.</div></div></div></div><div class="actions"><span class="btn primary">Reply<kbd>R</kbd></span><span class="btn">Make a task<kbd>T</kbd></span>
+<span class="btn">Archive<kbd>E</kbd></span><span class="btn">Later<kbd>B</kbd></span></div><div class="ask"><span>✦ Ask Kaluta about this conversation…</span><span><kbd>⌘K</kbd></span></div></section></div></div></div>
+<p class="note">Both screens use the two-pane arrangement so the directions can be compared like for like; a direction does not depend on the layout chosen.</p>
+
+<script>
+const root=document.documentElement, stage=document.querySelector('.stage');
+function press(group,btn){document.querySelectorAll('[data-g="'+group+'"]').forEach(b=>b.setAttribute('aria-pressed',b===btn))}
+document.querySelectorAll('.controls button').forEach(b=>b.addEventListener('click',()=>{
+  const g=b.dataset.g,v=b.dataset.v; press(g,b);
+  if(g==='theme') root.dataset.theme=v;
+  if(g==='width') stage.classList.toggle('narrow',v==='narrow');
+  if(g==='state') document.querySelectorAll('[data-state]').forEach(e=>e.classList.toggle('hide',!e.dataset.state.split(' ').includes(v)));
+}));
+</script>
+</body></html>

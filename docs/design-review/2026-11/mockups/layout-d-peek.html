@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>D. List with a peek</title><style>
+*{box-sizing:border-box;margin:0}
+:root{
+  --page:#e9e9ec; --ink:#1d1d1f; --ink2:#6e6e73; --ink3:#a1a1a6;
+  --win:#ffffff; --side:#f2f2f4; --line:#e3e3e6; --sel:#e4e4e8; --card:#f5f5f7;
+  --accent:#0a66d8; --accent-ink:#ffffff; --unread:#0a66d8;
+  --ok:#2f7d6d; --warn:#b4691f; --chip:#e8e8ed; --shadow:0 18px 50px rgba(0,0,0,.18);
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;
+  --display:var(--font); --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --radius:8px; --row-pad:10px;
+}
+:root[data-theme=dark]{
+  --page:#111113; --ink:#f2f2f4; --ink2:#a1a1a8; --ink3:#6c6c73;
+  --win:#1c1c1f; --side:#232326; --line:#323236; --sel:#34343a; --card:#27272b;
+  --accent:#4c9dff; --accent-ink:#06121f; --unread:#4c9dff;
+  --ok:#5fc2ad; --warn:#e0a060; --chip:#34343a; --shadow:0 18px 50px rgba(0,0,0,.6);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme=light]){
+  --page:#111113; --ink:#f2f2f4; --ink2:#a1a1a8; --ink3:#6c6c73;
+  --win:#1c1c1f; --side:#232326; --line:#323236; --sel:#34343a; --card:#27272b;
+  --accent:#4c9dff; --accent-ink:#06121f; --unread:#4c9dff;
+  --ok:#5fc2ad; --warn:#e0a060; --chip:#34343a; --shadow:0 18px 50px rgba(0,0,0,.6);
+}}
+body{background:var(--page);color:var(--ink);font:13px/1.45 var(--font);padding:28px 16px 60px;-webkit-font-smoothing:antialiased}
+.intro{max-width:1200px;margin:0 auto 18px}
+.intro h1{font:600 22px/1.2 var(--font);margin-bottom:6px}
+.intro p{color:var(--ink2);max-width:780px;font-size:14px}
+.pros{display:grid;grid-template-columns:1fr 1fr;gap:6px 28px;max-width:900px;margin-top:12px;font-size:13px}
+.pros h2{font:600 11px/1 var(--font);letter-spacing:.06em;text-transform:uppercase;color:var(--ink2);margin-bottom:4px}
+.pros li{margin-left:16px;color:var(--ink)}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+.controls button{font:500 12px var(--font);padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--win);color:var(--ink);cursor:pointer}
+.controls button[aria-pressed=true]{background:var(--ink);color:var(--win);border-color:var(--ink)}
+.stage{overflow-x:auto;padding:6px 0 30px}
+.window{width:1200px;height:760px;margin:0 auto;background:var(--win);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;border:1px solid var(--line);position:relative;transition:width .25s}
+.narrow .window{width:820px}
+.bar{height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid var(--line)}
+.lights{display:flex;gap:8px;margin-right:6px}.lights i{width:12px;height:12px;border-radius:50%;background:var(--ink3);opacity:.55}
+.bar .title{font-weight:600;font-size:14px}.bar .sub{color:var(--ink2);font-size:12px}
+.bar .grow{flex:1}
+.tool{color:var(--ink2);font-size:12px;padding:4px 9px;border-radius:6px;white-space:nowrap}
+.tool.primary{background:var(--accent);color:var(--accent-ink);font-weight:600}
+kbd{font:500 10.5px var(--mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--ink2);background:var(--win);margin-left:5px}
+.body{flex:1;display:flex;min-height:0}
+.sidebar{width:200px;flex:none;background:var(--side);border-right:1px solid var(--line);padding:12px 8px;overflow:hidden}
+.sidebar h3{font:600 11px var(--font);color:var(--ink2);margin:14px 8px 4px;letter-spacing:.02em}
+.sidebar a{display:flex;justify-content:space-between;padding:5px 8px;border-radius:6px;color:var(--ink);text-decoration:none}
+.sidebar a.on{background:var(--sel);font-weight:600}.sidebar a span{color:var(--ink2);font-variant-numeric:tabular-nums}
+.list{width:350px;flex:none;border-right:1px solid var(--line);overflow:hidden;display:flex;flex-direction:column}
+.listhead{padding:12px 16px 8px;display:flex;align-items:baseline;gap:8px}
+.listhead b{font-size:15px}.listhead span{color:var(--ink2);font-size:12px}
+.row{padding:var(--row-pad) 16px;border-bottom:1px solid var(--line);position:relative}
+.row.on{background:var(--sel)}
+.row .top{display:flex;justify-content:space-between;gap:8px}
+.row .from{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.row.unread .from{font-weight:700}
+.row.unread::before{content:"";position:absolute;left:5px;top:16px;width:7px;height:7px;border-radius:50%;background:var(--unread)}
+.row .when{color:var(--ink2);font-size:12px;white-space:nowrap}
+.row .subj{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .prev{color:var(--ink2);font-size:12.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.chip{display:inline-block;font:500 11px var(--font);padding:0 6px;border-radius:4px;background:var(--chip);color:var(--ink2);margin-right:5px}
+.reader{flex:1;min-width:0;display:flex;flex-direction:column}
+.reader .scroll{flex:1;overflow:hidden;padding:26px 36px}
+.reader .inner{max-width:680px;margin:0 auto}
+.reader h2{font:600 22px/1.25 var(--display);margin-bottom:4px}
+.reader .meta{color:var(--ink2);font-size:12.5px;margin-bottom:18px}
+.reader p{font-size:15px;line-height:1.55;margin-bottom:12px}
+.suggest{display:flex;gap:8px;align-items:center;color:var(--ok);font-size:12.5px;margin:0 0 14px}
+.answers{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.answer{border:1px solid var(--line);border-radius:var(--radius);padding:9px 12px;font-size:13.5px;display:flex;gap:10px;align-items:baseline}
+.answer kbd{margin:0}
+.ask{flex:none;border-top:1px solid var(--line);padding:10px 16px;color:var(--ink2);display:flex;justify-content:space-between;font-size:13px}
+.actions{flex:none;display:flex;gap:8px;padding:12px 36px;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap}
+.btn{padding:7px 14px;border-radius:999px;background:var(--card);font-weight:600;font-size:13px;white-space:nowrap}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}.btn.primary kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--ink3);font-size:15px}
+.hide{display:none!important}
+.note{max-width:1200px;margin:8px auto 0;color:var(--ink2);font-size:12.5px}
+
+.wide{flex:1;overflow:hidden}
+.wrow{display:grid;grid-template-columns:18px 170px 1fr auto 76px;gap:12px;align-items:baseline;padding:9px 18px;border-bottom:1px solid var(--line)}
+.wrow.on{background:var(--sel)}.wrow .dot{width:7px;height:7px;border-radius:50%;background:var(--unread);align-self:center}
+.wrow .dot.off{background:transparent}.wrow .from{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wrow.unread .from{font-weight:700}.wrow .text{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
+.wrow .text b{color:var(--ink);font-weight:500}.wrow .when{color:var(--ink2);font-size:12px;text-align:right}
+.peek{position:absolute;top:52px;right:0;bottom:0;width:62%;background:var(--win);border-left:1px solid var(--line);box-shadow:-18px 0 40px rgba(0,0,0,.14);display:flex;flex-direction:column}
+.narrow .peek{width:78%}.narrow .wrow{grid-template-columns:18px 120px 1fr 60px}.narrow .wrow .chips{display:none}
+.peekbar{padding:9px 18px;border-bottom:1px solid var(--line);color:var(--ink2);font-size:12.5px;display:flex;justify-content:space-between}
+</style></head><body>
+<div class="intro"><h1>D. List with a peek</h1><p>The list keeps the whole window, one line a conversation, so far more fit on screen. Space or Return slides a conversation over part of the list; Esc closes it; the list underneath keeps its place.</p>
+<div class="pros"><div><h2>Gains</h2><ul><li>Seventeen or more conversations visible at once: the best option for scanning and bulk tidying</li><li>Reading does not lose the list: it stays visible at the left edge</li><li>A cheap look before deciding, with a full view one key away</li></ul></div><div><h2>Loses</h2><ul><li>One-line rows lose the two-line preview that makes many decisions possible without opening</li><li>A panel that comes and goes is a second way to open mail that must stay consistent with the first</li><li>The covered part of the list is dead space while reading</li></ul></div></div>
+<div class="controls">
+<button data-g="theme" data-v="light" aria-pressed="false">Light</button>
+<button data-g="theme" data-v="dark" aria-pressed="false">Dark</button>
+<button data-g="width" data-v="wide" aria-pressed="true">1200 wide</button>
+<button data-g="width" data-v="narrow" aria-pressed="false">820 wide</button>
+<button data-g="state" data-v="peek" aria-pressed="true">A conversation peeked</button><button data-g="state" data-v="none" aria-pressed="false">The list alone</button></div></div>
+<div class="stage"><div class="window"><div class="bar"><div class="lights"><i></i><i></i><i></i></div><span class="tool" style="border:1px solid var(--line)">Inbox ▾<kbd>⌘K</kbd></span><span class="sub">12 new · 3 need you</span><span class="grow"></span><span class="tool">Reply</span><span class="tool">Archive</span><span class="tool">Label</span><span class="tool">Search</span><span class="tool primary">New Message</span></div>
+<div class="body"><div class="wide"><div class="wrow on unread"><span class="dot"></span><span class="from">Taylor Chen</span><span class="text"><b>Interview feedback for the designer role</b> — Strong portfolio and great with the team; a little light on systems work. I'd lean towards an offer.</span><span class="chips"></span><span class="when">7:17 PM</span></div><div class="wrow unread"><span class="dot"></span><span class="from">Avery Kim</span><span class="text"><b>Launch date — go or no-go?</b> — QA signed off this morning. The only open item is the pricing page copy. Are we go for Tuesday?</span><span class="chips"></span><span class="when">9:17 PM</span></div><div class="wrow"><span class="dot off"></span><span class="from">Emerson Silva</span><span class="text"><b>Onboarding plan</b> — I've attached the latest version for your review. Can we find thirty minutes on Thursday?</span><span class="chips"></span><span class="when">4:02 PM</span></div><div class="wrow unread"><span class="dot"></span><span class="from">Reese Schmidt</span><span class="text"><b>Customer escalation</b> — Following up on our conversation from last week. The numbers look better than we expected.</span><span class="chips"><span class="chip">Customers</span></span><span class="when">2:40 PM</span></div><div class="wrow"><span class="dot off"></span><span class="from">Logan Schmidt</span><span class="text"><b>Security review</b> — I'll send an updated draft once the team has weighed in. Let me know if anything is unclear.</span><span class="chips"><span class="chip">Customers</span></span><span class="when">1:15 PM</span></div><div class="wrow"><span class="dot off"></span><span class="from">Alex Kim</span><span class="text"><b>Contract review</b> — Thanks again for the quick turnaround. Adding a couple of people who should be in the loop.</span><span class="chips"></span><span class="when">11:30 AM</span></div><div class="wrow"><span class="dot off"></span><span class="from">Skyler Rivera</span><span class="text"><b>Q3 planning</b> — I'll send an updated draft once the team has weighed in. I've attached the latest version.</span><span class="chips"></span><span class="when">Yesterday</span></div><div class="wrow"><span class="dot off"></span><span class="from">Weekly Digest</span><span class="text"><b>This week in design systems</b> — Tokens that travel, a field guide to density, and what a calm interface costs.</span><span class="chips"><span class="chip">Newsletters</span></span><span class="when">Yesterday</span></div><div class="wrow"><span class="dot off"></span><span class="from">Status Alerts</span><span class="text"><b>Your invoice for November</b> — Your invoice is ready. Amount due: $48.00. It will be charged on December 1.</span><span class="chips"><span class="chip">Receipts</span></span><span class="when">Yesterday</span></div><div class="wrow"><span class="dot off"></span><span class="from">Careers</span><span class="text"><b>3 new applicants for Product Designer</b> — Three people applied since Monday. Review them before Friday's sync.</span><span class="chips"><span class="chip">Hiring</span></span><span class="when">Nov 18</span></div></div></div>
+<div class="peek" data-state="peek"><div class="peekbar"><span>Close<kbd>Esc</kbd> · Open in full<kbd>O</kbd></span><span>next<kbd>J</kbd> previous<kbd>K</kbd></span></div><section class="reader"><div class="scroll"><div class="inner">
+<div class="suggest">✦ Kaluta suggests a quick reply · about 20 seconds</div>
+<h2>Interview feedback for the designer role</h2>
+<div class="meta">Taylor Chen · today at 7:17 PM · to you</div>
+<p>Hi Jo,</p>
+<p>Strong portfolio and great with the team; a little light on systems work. I'd lean towards an offer.
+Do you want to meet them once more, or should I start on the offer?</p>
+<p>Taylor</p><div class="answers">
+<div class="answer"><kbd>1</kbd>Go ahead with the offer.</div>
+<div class="answer"><kbd>2</kbd>Let's meet them once more first.</div>
+<div class="answer"><kbd>3</kbd>Hold until I've seen the portfolio again.</div></div></div></div><div class="actions"><span class="btn primary">Reply<kbd>R</kbd></span><span class="btn">Make a task<kbd>T</kbd></span>
+<span class="btn">Archive<kbd>E</kbd></span><span class="btn">Later<kbd>B</kbd></span></div><div class="ask"><span>✦ Ask Kaluta about this conversation…</span><span><kbd>⌘K</kbd></span></div></section></div>
+</div></div>
+<p class="note">Use the two buttons above to see the list alone.</p>
+
+<script>
+const root=document.documentElement, stage=document.querySelector('.stage');
+function press(group,btn){document.querySelectorAll('[data-g="'+group+'"]').forEach(b=>b.setAttribute('aria-pressed',b===btn))}
+document.querySelectorAll('.controls button').forEach(b=>b.addEventListener('click',()=>{
+  const g=b.dataset.g,v=b.dataset.v; press(g,b);
+  if(g==='theme') root.dataset.theme=v;
+  if(g==='width') stage.classList.toggle('narrow',v==='narrow');
+  if(g==='state') document.querySelectorAll('[data-state]').forEach(e=>e.classList.toggle('hide',!e.dataset.state.split(' ').includes(v)));
+}));
+</script>
+</body></html>
