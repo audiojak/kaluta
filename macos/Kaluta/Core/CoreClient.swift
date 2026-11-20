@@ -2236,6 +2236,7 @@ typealias WrittenSince = KalutaCore.WrittenSince
 typealias WorthReason = KalutaCore.WorthReason
 typealias WorkflowDay = KalutaCore.WorkflowDay
 typealias WorkflowItem = KalutaCore.WorkflowItem
+typealias TriageGroup = KalutaCore.TriageGroup
 typealias WorkflowSet = KalutaCore.WorkflowSet
 typealias WorkflowScore = KalutaCore.WorkflowScore
 typealias TriageSuggestion = KalutaCore.TriageSuggestion

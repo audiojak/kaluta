@@ -197,6 +197,15 @@ final class WorkflowSession {
         return "\(min(decided + 1, total)) of \(total)"
     }
 
+    /// Triage: the group the item on screen is in, and where in it ("Worth
+    /// a look · 2 of 5"); nil for other workflows and at the end.
+    var groupLine: String? {
+        guard !isFinished, let group = current?.group else { return nil }
+        let members = items.filter { $0.group == group }
+        guard let at = members.firstIndex(where: { $0.key == current?.key }) else { return group.title }
+        return "\(group.title) · \(at + 1) of \(members.count)"
+    }
+
     /// Time on the current item, for the user's pace.
     var elapsedMillis: Int64 { Int64(Date().timeIntervalSince(itemShownAt) * 1000) }
 
@@ -206,6 +215,18 @@ final class WorkflowSession {
         guard left > 0 else { return "Nothing left in this set." }
         let minutes = max(1, (left * secondsPerItem + 30) / 60)
         return "\(left) of \(total) left, about \(minutes) minute\(minutes == 1 ? "" : "s")."
+    }
+}
+
+extension TriageGroup {
+    /// Its name above the item (spec §14.13).
+    var title: String {
+        switch self {
+        case .due: "Due again"
+        case .worth: "Worth a look"
+        case .people: "From people"
+        case .automated: "Automated"
+        }
     }
 }
 

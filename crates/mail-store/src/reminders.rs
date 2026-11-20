@@ -104,14 +104,18 @@ pub fn due(conn: &Connection, now: Millis) -> StoreResult<Vec<Candidate>> {
     Ok(out)
 }
 
+/// The group of a conversation whose reminder came due (spec §14.13).
+pub const DUE_GROUP: &str = "due";
+
 /// Bring due reminders into an open triage set: each goes up next, and
 /// one decided earlier in the set (put off from it) is undecided. How
-/// many came back.
+/// many came back. Each is in the due group.
 pub fn bring_back(tx: &Transaction, set_id: i64, now: Millis) -> StoreResult<usize> {
     let Some(set) = workflows::get_set(tx, set_id)? else { return Ok(0) };
     let decided: HashSet<String> = workflows::decisions(tx, set_id)?.into_iter().map(|d| d.item).collect();
     let mut items = set.items.clone();
     let mut n = 0;
+    let mut back = Vec::new();
     // The earliest last, so it ends up first.
     for c in due(tx, now)?.into_iter().rev() {
         let key = format!("thread:{}", c.thread_id);
@@ -123,11 +127,13 @@ pub fn bring_back(tx: &Transaction, set_id: i64, now: Millis) -> StoreResult<usi
         }
         items.retain(|k| *k != key);
         let at = items.iter().position(|k| !decided.contains(k) || *k == key).unwrap_or(items.len());
-        items.insert(at, key);
+        items.insert(at, key.clone());
+        back.push(key);
         n += 1;
     }
     if n > 0 {
         workflows::set_items(tx, set_id, &items)?;
+        workflows::set_groups(tx, set_id, back.iter().map(|k| (k.as_str(), DUE_GROUP)))?;
     }
     Ok(n)
 }
@@ -246,6 +252,8 @@ mod tests {
         let set = db.read_blocking(move |cn| get_set(cn, set_id)).unwrap().unwrap();
         // After what is decided, before what waits.
         assert_eq!(&set.items[..3], &[b.clone(), a.clone(), c]);
+        assert_eq!(set.groups.get(&a).map(String::as_str), Some(DUE_GROUP), "in the due group");
+        assert!(!set.groups.contains_key(&b), "the others keep theirs");
         let decided = db.read_blocking(move |cn| workflows::decisions(cn, set_id)).unwrap();
         assert!(!decided.iter().any(|d| d.item == a), "undecided again");
         // Already waiting in the set: nothing moves.

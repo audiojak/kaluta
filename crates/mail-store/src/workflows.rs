@@ -21,6 +21,9 @@ pub struct SetRow {
     pub items: Vec<String>,
     pub started_at: Millis,
     pub finished_at: Option<Millis>,
+    /// Triage: which group each item came from (item key to group name),
+    /// empty for sets without groups.
+    pub groups: std::collections::BTreeMap<String, String>,
 }
 
 /// One decided item.
@@ -50,10 +53,11 @@ fn set_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SetRow> {
         items: serde_json::from_str(&items).unwrap_or_default(),
         started_at: r.get(4)?,
         finished_at: r.get(5)?,
+        groups: r.get::<_, Option<String>>(6)?.and_then(|g| serde_json::from_str(&g).ok()).unwrap_or_default(),
     })
 }
 
-const SET_COLUMNS: &str = "id, kind, day, items_json, started_at, finished_at";
+const SET_COLUMNS: &str = "id, kind, day, items_json, started_at, finished_at, groups_json";
 
 /// The set of `kind` the user started on `day` and has not finished, if any.
 pub fn open_set(conn: &Connection, kind: &str, day: &str) -> StoreResult<Option<SetRow>> {
@@ -77,6 +81,22 @@ pub fn create_set(tx: &Transaction<'_>, kind: &str, day: &str, items: &[String],
     tx.prepare_cached("INSERT INTO workflow_sets (kind, day, items_json, started_at) VALUES (?1, ?2, ?3, ?4)")?
         .execute(params![kind, day, serde_json::to_string(items)?, now])?;
     Ok(tx.last_insert_rowid())
+}
+
+/// Set the group of some of a set's items, keeping the others'.
+pub fn set_groups<'a>(
+    tx: &Transaction<'_>,
+    set_id: i64,
+    groups: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> StoreResult<()> {
+    let Some(set) = get_set(tx, set_id)? else { return Ok(()) };
+    let mut all = set.groups;
+    for (item, group) in groups {
+        all.insert(item.to_owned(), group.to_owned());
+    }
+    tx.prepare_cached("UPDATE workflow_sets SET groups_json = ?2 WHERE id = ?1")?
+        .execute(params![set_id, serde_json::to_string(&all)?])?;
+    Ok(())
 }
 
 pub fn decisions(conn: &Connection, set_id: i64) -> StoreResult<Vec<DecisionRow>> {
