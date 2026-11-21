@@ -537,7 +537,7 @@ like its own place; the vocabulary stays the same.
   graphite, Teach green), white text on it at 4.5:1;
   `Tone.workflowGround(kind)` its faint ground; `Tone.workflowSurface`
   for cards and fields on it.
-- **Parts**: `WorkflowHeader` (‹ Mail with Esc, the name and "n of N",
+- **Parts**: `WorkflowHeader` (‹ Dashboard with Esc, the name and "n of N",
   one pill), `WorkflowProgress` (a segment per item up to 20, else one
   bar), `WorkflowButton` (primary filled, plain, quiet; its `Keycap`),
   `WorkflowRailRow`, `ScoreTile`, `CompletionRing`.

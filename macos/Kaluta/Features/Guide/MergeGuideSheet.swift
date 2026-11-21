@@ -34,7 +34,7 @@ struct MergeGuideSheet: View {
             if working {
                 HStack(spacing: Space.s) {
                     ProgressView().controlSize(.small)
-                    Text("Comparing with \(model.agent.providerName)…").foregroundStyle(.secondary)
+                    Text("\(AgentStore.assistantName) is comparing them…").foregroundStyle(.secondary)
                 }
                 .font(TypeRole.meta)
             }

@@ -3143,6 +3143,9 @@ away, unchanged except where §14.13 says.)*
   what was typed, so `⌘K`, a question and Return still asks the agent;
   `⌥⌘K` puts the cursor in the agent's prompt as `⌘K` did. The thread
   list's single keys run the same command definitions.)*
+  *(Amendment 2026-11-21: the reader keeps a minimum width of 380
+  points, so the list and the sidebar give way before it; the window's
+  own minimum grows to fit.)*
   *(Amended in M2: `r` is reply, Gmail-style; `u` toggles read either
   way.)*
 - Thread view: one locked-down `WKWebView` renders the whole thread as a
@@ -4192,6 +4195,12 @@ on each row: Global, This account, or the people or groups it is for. A
 row opens where it lives: a fact in Facts, an entry in its Writing Guide
 category. Nothing moves in storage.)*
 
+*(Amendment 2026-11-21: a row is also edited or deleted where it is
+listed, from its menu (and the context menu), with the editor its own
+page uses and the same undoable delete. A filter field over the list
+narrows it to the rows holding every word typed, in the title, detail or
+scope, so a person's name or address finds what Kaluta knows about them.)*
+
 Facts about the user, their work and the people they mention have a place
 of their own, used by every AI that composes for the user. They replace
 the writing guide's category F3; accepted F3 entries were moved into
@@ -4747,7 +4756,7 @@ that day.
 #### A workflow's shape
 
 - **The window**: the workflow replaces the split view, as Review mode
-  does; the sidebar and toolbar step aside. Its header: *‹ Mail* (Esc),
+  does; the sidebar and toolbar step aside. Its header: *‹ Dashboard* (Esc),
   the workflow's name with "*n* of *N*", and at most one status pill
   ("2 new will wait for the end", "Next 2 answers ready").
 - **Progress** under the header: one segment per item up to 20, else a
@@ -4777,7 +4786,7 @@ that day.
   colour, the others plain, each with its key on it.
 - **The end**: a ring that closes and a short burst, the score (what was
   decided, in the workflow's own terms), the *Next* workflow (Return)
-  and *Back to the start* (Esc). The last workflow of the day ends with
+  and *Back to the Dashboard* (Esc). The last workflow of the day ends with
   the day's summary ("You're done for today") and *Open Mail* (M).
 - **Resume**: leaving keeps the set and the position for the rest of the
   day; coming back continues there with a one-line recap of the item.
@@ -4807,7 +4816,7 @@ Enter, the keypad's or fn-Return, acts as Return wherever Return does):
 | ⌘. | discard what Kaluta wrote and go back to the item (writing); Esc goes back one step, from inside the text too |
 | 1–3 | pick one of Kaluta's answers |
 | / | tell Kaluta what to say |
-| Esc | back one step; from an item, back to Mail |
+| Esc | back one step; from an item, back to the Dashboard |
 | Esc or M, 1–7 | Mail, a workflow (start screen) |
 | ↑ ↓, Space, ⇧Space, Page Up/Down, Home/End | scroll the item |
 
@@ -4937,6 +4946,24 @@ are looked for as each account opens.
   wherever the reply is written; no dialog.
 - Without a ready agent: no suggestions or answers; *Write it yourself*
   replaces *Write it*; the workflows otherwise work.
+- *(Amendment 2026-11-21.)* **A missing suggestion says why.** In Triage
+  and Replies a conversation with no suggestion shows one quiet line
+  where the suggestion would be: "Kaluta has not looked at this one yet"
+  when an agent is ready (the background job has not reached it), or
+  "No suggestion: no agent is ready (Settings › Agents)". Replies shows
+  the suggestion line too ("3 answers ready" and the reason).
+- *(Amendment 2026-11-21.)* **The Dashboard has one name.** A workflow's
+  header reads *‹ Dashboard* and its end *Back to the Dashboard*; both
+  go there. ⌘0 is *View › Dashboard* while the mail window has the
+  keyboard; *Window › Mail* keeps ⌘0 only when it does not (to bring
+  the window back). The palette lists *Start …* only while workflows
+  are on, and starting one from the mail view shows it.
+- *(Amendment 2026-11-21.)* **Send and Archive in the composer.** A
+  reply written in the composer can be sent with *Send and Archive*
+  (⇧⌘Return, and a toolbar button): the conversation is marked read and
+  archived, as a reply sent from Triage or Replies is. Undo Send brings
+  the conversation back with the draft; without a hold, ⌘Z undoes the
+  archive. Plain *Send* is unchanged.
 
 #### Triage
 

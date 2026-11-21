@@ -19,6 +19,11 @@ struct KnowledgeTests {
         #expect(items.count == accepted, "only what was accepted")
         // Guide entries are preferences; a fact is where its category says.
         #expect(items.filter { if case .guide = $0.source { true } else { false } }.allSatisfy { $0.tabs.contains(.preferences) })
+        // The filter: every word, in the title, detail or scope, any case.
+        let text = "Sign off with just “J” Writing guide · Sign-offs taylor@example.com"
+        #expect(KnowledgeItem.matches("", in: text) && KnowledgeItem.matches("  ", in: text))
+        #expect(KnowledgeItem.matches("sign TAYLOR", in: text) && KnowledgeItem.matches("guide", in: text))
+        #expect(!KnowledgeItem.matches("sign avery", in: text))
         // The sidebar entry opens the page, not a mailbox.
         model.selectedMailboxID = AppModel.knowsMailboxID
         #expect(model.isKnows && model.listMailboxID == nil)

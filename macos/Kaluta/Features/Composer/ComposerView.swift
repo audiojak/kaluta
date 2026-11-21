@@ -65,7 +65,9 @@ struct ComposerView: View {
             if let store, store.didSend, let account = store.accountID ?? model.openAccountID {
                 Task {
                     await model.messageSent(heldDraftID: store.heldSend, taskID: store.taskID,
-                                            finishTask: store.task != nil && !store.keepsTask, accountID: account)
+                                            finishTask: store.task != nil && !store.keepsTask,
+                                            archiveThreadID: store.archivesThread ? store.threadID : nil,
+                                            accountID: account)
                 }
             }
             dismiss()
@@ -90,6 +92,13 @@ struct ComposerView: View {
                 await store.send()
             }
         }
+    }
+
+    /// *Send and Archive* is offered on a reply in the open account's
+    /// mailbox that no agent proposed (the agent sends those itself).
+    private func canSendAndArchive(_ store: ComposerStore) -> Bool {
+        store.threadID != nil && request.agentAction == nil && request.agentName == nil
+            && (store.accountID ?? model.openAccountID) == model.openAccountID
     }
 
     /// Discard: an agent's proposed send is rejected with it.
@@ -145,6 +154,14 @@ struct ComposerView: View {
                             .keyboardShortcut(key, modifiers: .command)
                             .disabled(!store.canSend)
                             .hidden()
+                        if canSendAndArchive(store) {
+                            // ⇧⌘Return: the reply goes and its conversation
+                            // leaves the Inbox, as in a workflow.
+                            Button("Send and Archive") { Task { await store.send(archive: true) } } // no-help: hidden
+                                .keyboardShortcut(key, modifiers: [.command, .shift])
+                                .disabled(!store.canSend)
+                                .hidden()
+                        }
                         if request.agentName == nil {
                             Button("Send, Keep Task Open") { Task { await store.send(keepTask: true) } } // no-help: hidden
                                 .keyboardShortcut(key, modifiers: [.command, .option])
@@ -244,6 +261,11 @@ struct ComposerView: View {
                                 Task { await store.sendLater(at: time.date) }
                             }
                         }
+                }
+                if canSendAndArchive(store) {
+                    Button("Send and Archive", systemImage: "archivebox") { Task { await store.send(archive: true) } }
+                        .disabled(!store.canSend)
+                        .help(ToolbarHelp.composer("Send and Archive")) // toolbar
                 }
                 Button(store.task == nil || request.agentName != nil ? "Send" : "Send and Finish Task",
                        systemImage: "paperplane.fill") {
@@ -417,7 +439,7 @@ struct ComposerView: View {
                 Image(systemName: "sparkles").foregroundStyle(.tint)
                 // As large as the main window's prompt, and it grows with
                 // what is typed (⌥Return for a new line).
-                TextField(ready ? "Ask \(name) to write or change this message…" : "\(name) is not set up (Settings › Agents)",
+                TextField(ready ? "Ask \(AgentStore.assistantName) to write or change this message…" : "\(name) is not set up (Settings › Agents)",
                           text: $assistant.instruction, axis: .vertical)
                     .textFieldStyle(.plain)
                     .lineLimit(1...6)
@@ -450,7 +472,7 @@ struct ComposerView: View {
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
                         .disabled(!ready || assistant.instruction.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .hoverHelp("Have \(name) write this into the message (Return)")
+                        .hoverHelp("Have \(AgentStore.assistantName) write this into the message (Return)")
                 }
             }
             .font(TypeRole.body)
@@ -460,8 +482,8 @@ struct ComposerView: View {
             case .done:
                 HStack(spacing: Space.m) {
                     Text(assistant.followsGuide
-                         ? "Written by \(name), following your writing guide. Read it before sending."
-                         : "Written by \(name). Read it before sending.").foregroundStyle(.secondary)
+                         ? "Written by \(AgentStore.assistantName), following your writing guide. Read it before sending."
+                         : "Written by \(AgentStore.assistantName). Read it before sending.").foregroundStyle(.secondary)
                     if assistant.followsGuide {
                         Button("Your Writing Guide") { model.showWritingGuide() }
                             .buttonStyle(.link)
@@ -500,9 +522,8 @@ struct ComposerView: View {
     /// the answers the thread offers to pick from. The answers are
     /// proposed in Facts for review (spec §14.9).
     private func factQuestions(_ questions: [ComposerAssistant.FactQuestion]) -> some View {
-        let name = model.agent.providerName
         return VStack(alignment: .leading, spacing: Space.s) {
-            Text("\(name) needs a few facts before it writes this. Answer what you can.")
+            Text("\(AgentStore.assistantName) needs a few facts before it writes this. Answer what you can.")
                 .font(TypeRole.caption)
                 .foregroundStyle(.secondary)
             ForEach(questions) { q in

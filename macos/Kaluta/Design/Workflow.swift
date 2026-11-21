@@ -198,7 +198,7 @@ struct WorkflowButton: View {
 struct WorkflowHeader: View {
     let kind: WorkflowKind
     let progress: String
-    var backTitle = "Mail"
+    var backTitle = "Dashboard"
     var pill: String?
     /// Opens the key list (?).
     var keys: (() -> Void)?

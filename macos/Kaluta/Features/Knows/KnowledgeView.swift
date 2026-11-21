@@ -3,9 +3,12 @@ import SwiftUI
 /// What Kaluta Knows (spec §14.11 amendment 2026-11-18): one list over the
 /// facts and the writing guide's entries, so the user can see in one
 /// place what AI drafts rely on. Nothing moves in storage: each row opens
-/// where it lives (Facts, or the Writing Guide).
+/// where it lives (Facts, or the Writing Guide), and can be edited or
+/// deleted from here with the editors those pages use (amended
+/// 2026-11-21). A filter field narrows the list by its words, so a
+/// person's name or address finds what Kaluta knows about them.
 struct KnowledgeItem: Identifiable, Equatable {
-    enum Source: Equatable { case fact(tag: String), guide(category: String) }
+    enum Source: Equatable { case fact(FactInfo), guide(GuideEntry) }
     enum Tab: String, CaseIterable { case all, preferences, people }
 
     let id: String
@@ -24,7 +27,7 @@ struct KnowledgeItem: Identifiable, Equatable {
             if f.category == "people" { tabs.insert(.people) }
             return KnowledgeItem(id: "fact-\(FactsStore.tag(f))", title: f.label, detail: f.value,
                                  scope: f.scope == .global ? "Global" : "This account",
-                                 source: .fact(tag: FactsStore.tag(f)), tabs: tabs)
+                                 source: .fact(f), tabs: tabs)
         }
         let fromGuide = guide.filter { $0.status == .accepted }.map { e in
             var tabs: Set<Tab> = [.all, .preferences]
@@ -32,20 +35,33 @@ struct KnowledgeItem: Identifiable, Equatable {
             let scope = e.scope.people.isEmpty ? (e.scope.groups.isEmpty ? "This account" : e.scope.groups.joined(separator: ", "))
                 : e.scope.people.joined(separator: ", ")
             return KnowledgeItem(id: "guide-\(e.id)", title: e.statement, detail: "Writing guide · \(e.category)",
-                                 scope: scope, source: .guide(category: e.category), tabs: tabs)
+                                 scope: scope, source: .guide(e), tabs: tabs)
         }
         return fromFacts + fromGuide
+    }
+
+    /// Whether every word of `filter` is in the row's title, detail or
+    /// scope, whatever its case or accents. An empty filter matches all.
+    func matches(_ filter: String) -> Bool {
+        Self.matches(filter, in: "\(title) \(detail) \(scope)")
+    }
+
+    static func matches(_ filter: String, in text: String) -> Bool {
+        filter.split(whereSeparator: \.isWhitespace)
+            .allSatisfy { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 }
 
 struct KnowledgeView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: String? = KnowledgeItem.Tab.all.rawValue
+    @State private var filter = ""
 
     var body: some View {
         let all = KnowledgeItem.items(facts: model.facts.facts, guide: model.guide.entries)
         let chosen = KnowledgeItem.Tab(rawValue: tab ?? "") ?? .all
-        let shown = all.filter { $0.tabs.contains(chosen) }
+        let inTab = all.filter { $0.tabs.contains(chosen) }
+        let shown = inTab.filter { $0.matches(filter) }
         VStack(spacing: 0) {
             ListHeaderBar {
                 CapsuleTabs(tabs: KnowledgeItem.Tab.allCases.map { t in
@@ -54,14 +70,40 @@ struct KnowledgeView: View {
                 }, selection: $tab, countNoun: "known")
                 .accessibilityLabel("Show")
             }
-            if shown.isEmpty {
+            if !inTab.isEmpty {
+                HStack(spacing: Space.s) {
+                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary).accessibilityHidden(true)
+                    TextField("Filter by words or a person", text: $filter)
+                        .textFieldStyle(.plain)
+                        .accessibilityLabel("Filter what Kaluta knows")
+                }
+                .font(TypeRole.meta)
+                .padding(.horizontal, Space.xl)
+                .padding(.vertical, Space.s)
+            }
+            if inTab.isEmpty {
                 ContentUnavailableView("Nothing Here Yet", systemImage: "brain",
                                        description: Text("Facts you accept and writing guide entries appear here."))
+            } else if shown.isEmpty {
+                ContentUnavailableView.search(text: filter)
             } else {
                 List(shown) { item in
-                    Button { open(item) } label: { row(item) }
-                        .buttonStyle(.plain)
-                        .hoverHelp(Self.help(item))
+                    HStack(spacing: Space.s) {
+                        Button { open(item) } label: { row(item) }
+                            .buttonStyle(.plain)
+                            .hoverHelp(Self.help(item))
+                        Menu {
+                            actions(item)
+                        } label: {
+                            Image(systemName: "ellipsis")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .accessibilityLabel("Change “\(item.title)”")
+                        .hoverHelp("Edit or delete this")
+                    }
+                    .contextMenu { actions(item) }
                 }
             }
         }
@@ -92,13 +134,34 @@ struct KnowledgeView: View {
 
     private func open(_ item: KnowledgeItem) {
         switch item.source {
-        case let .fact(tag):
+        case let .fact(fact):
             model.openFacts()
-            model.facts.selection = tag
-        case let .guide(category):
+            model.facts.selection = FactsStore.tag(fact)
+        case let .guide(entry):
             model.selectedMailboxID = AppModel.guideMailboxID
-            model.showGuideCategory(category)
+            model.showGuideCategory(entry.category)
         }
+    }
+
+    /// Edit and delete where it is listed, with the page's own editor and
+    /// the same undoable delete (UX review 2026-11, F14).
+    @ViewBuilder private func actions(_ item: KnowledgeItem) -> some View {
+        Button("Edit…") { // no-help: menu
+            switch item.source {
+            case let .fact(fact): model.guideSheet = .fact(fact, category: nil)
+            case let .guide(entry): model.guideSheet = .edit(entry, category: entry.category)
+            }
+        }
+        Button("Delete") { // no-help: menu
+            Task {
+                switch item.source {
+                case let .fact(fact): await model.deleteFact(fact)
+                case let .guide(entry): await model.deleteGuideEntry(entry)
+                }
+            }
+        }
+        Divider() // menu
+        Button(Self.help(item)) { open(item) } // no-help: menu
     }
 
     static func title(_ t: KnowledgeItem.Tab) -> String {

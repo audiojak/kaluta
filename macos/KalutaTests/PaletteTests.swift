@@ -51,7 +51,19 @@ struct PaletteTests {
         }
         #expect(model.listCommand(for: "l") == nil && model.listCommand(for: "b") == nil, "pickers stay with the list")
         #expect(commands.contains { $0.title == "Go to Inbox" })
-        #expect(commands.contains { $0.title == "Start Triage" })
+        // Workflows are listed only while they are on, and starting one
+        // from the mail view shows it (the window was left on mail).
+        #expect(!commands.contains { $0.title == "Start Triage" })
+        model.turnOnWorkflows()
+        model.showMail()
+        #expect(!model.showsWorkflows)
+        let start = try #require(model.mailCommands.first { $0.title == "Start Triage" })
+        start.run()
+        #expect(model.showsWorkflows, "the Dashboard's side, where a workflow shows")
+        for _ in 0..<200 where model.workflowSession == nil { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(model.workflowSession?.kind == .triage)
+        model.leaveWorkflow()
+        model.showMail()
 
         // With a conversation selected, E archives it, as the key always did.
         let thread = try #require(model.threads.rows.first?.id)

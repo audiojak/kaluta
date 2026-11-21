@@ -1447,7 +1447,7 @@ final class AppModel {
             guard await core.cancelSend(draftID, in: accountID) else { return false }
             guard let self else { return true }
             if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
-            self.compose(.review(draftID: draftID, agent: store?.providerName ?? "Agent"))
+            self.compose(.review(draftID: draftID, agent: AgentStore.assistantName))
             return true
         }
         return store
@@ -1455,8 +1455,33 @@ final class AppModel {
 
     /// A message was sent (or is held for Undo Send). Sent with *Send and
     /// finish the task*, its task is done, with Undo (spec §14.13).
-    func messageSent(heldDraftID: Int64?, taskID: Int64?, finishTask: Bool, accountID: String) async {
-        if let heldDraftID { sendHeld(draftID: heldDraftID, accountID: accountID, taskID: finishTask ? taskID : nil) }
+    /// With `archiveThreadID` (*Send and Archive*) the conversation it
+    /// answers is read and archived, as a reply sent from a workflow is;
+    /// taking the send back, or ⌘Z, brings it back to the Inbox.
+    func messageSent(heldDraftID: Int64?, taskID: Int64?, finishTask: Bool, archiveThreadID: String? = nil,
+                     accountID: String) async {
+        var unarchive: (@MainActor () async -> Void)?
+        if let thread = archiveThreadID, let core, accountID == openAccountID {
+            let read = try? await core.setRead([thread], true)
+            if let token = try? await core.archive([thread]) {
+                unarchive = {
+                    _ = try? await core.undo(token)
+                    if let read { _ = try? await core.undo(read) }
+                }
+                // Not held (Undo Send is off): the archive is its own step.
+                if heldDraftID == nil, let unarchive {
+                    undo.record(accountID: accountID, actionName: "Archive", noticeText: "Sent and archived",
+                                undo: unarchive,
+                                redo: {
+                                    if let read { _ = try? await core.redo(read) }
+                                    _ = try? await core.redo(token)
+                                })
+                }
+            }
+        }
+        if let heldDraftID {
+            sendHeld(draftID: heldDraftID, accountID: accountID, taskID: finishTask ? taskID : nil, alsoUndo: unarchive)
+        }
         guard finishTask, let taskID, let core,
               let task = try? await core.listTasks(includeDone: true).first(where: { $0.id == taskID }), !task.done,
               (try? await core.setTaskDone(task.id, true)) != nil
@@ -1470,13 +1495,16 @@ final class AppModel {
                     redo: { _ = try? await core.setTaskDone(task.id, true) })
     }
 
-    func sendHeld(draftID: Int64, accountID: String, taskID: Int64? = nil) {
+    func sendHeld(draftID: Int64, accountID: String, taskID: Int64? = nil,
+                  alsoUndo: (@MainActor () async -> Void)? = nil) {
         guard let core else { return }
         undo.recordSend(accountID: accountID, holdFor: .seconds(Int(undoSendSeconds))) { [weak self] in
             guard let self else { return }
             if await core.cancelSend(draftID, in: accountID) {
-                // Taken back: its task is not done after all.
+                // Taken back: its task is not done after all, and its
+                // conversation is back in the Inbox.
                 if let taskID { _ = try? await core.setTaskDone(taskID, false) }
+                await alsoUndo?()
                 if accountID != self.openAccountID { await self.switchAccount(to: accountID) }
                 // Sending it again still answers the task.
                 self.compose(.draft(id: draftID, task: taskID))

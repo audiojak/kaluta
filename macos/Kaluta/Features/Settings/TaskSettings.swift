@@ -38,7 +38,7 @@ struct TaskSettings: View {
             } header: {
                 Text("Task Categories")
             } footer: {
-                Text("Claude chooses one of these for each task. Drag to reorder.")
+                Text("Kaluta chooses one of these for each task. Drag to reorder.")
             }
             Section {
                 Button("Reset to the Starting Set") { editor.reset() }

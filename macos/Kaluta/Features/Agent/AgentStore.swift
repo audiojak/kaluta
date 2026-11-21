@@ -98,6 +98,13 @@ final class AgentStore {
     }
 
     var provider: AgentProviderInfo? { providers.first { $0.id == providerID } }
+    /// The AI's name wherever the user asks it something or it speaks
+    /// (principle 17, `docs/plans/design-review.md`): Kaluta. The backend's
+    /// own name (`providerName`) is for where the user chooses or audits
+    /// it: Settings › Agents, the backend picker, setup errors, and
+    /// notices of where mail goes.
+    static let assistantName = "Kaluta"
+
     var providerName: String { provider?.name ?? (providerID == "codex" ? "Codex" : "Claude") }
 
     var isProviderReady: Bool {

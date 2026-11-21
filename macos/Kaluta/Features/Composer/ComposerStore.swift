@@ -78,6 +78,9 @@ final class ComposerStore {
     private(set) var task: TaskItem?
     /// Sent with *Send, keep the task open*.
     private(set) var keepsTask = false
+    /// Sent with *Send and Archive*: the conversation leaves the Inbox
+    /// with the reply, as a reply sent from a workflow does.
+    private(set) var archivesThread = false
     /// The account the composer sends as.
     var accountID: String? { core?.accountID }
 
@@ -252,10 +255,12 @@ final class ComposerStore {
     }
 
     /// Sends the message; with a task, `keepTask` leaves it open, otherwise
-    /// sending finishes it (spec §14.13).
-    func send(keepTask: Bool = false) async {
+    /// sending finishes it (spec §14.13). `archive` also archives the
+    /// conversation a reply answers (*Send and Archive*).
+    func send(keepTask: Bool = false, archive: Bool = false) async {
         guard canSend, let core else { return }
         keepsTask = keepTask
+        archivesThread = archive && threadID != nil
         isDirty = true
         await save()
         guard saveError == nil, draftID != 0 else { return }

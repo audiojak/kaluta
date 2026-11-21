@@ -65,8 +65,14 @@ extension AppModel {
                 self.agent.isPresented.toggle()
             },
         ]
-        commands += WorkflowKind.all.map { kind in
-            MailCommand(id: "workflow-\(kind)", title: "Start \(kind.title)") { Task { await self.beginWorkflow(kind) } }
+        // Only while workflows are on: off, the window never shows one.
+        commands += (workflowsEnabled ? WorkflowKind.all : []).map { kind in
+            // From the mail view: the window shows a workflow only on the
+            // Dashboard's side (`showsWorkflows`), so go there first.
+            MailCommand(id: "workflow-\(kind)", title: "Start \(kind.title)") {
+                self.showStart()
+                Task { await self.beginWorkflow(kind) }
+            }
         }
         commands += snippetCommands(paletteSnippets)
         commands += (mailboxes.systemMailboxes + mailboxes.labels).map { mailbox in

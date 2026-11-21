@@ -56,11 +56,11 @@ struct AgentPromptBar: View {
 
                 // Always typable, so ⌘K always lands here; Send waits for
                 // a ready agent, and the line under says why.
-                TextField("Ask \(agent.providerName)…", text: $model.agentPromptDraft)
+                TextField("Ask \(AgentStore.assistantName)…", text: $model.agentPromptDraft)
                     .textFieldStyle(.plain)
                     .focused($focused)
                     .onSubmit(send)
-                    .accessibilityLabel("Ask \(agent.providerName)")
+                    .accessibilityLabel("Ask \(AgentStore.assistantName)")
                     .onKeyPress(.downArrow) { move(1, in: chips) }
                     .onKeyPress(.tab) { move(1, in: chips) }
                     .onKeyPress(.upArrow) { move(-1, in: chips) }
@@ -88,7 +88,7 @@ struct AgentPromptBar: View {
                         .buttonStyle(.borderless)
                         .disabled(model.agentPromptDraft.trimmingCharacters(in: .whitespaces).isEmpty
                                   || !agent.isProviderReady)
-                        .hoverHelp("Ask \(agent.providerName) (Return)")
+                        .hoverHelp("Ask \(AgentStore.assistantName) (Return)")
                 }
             }
             .glassCapsule()
@@ -201,7 +201,7 @@ struct AgentCapabilitiesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xxl) {
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Label("Ask \(model.agent.providerName)", systemImage: "sparkles").font(TypeRole.heading)
+                    Label("Ask \(AgentStore.assistantName)", systemImage: "sparkles").font(TypeRole.heading)
                     Text("It reads your mail here, on this Mac. Drafts wait for you, and sending always asks first.")
                         .font(TypeRole.meta)
                         .foregroundStyle(.secondary)
@@ -272,7 +272,7 @@ struct AgentInspector: View {
 
     private func header(_ agent: AgentStore) -> some View {
         HStack {
-            Text(agent.providerName).font(TypeRole.heading)
+            Text(AgentStore.assistantName).font(TypeRole.heading)
             Spacer()
             if agent.approvableProposals.count > 1 {
                 Button("Approve All (\(agent.approvableProposals.count))") { agent.approveAll() }
@@ -454,14 +454,14 @@ private struct ProposalCard: View {
                     // editable email before it goes (spec §10.4).
                     if let draftID, AgentStore.isSend(tool) {
                         Button("Review and Send") {
-                            model.compose(.review(draftID: draftID, agent: model.agent.providerName, action: actionID))
+                            model.compose(.review(draftID: draftID, agent: AgentStore.assistantName, action: actionID))
                         }
                         .hoverHelp("Open the message to read, edit and send it")
                         .buttonStyle(.borderedProminent)
                     } else {
                         if let draftID {
                             Button("Review…") {
-                                model.compose(.review(draftID: draftID, agent: model.agent.providerName))
+                                model.compose(.review(draftID: draftID, agent: AgentStore.assistantName))
                             }
                             .hoverHelp("Open the message in a composer to read or edit it first")
                         }

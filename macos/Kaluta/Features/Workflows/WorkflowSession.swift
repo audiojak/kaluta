@@ -131,6 +131,9 @@ final class WorkflowSession {
     var noteDraft: String?
     /// Kaluta's triage suggestions, by thread id, as each item is shown.
     var suggestions: [String: TriageSuggestion] = [:]
+    /// Conversations whose suggestion has been looked up, found or not:
+    /// "Kaluta has not looked at this yet" is said only once it is known.
+    var suggestionsLooked: Set<String> = []
     /// The forward a forwarding rule set to ask suggests (Triage), by
     /// thread id: marked on Forward, and taken with F.
     var forwardSuggestions: [String: ForwardSuggestionInfo] = [:]
