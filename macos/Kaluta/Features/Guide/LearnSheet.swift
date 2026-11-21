@@ -17,7 +17,7 @@ struct LearnSheet: View {
 
     var body: some View {
         Dialog(title: (info?.analysedBefore ?? 0) > 0 ? "Learn More from Sent Mail" : "Learn from Sent Mail",
-               message: "\(model.agent.providerName) reads your sent messages in batches and proposes rules and guidelines. You decide on them when it has finished.") {
+               message: "\(AgentStore.assistantName) reads your sent messages in batches and proposes rules and guidelines. You decide on them when it has finished.") {
             if let why = notReady {
                 VStack(alignment: .leading, spacing: Space.s) {
                     Label(why, systemImage: "exclamationmark.triangle")

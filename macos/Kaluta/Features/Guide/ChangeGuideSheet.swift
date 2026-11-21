@@ -18,7 +18,7 @@ struct ChangeGuideSheet: View {
 
     var body: some View {
         Dialog(title: "Change Your Writing Guide",
-               message: questions.isEmpty ? "Say what you want changed. \(model.agent.providerName) works out the changes and asks you about each before anything changes." : "Answer each question. Only the ones you say yes to change your guide.",
+               message: questions.isEmpty ? "Say what you want changed. \(AgentStore.assistantName) works out the changes and asks you about each before anything changes." : "Answer each question. Only the ones you say yes to change your guide.",
                width: Self.width) {
             if let why = notReady {
                 Label(why, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.caution)
@@ -32,7 +32,7 @@ struct ChangeGuideSheet: View {
                 if asking {
                     HStack(spacing: Space.s) {
                         ProgressView().controlSize(.small)
-                        Text("Asking \(model.agent.providerName)…").foregroundStyle(.secondary)
+                        Text("Asking \(AgentStore.assistantName)…").foregroundStyle(.secondary)
                     }
                     .font(TypeRole.meta)
                 }
@@ -53,7 +53,7 @@ struct ChangeGuideSheet: View {
                 Button("Ask") { Task { await ask() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(asking || notReady != nil || request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .hoverHelp("Ask \(model.agent.providerName) what to change (Return)")
+                    .hoverHelp("Ask \(AgentStore.assistantName) what to change (Return)")
             } else {
                 let yes = answers.values.filter { $0 }.count
                 Button(yes == 1 ? "Apply 1 Change" : "Apply \(yes) Changes") { Task { await apply() } }

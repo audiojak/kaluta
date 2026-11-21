@@ -56,7 +56,7 @@ enum KeyboardShortcutGuide {
             .init(keys: "f", action: "Forward", inThreadList: true),
             .init(keys: "c", action: "New message", inThreadList: true),
             .init(keys: "/", action: "Search mail", inThreadList: true),
-            .init(keys: "t", action: "New task from the email (Claude suggests it)", inThreadList: true),
+            .init(keys: "t", action: "New task from the email (Kaluta suggests it)", inThreadList: true),
             .init(keys: "⇧T", action: "Create tasks for the highlighted emails, or the latest 20", inThreadList: true),
         ]),
         Group(title: "In Clean Up's groups", shortcuts: [
@@ -68,6 +68,7 @@ enum KeyboardShortcutGuide {
         ]),
         Group(title: "Writing", shortcuts: [
             .init(keys: "⇧⌘D  or  ⌘↩", action: "Send", inThreadList: false),
+            .init(keys: "⇧⌘↩", action: "Send a reply and archive its conversation", inThreadList: false),
             .init(keys: "⇧⌘A", action: "Attach files", inThreadList: false),
             .init(keys: "⌘B  ⌘I  ⌘U", action: "Bold, italic, underline", inThreadList: false),
             .init(keys: "⇧⌘X  ⇧⌘8  ⇧⌘7  ⇧⌘9", action: "Strikethrough, bulleted list, numbered list, quote",

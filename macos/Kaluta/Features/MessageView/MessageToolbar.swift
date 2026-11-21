@@ -37,7 +37,7 @@ struct ListToolbar: ToolbarContent {
                     .help(ToolbarHelp.text(for: "Learn from Sent Mail", model: model) ?? "")
                     .disabled(model.guideRunActive)
                 Menu("More", systemImage: "ellipsis.circle") {
-                    Button("Ask \(model.agent.providerName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
+                    Button("Ask \(AgentStore.assistantName) to Change the Guide…") { model.guideSheet = .change } // no-help: menu
                     Button("Answer Questions…") { model.guideSheet = .interview(only: nil) } // no-help: menu
                     if model.reviewsAvailable {
                         Button("Run Review Now") { Task { await model.runAnalysisNow() } } // no-help: menu
@@ -216,6 +216,7 @@ enum ToolbarHelp {
         case "Attach": "Attach files (⇧⌘A)"
         case "Discard": "Delete this draft"
         case "Send": "Send (⇧⌘D or ⌘Return)"
+        case "Send and Archive": "Send, and archive the conversation it answers (⇧⌘Return); Undo brings both back"
         case "Send Later": "Send at a time you choose, if Kaluta is running then (⌥⇧⌘D)"
         case "Insert Free Times": "Write your next free times into the message (needs Google Calendar connected)"
         case "Send and Finish Task": "Send and finish the task (⇧⌘D or ⌘Return); ⌥⌘Return keeps it open"
@@ -225,7 +226,8 @@ enum ToolbarHelp {
 
     static func text(for label: String, model: AppModel) -> String? {
         switch label {
-        case "Attach", "Discard", "Send", "Send Later", "Insert Free Times", "Send and Finish Task": composer(label)
+        case "Attach", "Discard", "Send", "Send and Archive", "Send Later", "Insert Free Times", "Send and Finish Task":
+            composer(label)
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
         case "Check for New Mail": "Check for New Mail (⇧⌘N)"
         case "Reply": "Reply (⌘R)"
@@ -244,8 +246,8 @@ enum ToolbarHelp {
         case "Scope": "Clean up the Inbox, or all mail but Spam and Trash"
         case "Star": "Star (s)"
         case "Unstar": "Unstar (s)"
-        case "Show Agent": "Show \(model.agent.providerName) (⌥⌘I)"
-        case "Hide Agent": "Hide \(model.agent.providerName) (⌥⌘I)"
+        case "Show Agent": "Show \(AgentStore.assistantName) (⌥⌘I)"
+        case "Hide Agent": "Hide \(AgentStore.assistantName) (⌥⌘I)"
         case "Accounts": AccountMenuButton.helpText(model)
         case "Hide Sidebar": "Hide the sidebar"
         case "Show Sidebar": "Show the sidebar"

@@ -244,6 +244,13 @@ struct WorkflowTests {
         #expect(session.progress == "3 of 3")
     }
 
+    @Test func aMissingSuggestionSaysWhyOnceItIsKnown() {
+        #expect(TriageSuggestionLine.missing(looked: false, agentReady: true) == nil, "not looked up yet: nothing")
+        #expect(TriageSuggestionLine.missing(looked: true, agentReady: true) == "Kaluta has not looked at this one yet")
+        #expect(TriageSuggestionLine.missing(looked: true, agentReady: false)?.contains("no agent is ready") == true)
+        #expect(WorkflowHeader(kind: .triage, progress: "1 of 2") {}.backTitle == "Dashboard", "it goes to the Dashboard")
+    }
+
     @Test func triageNamesTheGroupOnScreenAndWhereInItItIs() {
         let item = { (key: String, group: TriageGroup?, decision: String?) in
             WorkflowItem(key: "thread:\(key)", threadId: key, taskId: nil, decision: decision, group: group)

@@ -101,7 +101,7 @@ struct BulkTaskSheet: View {
         } leading: {
             Button("Ask Again") { ask() }
                 .disabled(!TaskSuggester.canAsk(model) || draft.suggester.state == .working)
-                .hoverHelp("Ask \(model.agent.providerName) again about these emails")
+                .hoverHelp("Ask \(AgentStore.assistantName) again about these emails")
         } buttons: {
             CancelButton(help: "Close without adding tasks (Esc)") { model.closeBulkTasks() }
             let count = draft.ready.count
@@ -125,7 +125,7 @@ struct BulkTaskSheet: View {
         case .working:
             HStack(spacing: Space.s) {
                 ProgressView().controlSize(.small)
-                Text("Asking \(model.agent.providerName) about \(draft.rows.count) emails…").foregroundStyle(.secondary)
+                Text("Asking \(AgentStore.assistantName) about \(draft.rows.count) emails…").foregroundStyle(.secondary)
             }
             .font(TypeRole.meta)
         case let .failed(message):

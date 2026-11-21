@@ -161,7 +161,7 @@ struct TaskDialog: View {
         } leading: {
             Button("Ask Again") { ask() }
                 .disabled(!TaskSuggester.canAsk(model) || draft.suggester.state == .working)
-                .hoverHelp("Ask \(model.agent.providerName) for another suggestion")
+                .hoverHelp("Ask \(AgentStore.assistantName) for another suggestion")
         } buttons: {
             CancelButton(help: "Close without adding a task (Esc)") { model.closeTaskDialog() }
             Button(draft.editing == nil ? "Add Task" : "Save") { Task { await model.acceptTask(draft) } }
@@ -183,7 +183,7 @@ struct TaskDialog: View {
         case .working:
             HStack(spacing: Space.s) {
                 ProgressView().controlSize(.small)
-                Text("Asking \(model.agent.providerName)…").foregroundStyle(.secondary)
+                Text("Asking \(AgentStore.assistantName)…").foregroundStyle(.secondary)
             }
             .font(TypeRole.meta)
         case let .failed(message):
@@ -194,7 +194,7 @@ struct TaskDialog: View {
             Label(draft.why, systemImage: "sparkles")
                 .font(TypeRole.meta)
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("\(model.agent.providerName) suggests this because: \(draft.why)")
+                .accessibilityLabel("\(AgentStore.assistantName) suggests this because: \(draft.why)")
         case .idle where !TaskSuggester.canAsk(model):
             Text("\(model.agent.providerName) is not set up, so write the task yourself.")
                 .font(TypeRole.meta)

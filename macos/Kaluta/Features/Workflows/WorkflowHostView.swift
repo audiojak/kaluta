@@ -382,14 +382,19 @@ struct WorkflowItemView: View {
             if session.kind == .waiting, let threadID, let wait = session.waits[threadID] {
                 WaitingLine(wait: wait, kind: session.kind)
             }
-            if session.kind == .triage, let threadID {
-                if let reminder = session.reminders[threadID], let line = Self.reminderLine(reminder) {
+            if session.kind == .triage || session.kind == .replies, let threadID {
+                if session.kind == .triage, let reminder = session.reminders[threadID],
+                   let line = Self.reminderLine(reminder) {
                     Label(line, systemImage: "bell")
                         .font(TypeRole.workflowContext)
                         .foregroundStyle(.secondary)
                 }
                 TriageSuggestionLine(suggestion: session.suggestions[threadID],
-                                     task: model.openTask(onThread: threadID), kind: session.kind)
+                                     missing: TriageSuggestionLine.missing(
+                                         looked: session.suggestionsLooked.contains(threadID),
+                                         agentReady: model.agent.isProviderReady),
+                                     task: session.kind == .triage ? model.openTask(onThread: threadID) : nil,
+                                     kind: session.kind)
             }
             // The times Kaluta can offer, before the user replies (spec §14.9).
             if let threadID, let times = session.freeTimes[threadID], !times.slots.isEmpty {
@@ -1084,6 +1089,9 @@ struct WaitingLine: View {
 /// has one.
 struct TriageSuggestionLine: View {
     let suggestion: TriageSuggestion?
+    /// What to say when there is no suggestion; nil says nothing (it has
+    /// not been looked up yet).
+    var missing: String?
     let task: TaskItem?
     let kind: WorkflowKind
 
@@ -1091,7 +1099,7 @@ struct TriageSuggestionLine: View {
         VStack(alignment: .leading, spacing: Space.s) {
             if let suggestion {
                 HStack(spacing: Space.m) {
-                    Text(Self.verb(suggestion))
+                    Text(Self.verb(suggestion, in: kind))
                         .font(TypeRole.workflowKey).fontWeight(.semibold)
                         .padding(.horizontal, Space.m).padding(.vertical, Space.hair)
                         .background(Tone.workflow(kind).opacity(0.14), in: Capsule())
@@ -1102,7 +1110,13 @@ struct TriageSuggestionLine: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Kaluta suggests: \(Self.verb(suggestion)). \(suggestion.reason)")
+                .accessibilityLabel("Kaluta suggests: \(Self.verb(suggestion, in: kind)). \(suggestion.reason)")
+            } else if let missing {
+                // No suggestion is not the same as "nothing to do": say
+                // which it is (UX review 2026-11, F8).
+                Label(missing, systemImage: "sparkle")
+                    .font(TypeRole.workflowContext)
+                    .foregroundStyle(.secondary)
             }
             if let task {
                 Label("Has a task: “\(task.title)”", systemImage: "checklist")
@@ -1112,7 +1126,23 @@ struct TriageSuggestionLine: View {
         }
     }
 
-    /// "Quick reply · about 20 seconds", "Make a task", "Archive", "Later".
+    /// Why a conversation has no suggestion, once that is known: no agent
+    /// is ready to make one, or Kaluta's background work has not reached
+    /// it (it runs after sync, within a daily cap, spec §14.13).
+    static func missing(looked: Bool, agentReady: Bool) -> String? {
+        guard looked else { return nil }
+        return agentReady ? "Kaluta has not looked at this one yet"
+            : "No suggestion: no agent is ready (Settings › Agents)"
+    }
+
+    /// "3 answers ready" in Replies, where the decision is already made;
+    /// else "Quick reply · about 20 seconds", "Make a task", "Archive", "Later".
+    static func verb(_ s: TriageSuggestion, in kind: WorkflowKind) -> String {
+        guard kind == .replies else { return verb(s) }
+        let n = s.answers.count
+        return n == 0 ? verb(s) : "\(n) answer\(n == 1 ? "" : "s") ready"
+    }
+
     static func verb(_ s: TriageSuggestion) -> String {
         switch s.kind {
         case .quickReply:
@@ -1157,7 +1187,7 @@ struct WorkflowEndView: View {
                         model.continueAfter(session)
                     }
                 }
-                WorkflowButton(title: "Back to the start", key: "Esc", style: .quiet, kind: session.kind) {
+                WorkflowButton(title: "Back to the Dashboard", key: "Esc", style: .quiet, kind: session.kind) {
                     model.leaveWorkflow()
                 }
             }

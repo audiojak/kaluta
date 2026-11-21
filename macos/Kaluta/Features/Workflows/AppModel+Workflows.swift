@@ -194,9 +194,11 @@ extension AppModel {
         guard let core, let threadID = threadID(of: item) else { return }
         // Kaluta's suggestion, with the answers it wrote ahead (Triage,
         // Replies, and a task's reply).
-        if [.triage, .replies, .tasks].contains(session.kind), session.suggestions[threadID] == nil,
-           let suggestion = try? await core.triageSuggestion(threadID) {
-            session.suggestions[threadID] = suggestion
+        if [.triage, .replies, .tasks].contains(session.kind), session.suggestions[threadID] == nil {
+            if let suggestion = try? await core.triageSuggestion(threadID) {
+                session.suggestions[threadID] = suggestion
+            }
+            session.suggestionsLooked.insert(threadID)
         }
         // Answered elsewhere? Looked up each time the item comes up.
         if session.kind == .triage || session.kind == .replies {

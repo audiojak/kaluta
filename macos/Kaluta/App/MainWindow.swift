@@ -130,6 +130,11 @@ struct MainWindow: View {
         }
     }
 
+    /// The narrowest the reader gets: about eight words a line. With the
+    /// sidebar and list at their narrowest and the agent column open, it
+    /// still fits the default 1200-point window.
+    static let readerMinWidth: CGFloat = 380
+
     private var mailWindow: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
@@ -156,6 +161,10 @@ struct MainWindow: View {
                             .padding(.vertical, Space.l)
                     }
                 }
+                // The reader is where mail is read: it keeps a readable
+                // width, so the list and the sidebar give way before it
+                // (UX review 2026-11, F1).
+                .frame(minWidth: Self.readerMinWidth)
                 if model.agent.isPresented {
                     PaneDivider()
                     // While the conversation is open the prompt sits under

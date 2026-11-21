@@ -201,7 +201,10 @@ struct MailCommands: Commands {
                     openWindow(id: "main")
                 }
             }
-            .keyboardShortcut("0")
+            // ⌘0 is View › Dashboard's while the mail window has the
+            // keyboard and workflows are on (spec §14.13); here it brings
+            // the window back, which matters only when it does not.
+            .keyboardShortcut(model.workflowsEnabled && mailKey ? nil : KeyboardShortcut("0"))
             Button("Routines") { openWindow(id: "routines") }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }
@@ -285,7 +288,7 @@ struct MailCommands: Commands {
             Button("Command Palette…") { model.showPalette() }
                 .keyboardShortcut("k")
                 .disabled(!model.isMailOpen)
-            Button("Ask \(model.agent.providerName)…") { model.focusAgentPrompt() }
+            Button("Ask \(AgentStore.assistantName)…") { model.focusAgentPrompt() }
                 .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(!model.isMailOpen)
             Button(model.agent.isPresented ? "Hide Agent" : "Show Agent") { model.agent.isPresented.toggle() }

@@ -182,6 +182,26 @@ struct UndoModelTests {
         }
     }
 
+    @Test func sendAndArchiveTakesTheConversationOutOfTheInboxAndUndoBringsItBack() async throws {
+        let model = try await demo()
+        let id = model.threads.rows[0].id
+        let account = try #require(model.openAccountID)
+        // As the composer reports a reply sent with Send and Archive, with
+        // no Undo Send hold: the archive is its own undoable step.
+        await model.messageSent(heldDraftID: nil, taskID: nil, finishTask: false, archiveThreadID: id, accountID: account)
+        try await waitUntil("out of the Inbox") { try await !inbox(model).contains(id) }
+        #expect(model.undo.notice?.text == "Sent and archived")
+        #expect(model.undo.undoTitle(in: account) == "Undo Archive")
+        model.undoMailAction()
+        try await waitUntil("back in the Inbox") { try await inbox(model).contains(id) }
+        // Plain Send archives nothing.
+        let other = model.threads.rows[1].id
+        await model.messageSent(heldDraftID: nil, taskID: nil, finishTask: false, accountID: account)
+        try await Task.sleep(for: .milliseconds(200))
+        let left = try await inbox(model)
+        #expect(left.contains(other) && left.contains(id))
+    }
+
     @Test func nothingChangedMeansNothingToUndo() async throws {
         let model = try await demo()
         let id = model.threads.rows[0].id
