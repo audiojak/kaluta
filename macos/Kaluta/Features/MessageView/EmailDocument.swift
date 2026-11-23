@@ -84,10 +84,12 @@ enum EmailDocument {
     /// body. Collapsed cards show one line of the message instead. A draft
     /// is an outlined, unfilled card marked "Draft", its time "Saved …".
     /// `onlyLatestOpen`: the composer's view of the thread being answered,
-    /// where only the latest message starts open. `actions`: each open
+    /// where only one message starts open: the one being answered
+    /// (`answering`), or the latest when that is not among them. `actions`: each open
     /// message (not a draft) ends with its own Reply, Reply all and
     /// Forward, so any of them can be answered, not only the latest.
-    static func thread(_ messages: [Message], isDark: Bool, onlyLatestOpen: Bool = false, actions: Bool = false) -> String {
+    static func thread(_ messages: [Message], isDark: Bool, onlyLatestOpen: Bool = false, answering: String? = nil,
+                       actions: Bool = false) -> String {
         var out = """
         <!doctype html><html><head><meta charset="utf-8">
         <meta http-equiv="Content-Security-Policy" content="\(contentSecurityPolicy)">
@@ -96,8 +98,9 @@ enum EmailDocument {
         """
         // Until another is clicked, the keys answer the latest message.
         let latest = actions ? messages.last { !$0.isDraft }?.id : nil
+        let answered = messages.contains { $0.id == answering } ? answering : messages.last?.id
         for (index, message) in messages.enumerated() {
-            let expanded = onlyLatestOpen ? index == messages.count - 1
+            let expanded = onlyLatestOpen ? message.id == answered
                 : isExpanded(message, index: index, count: messages.count)
             let classes = "msg" + (message.isDraft ? " draft" : "") + (message.id == latest ? " current" : "")
             out += "<details class=\"\(classes)\"\(expanded ? " open" : "") id=\"m-\(escape(message.id))\"><summary>"
