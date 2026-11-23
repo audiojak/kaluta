@@ -32,6 +32,27 @@ struct ThreadWindowTests {
         model.selectedThreadID = rows[0].id
         #expect(store.detail?.thread.id == rows[1].id)
     }
+
+    @Test func aReplyJustSentJoinsTheConversationBeingRead() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        let core = try #require(model.core)
+        let id = try #require(model.threads.rows.first?.id)
+        await model.reader.show(threadID: id)
+        let before = try #require(model.reader.detail?.messages)
+        model.reader.currentMessageID = before.last?.id
+        let draft = try await core.replyDraft(to: try #require(before.last?.id), all: false)
+        _ = try await core.sendDraft(try await core.saveDraft(draft))
+        let deadline = ContinuousClock.now + .seconds(5)
+        while (model.reader.detail?.messages.filter { !$0.isDraft }.count ?? 0) <= before.filter({ !$0.isDraft }).count,
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let after = try #require(model.reader.detail?.messages.filter { !$0.isDraft })
+        #expect(after.count == before.filter { !$0.isDraft }.count + 1, "the sent reply shows without choosing the thread again")
+        #expect(after.last?.isSentByMe == true)
+        #expect(model.reader.currentMessageID == before.last?.id, "the message clicked stays clicked")
+    }
 }
 
 @MainActor
