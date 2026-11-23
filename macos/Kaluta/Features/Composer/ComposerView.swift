@@ -190,12 +190,12 @@ struct ComposerView: View {
                 Banner(error, systemImage: "exclamationmark.triangle.fill", intent: .caution)
             }
             if let threadID = store.threadID, store.inReplyTo != nil {
-                // A reply: the conversation above it, the latest message
-                // open and earlier ones as rows; the divider draggable.
+                // A reply: the conversation above it, the message being
+                // answered open and the others as rows; the divider draggable.
                 if showsQuote {
                     VSplitView {
                         VStack(spacing: 0) {
-                            ComposerThreadPane(threadID: threadID)
+                            ComposerThreadPane(threadID: threadID, answering: store.inReplyTo)
                             conversationToggle
                         }
                         .frame(minHeight: 160, idealHeight: 360, maxHeight: .infinity)

@@ -34,6 +34,16 @@ struct EmailDocumentTests {
         #expect(html.contains(#"<details class="msg" open id="m-c""#))
     }
 
+    @Test func theComposersViewOpensTheMessageBeingAnswered() {
+        let shown = [message("a"), message("b"), message("c")]
+        let html = EmailDocument.thread(shown, isDark: false, onlyLatestOpen: true, answering: "b")
+        #expect(html.contains(#"<details class="msg" id="m-a">"#))
+        #expect(html.contains(#"<details class="msg" open id="m-b""#), "a reply to a message mid-thread opens that one")
+        #expect(html.contains(#"<details class="msg" id="m-c">"#), "later messages are rows below it")
+        let gone = EmailDocument.thread(shown, isDark: false, onlyLatestOpen: true, answering: "zz")
+        #expect(gone.contains(#"<details class="msg" open id="m-c""#), "an unknown message falls back to the latest")
+    }
+
     @Test func styledMailGetsPaperInDarkModeOnly() {
         let styled = message("s", html: ##"<table bgcolor="#fff"><tr><td>x</td></tr></table>"##)
         #expect(EmailDocument.thread([styled], isDark: true).contains(#"class="body paper""#))

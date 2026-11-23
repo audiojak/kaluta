@@ -3390,6 +3390,11 @@ selection otherwise; the Writing Guide, Facts and Tasks lists take their
 turn the same way *(amended 2026-10-06; before, Tab went only from the
 sidebar to the list and selected nothing)*.
 
+**Amendment (2026-11-22): the message being answered.** The pane opens
+and starts at the message the reply answers, which is not always the
+latest: later messages are rows below it. When that message is not in
+the conversation, the latest is open, as before.
+
 **Amendment (2026-09-28): drafts from the Drafts mailbox.** Drafts sync
 through Gmail's drafts list (`drafts.list`) on every incremental round,
 since Gmail's change history leaves drafts out and the sync window

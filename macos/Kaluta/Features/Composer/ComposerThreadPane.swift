@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// The conversation being answered, above a reply (spec §14.5): the
-/// earlier messages as rows that open when clicked, as in the reader, and
-/// the latest one open. Drafts (this reply among them) are left out.
+/// message being answered open and in view, the others as rows that open
+/// when clicked, as in the reader. Drafts (this reply among them) are left out.
 struct ComposerThreadPane: View {
     @Environment(AppModel.self) private var model
     @Environment(\.colorScheme) private var colorScheme
     let threadID: String
+    /// The message this reply answers; the latest when nil.
+    var answering: String?
     @State private var reader: ReaderStore?
 
     var body: some View {
@@ -14,10 +16,11 @@ struct ComposerThreadPane: View {
             if let reader, reader.detail != nil {
                 MessageWebView(
                     html: EmailDocument.thread(Self.shown(reader.documentMessages), isDark: colorScheme == .dark,
-                                               onlyLatestOpen: true),
+                                               onlyLatestOpen: true, answering: answering),
                     allowRemoteImages: reader.allowsRemoteImages,
                     inlineImages: reader.inlineImages,
-                    scrollToLatest: true)
+                    scrollToLatest: true,
+                    scrollToMessageID: answering)
             } else {
                 Color.clear
             }

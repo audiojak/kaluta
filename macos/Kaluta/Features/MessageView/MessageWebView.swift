@@ -17,6 +17,8 @@ struct MessageWebView: NSViewRepresentable {
     /// than the top. The page itself still runs no script: this is the
     /// app's own call, after each load.
     var scrollToLatest = false
+    /// With `scrollToLatest`: the message to start at instead of the latest.
+    var scrollToMessageID: String?
     /// The page's height once laid out (and again as images arrive), for a
     /// view that grows to fit the email instead of scrolling it: a
     /// workflow's item, where the workflow keeps the one scroll.
@@ -102,6 +104,7 @@ struct MessageWebView: NSViewRepresentable {
         coordinator.loadedInlineImages = Set(images.keys)
         guard html != coordinator.loadedHTML || remoteChanged || imagesChanged else { return }
         coordinator.scrollToLatest = scrollToLatest
+        coordinator.scrollToMessageID = scrollToMessageID
         coordinator.loadedHTML = html
         coordinator.suspiciousLinks = LinkSafety.mismatchedLinks(in: html)
         // A fixed, opaque base URL: nothing in the document can resolve
@@ -118,6 +121,7 @@ struct MessageWebView: NSViewRepresentable {
         var loadedInlineImages: Set<String> = []
         var suspiciousLinks: [String: String] = [:]
         var scrollToLatest = false
+        var scrollToMessageID: String?
         var onContentHeight: ((CGFloat) -> Void)?
         var onAttachment: ((String) -> Void)?
         var onMessageAction: ((EmailDocument.MessageAction, String) -> Void)?
@@ -168,11 +172,16 @@ struct MessageWebView: NSViewRepresentable {
             // Each load (bodies and images arriving reload the page) starts
             // at the top again.
             guard scrollToLatest else { return }
-            // A short message sits at the bottom with the earlier rows above it;
-            // a long one starts at its top.
+            // The message being answered, or the latest. A short latest
+            // message sits at the bottom with the earlier rows above it; a
+            // long one, or one with later messages below it, starts at its top.
+            let target = scrollToMessageID.flatMap { id in
+                (try? JSONSerialization.data(withJSONObject: ["m-" + id])).flatMap { String(data: $0, encoding: .utf8) }
+            } ?? "[null]"
             webView.evaluateJavaScript("""
-                var m = document.querySelectorAll('details.msg');
-                if (m.length) { var e = m[m.length - 1]; e.scrollIntoView(e.offsetHeight + 24 > window.innerHeight); }
+                var m = document.querySelectorAll('details.msg'), id = \(target)[0];
+                var e = (id && document.getElementById(id)) || m[m.length - 1];
+                if (e) { e.scrollIntoView(e !== m[m.length - 1] || e.offsetHeight + 24 > window.innerHeight); }
                 """)
         }
 
