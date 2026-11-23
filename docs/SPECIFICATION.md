@@ -3350,6 +3350,12 @@ time, by structure and wording, since the stored HTML has lost the
 senders' class names. A message that answers between quotes, or is
 nothing but a quote (a forward), is shown whole (amended 2026-10-02).
 
+**Amendment (2026-11-22): the conversation being read stays current.** When
+the shown conversation gains or loses a message (a reply just sent, even
+while its send is held, or one that arrives), the reader shows it without
+the conversation being chosen again. The message clicked, images allowed
+and hidden text shown are kept.
+
 ### 14.5 Composer
 
 Rich text via `NSTextView` in an `NSViewRepresentable`, `NSAttributedString`

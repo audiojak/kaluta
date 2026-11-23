@@ -1862,6 +1862,11 @@ final class AppModel {
             if reader.isWaitingForBodies, let shown = reader.threadID,
                hint.invalidate || hint.updated.contains(shown) {
                 await reader.reload()
+            } else if let shown = reader.threadID,
+                      hint.invalidate || hint.updated.contains(shown) || hint.inserted.contains(shown) {
+                // A reply just sent, or one that arrived, joins the
+                // conversation being read.
+                await reader.refresh()
             }
         case let .error(error):
             logger.error("core error: \(error.message, privacy: .private)")

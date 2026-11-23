@@ -68,12 +68,20 @@ final class ReaderStore {
     }
 
     func show(threadID: String?) async {
+        await show(threadID: threadID, keepingChoices: false)
+    }
+
+    /// `keepingChoices`: the same thread loaded again, so the message
+    /// clicked, images allowed and hidden text shown stay as they are.
+    private func show(threadID: String?, keepingChoices: Bool) async {
         guard threadID != self.threadID else { return }
         self.threadID = threadID
-        currentMessageID = nil
-        remoteImagesAllowedForThread = false
-        showsHiddenText = false
-        inlineImages = [:]
+        if !keepingChoices {
+            currentMessageID = nil
+            remoteImagesAllowedForThread = false
+            showsHiddenText = false
+            inlineImages = [:]
+        }
         loadGeneration += 1
         let generation = loadGeneration
         guard let threadID, let core else {
@@ -131,6 +139,17 @@ final class ReaderStore {
         guard let current = threadID else { return }
         threadID = nil
         await show(threadID: current)
+    }
+
+    /// The shown thread changed (a reply was sent or arrived): show its
+    /// messages as they are now. Nothing happens when they are the same, so
+    /// a change to labels alone does not redraw what is being read.
+    func refresh() async {
+        guard let current = threadID, let core,
+              let fresh = try? await core.thread(current), threadID == current,
+              fresh.messages.map(\.id) != detail?.messages.map(\.id) else { return }
+        threadID = nil
+        await show(threadID: current, keepingChoices: true)
     }
 
     /// Whether the shown thread is still waiting for a body.
