@@ -416,7 +416,7 @@ struct MainWindow: View {
     }
 
     private static let analysisSettingsWidth: CGFloat = 560
-    private static let analysisSettingsHeight: CGFloat = 520
+    private static let analysisSettingsHeight: CGFloat = 640
 }
 
 /// A message the provider would not send: why, and the draft to fix it.

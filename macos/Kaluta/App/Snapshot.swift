@@ -486,6 +486,9 @@ enum Snapshot {
                 case "fact":
                     window = Self.hostingWindow(ContactFactEditor(item: nil).background(ground).environment(model),
                                                 width: 460, height: nil)
+                case "learning":
+                    window = Self.hostingWindow(AnalysisSettingsView().background(ground).environment(model),
+                                                width: 560, height: 760)
                 case "settings":
                     let form = Form { ContactLearningSettings() }.formStyle(.grouped)
                     window = Self.hostingWindow(form.background(ground).environment(model), width: 560, height: 420)

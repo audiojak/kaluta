@@ -6,7 +6,7 @@
 use mail_store::analysis as store;
 
 use crate::analysis_glean::{FactsFrom, keys as glean};
-use crate::analysis_run::{DEFAULT_PAIRS_PER_DAY, keys};
+use crate::analysis_run::{DEFAULT_PAIRS_PER_DAY, LEARNING_AGENTS, chosen_agent, keys};
 use crate::{Core, CoreError, ErrorKind, runtime};
 
 /// Days AI drafts' full texts are kept after review, unless changed.
@@ -24,6 +24,10 @@ pub struct AnalysisSettings {
     pub pairs_per_day: u32,
     /// Days the full texts are kept after review: 7, 30 or 90.
     pub keep_days: u32,
+    /// The agent learning uses: `claude-code` or `codex` (*Learn with*).
+    pub agent: String,
+    /// When that agent is not ready, learn with the other one.
+    pub agent_fallback: bool,
 }
 
 #[uniffi::export]
@@ -44,6 +48,8 @@ impl Core {
                             .and_then(|v| v.parse().ok())
                             .filter(|d| KEEP_DAYS.contains(d))
                             .unwrap_or(DEFAULT_KEEP_DAYS),
+                        agent: chosen_agent(c)?,
+                        agent_fallback: get(keys::AGENT_FALLBACK)?.is_some_and(|v| v == "on"),
                     })
                 })
                 .await?)
@@ -58,10 +64,15 @@ impl Core {
         if !(1..=500).contains(&settings.pairs_per_day) {
             return Err(CoreError::new(ErrorKind::InvalidInput, "compare between 1 and 500 drafts a day"));
         }
+        if !LEARNING_AGENTS.contains(&settings.agent.as_str()) {
+            return Err(CoreError::new(ErrorKind::InvalidInput, "learn with Claude Code or Codex"));
+        }
         let db = self.db()?;
         runtime::run(async move {
             Ok(db
                 .write(move |tx| {
+                    store::set_meta(tx, keys::AGENT, &settings.agent)?;
+                    store::set_meta(tx, keys::AGENT_FALLBACK, if settings.agent_fallback { "on" } else { "off" })?;
                     store::set_meta(tx, keys::DAILY_REVIEW, if settings.daily_review { "on" } else { "off" })?;
                     store::set_meta(tx, glean::FACTS_FROM, settings.facts_from.as_str())?;
                     store::set_meta(tx, keys::PAIRS_PER_DAY, &settings.pairs_per_day.to_string())?;
@@ -110,15 +121,24 @@ mod tests {
                 daily_review: true,
                 facts_from: FactsFrom::MailWrittenWithAi,
                 pairs_per_day: 50,
-                keep_days: 30
+                keep_days: 30,
+                agent: "claude-code".into(),
+                agent_fallback: false,
             }
         );
-        let off =
-            AnalysisSettings { daily_review: false, facts_from: FactsFrom::Off, pairs_per_day: 20, keep_days: 90 };
+        let off = AnalysisSettings {
+            daily_review: false,
+            facts_from: FactsFrom::Off,
+            pairs_per_day: 20,
+            keep_days: 90,
+            agent: "codex".into(),
+            agent_fallback: true,
+        };
         block_on(core.set_analysis_settings(off.clone())).unwrap();
         assert_eq!(block_on(core.analysis_settings()).unwrap(), off);
         assert!(block_on(core.set_analysis_settings(AnalysisSettings { keep_days: 10, ..off.clone() })).is_err());
-        assert!(block_on(core.set_analysis_settings(AnalysisSettings { pairs_per_day: 0, ..off })).is_err());
+        assert!(block_on(core.set_analysis_settings(AnalysisSettings { pairs_per_day: 0, ..off.clone() })).is_err());
+        assert!(block_on(core.set_analysis_settings(AnalysisSettings { agent: "other".into(), ..off })).is_err());
 
         // The daily review off: the schedule starts nothing.
         learned(core);

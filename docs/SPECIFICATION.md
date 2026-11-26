@@ -4215,6 +4215,21 @@ mail", which opens the page with something new,
 once a day and only when the app is not in front (off by default). The
 account menu shows a small dot on accounts with unseen proposals.
 
+**Learn with (Amendment 2026-11-26).** Learning Settings opens with
+*Learn with*: *Claude Code* or *Codex*, the one agent that reads for
+reviews, facts, the workflow jobs (tasks among them) and contacts
+(§14.16). Until the user chooses, it is the agent the writing guide last
+learned with, else Claude Code. When that agent is not ready (signed out,
+missing, or it cannot be checked), learning waits and says why. *Use the
+other agent when this one is not ready* (off by default) lets learning go
+on with the other agent instead; the line under the two controls names
+where mail is then sent, since the other agent is another company's. The
+agent is settled when a piece of work starts and that piece keeps it: a
+review to its end, a deep dive for one contact to its end (the next
+contact in *Learn From Past Mail* is settled afresh, so the chosen agent
+is used again once it is back). A review already paused for its agent
+waits for that agent.
+
 **Privacy.** Recording is local. The review sends matched pairs, and with
 *All mail I send* the day's sent mail, to the user's own agent CLI, the
 same disclosure as learning; the Writing Guide's header says so before

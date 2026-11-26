@@ -749,6 +749,19 @@ pub(crate) mod tests {
         s
     }
 
+    /// As [`scratch`], with Claude Code's sign-in lapsed and Codex ready.
+    pub(crate) fn scratch_claude_lapsed(name: &str) -> crate::guide::tests::Scratch {
+        use agent_api::AgentStatus;
+        let s = crate::guide::tests::demo(name);
+        stop_scheduler(&s.1);
+        s.1.debug_use_agents_with(
+            AgentStatus::Error { message: "OAuth session expired".into() },
+            AgentStatus::Ready { version: "1.0.0 (fake)".into(), path: "/fake/agent".into() },
+        );
+        put(&s.1, vec![mail("old-1", "old", 1_000, ME, &[REESE], "Hello Reese.")]);
+        s
+    }
+
     /// One look of the job, as the runner gives it: `used` of today's
     /// conversations already counted.
     pub(crate) fn look(core: &Arc<Core>, used: u32) -> u32 {

@@ -482,11 +482,10 @@ impl Core {
     async fn run_dives(self: &Arc<Self>) -> Result<(), CoreError> {
         let own = self.own_addresses().await.unwrap_or_default();
         while let Some(run) = self.next_run().await? {
-            let agent = self.analysis_agent().await?;
-            let not_ready = self.agent_not_ready(&agent).await?;
-            let result = match not_ready {
-                Some(why) => Err(CoreError::new(ErrorKind::Agent, why)),
-                None => self.run_dive(run.id, &agent, &own).await,
+            // Chosen for each contact: a run is one agent's from end to end.
+            let result = match self.ready_learning_agent().await {
+                Ok(agent) => self.run_dive(run.id, &agent, &own).await,
+                Err(e) => Err(e),
             };
             if let Err(e) = result {
                 // What was read stays read; the run waits to be started again.
@@ -871,7 +870,7 @@ mod tests {
     use super::*;
     use crate::analysis_run::tests::rt;
     use crate::contacts::ContactFactStatus;
-    use crate::contacts_learn::tests::{ME, REESE, items, look, mail, put, scratch};
+    use crate::contacts_learn::tests::{ME, REESE, items, look, mail, put, scratch, scratch_claude_lapsed};
 
     const ADA: &str = "ada@other.example";
 
@@ -1196,6 +1195,46 @@ mod tests {
         let db = core.db().unwrap();
         rt(db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM contact_reads", [], |r| r.get::<_, i64>(0))?))).unwrap()
             == 0
+    }
+
+    #[test]
+    fn past_mail_waits_for_the_chosen_agent_unless_it_may_use_the_other() {
+        let s = scratch_claude_lapsed("dive-fallback");
+        let core = &s.1;
+        let now = mail_sync::now_millis();
+        put(core, vec![mail("r0", "tr0", now - 3 * DAY_MS, ME, &[REESE], "Let's discuss the renewal.")]);
+        let settings = rt(core.analysis_settings()).unwrap();
+        assert_eq!((settings.agent.as_str(), settings.agent_fallback), ("claude-code", false));
+
+        // Claude Code is chosen and cannot be reached: the run pauses and says why.
+        rt(core.clone().start_contact_batch(30)).unwrap();
+        settle(core);
+        let paused = rt(core.contact_batch()).unwrap().unwrap();
+        assert_eq!(paused.state, "paused");
+        assert!(paused.why.is_some_and(|w| w.contains("Claude")));
+        assert!(reads_none(core));
+
+        // Allowed to use the other agent: Resume finishes it with Codex.
+        rt(core.set_analysis_settings(crate::analysis_settings::AnalysisSettings { agent_fallback: true, ..settings }))
+            .unwrap();
+        assert_eq!(rt(core.learning_agent()).unwrap(), Ok("codex".to_owned()));
+        rt(core.clone().set_contact_batch_state("running".into())).unwrap();
+        settle(core);
+        let done = rt(core.contact_batch()).unwrap().unwrap();
+        assert_eq!((done.state.as_str(), done.done_people, done.why), ("done", 1, None));
+        assert!(items(core, REESE).iter().any(|f| f.label == "The renewal"));
+    }
+
+    #[test]
+    fn learning_uses_the_agent_chosen_in_settings() {
+        let s = scratch_claude_lapsed("dive-choice");
+        let core = &s.1;
+        let settings = rt(core.analysis_settings()).unwrap();
+        assert!(rt(core.learning_agent()).unwrap().is_err(), "the chosen agent is not ready, and no fallback");
+        rt(core
+            .set_analysis_settings(crate::analysis_settings::AnalysisSettings { agent: "codex".into(), ..settings }))
+        .unwrap();
+        assert_eq!(rt(core.learning_agent()).unwrap(), Ok("codex".to_owned()));
     }
 
     #[test]
