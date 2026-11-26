@@ -172,7 +172,7 @@ struct ContactsTests {
         #expect(ContactDiveSheet.line(ContactDiveEstimate(messages: 46, unread: 0, turns: 0)) == "All 46 messages have been read already.")
         #expect(PastMailSheet.line(ContactBatchEstimate(people: 85, messages: 4210, turns: 260)).hasPrefix("85 people · "))
         #expect(PastMailSheet.line(ContactBatchEstimate(people: 0, messages: 0, turns: 0)).hasPrefix("Nobody"))
-        let batch = ContactBatch(id: 1, days: 90, state: "running", totalPeople: 85, donePeople: 12, current: "Reese Okafor")
+        let batch = ContactBatch(id: 1, days: 90, state: "running", totalPeople: 85, donePeople: 12, current: "Reese Okafor", why: nil)
         #expect(ContactLearningSettings.batchLine(batch) == "12 of 85 people · Reese Okafor")
     }
 }

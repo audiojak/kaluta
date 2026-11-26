@@ -48,6 +48,10 @@ struct ContactLearningSettings: View {
         if let batch = store.batch, batch.state == "running" || batch.state == "paused" {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(Self.batchLine(batch))
+                if let why = batch.why {
+                    Label(why, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.failure)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 ProgressView(value: Double(min(batch.donePeople, batch.totalPeople)), total: Double(max(batch.totalPeople, 1)))
                 HStack(spacing: Space.m) {
                     Button(batch.state == "running" ? "Pause" : "Resume") {

@@ -75,6 +75,9 @@ pub struct ContactBatch {
     pub done_people: u32,
     /// Whose mail is being read now.
     pub current: Option<String>,
+    /// Why Kaluta paused it itself (the agent could not be reached, say);
+    /// none when the user paused it.
+    pub why: Option<String>,
 }
 
 fn dive_info(r: &RunRow) -> ContactDive {
@@ -601,10 +604,12 @@ impl Core {
 }
 
 fn batch_info(conn: &mail_store::Connection, b: &BatchRow) -> mail_store::StoreResult<ContactBatch> {
-    let current = match store::runs_of_batch(conn, b.id)?.into_iter().find(|r| r.state == "running") {
+    let runs = store::runs_of_batch(conn, b.id)?;
+    let current = match runs.iter().find(|r| r.state == "running") {
         Some(run) => crate::contacts::contact_info(conn, run.person_id)?.map(|i| i.name),
         None => None,
     };
+    let why = (b.state == "paused").then(|| runs.iter().find_map(|r| r.error.clone())).flatten();
     Ok(ContactBatch {
         id: b.id,
         days: b.days.max(0) as u32,
@@ -612,6 +617,7 @@ fn batch_info(conn: &mail_store::Connection, b: &BatchRow) -> mail_store::StoreR
         total_people: b.total_people.max(0) as u32,
         done_people: b.done_people.max(0) as u32,
         current,
+        why,
     })
 }
 
@@ -1190,6 +1196,43 @@ mod tests {
         let db = core.db().unwrap();
         rt(db.read(|c| Ok(c.query_row("SELECT COUNT(*) FROM contact_reads", [], |r| r.get::<_, i64>(0))?))).unwrap()
             == 0
+    }
+
+    #[test]
+    fn a_batch_kaluta_paused_says_why_until_it_is_resumed() {
+        let s = scratch("dive-batch-why");
+        let core = &s.1;
+        let now = mail_sync::now_millis();
+        put(core, vec![mail("r0", "tr0", now - 3 * DAY_MS, ME, &[REESE], "Let's discuss the renewal.")]);
+        let reese = person(core, REESE);
+        let db = core.db().unwrap();
+        // As run_dives leaves a run whose agent could not be reached.
+        rt(db.write(move |tx| {
+            let id = store::insert_batch(
+                tx,
+                &BatchRow { days: 30, state: "paused".into(), total_people: 1, ..Default::default() },
+            )?;
+            store::insert_run(
+                tx,
+                &RunRow {
+                    person_id: reese,
+                    batch_id: Some(id),
+                    state: "paused".into(),
+                    error: Some("Claude could not be checked.".into()),
+                    max_messages: 2_000,
+                    ..Default::default()
+                },
+            )?;
+            Ok(())
+        }))
+        .unwrap();
+        let paused = rt(core.contact_batch()).unwrap().unwrap();
+        assert_eq!(paused.why.as_deref(), Some("Claude could not be checked."));
+
+        rt(core.clone().set_contact_batch_state("running".into())).unwrap();
+        settle(core);
+        let done = rt(core.contact_batch()).unwrap().unwrap();
+        assert_eq!((done.state.as_str(), done.why), ("done", None));
     }
 
     #[test]
