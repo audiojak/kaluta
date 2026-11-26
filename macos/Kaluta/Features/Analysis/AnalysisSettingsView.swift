@@ -41,6 +41,9 @@ struct AnalysisSettingsView: View {
             } else {
                 Text("Open an account to change its learning settings.").foregroundStyle(.secondary)
             }
+            if model.core != nil, model.openAccountID != nil {
+                ContactLearningSettings()
+            }
             Section {
                 Toggle("Notify me of new proposals", isOn: $notify)
                     .hoverHelp("Once a day, when a review finds something and Kaluta is not in front")
@@ -69,6 +72,13 @@ struct AnalysisSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task(id: model.openAccountID) { await model.contacts.load() }
+        .sheet(item: Binding(get: { model.contacts.settingsSheet }, set: { model.contacts.settingsSheet = $0 })) { sheet in
+            switch sheet {
+            case .pastMail: PastMailSheet()
+            case .tags: ContactTagsSheet()
+            }
+        }
         .task(id: model.openAccountID) {
             // Nothing from the last account is written into this one.
             settings = nil

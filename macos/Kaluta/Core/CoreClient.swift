@@ -1477,6 +1477,136 @@ final class CoreClient: Sendable {
         try await call { try await core.addFactStarterSet(set: set) }
     }
 
+    // MARK: Contacts and contact facts (spec §14.16)
+
+    /// The contact an address belongs to, made if it has none; only people have one.
+    func contact(forAddress email: String) async throws(CoreClientError) -> ContactInfo {
+        try await call { try await core.contactForAddress(email: email) }
+    }
+
+    func contact(_ personID: Int64) async throws(CoreClientError) -> ContactInfo {
+        try await call { try await core.contact(personId: personID) }
+    }
+
+    /// The Contacts list: those with every tag in `tagIDs`, and with `search` anyone matching.
+    func contacts(tagIDs: [String], search: String) async throws(CoreClientError) -> [ContactSummary] {
+        try await call { try await core.listContacts(tagIds: tagIDs, search: search) }
+    }
+
+    func contactFacts(_ personID: Int64, statuses: [ContactFactStatus] = [.accepted, .proposed]) async throws(CoreClientError) -> [ContactFactInfo] {
+        try await call { try await core.contactFacts(personId: personID, statuses: statuses) }
+    }
+
+    func heldContactFacts() async throws(CoreClientError) -> [ContactFactInfo] {
+        try await call { try await core.heldContactFacts() }
+    }
+
+    /// Every contact's accepted items (What Kaluta Knows' People tab).
+    func acceptedContactFacts() async throws(CoreClientError) -> [ContactFactInfo] {
+        try await call { try await core.acceptedContactFacts() }
+    }
+
+    func heldContactFactCount() async throws(CoreClientError) -> Int64 {
+        try await call { try await core.heldContactFactCount() }
+    }
+
+    func contactTags() async throws(CoreClientError) -> [ContactTagInfo] {
+        try await call { try await core.contactTags() }
+    }
+
+    /// Waits, tasks and recent conversations with a contact; no agent involved.
+    func contactLinks(_ personID: Int64) async throws(CoreClientError) -> ContactLinks {
+        try await call { try await core.contactLinks(personId: personID) }
+    }
+
+    /// Change a contact's items as one change; undone with `undoContactChange`.
+    func applyContactEdits(_ edits: [ContactEdit], reason: String) async throws(CoreClientError) -> ContactChange {
+        try await call { try await core.applyContactEdits(edits: edits, reason: reason) }
+    }
+
+    func editContactTags(_ edits: [ContactTagEdit]) async throws(CoreClientError) -> ContactChange {
+        try await call { try await core.editContactTags(edits: edits) }
+    }
+
+    func joinContacts(_ personID: Int64, into: Int64) async throws(CoreClientError) -> ContactChange {
+        try await call { try await core.joinContacts(personId: personID, into: into) }
+    }
+
+    func forgetContact(_ personID: Int64) async throws(CoreClientError) -> ContactChange {
+        try await call { try await core.forgetContact(personId: personID) }
+    }
+
+    func markContactSeen(_ personID: Int64) async throws(CoreClientError) {
+        try await call { try await core.markContactSeen(personId: personID) }
+    }
+
+    func undoContactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.undoContactChange(changeId: id) }
+    }
+
+    func redoContactChange(_ id: Int64) async throws(CoreClientError) {
+        try await call { try await core.redoContactChange(changeId: id) }
+    }
+
+    /// Where learning about contacts stands: the switch, the ask, the limit, the estimate.
+    func contactLearning() async throws(CoreClientError) -> ContactLearning {
+        try await call { try await core.contactLearning() }
+    }
+
+    func setContactLearning(_ on: Bool) async throws(CoreClientError) {
+        try await call { try await core.setContactLearning(on: on) }
+    }
+
+    func contactLearningWasAsked() async throws(CoreClientError) {
+        try await call { try await core.contactLearningWasAsked() }
+    }
+
+    func contactLearningOfferDeclined() async throws(CoreClientError) {
+        try await call { try await core.contactLearningOfferDeclined() }
+    }
+
+    func setContactConversationsADay(_ perDay: UInt32) async throws(CoreClientError) {
+        try await call { try await core.setContactConversationsADay(perDay: perDay) }
+    }
+
+    func contactDiveEstimate(_ personID: Int64, maxMessages: UInt32) async throws(CoreClientError) -> ContactDiveEstimate {
+        try await call { try await core.contactDiveEstimate(personId: personID, maxMessages: maxMessages) }
+    }
+
+    func startContactDive(_ personID: Int64, maxMessages: UInt32) async throws(CoreClientError) -> ContactDive {
+        try await call { try await core.startContactDive(personId: personID, maxMessages: maxMessages) }
+    }
+
+    func contactDive(_ personID: Int64) async throws(CoreClientError) -> ContactDive? {
+        try await call { try await core.contactDive(personId: personID) }
+    }
+
+    func stopContactDive(_ personID: Int64) async throws(CoreClientError) {
+        try await call { try await core.stopContactDive(personId: personID) }
+    }
+
+    func contactBatchEstimate(days: UInt32) async throws(CoreClientError) -> ContactBatchEstimate {
+        try await call { try await core.contactBatchEstimate(days: days) }
+    }
+
+    func startContactBatch(days: UInt32) async throws(CoreClientError) -> ContactBatch {
+        try await call { try await core.startContactBatch(days: days) }
+    }
+
+    func contactBatch() async throws(CoreClientError) -> ContactBatch? {
+        try await call { try await core.contactBatch() }
+    }
+
+    /// `running` (resume), `paused` or `stopped`.
+    func setContactBatchState(_ state: String) async throws(CoreClientError) {
+        try await call { try await core.setContactBatchState(state: state) }
+    }
+
+    /// The names a search's `tag:` operators ask for that are not on the tag list.
+    func unknownSearchTags(_ query: String) async throws(CoreClientError) -> [String] {
+        try await call { try await core.unknownSearchTags(query: query) }
+    }
+
     func undoFactChange(_ id: Int64) async throws(CoreClientError) {
         try await call { try await core.undoFactChange(changeId: id) }
     }
@@ -2193,6 +2323,33 @@ typealias AudienceStatus = KalutaCore.AudienceStatus
 typealias GuideProgress = KalutaCore.GuideProgress
 typealias GuideRunInfo = KalutaCore.GuideRunInfo
 typealias AnalysisProgress = KalutaCore.AnalysisProgress
+// Contacts and contact facts (spec §14.16).
+typealias ContactInfo = KalutaCore.ContactInfo
+typealias ContactSummary = KalutaCore.ContactSummary
+typealias ContactAddress = KalutaCore.ContactAddress
+typealias ContactFactInfo = KalutaCore.ContactFactInfo
+typealias ContactFactKind = KalutaCore.ContactFactKind
+typealias ContactFactClass = KalutaCore.ContactFactClass
+typealias ContactFactStatus = KalutaCore.ContactFactStatus
+typealias ContactFactSource = KalutaCore.ContactFactSource
+typealias ContactFactFields = KalutaCore.ContactFactFields
+typealias ContactEdit = KalutaCore.ContactEdit
+typealias ContactTagEdit = KalutaCore.ContactTagEdit
+typealias ContactTagInfo = KalutaCore.ContactTagInfo
+typealias ContactTagSet = KalutaCore.ContactTagSet
+typealias ContactParty = KalutaCore.ContactParty
+typealias ContactQuote = KalutaCore.ContactQuote
+typealias ContactChange = KalutaCore.ContactChange
+typealias ContactLinks = KalutaCore.ContactLinks
+typealias ContactWait = KalutaCore.ContactWait
+typealias ContactTask = KalutaCore.ContactTask
+typealias ContactConversation = KalutaCore.ContactConversation
+typealias ContactLearning = KalutaCore.ContactLearning
+typealias ContactDive = KalutaCore.ContactDive
+typealias ContactDiveEstimate = KalutaCore.ContactDiveEstimate
+typealias ContactBatch = KalutaCore.ContactBatch
+typealias ContactBatchEstimate = KalutaCore.ContactBatchEstimate
+typealias SaidBy = KalutaCore.SaidBy
 typealias FactInfo = KalutaCore.FactInfo
 typealias FactScope = KalutaCore.FactScope
 typealias FactMergeResult = KalutaCore.FactMergeResult
@@ -2314,6 +2471,8 @@ enum CoreClientEvent: Sendable, Equatable {
     case analysisProgress(AnalysisProgress)
     case analysisChanged
     case factsChanged
+    /// Contacts, their items or the tag list changed (spec §14.16).
+    case contactsChanged
     /// An agent mailbox's publishing to a rules server moved on (spec §10.6).
     case rulesPublicationChanged
     case importProgress(ImportStatus)
@@ -2413,6 +2572,8 @@ private extension CoreClientEvent {
             self = .analysisChanged
         case .factsChanged:
             self = .factsChanged
+        case .contactsChanged:
+            self = .contactsChanged
         case .rulesPublicationChanged:
             self = .rulesPublicationChanged
         case let .agentEvents(sessionId, events):

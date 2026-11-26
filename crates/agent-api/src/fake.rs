@@ -510,6 +510,132 @@ pub fn prep_answer(prompt: &str) -> Option<String> {
     Some(lines.join("\n"))
 }
 
+/// The fake's answer to a Kaluta contact facts prompt (spec §14.16), or
+/// `None`. It reads each `<message>` for a few plain phrasings:
+/// "I'll …" / "I will …" is a commitment (owed by whoever said it),
+/// "Let's discuss …" a topic, "I'm the …" a role (and a tag when the list
+/// has one of that name), "as your <tag>" a tag, and "That's done: <label>"
+/// closes the known item with that label. A line `AGENT-ANSWER: {…}` in a
+/// message is copied into the answer as it stands: a reader that a planted
+/// message has talked round completely, for the adversarial tests.
+pub fn contact_facts_answer(prompt: &str) -> Option<String> {
+    if !prompt.starts_with("Kaluta contact facts") {
+        return None;
+    }
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let at = tag.find(&format!("{name}=\""))? + name.len() + 2;
+        Some(tag[at..].split('"').next()?.to_owned())
+    };
+    let contacts: Vec<String> =
+        prompt.split("<contact ").skip(1).filter_map(|b| attr(b.split('>').next()?, "address")).collect();
+    // Known items: "[#12] kind …: Label — Value".
+    let known: Vec<(i64, String)> = prompt
+        .lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("[#")?;
+            let (id, rest) = rest.split_once(']')?;
+            let label = rest.split_once(": ")?.1.split(" — ").next()?.trim().to_owned();
+            Some((id.parse().ok()?, label))
+        })
+        .collect();
+    let tags: Vec<String> = prompt
+        .split("Tags you may choose from")
+        .nth(1)
+        .and_then(|t| t.split("\n\n").next())
+        .map(|block| {
+            block
+                .lines()
+                .filter_map(|l| l.split_once(": "))
+                .flat_map(|(_, names)| names.split(", ").map(|n| n.trim().to_owned()).collect::<Vec<_>>())
+                .filter(|n| !n.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let cut = |s: &str, n: usize| -> String {
+        let s = s.trim().trim_end_matches(['.', '!', '?', ',', ';']).trim();
+        let mut c = s.chars();
+        let first: String = c.next().map(|f| f.to_uppercase().collect()).unwrap_or_default();
+        (first + c.as_str()).chars().take(n).collect()
+    };
+    let after = |sentence: &str, phrases: &[&str]| -> Option<String> {
+        let lower = sentence.to_lowercase();
+        phrases.iter().find_map(|p| lower.find(p).map(|at| sentence[at + p.len()..].to_owned()))
+    };
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    for block in prompt.split("<message ").skip(1) {
+        let Some((head, rest)) = block.split_once(">\n") else { continue };
+        let body = rest.split("</message>").next().unwrap_or(rest);
+        let (Some(id), Some(from), Some(by)) = (attr(head, "id"), attr(head, "from"), attr(head, "by")) else {
+            continue;
+        };
+        let date = attr(head, "date").unwrap_or_default();
+        for line in body.lines() {
+            if let Some(raw) = line.trim().strip_prefix("AGENT-ANSWER:")
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(raw.trim())
+            {
+                items.push(v);
+            }
+        }
+        let contact = if by == "you" {
+            contacts.first().cloned()
+        } else {
+            contacts.iter().find(|c| c.eq_ignore_ascii_case(&from)).cloned()
+        };
+        let Some(contact) = contact else { continue };
+        for sentence in body.split(['.', '!', '?', '\n']).map(str::trim).filter(|s| !s.is_empty()) {
+            if sentence.starts_with("AGENT-ANSWER:") {
+                continue;
+            }
+            let quotes = serde_json::json!([{ "message": id, "quote": sentence }]);
+            if let Some(rest) = after(sentence, &["i'll ", "i will "]) {
+                items.push(serde_json::json!({
+                    "op": "new", "contact": contact, "kind": "commitment", "label": cut(&rest, 60),
+                    "value": format!("Said on {date}"), "class": "other",
+                    "owed_by": if by == "you" { "you" } else { "them" }, "quotes": quotes,
+                }));
+            } else if let Some(rest) = after(sentence, &["let's discuss ", "let's talk about ", "can we discuss "]) {
+                items.push(serde_json::json!({
+                    "op": "new", "contact": contact, "kind": "topic", "label": cut(&rest, 60),
+                    "value": format!("Raised on {date}"), "class": "topic", "quotes": quotes,
+                }));
+            } else if let Some(rest) = after(sentence, &["that's done: "])
+                && let Some((known_id, _)) = known.iter().find(|(_, l)| l.eq_ignore_ascii_case(&cut(&rest, 60)))
+            {
+                items.push(serde_json::json!({ "op": "close", "id": known_id, "quotes": quotes }));
+            }
+            if by == "you" {
+                continue;
+            }
+            if let Some(rest) = after(sentence, &["i'm the ", "i am the "]) {
+                items.push(serde_json::json!({
+                    "op": "new", "contact": contact, "kind": "fact", "label": "Role", "value": cut(&rest, 160),
+                    "class": "role", "quotes": quotes,
+                }));
+                let said = rest.to_lowercase();
+                if let Some(tag) = tags.iter().find(|t| {
+                    let t = t.to_lowercase();
+                    said == t || said.starts_with(&format!("{t} ")) || said.starts_with(&format!("{t},"))
+                }) {
+                    items.push(serde_json::json!({ "op": "tag", "contact": contact, "tag": tag, "quotes": quotes }));
+                }
+            }
+            if let Some(rest) = after(sentence, &["as your "]) {
+                let said = rest.to_lowercase();
+                if let Some(tag) = tags.iter().find(|t| said.starts_with(&t.to_lowercase())) {
+                    items.push(serde_json::json!({ "op": "tag", "contact": contact, "tag": tag, "quotes": quotes }));
+                }
+            }
+        }
+    }
+    Some(serde_json::json!({ "items": items }).to_string())
+}
+
+/// The fake's answer to a deep dive's merge turn (spec §14.16): it joins
+/// nothing and closes nothing.
+pub fn contact_merge_answer(prompt: &str) -> Option<String> {
+    prompt.starts_with("Kaluta contact merge").then(|| r#"{"join": [], "close": []}"#.to_owned())
+}
+
 /// The scripted answer to one of Kaluta's own prompts (tasks, the writing
 /// guide, analysis, facts, writing help's questions), or `None`.
 pub fn scripted_answer(prompt: &str) -> Option<String> {
@@ -528,6 +654,8 @@ pub fn scripted_answer(prompt: &str) -> Option<String> {
         .or_else(|| compare_answer(prompt))
         .or_else(|| glean_answer(prompt))
         .or_else(|| writing_help_answer(prompt))
+        .or_else(|| contact_facts_answer(prompt))
+        .or_else(|| contact_merge_answer(prompt))
 }
 
 struct FakeSession {

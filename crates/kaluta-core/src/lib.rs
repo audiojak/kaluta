@@ -23,6 +23,13 @@ mod cleanup;
 mod cloud_routines;
 mod compose;
 mod compositions;
+mod contacts;
+#[cfg(test)]
+mod contacts_adversarial_tests;
+mod contacts_dive;
+mod contacts_gate;
+mod contacts_learn;
+mod contacts_prompt;
 mod demo;
 mod embeddings;
 mod error;
@@ -88,6 +95,13 @@ pub use cleanup::{
 };
 pub use cloud_routines::RoutineHandoff;
 pub use compose::{AccountComposer, DraftAttachmentInfo, DraftInfo, DraftStatus};
+pub use contacts::{
+    ContactAddress, ContactChange, ContactConversation, ContactEdit, ContactFactClass, ContactFactFields,
+    ContactFactInfo, ContactFactKind, ContactFactSource, ContactFactStatus, ContactInfo, ContactLinks, ContactParty,
+    ContactQuote, ContactSummary, ContactTagEdit, ContactTagInfo, ContactTagSet, ContactTask, ContactWait, SaidBy,
+};
+pub use contacts_dive::{ContactBatch, ContactBatchEstimate, ContactDive, ContactDiveEstimate};
+pub use contacts_learn::ContactLearning;
 pub use error::{CoreError, ErrorKind};
 pub use events::{ChangeHint, CoreEvent, EventBus, EventListener, LogLevel, NewMailInfo, SyncState};
 pub use followups::{FollowUpOption, MeetingFollowUp, MeetingPerson};

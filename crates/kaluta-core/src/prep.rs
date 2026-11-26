@@ -153,7 +153,11 @@ impl Core {
                     .await?)
             })
             .await?;
-            let answer = self.ask_agent_hidden(&step.agent, prompt(&row, &mail)).await?;
+            // What is known about the people being met (spec §14.16).
+            let met: Vec<String> = mail.iter().filter_map(|(p, _)| p.email.clone()).collect();
+            let known = self.contact_sections(met).await.unwrap_or_default();
+            let asked = crate::contacts_prompt::with_contacts(prompt(&row, &mail), &known);
+            let answer = self.ask_agent_hidden(&step.agent, asked).await?;
             done += 1;
             let Some(text) = brief(&answer) else { continue };
             let (write, id) = (db.clone(), row.meeting_id.clone());

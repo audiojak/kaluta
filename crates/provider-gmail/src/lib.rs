@@ -26,6 +26,9 @@ use serde_json::json;
 pub use wire::{decode_base64url, encode_base64url};
 
 pub const GMAIL_API: &str = "https://gmail.googleapis.com/gmail/v1";
+/// The name Gmail's receiving servers sign their `Authentication-Results`
+/// header with; one naming anything else is not Gmail's word.
+pub const AUTHSERV_ID: &str = "mx.google.com";
 
 /// Quota units per call (spec §7.2; per-minute quotas since 2026-05-01).
 pub mod cost {

@@ -282,6 +282,9 @@ struct MailCommands: Commands {
                 .disabled(!mailKey || model.taskTarget == nil)
             Button("Create Tasks…") { Task { await model.openBulkTasks() } }
                 .disabled(!mailKey || model.isTaskList || model.threads.rows.isEmpty)
+            // The page of the person the conversation is with (spec §14.16).
+            Button("Show Contact") { model.showContactOfSelection() }
+                .disabled(!mailKey || model.taskTarget == nil)
             Divider() // menu
             // From every window, not only the mail window: it comes forward.
             // ⌘K: every command by name; what matches none is asked of the agent.

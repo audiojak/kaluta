@@ -53,6 +53,7 @@ pub fn to_incoming(m: FetchedMessage) -> IncomingMessage {
         hidden,
         attachments,
         list: m.list,
+        sender_auth: m.sender_auth,
         headers_json: None,
     }
 }

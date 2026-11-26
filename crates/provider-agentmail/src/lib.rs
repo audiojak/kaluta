@@ -413,6 +413,7 @@ fn message_of(record: &wire::Message, raw: Option<&[u8]>) -> FetchedMessage {
         let h = parsed.headers;
         let snippet = snippet(parsed.text.as_deref().or(parsed.html.as_deref()).unwrap_or(""));
         return FetchedMessage {
+            sender_auth: None,
             id,
             thread_id,
             label_ids,
@@ -470,6 +471,7 @@ fn message_of(record: &wire::Message, raw: Option<&[u8]>) -> FetchedMessage {
         .or_else(|| record.message_id.contains('@').then(|| strip_angles(&record.message_id)));
     let text = record.text.clone();
     FetchedMessage {
+        sender_auth: None,
         id,
         thread_id,
         label_ids,

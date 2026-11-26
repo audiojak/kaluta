@@ -1019,3 +1019,33 @@ async fn a_widening_decided_on_cheap_headers_asks_if_imap_was_refused_since() {
     assert_eq!(mail_sync::load_every_header_stored(&db, false, true).await.unwrap(), EveryHeader::NeedsAsk);
     assert_eq!(engine.window().await.unwrap(), SyncWindow::HalfYear);
 }
+
+#[tokio::test]
+async fn sync_stores_what_the_provider_concluded_about_each_sender() {
+    use mail_domain::SenderAuth;
+    let (fake, db, _recorder, engine) = setup("sender-auth");
+    engine.bootstrap_prepare().await.unwrap();
+    engine.bootstrap_list_rest().await.unwrap();
+    for (id, auth) in [
+        ("passed", Some(SenderAuth::Pass)),
+        ("failed", Some(SenderAuth::Fail)),
+        ("silent", Some(SenderAuth::None)),
+        ("unsaid", None),
+    ] {
+        fake.deliver(FetchedMessage { sender_auth: auth, ..message(id, id, 0, &["INBOX"]) });
+    }
+    engine.sync_incremental().await.unwrap();
+    let stored: Vec<(String, Option<String>)> = db
+        .read(|c| {
+            Ok(c.prepare("SELECT gmail_id, sender_auth FROM messages ORDER BY gmail_id")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?)
+        })
+        .await
+        .unwrap();
+    let said = |id: &str| stored.iter().find(|(m, _)| m == id).unwrap().1.clone();
+    assert_eq!(said("passed").as_deref(), Some("pass"));
+    assert_eq!(said("failed").as_deref(), Some("fail"));
+    assert_eq!(said("silent").as_deref(), Some("none"));
+    assert_eq!(said("unsaid"), None, "a provider that says nothing stores nothing");
+}

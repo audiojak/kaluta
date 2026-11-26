@@ -43,6 +43,9 @@ pub enum Tool {
     GetMessage,
     ListLabels,
     FactsLookup,
+    /// What is known about a contact (spec §14.16): only for the people
+    /// of the session's own conversation or drafts.
+    ContactLookup,
     GetAttachmentText,
     PresentThreads,
     CreateDraft,
@@ -66,12 +69,13 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 21] = [
+    pub const ALL: [Tool; 22] = [
         Tool::Search,
         Tool::GetThread,
         Tool::GetMessage,
         Tool::ListLabels,
         Tool::FactsLookup,
+        Tool::ContactLookup,
         Tool::GetAttachmentText,
         Tool::PresentThreads,
         Tool::CreateDraft,
@@ -99,6 +103,7 @@ impl Tool {
             Tool::GetMessage => "mail_get_message",
             Tool::ListLabels => "mail_list_labels",
             Tool::FactsLookup => "facts_lookup",
+            Tool::ContactLookup => "contact_lookup",
             Tool::GetAttachmentText => "mail_get_attachment_text",
             Tool::PresentThreads => "mail_present_threads",
             Tool::CreateDraft => "mail_create_draft",
@@ -129,6 +134,7 @@ impl Tool {
             | Tool::GetMessage
             | Tool::ListLabels
             | Tool::FactsLookup
+            | Tool::ContactLookup
             | Tool::GetAttachmentText
             | Tool::PresentThreads
             | Tool::CalendarFreeSlots => Risk::ReadOnly,
@@ -321,6 +327,11 @@ impl SessionGuard {
     }
 
     /// A draft this session created (or the user attached) may be sent.
+    /// The drafts this session made or was given.
+    pub fn drafts(&self) -> Vec<i64> {
+        self.sendable_drafts.iter().copied().collect()
+    }
+
     pub fn allow_draft(&mut self, draft_id: i64) {
         self.sendable_drafts.insert(draft_id);
     }

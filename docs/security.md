@@ -36,6 +36,7 @@ worse (secrets in the Keychain, private sockets, no credentials on disk).
 | Agent reaches beyond mail | CLIs run with no built-in tools and only Kaluta's MCP server (Claude: `--tools ""`, `--strict-mcp-config`, `dontAsk`; Codex: read-only sandbox, `approval_policy=never`, the user's MCP servers replaced, shell/exec/browser/apps disabled) | `agent-claude/src/session.rs`, `agent-codex/src/session.rs` |
 | Prompt injection → sending, forwarding, deleting | Every tool call is decided in the core; external actions always wait for the user, time out after 10 minutes, and are rejected if the turn is cancelled | `permissions`, `kaluta-core/src/agents/{tools,approvals}.rs` |
 | A forwarding rule sends mail nobody looked at (spec §14.15, ADR 0021) | A rule exists only because the user accepted or wrote it, and forwards on its own only where the user chose that for that rule; it always names a sender, its one recipient is fixed, and it applies only to mail that arrived after it was made; matching is code over stored headers, with no agent and no agent tool that reads or changes a rule; one forward per message per rule, at most 20 a day. A forged sender can trigger an automatic rule: what leaves is that one message, to the address the user chose (accepted) | `kaluta-core/src/forward_rules.rs`, `mail-store/src/forward_rules.rs` |
+| Received mail plants something Kaluta then believes (spec §14.16, ADR 0026) | Learning about contacts is off until the user turns it on. Mail is read only in conversations with people the user has written to, one conversation per session, and that session is refused every tool: it sees the conversation and what is known about its own participants, nothing else in the store. What the agent answers is never believed as it stands: each quote is checked against the message's own text (quoted replies stripped); who said it comes from the message's sender, and a message that failed the receiving server's sender check is never the contact speaking; an answer about a person who is not in the conversation, or naming an item that is not theirs, is dropped. Rules in code, which the agent can raise but never lower, hold for the user's review: a commitment of the user's not in the user's words; anything about money, where to send things, agreements or deadlines resting on others' words; any change to what the user wrote or accepted; evidence only from a newly joined address or only from a third person; anything holding an address, a link or a number; closing or re-dating a commitment owed to the user; anything from mail that failed the sender check; and any tag that says what the person is to the user. A fact resting on their word waits for a second message on another day. Labels and values are short and refused when long; account, card and id numbers, passwords and private matters (health, religion, politics) are dropped by pattern and never stored, and long digit runs are taken out of stored quotes. A tag is chosen from the user's list or dropped. The deep dive's merge turn names items by id and writes no words. Addresses join a contact only by the user's hand. A contact's notes reach a prompt only when that contact is a recipient, as notes and not instructions, and `contact_lookup` answers only for the people of the session's own conversation or drafts. Agent mailboxes are neither read nor given any; nothing is global or published. What remains: a short low-risk line about people in that one conversation can skew a draft the user reads before it goes (accepted) | `kaluta-core/src/contacts_gate.rs`, `contacts_learn.rs`, `contacts_dive.rs`, `contacts_prompt.rs`, `agents/tools.rs` (sealed sessions, `contact_lookup`), `mail-mime/src/parse.rs` (`dmarc_verdict`) |
 | Agent edits what the user reviews | A draft under review is frozen for the agent; approving sends what the user sees | `approvals.rs` |
 | Agent sends the user's own drafts | Only drafts created in the session can be sent | `permissions::SessionGuard` |
 | Bulk damage | ≤ 200 threads per call, ≤ 2,000 per prompt, ≤ 60 calls a minute, system labels refused, selection scope | `permissions`, `tools.rs` |
@@ -94,6 +95,15 @@ never reaches the Keychain.
   mail sends nothing under *Ask* (proposals expire; the headless core
   refuses), cannot reach the user's own account or other tools, and under
   *Send freely* is logged by name.
+- `crates/kaluta-core/src/contacts_adversarial_tests.rs` — a reader that a
+  planted message has talked round completely (the fake copies the
+  message's own answer) leaves no number, link or secret, nothing about
+  anyone outside the conversation, and nothing of the held kinds without
+  the user; the same through a deep dive; a forged sender and a cc'd third
+  person cannot speak for a contact; a session with no tools is refused
+  every tool. `contacts_gate.rs` has a test for each of the ten rules, two
+  sightings and each never-stored pattern, and `injection_tests.rs` checks
+  that `contact_lookup` answers only for the session's own people.
 - `crates/kaluta-core/src/cleanup/unsubscribe/tests.rs` — one-click is
   never offered or posted to internal names, IP literals, other ports or
   names that resolve to private addresses; the POST is pinned.
@@ -113,6 +123,10 @@ Local malware with the user's privileges; a compromised agent CLI binary
 (it runs as the user); a cloud routine acting within the Gmail permissions
 the user granted to Claude or ChatGPT (outside Kaluta's approval rules, as
 the routine editor says); the user approving something they should not;
+mail from a contact's own account in someone else's hands, or with a
+forged sender the receiving server did not fail, adding short low-risk
+notes to that contact (visible, marked New, one undo; the held kinds
+still need the user);
 a program running as the user driving an agent mailbox through
 `kaluta-mcp --mailbox` (above), which under *Send freely* can send from
 it.

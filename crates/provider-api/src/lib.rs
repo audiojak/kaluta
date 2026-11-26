@@ -78,6 +78,9 @@ pub struct FetchedMessage {
     pub date: Option<Millis>,
     /// Mailing-list headers, when the fetch included them.
     pub list: ListHeaders,
+    /// What the provider's receiving server concluded about the sender;
+    /// `None` when the provider does not say (the stored one is kept).
+    pub sender_auth: Option<mail_domain::SenderAuth>,
     /// `None` when only metadata was fetched.
     pub body: Option<FetchedBody>,
 }

@@ -49,7 +49,7 @@ The short version. Everything below elaborates on these.
 | Telemetry | None. *(Amendment 2026-11-12, ADR 0020:)* a bug report or feature request is an email the user reads and sends from their own account (§17.1) |
 | Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta; an eighth, Follow-ups, with Granola connected, §14.14), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Forwarding rules | *(Amendment 2026-11-14, ADR 0021; built 2026-11-14.)* Kaluta proposes a rule when mail from one sender with one subject prefix is always forwarded to one address; an accepted rule forwards new matches automatically or asks each time, as the user chose when accepting it; matching is code in the core, never an agent (§14.15) |
-| Contact facts | *(Amendment 2026-11-25, ADR 0026; not built.)* Facts, open topics, commitments and tags (from a list the user keeps) about each person the user corresponds with, learned from the mail between them (received mail included) by a daily job, off until the user turns it on when first opening Contacts, and by a deep dive the user starts for one contact; high-risk items are held for the user by rules in code the agent cannot lower; used in drafting only when that contact is a recipient; the contact's page also shows the user's waits on them and tasks from their mail, by query (§14.16) |
+| Contact facts | *(Amendment 2026-11-25, ADR 0026; built 2026-11-25.)* Facts, open topics, commitments and tags (from a list the user keeps) about each person the user corresponds with, learned from the mail between them (received mail included) by a daily job, off until the user turns it on when first opening Contacts, and by a deep dive the user starts for one contact; high-risk items are held for the user by rules in code the agent cannot lower; used in drafting only when that contact is a recipient; the contact's page also shows the user's waits on them and tasks from their mail, by query (§14.16) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -1788,7 +1788,7 @@ As-you-type search debounces 40 ms and cancels superseded queries (each
 query carries a generation number; results for stale generations are
 dropped in Rust before crossing the FFI).
 
-**Amendment (2026-11-25): `tag:` (§14.16; not built).** `tag:customer`
+**Amendment (2026-11-25): `tag:` (§14.16; built 2026-11-25).** `tag:customer`
 finds mail with a person who has that contact tag: a message matches
 when its sender or any recipient, other than the user, is an address of
 a contact with the tag. Only accepted tags count; a tag held for review
@@ -5636,7 +5636,7 @@ restricted `gmail.settings.sharing` scope and an address verified by
 the recipient (ADR 0021). A forged sender can trigger a rule (§15.4);
 the store keeps no authentication results to check it against.
 
-### 14.16 Contacts and contact facts **(Amendment 2026-11-25, ADR 0026; not built)**
+### 14.16 Contacts and contact facts **(Amendment 2026-11-25, ADR 0026; built 2026-11-25)**
 
 Kaluta keeps facts about the people the user corresponds with, learned
 from the mail between them, and gives them to drafting when the user
@@ -6014,6 +6014,39 @@ Meetings (§14.14) are not read for contact facts yet. Tags do not
 change which audience group (§14.9) a person is written to as; the two
 are separate for now. A person the user
 writes to from two accounts is two contacts.
+
+**As built (2026-11-25).** Where the build differs from the text above:
+
+- **Review** of held items is on the contact's page (*Accept* and
+  *Reject* on each) and in a dialog that goes through them one at a time
+  as documents (Return accepts, Delete rejects, → skips), opened with
+  *Review All*; it is not the window-wide Review mode Facts uses.
+- **Show Contact** is in the Message menu and the command palette, for
+  the conversation that is open, and opens the page of the first of its
+  people who is a person; it is not on a name in the reader.
+- **Tags from mail are added, never taken off.** An agent's answer cannot
+  remove a tag at all, so rule 3 has nothing to hold there.
+- **A first sighting is kept out of sight whatever its risk.** A fact
+  resting on their word alone is *watching* after one message even when a
+  rule would hold it; the rules are applied when a second day states it.
+- **Never stored** also drops a number of six or more digits beside a
+  word for where money goes (account, bank, card, IBAN, sort code, wire),
+  however short the number: an adversarial test found an eight-digit
+  account number kept as a watched fact.
+- **Completing a tag** uses the system's search suggestions: ↑/↓ and
+  Return (or a click) choose one; Tab does not. Tags no contact has are
+  listed under their own heading, twelve at most, found by typing.
+- **The settings line** counts conversations read by the daily job today
+  and yesterday, whether or not one cost an agent turn (a conversation
+  with nobody to learn about is logged as read and costs none).
+- **The read log** keeps the daily job's reads under no contact (they
+  count for everyone in the conversation) and a deep dive's under its
+  contact.
+- **Reading sessions have no tools at all** (a *sealed* session, refused
+  every tool call), which is stricter than ADR 0007's read-only sessions.
+- **Sender authentication** is read for Gmail (REST and IMAP), from the
+  topmost `Authentication-Results` naming `mx.google.com`; other
+  providers store nothing, which reads as *none*.
 
 ## 15. Security Model and Threat Model
 

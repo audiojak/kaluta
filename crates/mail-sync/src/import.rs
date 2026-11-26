@@ -191,6 +191,7 @@ fn convert(raw: &[u8], mine: &HashSet<String>) -> Option<(IncomingMessage, Vec<L
         })
         .collect();
     let incoming = IncomingMessage {
+        sender_auth: None,
         id,
         thread_id,
         rfc822_message_id: headers.message_id.clone(),

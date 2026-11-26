@@ -52,6 +52,11 @@ pub enum SearchExpr {
     Label {
         value: String,
     },
+    /// Mail with a person who has this contact tag (spec §8, §14.16): the
+    /// tag's name (any case; a hyphen stands for a space) or its id.
+    Tag {
+        value: String,
+    },
     In {
         mailbox: Mailbox,
     },
@@ -189,6 +194,7 @@ const FIELDS: &[&str] = &[
     "bcc",
     "subject",
     "label",
+    "tag",
     "in",
     "is",
     "has",
@@ -342,6 +348,18 @@ impl Parser {
     }
 }
 
+/// The names a query's `tag:` operators ask for, in order (so the app can
+/// say which of them is not a tag).
+pub fn tag_names(expr: &SearchExpr) -> Vec<String> {
+    match expr {
+        SearchExpr::And { all } => all.iter().flat_map(tag_names).collect(),
+        SearchExpr::Or { any } => any.iter().flat_map(tag_names).collect(),
+        SearchExpr::Not { expr } => tag_names(expr),
+        SearchExpr::Tag { value } => vec![value.clone()],
+        _ => vec![],
+    }
+}
+
 fn field_expr(field: &str, value: &str) -> Result<SearchExpr, String> {
     let v = value.to_owned();
     let lower = value.to_ascii_lowercase();
@@ -352,6 +370,7 @@ fn field_expr(field: &str, value: &str) -> Result<SearchExpr, String> {
         "bcc" => SearchExpr::Bcc { value: v },
         "subject" => SearchExpr::Subject { value: v },
         "label" => SearchExpr::Label { value: v },
+        "tag" => SearchExpr::Tag { value: v },
         "filename" => SearchExpr::Filename { value: v },
         "in" => SearchExpr::In {
             mailbox: match lower.as_str() {

@@ -15,7 +15,8 @@ pub use build::{
 };
 pub use hidden::{Invisible, Visible, strip_invisible, visible};
 pub use parse::{
-    ParseError, ParsedAttachment, ParsedHeaders, ParsedMessage, decode_text_part, html_to_text, parse, parse_headers,
+    ParseError, ParsedAttachment, ParsedHeaders, ParsedMessage, decode_text_part, dmarc_verdict, html_to_text, parse,
+    parse_headers,
 };
 pub use quotes::{fold_quoted_html, html_to_quoted_text, split_quoted_text, text_to_reader_html, without_quoted_html};
 pub use sanitize::{

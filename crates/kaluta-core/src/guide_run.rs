@@ -262,8 +262,30 @@ impl Core {
     /// Ask the agent one prompt in a hidden, read-only session and wait for
     /// the whole answer.
     pub(crate) async fn ask_agent_hidden(self: &Arc<Self>, agent: &str, prompt: String) -> Result<String, CoreError> {
+        self.ask_agent_in_hidden_session(agent, prompt, false).await
+    }
+
+    /// As [`Self::ask_agent_hidden`], in a session that is refused every
+    /// tool: the agent sees its prompt and nothing else in the store.
+    pub(crate) async fn ask_agent_sealed(self: &Arc<Self>, agent: &str, prompt: String) -> Result<String, CoreError> {
+        self.ask_agent_in_hidden_session(agent, prompt, true).await
+    }
+
+    async fn ask_agent_in_hidden_session(
+        self: &Arc<Self>,
+        agent: &str,
+        prompt: String,
+        sealed: bool,
+    ) -> Result<String, CoreError> {
         let session = self.clone().start_read_only_agent_session(agent.to_owned(), vec![]).await?;
-        self.agents.with_session(&session, |s| s.hidden = true);
+        self.agents.with_session(&session, |s| {
+            s.hidden = true;
+            s.sealed = sealed;
+        });
+        #[cfg(test)]
+        if sealed {
+            self.agents.sealed_prompts.lock().unwrap_or_else(|e| e.into_inner()).push(prompt.clone());
+        }
         let answer = self.agents.watch_turn(&session);
         let sent =
             self.clone().send_agent_prompt(session.clone(), prompt, crate::agents::PromptContextInfo::default()).await;

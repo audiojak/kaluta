@@ -236,6 +236,7 @@ pub fn to_fetched(m: Message) -> FetchedMessage {
         subject: headers.subject,
         date: headers.date,
         list: headers.list,
+        sender_auth: Some(mail_mime::dmarc_verdict(headers.authentication_results.as_deref(), crate::AUTHSERV_ID)),
         body,
     }
 }
@@ -318,4 +319,34 @@ fn default_name(mime: &str) -> String {
 /// Gmail snippets are HTML-escaped.
 fn decode_snippet(s: &str) -> String {
     s.replace("&#39;", "'").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+#[cfg(test)]
+mod sender_auth_tests {
+    use mail_domain::SenderAuth;
+
+    use super::*;
+
+    fn fetched(headers: serde_json::Value) -> FetchedMessage {
+        let m: Message = serde_json::from_value(serde_json::json!({
+            "id": "m1", "threadId": "t1", "payload": { "mimeType": "text/plain", "headers": headers }
+        }))
+        .unwrap();
+        to_fetched(m)
+    }
+
+    #[test]
+    fn gmails_own_verdict_is_read_and_a_forged_one_below_it_is_not() {
+        let gmail = |verdict: &str| {
+            serde_json::json!({"name": "Authentication-Results",
+                "value": format!("mx.google.com; spf=pass smtp.mailfrom=a@example.net; dmarc={verdict} header.from=example.net")})
+        };
+        let forged = serde_json::json!({"name": "Authentication-Results", "value": "mx.google.com; dmarc=pass"});
+        let from = serde_json::json!({"name": "From", "value": "Reese <reese@example.net>"});
+        assert_eq!(fetched(serde_json::json!([gmail("fail"), forged, from])).sender_auth, Some(SenderAuth::Fail));
+        assert_eq!(fetched(serde_json::json!([gmail("pass"), from])).sender_auth, Some(SenderAuth::Pass));
+        assert_eq!(fetched(serde_json::json!([from])).sender_auth, Some(SenderAuth::None));
+        let other = serde_json::json!({"name": "Authentication-Results", "value": "mx.sender.example; dmarc=pass"});
+        assert_eq!(fetched(serde_json::json!([other, from])).sender_auth, Some(SenderAuth::None));
+    }
 }

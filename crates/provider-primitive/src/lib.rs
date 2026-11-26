@@ -411,6 +411,7 @@ fn inbound_message(record: &wire::Inbound, raw: Option<&[u8]>) -> FetchedMessage
             let h = parsed.headers;
             let snippet = snippet(parsed.text.as_deref().or(parsed.html.as_deref()).unwrap_or(""));
             FetchedMessage {
+                sender_auth: None,
                 id,
                 thread_id,
                 label_ids,
@@ -456,6 +457,7 @@ fn inbound_message(record: &wire::Inbound, raw: Option<&[u8]>) -> FetchedMessage
             let h = mail_mime::parse_headers([("From", from), ("To", to)]);
             let text = record.body_text.clone();
             FetchedMessage {
+                sender_auth: None,
                 id,
                 thread_id,
                 label_ids,
@@ -499,6 +501,7 @@ fn outbound_message(record: &wire::Sent) -> FetchedMessage {
         .unwrap_or_default();
     let text = record.body_text.clone();
     FetchedMessage {
+        sender_auth: None,
         id,
         thread_id,
         label_ids: vec![LabelId::new(system_labels::SENT)],

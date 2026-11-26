@@ -57,6 +57,9 @@ pub(crate) const JOBS: &[Job] = &[
     Job { name: "followups", daily_cap: crate::followups::DAILY_CAP, step: crate::followups::step },
     // With Granola connected: briefs for the next day's meetings.
     Job { name: "prep", daily_cap: crate::prep::DAILY_CAP, step: crate::prep::step },
+    // Only once the user has turned it on (spec §14.16). The one job with
+    // no fixed cap: its step keeps to the user's limit when there is one.
+    Job { name: crate::contacts_learn::JOB, daily_cap: u32::MAX, step: crate::contacts_learn::step },
 ];
 
 impl Core {

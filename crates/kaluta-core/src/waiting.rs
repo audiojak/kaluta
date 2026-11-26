@@ -448,7 +448,24 @@ impl Core {
         let days: Vec<(String, i64)> =
             due.iter().map(|w| (w.thread_id.clone(), (now - w.since) / 86_400_000)).collect();
         let emails = self.email_blocks(ids.clone(), BODY_CAP).await?;
-        let answer = self.ask_agent_hidden(&step.agent, nudge_prompt(&emails, &days)).await?;
+        // What is known about whom each email was sent to (spec §14.16),
+        // each under its own conversation.
+        let mut notes: Vec<(String, Vec<String>)> = Vec::new();
+        for w in &due {
+            let db = self.db()?;
+            let message = w.message_id.clone();
+            let to = runtime::run(async move {
+                Ok(db.read(move |c| mail_store::contact_learn::recipients_of(c, &message)).await?)
+            })
+            .await
+            .unwrap_or_default();
+            let sections = self.contact_sections(to).await.unwrap_or_default();
+            if !sections.is_empty() {
+                notes.push((w.thread_id.clone(), sections));
+            }
+        }
+        let prompt = nudge_prompt(&emails, &days) + &crate::contacts_prompt::per_thread(&notes);
+        let answer = self.ask_agent_hidden(&step.agent, prompt).await?;
         let found = parse_nudges(&answer, &ids).unwrap_or_default();
         let db = self.db()?;
         let at = mail_sync::now_millis();
