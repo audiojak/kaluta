@@ -1847,6 +1847,17 @@ Nothing outside `agent-claude` / `agent-codex` knows a CLI flag.
 Detection runs at launch and when Settings › Agents opens; results are
 cached for the session and re-checked on demand.
 
+**Putting an agent right (Amendment 2026-11-26).** Each agent's row in
+Settings › Agents that is not ready says what is wrong and shows the
+command that fixes it, with a button that opens Terminal and runs it and
+*Copy* beside it: *Sign In…* (`claude auth login`, `codex login`),
+*Install…* (`brew install …`) or *Update…* (`brew upgrade …`). A check
+that failed because the tool's own sign-in lapsed ("Failed to
+authenticate…", "OAuth session expired…") reads as a sign-in that has
+expired, not as "couldn't check". Kaluta still never reads or handles the
+credentials: the tool signs itself in. When Kaluta comes to the front
+again with an agent not ready, the page checks again.
+
 | | Claude Code | Codex |
 |---|---|---|
 | Locate binary | `PATH` lookup (login shell `$PATH` resolved once via `/bin/zsh -lc 'echo $PATH'`), then `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; user-overridable path in Settings | same |
@@ -3699,6 +3710,14 @@ offers *Send and finish the task* or *Send, keep the task open*,
 wherever the reply is written, in place of the "Mark the Task Done?"
 question; tasks from an earlier day are *carried over*, not overdue;
 the Tasks workflow works today's set one at a time.)*
+
+*(Amended 2026-11-26: on the Tasks page the list toolbar's button is *New
+Task* in place of *New Message* (which stays ⌘N and `c`). It opens the
+task dialog for a task of the user's own, about no email: no email line,
+no *When it's done*, nothing asked of the agent, and it is stored with an
+empty thread and the action *No Email*. Selecting it shows no email, and
+no `Task` label follows it. Only the user makes one; a task an agent
+suggests is always about an email.)*
 
 A task-based way through email that changes the app as little as
 possible: Claude reads an email and suggests what the user has to do about

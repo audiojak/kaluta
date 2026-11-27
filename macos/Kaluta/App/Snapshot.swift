@@ -486,6 +486,14 @@ enum Snapshot {
                 case "fact":
                     window = Self.hostingWindow(ContactFactEditor(item: nil).background(ground).environment(model),
                                                 width: 460, height: nil)
+                case "agentsettings":
+                    window = Self.hostingWindow(AgentSettings().background(ground).environment(model),
+                                                width: 620, height: 560)
+                case "newtask":
+                    let draft = TaskDraft(categories: ["Reply", "Decide", "Review", "Pay"])
+                    draft.title = "Renew the passport"
+                    window = Self.hostingWindow(TaskDialog(draft: draft).background(ground).environment(model),
+                                                width: 480, height: nil)
                 case "learning":
                     window = Self.hostingWindow(AnalysisSettingsView().background(ground).environment(model),
                                                 width: 560, height: 760)

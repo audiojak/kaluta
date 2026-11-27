@@ -16,6 +16,14 @@ struct AgentSettingsTests {
         let old = AgentStatusText(info("claude-code", .updateRequired(version: "1.0.0", minimum: "2.1.0")))
         #expect(!old.isReady && old.detail.contains("2.1.0"))
         #expect(AgentStatusText(info("codex", .error(message: "boom"))).detail.hasSuffix("boom"))
+        #expect(AgentStatusText(info("codex", .error(message: "boom"))).fix == nil)
+        // A lapsed sign-in is not "couldn't check": it says how to sign in again.
+        let lapsed = AgentStatusText(info("claude-code", .error(message: "Failed to authenticate: OAuth session expired and could not be refreshed")))
+        #expect(lapsed.detail == "Its sign-in has expired. Sign in again with: claude auth login")
+        #expect(lapsed.fix == AgentFix(title: "Sign In…", command: "claude auth login") && !lapsed.isReady)
+        #expect(AgentStatusText(info("claude-code", .notAuthenticated(version: "2.1.34"))).fix?.command == "claude auth login")
+        #expect(AgentStatusText(info("codex", .notInstalled)).fix == AgentFix(title: "Install…", command: "brew install codex"))
+        #expect(AgentStatusText(info("claude-code", .ready(version: "2.1.34"))).fix == nil)
     }
 
     /// A refused model says what Kaluta used instead.
