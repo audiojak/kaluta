@@ -189,6 +189,10 @@ impl Core {
     /// could not be made (offline, first time) is added with the next
     /// task.
     async fn follow_task_label(&self, thread_id: &str) {
+        // A task of its own, about no email, has nothing to label.
+        if thread_id.is_empty() {
+            return;
+        }
         if let Err(e) = self.try_follow_task_label(thread_id).await {
             tracing::warn!(error = %e, "task label not updated");
         }
@@ -256,10 +260,13 @@ impl Core {
         }
         let mut rows = Vec::with_capacity(new.len());
         for t in new {
-            if t.thread_id.is_empty() {
-                return Err(CoreError::new(ErrorKind::InvalidInput, "a task is about an email"));
+            // The user may write a task about no email (the Tasks page's
+            // New Task); one an agent proposes is always about an email.
+            if t.thread_id.is_empty() && (t.from_ai || t.message_id.is_some()) {
+                return Err(CoreError::new(ErrorKind::InvalidInput, "a suggested task is about an email"));
             }
-            let f = fields(t.title, t.notes, t.category, t.due_day, t.action)?;
+            let action = if t.thread_id.is_empty() { TaskAction::NoEmail } else { t.action };
+            let f = fields(t.title, t.notes, t.category, t.due_day, action)?;
             let why = t.why.split_whitespace().collect::<Vec<_>>().join(" ");
             rows.push((t.thread_id, t.message_id, f, if t.from_ai { "ai" } else { "you" }, why));
         }
@@ -586,6 +593,23 @@ mod tests {
         let tagged: Vec<String> =
             block_on(core.list_threads(label.clone(), None, 50)).unwrap().rows.into_iter().map(|r| r.id).collect();
         assert_eq!(tagged, [inbox[1].clone()]);
+    }
+
+    #[test]
+    fn a_task_of_the_users_own_is_about_no_email() {
+        let s = core("no-email");
+        let core = &s.1;
+        block_on(core.clone().open_account("demo".into())).unwrap();
+        let own = NewTask { from_ai: false, why: String::new(), ..new_task("", "Renew the passport") };
+        let made = block_on(core.create_tasks(vec![own.clone()])).unwrap();
+        assert_eq!((made[0].thread_id.as_str(), made[0].action), ("", TaskAction::NoEmail), "nothing to reply to");
+        assert!(made[0].subject.is_empty() && made[0].linked_thread_ids.is_empty());
+        // Done and open again, with no label to follow.
+        assert!(block_on(core.set_task_done(made[0].id, true)).unwrap().done);
+        assert!(!block_on(core.set_task_done(made[0].id, false)).unwrap().done);
+        // One an agent proposes is always about an email.
+        let suggested = NewTask { from_ai: true, ..own };
+        assert_eq!(block_on(core.create_tasks(vec![suggested])).unwrap_err().kind(), ErrorKind::InvalidInput);
     }
 
     #[test]

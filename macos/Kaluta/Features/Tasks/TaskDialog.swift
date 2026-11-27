@@ -50,6 +50,21 @@ final class TaskDraft: Identifiable {
         }
     }
 
+    /// A task of its own, about no email (the Tasks page's New Task).
+    init(categories: [String], now: Date = .now) {
+        editing = nil
+        threadID = ""
+        subject = ""
+        sender = ""
+        self.categories = categories
+        category = categories.first ?? "Reply"
+        due = Calendar.current.startOfDay(for: now)
+        action = .noEmail
+    }
+
+    /// Whether the task is about an email.
+    var hasEmail: Bool { !threadID.isEmpty }
+
     /// The dialog for changing a task: its fields, no request to Claude.
     init(editing task: TaskItem, categories: [String]) {
         editing = task
@@ -118,8 +133,11 @@ struct TaskDialog: View {
 
     var body: some View {
         Dialog(title: draft.editing == nil ? "New Task" : "Edit Task",
-               message: draft.sender.isEmpty ? draft.subject : "\(draft.sender) · \(draft.subject)") {
-            status
+               message: !draft.hasEmail ? "A task of your own, about no email."
+                   : draft.sender.isEmpty ? draft.subject : "\(draft.sender) · \(draft.subject)") {
+            if draft.hasEmail { status } else if let error = draft.error {
+                Label(error, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.failure)
+            }
             TextField("What to do", text: $draft.title)
                 .textFieldStyle(.roundedBorder)
                 .focused($titleFocused)
@@ -146,28 +164,34 @@ struct TaskDialog: View {
                 }
                 Spacer(minLength: 0)
             }
-            Picker("When it's done", selection: $draft.action) {
-                ForEach(TaskDraft.actions, id: \.0) { action, title in Text(title).tag(action) }
+            if draft.hasEmail {
+                Picker("When it's done", selection: $draft.action) {
+                    ForEach(TaskDraft.actions, id: \.0) { action, title in Text(title).tag(action) }
+                }
+                .hoverHelp("What you will do with the email to finish the task")
             }
-            .hoverHelp("What you will do with the email to finish the task")
             TextField("Notes", text: $draft.notes, axis: .vertical)
                 .lineLimit(2...4)
                 .textFieldStyle(.roundedBorder)
-            if draft.editing == nil {
+            if draft.editing == nil, draft.hasEmail {
                 TaskMatchesView(matcher: draft.matcher) { match in
                     Task { await model.addDialogEmail(to: match, draft: draft) }
                 }
             }
         } leading: {
-            Button("Ask Again") { ask() }
-                .disabled(!TaskSuggester.canAsk(model) || draft.suggester.state == .working)
-                .hoverHelp("Ask \(AgentStore.assistantName) for another suggestion")
+            if draft.hasEmail {
+                Button("Ask Again") { ask() }
+                    .disabled(!TaskSuggester.canAsk(model) || draft.suggester.state == .working)
+                    .hoverHelp("Ask \(AgentStore.assistantName) for another suggestion")
+            }
         } buttons: {
             CancelButton(help: "Close without adding a task (Esc)") { model.closeTaskDialog() }
             Button(draft.editing == nil ? "Add Task" : "Save") { Task { await model.acceptTask(draft) } }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!draft.canAdd)
-                .hoverHelp(draft.editing == nil ? "Add it to your tasks and label the email Task (Return)"
+                .hoverHelp(draft.editing != nil ? "Save your changes to the task (Return)"
+                           : !draft.hasEmail ? "Add it to your tasks (Return)"
+                           : draft.editing == nil ? "Add it to your tasks and label the email Task (Return)"
                                                 : "Save your changes to the task (Return)")
         }
         .onAppear { titleFocused = true }

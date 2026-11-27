@@ -84,9 +84,15 @@ struct ListToolbar: ToolbarContent {
         }
         ToolbarSpacer(.fixed)
         ToolbarItem {
-            Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
-                .help(ToolbarHelp.text(for: "New Message", model: model) ?? "")
-                .disabled(model.isArchive)
+            // On the Tasks page the list's own button makes a task, not mail.
+            if model.isTaskList {
+                Button("New Task", systemImage: "plus") { Task { await model.openNewTaskDialog() } }
+                    .help(ToolbarHelp.text(for: "New Task", model: model) ?? "")
+            } else {
+                Button("New Message", systemImage: "square.and.pencil") { model.compose(.new(to: nil)) }
+                    .help(ToolbarHelp.text(for: "New Message", model: model) ?? "")
+                    .disabled(model.isArchive)
+            }
         }
     }
 }
@@ -228,6 +234,7 @@ enum ToolbarHelp {
         switch label {
         case "Attach", "Discard", "Send", "Send and Archive", "Send Later", "Insert Free Times", "Send and Finish Task":
             composer(label)
+        case "New Task": "New Task: one of your own, about no email (New Message is ⌘N)"
         case "New Message": model.isArchive ? AppModel.cannotSendReason : "New Message (⌘N)"
         case "Check for New Mail": "Check for New Mail (⇧⌘N)"
         case "Reply": "Reply (⌘R)"

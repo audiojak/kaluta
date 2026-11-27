@@ -23,7 +23,9 @@ extension AppModel {
     func selectTask(_ id: Int64?) {
         tasks.selectedID = id
         selectedThreadIDs = []
-        selectedThreadID = id.flatMap { id in tasks.tasks.first { $0.id == id } }?.threadId
+        // A task about no email shows none.
+        let thread = id.flatMap { id in tasks.tasks.first { $0.id == id } }?.threadId
+        selectedThreadID = thread?.isEmpty == false ? thread : nil
     }
 
     /// `e` in the task list: done (or, among finished ones, open again).
@@ -91,6 +93,13 @@ extension AppModel {
     var taskTarget: ThreadRow? {
         let id = selectedThreadID ?? actionTargets.first
         return id.flatMap { id in threads.rows.first { $0.id == id } }
+    }
+
+    /// The Tasks page's New Task: a task of the user's own, about no email.
+    func openNewTaskDialog(now: Date = .now) async {
+        guard taskDraft == nil, let core else { return }
+        let categories = (try? await core.taskCategories()) ?? []
+        taskDraft = TaskDraft(categories: categories, now: now)
     }
 
     /// `t` and Message › New Task from Email: open the dialog and ask
@@ -224,7 +233,7 @@ extension AppModel {
             if taskDraft === draft { taskDraft = nil }
             recordTaskUndo(made, accountID: accountID)
             // A task made for a workflow's current conversation decides it.
-            await workflowTaskMade(threadID: draft.threadID)
+            if draft.hasEmail { await workflowTaskMade(threadID: draft.threadID) }
         } catch let error as CoreClientError {
             draft.error = error.message
         } catch {
