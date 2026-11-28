@@ -68,6 +68,21 @@ impl Sql {
                      OR replace(l.name, ' ', '-') = {p} COLLATE NOCASE))"
                 )
             }
+            // A sender or recipient who is a contact with the tag,
+            // accepted: one held for review finds nothing. The user's own
+            // address is never a contact, so it never makes a match.
+            SearchExpr::Tag { value } => {
+                let id = self.bind(value.trim().to_owned());
+                let name = self.bind(crate::contact_facts::tag_key(value));
+                format!(
+                    "EXISTS (SELECT 1 FROM participants p \
+                       JOIN contacts c ON c.email = p.email \
+                       JOIN contact_facts f ON f.person_id = c.person_id AND f.kind = 'tag' AND f.status = 'accepted' \
+                       JOIN contact_tags t ON t.id = f.value \
+                      WHERE p.message_id = m.id AND p.role IN ('from', 'to', 'cc', 'bcc') \
+                        AND (t.id = {id} COLLATE NOCASE OR lower(replace(t.name, '-', ' ')) = {name}))"
+                )
+            }
             SearchExpr::In { mailbox } => match mailbox {
                 Mailbox::Inbox => self.has_label("INBOX"),
                 Mailbox::Sent => self.has_label("SENT"),

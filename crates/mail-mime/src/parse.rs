@@ -6,7 +6,7 @@
 //! helpers feed small synthetic snippets through the same parser so there is
 //! one decoder for encoded words, address lists, dates and charsets.
 
-use mail_domain::{EmailAddress, ListHeaders, Millis};
+use mail_domain::{EmailAddress, ListHeaders, Millis, SenderAuth};
 use mail_parser::{Address, Encoding, HeaderValue, MessageParser, MessagePart, MimeHeaders, PartType};
 
 /// A message as parsed from MIME. `html` is the original, unsanitized HTML.
@@ -32,6 +32,10 @@ pub struct ParsedHeaders {
     pub subject: String,
     pub date: Option<Millis>,
     pub list: ListHeaders,
+    /// The topmost `Authentication-Results` header, unfolded: the one the
+    /// last server to handle the message added. Any below it may have been
+    /// written by the sender.
+    pub authentication_results: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -256,7 +260,41 @@ fn headers_of(msg: &mail_parser::Message<'_>) -> ParsedHeaders {
         subject: msg.subject().unwrap_or_default().trim().to_owned(),
         date: msg.date().map(|d| d.to_timestamp() * 1000),
         list: list_headers(msg),
+        authentication_results: msg
+            .headers_raw()
+            .find(|(name, _)| name.eq_ignore_ascii_case("Authentication-Results"))
+            .map(|(_, value)| unfold(value))
+            .filter(|v| !v.is_empty()),
     }
+}
+
+/// The DMARC verdict in an `Authentication-Results` value (RFC 8601), if
+/// the header was added by `authserv_id` (the receiving provider's own
+/// server, `mx.google.com` for Gmail). A header naming another server is
+/// not that server's word and gives `None`, as does one with no DMARC
+/// result. Only `pass` and `fail` are verdicts; `none`, `temperror`,
+/// `permerror` and `bestguesspass` say nothing either way.
+pub fn dmarc_verdict(authentication_results: Option<&str>, authserv_id: &str) -> SenderAuth {
+    let Some(value) = authentication_results else { return SenderAuth::None };
+    let mut parts = value.split(';');
+    // The id may be followed by a version ("mx.example.com 1").
+    let named = parts.next().and_then(|id| id.split_whitespace().next()).unwrap_or("");
+    if !named.eq_ignore_ascii_case(authserv_id) {
+        return SenderAuth::None;
+    }
+    for part in parts {
+        let part = part.trim_start();
+        let Some(rest) = part.get(..6).filter(|p| p.eq_ignore_ascii_case("dmarc=")).map(|_| &part[6..]) else {
+            continue;
+        };
+        let result: String = rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+        return match result.to_ascii_lowercase().as_str() {
+            "pass" => SenderAuth::Pass,
+            "fail" => SenderAuth::Fail,
+            _ => SenderAuth::None,
+        };
+    }
+    SenderAuth::None
 }
 
 /// `List-Id`, `List-Unsubscribe` and `List-Unsubscribe-Post`. The id is

@@ -767,6 +767,7 @@ fn to_fetched(
         subject: h.subject,
         date: h.date,
         list: h.list,
+        sender_auth: Some(mail_mime::dmarc_verdict(h.authentication_results.as_deref(), crate::AUTHSERV_ID)),
         body: Some(FetchedBody {
             text: parsed.text,
             html: parsed.html,

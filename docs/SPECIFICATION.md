@@ -49,6 +49,7 @@ The short version. Everything below elaborates on these.
 | Telemetry | None. *(Amendment 2026-11-12, ADR 0020:)* a bug report or feature request is an email the user reads and sends from their own account (§17.1) |
 | Workflows | *(Amendment 2026-10-11, ADR 0018.)* The window opens on a start screen (the *Dashboard*; *What's next* until 2026-11-04); seven full-window workflows (Triage, Replies, Tasks, Waiting on others, Weekly reading, Agents, Teach Kaluta; an eighth, Follow-ups, with Granola connected, §14.14), one item at a time, one command layer for keys, buttons and voice; the mail app is one key away (§14.13) |
 | Forwarding rules | *(Amendment 2026-11-14, ADR 0021; built 2026-11-14.)* Kaluta proposes a rule when mail from one sender with one subject prefix is always forwarded to one address; an accepted rule forwards new matches automatically or asks each time, as the user chose when accepting it; matching is code in the core, never an agent (§14.15) |
+| Contact facts | *(Amendment 2026-11-25, ADR 0026; built 2026-11-25.)* Facts, open topics, commitments and tags (from a list the user keeps) about each person the user corresponds with, learned from the mail between them (received mail included) by a daily job, off until the user turns it on when first opening Contacts, and by a deep dive the user starts for one contact; high-risk items are held for the user by rules in code the agent cannot lower; used in drafting only when that contact is a recipient; the contact's page also shows the user's waits on them and tasks from their mail, by query (§14.16) |
 | Issue tracking | beads (`bd`) in the repo |
 
 ---
@@ -1787,6 +1788,32 @@ As-you-type search debounces 40 ms and cancels superseded queries (each
 query carries a generation number; results for stale generations are
 dropped in Rust before crossing the FFI).
 
+**Amendment (2026-11-25): `tag:` (§14.16; built 2026-11-25).** `tag:customer`
+finds mail with a person who has that contact tag: a message matches
+when its sender or any recipient, other than the user, is an address of
+a contact with the tag. Only accepted tags count; a tag held for review
+finds nothing. The name is matched without regard to case; a name with
+spaces is quoted or hyphenated (`tag:"services client"`,
+`tag:services-client`); a tag's stable id also works
+(`tag:rel.customer`). A name that is in both sets (*Board member*)
+matches either. It combines as every operator does:
+`tag:customer has:attachment newer_than:30d`, `tag:customer OR
+tag:prospect`, `-tag:vendor`. An unknown name finds nothing, and the
+list says "No tag named …". The AST gains the same field, so
+`mail.search` accepts it; it resolves to the tag's contacts' addresses
+and an exact `participants.email` lookup. Per account, as tags are.
+
+**Completing a tag.** Typing `tag:` in the search field opens a menu
+under the field with the account's tags, narrowed as the user types
+(any word of a name: "eng" finds *Engineering* and *VP* does not need
+its heading). Tags that some contact has come first, each with how many
+contacts have it, under *Relationship* and *Role*; the rest follow,
+dimmed. ↑/↓ move, Return or Tab puts the tag in the field (quoted when
+it has a space) and searches, Esc closes the menu and leaves what was
+typed. The menu is built locally from the tag list, with no agent, and
+VoiceOver reads each row as "Customer, 14 contacts". It is the search
+field's first completion; other operators do not complete yet.
+
 ---
 
 ## 9. Agent Architecture
@@ -1819,6 +1846,17 @@ Nothing outside `agent-claude` / `agent-codex` knows a CLI flag.
 
 Detection runs at launch and when Settings › Agents opens; results are
 cached for the session and re-checked on demand.
+
+**Putting an agent right (Amendment 2026-11-26).** Each agent's row in
+Settings › Agents that is not ready says what is wrong and shows the
+command that fixes it, with a button that opens Terminal and runs it and
+*Copy* beside it: *Sign In…* (`claude auth login`, `codex login`),
+*Install…* (`brew install …`) or *Update…* (`brew upgrade …`). A check
+that failed because the tool's own sign-in lapsed ("Failed to
+authenticate…", "OAuth session expired…") reads as a sign-in that has
+expired, not as "couldn't check". Kaluta still never reads or handles the
+credentials: the tool signs itself in. When Kaluta comes to the front
+again with an agent not ready, the page checks again.
 
 | | Claude Code | Codex |
 |---|---|---|
@@ -3673,6 +3711,14 @@ wherever the reply is written, in place of the "Mark the Task Done?"
 question; tasks from an earlier day are *carried over*, not overdue;
 the Tasks workflow works today's set one at a time.)*
 
+*(Amended 2026-11-26: on the Tasks page the list toolbar's button is *New
+Task* in place of *New Message* (which stays ⌘N and `c`). It opens the
+task dialog for a task of the user's own, about no email: no email line,
+no *When it's done*, nothing asked of the agent, and it is stored with an
+empty thread and the action *No Email*. Selecting it shows no email, and
+no `Task` label follows it. Only the user makes one; a task an agent
+suggests is always about an email.)*
+
 A task-based way through email that changes the app as little as
 possible: Claude reads an email and suggests what the user has to do about
 it, by when, and in which category; accepted tasks go in a task list the
@@ -4181,11 +4227,27 @@ headers, and Settings › Learning; per account,
 except the notification, which is app-wide):
 *Daily review* on or off; *Learn facts from*: *Off* · *Mail written with
 AI* · *All mail I send* (default *Mail written with AI*; received mail is
-never used); *Pairs a day* (default 50); *Keep AI drafts for* 7, 30 or 90
+never used for facts about the user; *Learn about contacts*, amendment
+2026-11-25, does read it, §14.16); *Pairs a day* (default 50); *Keep AI drafts for* 7, 30 or 90
 days (default 30); an opt-in notification, "3 new proposals from your
 mail", which opens the page with something new,
 once a day and only when the app is not in front (off by default). The
 account menu shows a small dot on accounts with unseen proposals.
+
+**Learn with (Amendment 2026-11-26).** Learning Settings opens with
+*Learn with*: *Claude Code* or *Codex*, the one agent that reads for
+reviews, facts, the workflow jobs (tasks among them) and contacts
+(§14.16). Until the user chooses, it is the agent the writing guide last
+learned with, else Claude Code. When that agent is not ready (signed out,
+missing, or it cannot be checked), learning waits and says why. *Use the
+other agent when this one is not ready* (off by default) lets learning go
+on with the other agent instead; the line under the two controls names
+where mail is then sent, since the other agent is another company's. The
+agent is settled when a piece of work starts and that piece keeps it: a
+review to its end, a deep dive for one contact to its end (the next
+contact in *Learn From Past Mail* is settled afresh, so the chosen agent
+is used again once it is back). A review already paused for its agent
+waits for that agent.
 
 **Privacy.** Recording is local. The review sends matched pairs, and with
 *All mail I send* the day's sent mail, to the user's own agent CLI, the
@@ -4270,6 +4332,10 @@ one.
 government ids; health details about others; anything about third parties
 beyond their name, role and how the user knows them. Gleaning drops these
 by pattern before a proposal is made, and its prompt says so.
+*(Amendment 2026-11-25, ADR 0026: this holds for facts about the user.
+What Kaluta keeps about a person the user corresponds with is a contact
+fact, with its own rules, §14.16; the People category stays for people
+the user mentions.)*
 
 **Where facts come from**: the user (the Facts editor, and the
 interview, whose F3 questions become fact questions in Identity, Contact,
@@ -5351,7 +5417,9 @@ open, in hidden read-only agent sessions (ADR 0007) with the user's
 chosen agent (the one the daily review uses, §14.10), capped per
 account per day, surviving a quit like the daily review: each job finds
 its own work in the store, batch by batch, and what it did each day is
-counted in `workflow_job_days` against its cap. When the agent cannot
+counted in `workflow_job_days` against its cap. *(Amendment 2026-11-25:
+the Contact facts job has no cap unless the user sets one, §14.16.)*
+When the agent cannot
 work, the jobs wait an hour and try again; opening a workflow stops them
 between batches until it is closed. While workflows are a preview
 (Settings › General), the jobs run only when they are on.
@@ -5390,6 +5458,7 @@ the latest, so they go too.
 | Waiting check | once at the start of the day | verdicts in `waiting_checks`; `Waiting` labels |
 | Reading summaries | after each routine run | one line and a short summary per sorted message |
 | Nudges | when an item joins Waiting | up to three follow-ups |
+| Contact facts *(amendment 2026-11-25, §14.16)* | only once the user has turned it on; as conversations with people the user has written to gain mail, one per prompt, with no daily cap unless the user sets one (the one job without a fixed cap) | facts, topics and commitments about each contact; low-risk ones accepted, high-risk ones held for review |
 
 Email content goes into the prompts as data, in fenced blocks whose
 instructions are to be ignored, as for tasks (§14.8). Nothing is sent or
@@ -5601,6 +5670,418 @@ restricted `gmail.settings.sharing` scope and an address verified by
 the recipient (ADR 0021). A forged sender can trigger a rule (§15.4);
 the store keeps no authentication results to check it against.
 
+### 14.16 Contacts and contact facts **(Amendment 2026-11-25, ADR 0026; built 2026-11-25)**
+
+Kaluta keeps facts about the people the user corresponds with, learned
+from the mail between them, and gives them to drafting when the user
+writes to that person. A contact's page shows those facts beside the
+replies the user is waiting for from them and the tasks made from their
+mail. Facts (§14.11) stay facts about the user; Waiting (§14.13) and
+Tasks (§14.8) stay as they are and are linked, not copied. Decision:
+ADR 0026.
+
+**A contact** is a person with one or more addresses. Until now
+`contacts` held one row per address, for autocomplete; a `people` row
+now stands above them (`contacts.person_id`), made the first time it is
+needed (a fact, a deep dive, opening the page). An address with no
+person is its own contact.
+
+- **Only people.** No-reply addresses, mailing lists and automated
+  senders have no page and are never read for facts (the test Waiting
+  and Triage use, §14.13).
+- **Joining addresses is the user's act.** *Same Person As…* on a
+  contact's page joins two contacts, undoably; their facts merge and
+  either address finds the page. Kaluta may suggest it (same display
+  name and an address the user has written to) but never joins on its
+  own: a display name is whatever the sender typed, and joining on it
+  would attach a stranger's address to a trusted person.
+- **Per account.** Contacts and their facts live in the account's store
+  and are never global (ADR 0012 is unchanged) and never published to a
+  rules server (§10.6).
+
+**A contact fact** has:
+
+| Field | What |
+| --- | --- |
+| person | the contact it is about |
+| kind | *fact* (who they are, how they work, what they prefer), *topic* (something in play between the user and them), *commitment* (something one owes the other) or *tag* (a word from the account's tag list, below) |
+| label, value | as a fact's (§14.11); one per label within a contact and kind. A tag has no label and holds the tag's id; a contact has each tag at most once |
+| class | what it concerns, from a fixed list: identity, role, contact detail, preference, personal, topic, money, routing (who or where to send something), agreement, deadline, other |
+| owed by, due | commitments only: *you* or *them*, and a day when one was stated |
+| state | topics and commitments only: *open* or *closed* |
+| use | *Use freely*, *Ask before using* or *Never use*; default *Use freely*, class *personal* defaults to *Ask before using* |
+| as of | the date of the newest message stating it |
+| source | *You* (written or edited by the user) or *Learned* |
+| risk | *low* or *high*, with a one-line reason when high |
+| status | *watching* (seen once, below), *proposed*, *accepted* or *rejected* |
+
+Each learned item carries **evidence**: the message, a quote verified
+against that message's own text (quoted replies stripped, as the writing
+guide's learning prepares mail, §14.9), and **who said it**, decided by
+code from the message's sender and never by the agent: *you* (sent from
+one of the account's addresses), *them* (from one of the contact's
+addresses) or *someone else* (another person in the conversation).
+
+**What is wanted.** A *fact* meets the bar facts about the user meet
+(§14.11): durable, reusable, complete on its own. A *topic* is still
+open after the message that raised it, in a few words ("Renewal pricing
+for 2027"). A *commitment* names who owes what ("Send the revised
+contract", owed by you, due Friday). At most three new items per
+conversation; the agent is shown the contact's accepted and rejected
+items and its open tasks and waits, and told not to restate them: a
+task or a wait already says it. A label is at most 60 characters and a
+value 160; longer ones are refused, not cut, so an item cannot carry a
+passage of someone's mail.
+
+**Tags** *(added 2026-11-25)* say in a word what a person is, so the
+user can sort contacts and drafting knows whom it is writing to. They
+come from a list the account keeps, in two sets:
+
+| Set | Says |
+| --- | --- |
+| Relationship | what they are to the user |
+| Role | what they do |
+
+The list starts full, so that most people can be tagged without adding
+to it, and is kept under headings (a tag's heading is for finding it,
+and means nothing else).
+
+Relationship:
+
+| Heading | Tags |
+| --- | --- |
+| They buy from me | Customer, Services client, Prospect, Lead, Former customer, Reseller, Distributor, User |
+| I buy from them | Vendor, Supplier, Contractor, Freelancer, Agency, Consultant, Professional adviser, Service provider, Landlord |
+| Work with me | Colleague, My manager, Direct report, Co-founder, Business partner, Collaborator, Former colleague, Board member, Employer |
+| Money and advice | Investor, Prospective investor, Portfolio company, Lender, Advisor, Mentor, Mentee, Coach, Trainer |
+| Hiring | Candidate, Recruiter, Reference, Prospective employer |
+| Field and public | Competitor, Peer, Press, Analyst, Regulator, Auditor, Government, Event organizer, Community member, Contributor |
+| Learning | Teacher, Student, Classmate, Alumni |
+| Personal | Family, Spouse or partner, Friend, Acquaintance, Neighbour, Tenant, Healthcare provider, School or childcare |
+
+Role:
+
+| Heading | Tags |
+| --- | --- |
+| Level | Founder, Owner, Board member, Chair, Executive, VP, Director, Manager, Team lead, Individual contributor, Assistant, Intern, Self-employed, Retired |
+| Title | CEO, President, Managing Director, COO, CFO, CTO, CIO, CISO, CPO, CMO, CRO, General Counsel, Chief of Staff, General Partner, Principal |
+| Function | Engineering, Technical, Product, Design, Data, Research, Security, IT, Sales, Business Development, Partnerships, Marketing, Communications, Customer Success, Support, Finance, Accounting, Legal, Compliance, People, Recruiting, Operations, Procurement, Facilities, Administration |
+| Profession | Lawyer, Accountant, Banker, Financial adviser, Insurance agent, Real estate agent, Doctor, Nurse, Therapist, Teacher, Professor, Researcher, Journalist, Writer, Editor, Designer, Developer, Architect, Tradesperson, Civil servant, Clergy, Nonprofit staff, Student |
+
+A role is said with more than one tag when it needs it: a VP of
+Engineering is *VP* and *Engineering*, so the list does not need a tag
+for every title in every function. A name is unique within its set
+(*Board member* is in both: on the user's board, and on someone's).
+
+**Tag ids and vCard.** Every tag has an id that never changes, apart
+from its name: built-in tags a fixed one (`rel.customer`, `role.vp`),
+the user's a generated one. A contact's tag item holds the id, so
+renaming a tag changes one row and every contact shows the new name.
+There is no standard vocabulary for the whole list (occupation
+classifications have no levels and are far too long to pick from;
+nothing standard says customer or vendor), so the list is Kaluta's own.
+Where vCard's `RELATED` types (RFC 6350) say the same thing, the
+built-in tag records the type, so a later export to or import from an
+address book loses nothing for these:
+
+| Tag | vCard type |
+| --- | --- |
+| Friend | `friend` |
+| Acquaintance | `acquaintance` |
+| Neighbour | `neighbor` |
+| Family | `kin` (and `parent`, `child`, `sibling` on the way in) |
+| Spouse or partner | `spouse` |
+| Colleague | `co-worker` |
+| Peer | `colleague` |
+
+Other tags have no vCard type. The mapping is stored and nothing reads
+or writes vCards yet; a tag the user adds has none.
+
+The user adds tags of their own to either set (a name of at most 30
+characters), and renames or deletes any, in Learning Settings; deleting
+a tag takes it off every contact, in one undoable change. A contact can
+have several tags from each set. The user tags by hand (*Add Tag* on the
+page), and the agent may suggest tags when it reads mail, as items of
+kind *tag* with evidence like any other. The agent chooses from the
+list and nothing else: it is shown the list, and an answer naming a tag
+that is not on it is dropped, so mail cannot coin a tag or put words of
+its own into one. Tags do not count toward the three new items per
+conversation; at most three new tags per contact per conversation.
+
+**Two sightings.** A new *fact* whose evidence is only what they said
+is kept (*watching*, in no prompt and not on the page) until a second
+message on a later day states it, as facts gleaned from mail are
+(§14.11). Topics and commitments are of the moment and are not held
+back this way; the gate below decides them. Nor are tags: the word comes
+from the user's list, not from the mail.
+
+**Never stored**, whoever says it: what §14.11 never stores (passwords,
+card and bank numbers, government ids), and health, religion, politics
+and the like about the contact. These are dropped by pattern before an
+item exists, so a message that announces new bank details leaves at most
+"said their bank details changed", held for review (below), and never
+the number.
+
+**The review gate.** An item learned from mail is *low* or *high* risk.
+A low-risk item is accepted at once, shown on the contact's page marked
+*New* until seen, and removed with one undo. A high-risk item stays
+*proposed* and is given to no prompt until the user accepts it. The
+rules are code, applied after the agent answers; the agent may raise an
+item to high (it says why) and can never lower one:
+
+1. A commitment owed by the user with no evidence in the user's own
+   words.
+2. An item of class money, routing, agreement or deadline, or of class
+   role or contact detail that changes an accepted item, whose evidence
+   is only what they or someone else said. The class is the agent's;
+   patterns over the value and the quote (amounts and currencies,
+   "invoice", "payment", "wire", "from now on", "instead of", "send it
+   to", "I approve", "as agreed") set it whatever the agent chose.
+3. Any change to an item the user wrote or accepted in review.
+4. An item whose only evidence is from an address joined to the contact
+   in the last 30 days.
+5. An item whose only evidence is what someone else in the conversation
+   said: neither the user nor the contact it is about.
+6. An item whose label or value holds an email address, a link, a phone
+   number or any run of six or more digits.
+7. Closing a commitment they owe, or changing its due day, on anything
+   but the user's own words: the open commitment stays in prompts until
+   the user agrees it is done.
+8. An item with evidence from a message that failed sender
+   authentication (below).
+9. Whatever the agent marks high: it contradicts what is known, or the
+   text reads as an instruction to whoever is reading.
+10. *(Added 2026-11-25.)* Any learned tag of the Relationship set,
+    whoever said it: "customer" or "vendor" changes how a draft treats a
+    request for money or work, and a message can claim either. A Role
+    tag is low risk unless another rule holds it (evidence only from
+    someone else, a newly joined address, failed authentication).
+    Taking off a tag the user added or accepted is rule 3.
+
+**Sender authentication.** Sync keeps, per received message, what the
+receiving server concluded about its sender (`messages.sender_auth`:
+*pass*, *fail* or *none*, from the `Authentication-Results` header the
+provider's own server added, never one further down the message). A
+message that failed counts as said by *someone else*, whatever its
+`From`, and rule 8 holds what it yields. *None* (imported mailboxes,
+mail synced before this was kept, domains that publish no policy) is
+treated as before.
+
+**What the gate does not do.** No rule proves a model cannot be talked
+round by a message it reads. The gate bounds what a hijacked reading
+can leave behind: a short low-risk line about people in that one
+conversation, with no address, link or number in it, that reaches a
+prompt only for mail to those people, in a draft the user reads before
+it is sent. This is a narrower promise than ADR 0007's ("a bad
+suggestion, which the user sees before anything is saved"), and ADR
+0026 says so.
+
+Held items wait under *Needs review* on the contact's page and are
+counted on the Contacts entry in the sidebar. Review is Facts' Review
+mode (§14.11): the item as a document with its kind, class, who said
+it, the quote as a blockquote and the reason it was held; *Accept*
+(Return) and *Reject* (⌫). Rejections are remembered and shown to the
+agent as not wanted (40 newest per contact).
+
+**Learning from new mail.** Once the user has turned it on (below), a
+background job, *Contact facts* (§14.13), reads conversations that gained a message since it last looked and have
+a contact the user has written to (`contacts.sent_count > 0`): mail from
+strangers is not read for facts until the user has answered them. One
+conversation per prompt, in a session that sees only that conversation
+(ADR 0007), as many a day as there are unless the user set a limit
+(*Settings*, below), the new messages as fenced data
+with the date and who said each. The prompt holds the items, tasks and
+waits of that conversation's participants and nobody else's, so a
+message has nothing of another conversation to repeat, and an answer
+naming a contact who is not in the conversation is dropped. Agent
+mailboxes (§7.9) are never read for contact facts and are given none:
+some send without asking. The agent answers with
+new items, `again` for a known one (its *as of* moves), a change, or
+`close` for a topic or commitment the mail shows is finished. Every
+message read is logged (`contact_reads`) and never read twice. Learning
+starts with mail arriving after it is turned on; nothing older is read
+except by a deep dive. Mail that arrives while the app is closed, the
+job is paused or the day's limit is reached is not skipped: the next run
+reads everything that arrived since learning was turned on and is not
+yet in `contact_reads`, oldest first.
+
+**The deep dive.** *Learn From All Our Mail* on a contact's page reads
+every message between the user and that contact (from, to or cc, any of
+their addresses). A dialog first says how many messages and how many
+agent turns that is (20 messages per turn, oldest first, each cut to
+3,000 characters), newest 2,000 by default. Bodies not yet downloaded
+(ADR 0003) are fetched first. It runs as a learning run does (§14.9):
+progress on the page, *Stop*, and it survives a quit. Each turn sees
+only this contact's items. A last turn merges what was found, and may
+only name items by id: join two as duplicates (the older wording kept)
+or close one that later mail finished. It writes no new label or value,
+and reads no mail. The results pass the same gate, two sightings
+included (two messages of the run on different days count). Messages
+it read are logged, so the daily job does not read them again.
+
+**A deep dive for many** *(added 2026-11-25)*. *Learn From Past Mail…*
+in Learning Settings runs the deep dive for everyone the user has
+written to in a period: the last 30, 90 (the default), 180 or 365 days,
+or a number of days typed in. The period chooses the people (a sent
+message To, Cc or Bcc them in those days; only people, as above); for
+each of them the deep dive is the whole one, all the mail between them
+and the user, newest 2,000 messages each. The dialog says so, and
+before anything is read shows how many people, how many messages not
+yet read and about how many agent turns that is, and updates as the
+period changes. *Start* queues them, the person written to most in the
+period first, one at a time. Settings shows progress ("12 of 85 people
+· Reese Okafor"), with *Pause* and *Stop*; it survives a quit, and
+stopping keeps what the finished people yielded. A person whose mail has
+all been read already costs nothing and is passed over. A message with
+several of the chosen people is read once for each of them, in that
+person's own turns, so the read log is kept per message and contact.
+Everything passes the same gate; what is held is counted on Contacts
+as it arrives. It is the user's act, so it works with *Learn about
+contacts* off and does not count toward *Conversations a day*; when it
+finishes with the job still off, the same one-time offer to keep
+learning is made. One runs at a time, per account.
+
+**Ageing.** An open topic with no mail on it for 90 days, and an open
+commitment 30 days past its due day, is shown as *stale* and left out of
+prompts until the user reopens or closes it. A fact older than a year is
+flagged for review, as facts that age are (§14.11).
+
+**In prompts.** Wherever Kaluta writes mail (the composer's writing
+help, reply answers, nudges, follow-ups, §14.9, §14.13, §14.14) and in
+meeting prep (§14.14), each recipient who is a contact gets a section
+"What you know about Reese": accepted items only, *Use freely* as
+stated, *Ask before using* marked so, *Never use* left out; open topics
+and commitments before facts, newest first, twelve lines per person,
+three people (To before Cc). Accepted tags are one line at the head of
+the section, Relationship before Role ("Customer · VP, Engineering"),
+outside the twelve. A contact's items are given only when that
+contact is a recipient: nothing learned from one person's mail is
+offered in mail to another. The section is introduced as notes from
+earlier mail, not instructions, and a commitment is never to be stated
+as agreed unless the conversation at hand shows it. Agents can read more
+through a read-only `contact_lookup` tool (by address or name; accepted
+items, never-use ones left out), which answers only for contacts who
+are recipients of the draft or participants of the conversation the
+session was started with.
+
+**The contact page.** *Contacts* is a sidebar entry under Facts: the
+contacts with facts, tags or something open, most recent first, each
+with its tags beside the name, a field that finds any contact by name or
+address, and a filter by tag (one or more; a contact must have all of
+them). Mail is found by tag with the `tag:` search operator (§8), which
+completes tag names as they are typed. A page also opens from a
+person's name in a conversation (*Show Contact*), from the People tab of
+What Kaluta Knows (§14.11), which lists contact facts too, and from the
+command palette. It shows, top to bottom:
+
+| Section | What | From |
+| --- | --- | --- |
+| Header | name, tags, addresses, first and latest mail, how many each way; *Learn From All Our Mail*, *Same Person As…*, *Add Fact*, *Add Tag* | `people`, `contacts`, `contact_facts` of kind tag |
+| Needs review | held items | `contact_facts`, proposed |
+| Open topics | accepted, open | `contact_facts` |
+| Commitments | *You owe* and *They owe*, with due days; *Make Task* on one the user owes (a task on that conversation, §14.8) | `contact_facts` |
+| Facts | accepted facts by class | `contact_facts` |
+| Waiting on them | conversations where the user waits for this contact's answer, with how long; opens the item in Waiting | `waiting` in state *waiting* whose sent message was to one of their addresses |
+| Tasks from their mail | the user's tasks on conversations this contact wrote in, open first, done ones folded | `tasks` and `task_threads`, by the task's message when it has one, else any message of theirs in the conversation |
+| Recent conversations | the latest five | `participants` |
+
+Waiting and Tasks are found by query each time the page opens; nothing
+is copied and their own workflows are where they are acted on. On an
+item: edit, delete, change *use*, close or reopen; each is one undoable
+change (§14.6a). *Forget This Contact* deletes the contact's items,
+evidence and read log in one undoable change; the mail is untouched.
+
+**Turning it on.** Learning about contacts is off until the user says
+yes, per account: it reads received mail and keeps something from it,
+and it is one agent turn per conversation, with no daily cap unless
+the user sets one. Kaluta asks
+once, the first time the user opens Contacts or a contact's page
+(*Show Contact*), in place of the empty sections. The ask says what is
+learned, that mail from people the user has written to is read by the
+user's agent, and about how many turns a day that is (the conversations
+with those people that gained mail each day of the last week, as a
+range: "about 12 to 30 a day"), with a note that a limit can be set in
+Learning Settings, and three answers:
+
+- **Turn On**: the daily job starts, with mail arriving from then on.
+- **Just This Person** (on a contact's page): opens the deep dive's
+  dialog for that contact; the daily job stays off.
+- **Not Now**: nothing is read. The page still shows the header,
+  *Waiting on them*, *Tasks from their mail* and *Recent conversations*,
+  which are queries and use no agent, and facts the user adds by hand.
+  A quiet line, "Kaluta is not learning about contacts · Turn On…",
+  stays where the learned sections would be; the ask does not return.
+
+When a first deep dive finishes with the job still off, its page offers
+once, "Keep learning about the people you write to?", with *Turn On*
+and *Not Now*. Nothing else turns learning on: not a workflow, not an
+update, not an agent.
+
+**Settings** (Learning Settings, §14.10; per account): *Learn about
+contacts* on or off, default off, the same switch the ask sets. Off
+stops the job and hides nothing already learned. The deep dive is the
+user's act for one contact and works either way. *Conversations a day*:
+*No limit* (the default), 10, 25, 50 or 100. With a limit, the job
+stops for the day when it is reached and takes the rest up the next
+day, oldest first, so nothing is skipped; the deep dive does not count
+toward it. Under the setting, a line says how many were read today and
+yesterday. *Learn From Past Mail…* starts a deep dive for many
+(above). *Contact tags*: the two sets under their headings, with add (to a heading, or to *Other*), rename and delete. *Add Tag* on a contact's page is a field that finds a tag by typing, with the headings below it.
+Tagging by hand works with learning off.
+
+**Stored** (per account, migration 0046): `people`, `contacts.person_id`,
+`contact_facts`, `contact_fact_evidence` (with `said_by`),
+`contact_fact_changes` (for exact undo, ADR 0006), `contact_reads`,
+`contact_runs` (deep dives, as `guide_runs`; one of a deep dive for
+many carries its batch, `contact_run_batches`), `contact_tags` (the
+account's list: stable id, name, set, heading, vCard type where there is one, built in or the user's), and `messages.sender_auth`
+in its own migration. The job's conversations each day are counted in
+`workflow_job_days`, against the user's limit when there is one.
+
+**Limits, accepted.** Mail with a forged sender that the receiving
+server did not fail (a domain with no policy, an imported mailbox), and
+mail from a contact's own account in someone else's hands, can add
+low-risk items to that contact; they are short, visible, marked *New*,
+and one undo removes them, and nothing of the held kinds gets through
+without the user (§15.4).
+Meetings (§14.14) are not read for contact facts yet. Tags do not
+change which audience group (§14.9) a person is written to as; the two
+are separate for now. A person the user
+writes to from two accounts is two contacts.
+
+**As built (2026-11-25).** Where the build differs from the text above:
+
+- **Review** of held items is on the contact's page (*Accept* and
+  *Reject* on each) and in a dialog that goes through them one at a time
+  as documents (Return accepts, Delete rejects, → skips), opened with
+  *Review All*; it is not the window-wide Review mode Facts uses.
+- **Show Contact** is in the Message menu and the command palette, for
+  the conversation that is open, and opens the page of the first of its
+  people who is a person; it is not on a name in the reader.
+- **Tags from mail are added, never taken off.** An agent's answer cannot
+  remove a tag at all, so rule 3 has nothing to hold there.
+- **A first sighting is kept out of sight whatever its risk.** A fact
+  resting on their word alone is *watching* after one message even when a
+  rule would hold it; the rules are applied when a second day states it.
+- **Never stored** also drops a number of six or more digits beside a
+  word for where money goes (account, bank, card, IBAN, sort code, wire),
+  however short the number: an adversarial test found an eight-digit
+  account number kept as a watched fact.
+- **Completing a tag** uses the system's search suggestions: ↑/↓ and
+  Return (or a click) choose one; Tab does not. Tags no contact has are
+  listed under their own heading, twelve at most, found by typing.
+- **The settings line** counts conversations read by the daily job today
+  and yesterday, whether or not one cost an agent turn (a conversation
+  with nobody to learn about is logged as read and costs none).
+- **The read log** keeps the daily job's reads under no contact (they
+  count for everyone in the conversation) and a deep dive's under its
+  contact.
+- **Reading sessions have no tools at all** (a *sealed* session, refused
+  every tool call), which is stricter than ADR 0007's read-only sessions.
+- **Sender authentication** is read for Gmail (REST and IMAP), from the
+  topmost `Authentication-Results` naming `mx.google.com`; other
+  providers store nothing, which reads as *none*.
+
 ## 15. Security Model and Threat Model
 
 ### 15.1 Assets
@@ -5640,6 +6121,7 @@ them.)
 | Phishing links | Host mismatch confirmation; links open in system browser only |
 | Prompt injection → exfiltration by email | `mail.send`/`forward` always approval-gated; recipients frozen and displayed at approval; agent has no other output channel (no shell, no filesystem, no web). Exception: an agent mailbox set to *Send freely* (§7.9) sends without asking, by the user's choice |
 | A forwarding rule sends mail nobody looked at *(amendment 2026-11-14, ADR 0021, §14.15)* | A rule exists only because the user accepted or wrote it, and is automatic only where the user chose that for that rule; the recipient is fixed in the rule and shown when accepting; a rule always names a sender, and applies only to mail that arrived after it was accepted; matching is code, with no agent and no tool that reads or changes rules, so nothing in a message can make, widen or redirect one; each message is forwarded at most once (`forward_rule_log`), at most 20 a day per rule; every forward is in Sent and marked in its conversation. A forged `From` can trigger a rule: what leaves is that message, to the address the user chose (accepted, §15.4) |
+| Received mail plants something Kaluta then believes *(amendment 2026-11-25, ADR 0026, §14.16)* | Contact facts are read only from conversations with people the user has written to, one conversation per read-only session that sees nothing else, with only its participants' items in the prompt, so a hijacked reading has no other conversation to copy from; every quote is verified and who said it is set by code from the sender, a message that failed sender authentication counting as someone else; rules in code hold for the user's review a commitment by the user not in the user's words, money, routing, agreements and deadlines resting on others' words, anything resting only on a third person's words, anything holding an address, link or number, and the closing of a commitment owed to the user; the agent can raise an item's risk but never lower it; a fact resting on their words needs two messages on different days; labels and values are short and refused when long; the deep dive's merge names items by id and writes no words; a tag is chosen from the user's list or dropped, and a learned relationship tag is always held; account and card numbers are dropped by pattern and never stored; addresses join a contact only by the user's hand; a contact's facts reach a prompt only when that contact is a recipient, as notes and not instructions; agent mailboxes are left out; sends stay approval-gated. What remains: a short low-risk line that skews a draft the user reads (§15.4) |
 | Prompt injection → destructive bulk actions | `delete` gated; bulk caps; reversible ops are actually reversible (archive not delete; trash not purge) |
 | Prompt injection → credential theft | Tokens never reach the agent process; Keychain only touched from Swift; MCP tools cannot read settings |
 | Agent escapes tool boundary | Claude: `--tools ""` + `dontAsk` + `--strict-mcp-config`; Codex: shell/exec/web tools disabled, read-only sandbox, `--ignore-user-config`; both are belt-and-braces — the real boundary is that Kaluta only ever *offers* mail tools |
@@ -5660,7 +6142,13 @@ them.)
 Malware running as the user; a compromised agent CLI binary; the user
 approving a bad send; mail with a forged sender matching a forwarding
 rule the user made automatic, which is forwarded to that rule's
-recipient (§14.15). These are documented in `docs/security.md`.
+recipient (§14.15); mail that talks the reading agent round, or comes
+from a contact's taken-over account or a forged sender the receiving
+server did not fail, which can add short low-risk contact facts, visible
+and undoable, about the people in that conversation, and so skew a
+later draft to them that the user reads before sending (§14.16,
+amendment 2026-11-25). These are documented in
+`docs/security.md`.
 
 *(Amendment 2026-10-08, oagc-cp3.6.)* Mailbox mode trusts the user's own
 processes: `kaluta-mcp --mailbox` carries no per-session token, so any

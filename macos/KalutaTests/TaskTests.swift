@@ -97,6 +97,27 @@ struct TaskDialogTests {
     }
     private struct Timeout: Error {}
 
+    @Test func theTasksPageMakesATaskAboutNoEmail() async throws {
+        let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
+        await model.start(openDemo: true)
+        model.undo.runsClock = false
+        model.selectedMailboxID = AppModel.tasksMailboxID
+        #expect(model.isTaskList)
+        #expect(ToolbarHelp.text(for: "New Task", model: model)?.hasPrefix("New Task") == true)
+
+        await model.openNewTaskDialog()
+        let draft = try #require(model.taskDraft)
+        #expect(!draft.hasEmail && draft.action == .noEmail && draft.suggester.state == .idle, "nothing is asked of the agent")
+        draft.title = "Renew the passport"
+        await model.acceptTask(draft)
+        #expect(model.taskDraft == nil)
+        await model.tasks.load()
+        let made = try #require(model.tasks.tasks.first { $0.title == "Renew the passport" })
+        #expect(made.threadId.isEmpty && made.action == .noEmail)
+        model.selectTask(made.id)
+        #expect(model.selectedThreadID == nil, "no email to show")
+    }
+
     @Test func claudesGuessFillsTheDialogAndAddingItCanBeUndone() async throws {
         let model = AppModel(core: try CoreClient(dataDirectory: CoreClient.testScratch()))
         await model.start(openDemo: true)

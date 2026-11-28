@@ -16,7 +16,8 @@ pub const LABEL_KEY: &str = "waiting_label";
 const DAY_MS: i64 = 86_400_000;
 
 /// Addresses that never answer.
-const AUTOMATED: [&str; 6] = ["noreply", "no-reply", "donotreply", "do-not-reply", "notifications", "mailer-daemon"];
+pub(crate) const AUTOMATED: [&str; 6] =
+    ["noreply", "no-reply", "donotreply", "do-not-reply", "notifications", "mailer-daemon"];
 
 /// A sent message the check has not read: the user wrote last.
 #[derive(Debug, Clone, PartialEq, Eq)]

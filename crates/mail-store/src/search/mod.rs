@@ -5,4 +5,4 @@ mod exec;
 mod parse;
 
 pub use exec::{MAX_RESULTS, search};
-pub use parse::{Flag, Mailbox, ParseError, SearchExpr, parse};
+pub use parse::{Flag, Mailbox, ParseError, SearchExpr, parse, tag_names};

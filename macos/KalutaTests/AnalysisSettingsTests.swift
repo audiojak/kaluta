@@ -35,6 +35,11 @@ struct AnalysisSettingsTests {
         #expect(settings.keepDays == 30 && settings.factsFrom == .mailWrittenWithAi && settings.dailyReview)
         settings.keepDays = 7
         settings.factsFrom = .off
+        #expect(settings.agent == "claude-code" && !settings.agentFallback, "one agent, and it waits, unless changed")
+        #expect(AnalysisSettingsView.agentNote(settings) == "Learning sends mail to Claude Code only, and waits when it is not ready.")
+        settings.agent = "codex"
+        settings.agentFallback = true
+        #expect(AnalysisSettingsView.agentNote(settings).hasPrefix("Learning sends mail to Codex, or to Claude Code when Codex is not ready."))
         try await core.setAnalysisSettings(settings)
         #expect(try await core.analysisSettings() == settings)
 

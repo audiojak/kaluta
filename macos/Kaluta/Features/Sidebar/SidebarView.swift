@@ -68,6 +68,12 @@ struct SidebarView: View {
                 .badge(model.analysis.factProposals.count)
                 .tag(AppModel.factsMailboxID)
                 .hoverHelp("Facts about you that AI drafts may use, and the facts proposed from your mail")
+                // The people the user corresponds with (spec §14.16); the
+                // badge counts what is held for review.
+                Label("Contacts", systemImage: "person.2")
+                    .badge(model.contacts.held)
+                    .tag(AppModel.contactsMailboxID)
+                    .hoverHelp("What you know about the people you write to: what is open between you, who owes whom what, and their tags")
                 // Facts and guide entries in one list (spec §14.11 amendment 2026-11-18).
                 Label("What Kaluta Knows", systemImage: "brain")
                     .tag(AppModel.knowsMailboxID)

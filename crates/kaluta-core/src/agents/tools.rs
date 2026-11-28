@@ -57,6 +57,9 @@ pub(crate) async fn call(core: &Arc<Core>, session: &str, tool: Tool, arguments:
         ProposedAction { tool, thread_ids: thread_ids_of(tool, &arguments), draft_id: arguments["draft_id"].as_i64() };
     let now = mail_sync::now_millis();
     let checked = core.agents.with_session(session, |s| s.guard.check(&action, now));
+    if core.agents.with_session(session, |s| s.sealed).unwrap_or(false) {
+        return Outcome::error("denied", "this session has no tools: it works only from what it was given");
+    }
     let read_only = core.agents.with_session(session, |s| s.read_only).unwrap_or(false);
     if read_only && tool.risk() != permissions::Risk::ReadOnly {
         return Outcome::error("denied", "this is a preview: nothing may be changed");
@@ -115,6 +118,7 @@ async fn run(core: &Arc<Core>, session: &str, tool: Tool, arguments: Value) -> O
         Tool::GetAttachmentText => attachment_text(core, session, arguments).await,
         Tool::PresentThreads => present_threads(core, session, arguments),
         Tool::FactsLookup => facts_lookup(core, arguments).await,
+        Tool::ContactLookup => contact_lookup(core, session, arguments).await,
         Tool::CreateDraft => create_draft(core, session, arguments).await,
         Tool::UpdateDraft => update_draft(core, session, arguments).await,
         Tool::AttachToDraft => attach_to_draft(core, session, arguments).await,
@@ -735,6 +739,84 @@ async fn facts_lookup(core: &Arc<Core>, arguments: Value) -> Result<Outcome, Out
     let facts = core.list_facts(vec![crate::facts::FactStatus::Accepted]).await.map_err(failed)?;
     let categories = core.fact_categories().await.map_err(failed)?;
     Ok(Outcome::json(crate::facts::lookup_json(&facts, &categories, a.category.as_deref(), a.query.as_deref())))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContactLookupArgs {
+    address: Option<String>,
+    name: Option<String>,
+}
+
+/// The user's notes about a contact (spec §14.16), for the people this
+/// session is about and nobody else: the participants of the conversation
+/// it was started with, and the recipients of its drafts. A session over
+/// the whole mailbox with no draft is told about no one, so what was
+/// learned from one person's mail cannot be asked for while writing to
+/// another.
+async fn contact_lookup(core: &Arc<Core>, session: &str, arguments: Value) -> Result<Outcome, Outcome> {
+    let a: ContactLookupArgs = args(arguments)?;
+    if core.contacts_unavailable().await {
+        return Err(Outcome::error("not_available", "this mailbox keeps no notes about contacts"));
+    }
+    let (threads, drafts) = core
+        .agents
+        .with_session(session, |s| {
+            let threads: Vec<ThreadId> = match s.guard.scope() {
+                permissions::Scope::Selection(ids) => ids.iter().cloned().collect(),
+                permissions::Scope::Mailbox => vec![],
+            };
+            (threads, s.guard.drafts())
+        })
+        .ok_or_else(|| Outcome::error("unknown_session", "this agent session has ended"))?;
+    let mut allowed: Vec<String> = Vec::new();
+    for id in drafts {
+        if let Ok(Some(d)) = core.get_draft(id).await {
+            allowed.extend(d.to.iter().chain(&d.cc).chain(&d.bcc).map(|x| x.email.trim().to_lowercase()));
+        }
+    }
+    let own = core.own_addresses().await.unwrap_or_default();
+    let db = core.db().map_err(failed)?;
+    let (address, name) = (a.address.unwrap_or_default(), a.name.unwrap_or_default());
+    let now = mail_sync::now_millis();
+    let answer = db
+        .read(move |c| {
+            use mail_store::contact_facts as store;
+            for thread in &threads {
+                if let Some((_, messages)) = read::get_thread(c, thread)? {
+                    allowed.extend(crate::contacts_learn::others_in(&messages, &own));
+                }
+            }
+            allowed.retain(|e| !own.iter().any(|o| o.eq_ignore_ascii_case(e)));
+            let wanted_address = address.trim().to_lowercase();
+            let wanted_name = name.trim().to_lowercase();
+            let tags = store::tags(c)?;
+            for email in &allowed {
+                let Some(person_id) = store::person_for_email(c, email)? else { continue };
+                let Some(info) = crate::contacts::contact_info(c, person_id)? else { continue };
+                let by_address = !wanted_address.is_empty()
+                    && info.addresses.iter().any(|x| x.email.eq_ignore_ascii_case(&wanted_address));
+                let by_name = wanted_address.is_empty()
+                    && !wanted_name.is_empty()
+                    && info.name.to_lowercase().contains(&wanted_name);
+                if by_address || by_name {
+                    let items = store::list_for_person(c, person_id, &["accepted"])?;
+                    let addresses: Vec<String> = info.addresses.iter().map(|x| x.email.clone()).collect();
+                    return Ok(Some(crate::contacts_prompt::lookup_json(&info.name, &addresses, &items, &tags, now)));
+                }
+            }
+            Ok(None)
+        })
+        .await
+        .map_err(|e| failed(e.into()))?;
+    match answer {
+        Some(json) => Ok(Outcome::json(json)),
+        None => Err(Outcome::error(
+            "denied",
+            "contact_lookup answers only for the people of the conversation this session was started with and \
+             the recipients of its drafts, and only when the user has notes about them",
+        )),
+    }
 }
 
 #[derive(Deserialize)]

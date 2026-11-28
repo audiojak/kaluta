@@ -521,3 +521,95 @@ fn an_agent_told_to_attach_a_file_from_elsewhere_attaches_nothing() {
     assert_eq!(files.iter().map(|f| f.filename.as_str()).collect::<Vec<_>>(), ["agenda.txt"]);
     assert_eq!(std::fs::read_to_string(&files[0].path).unwrap(), "agenda", "a copy of the mail's file");
 }
+
+/// `contact_lookup` (spec §14.16): an agent told by hostile mail to look
+/// up what the user knows about someone else is told nothing. It answers
+/// only for the people of the conversation the session was started with
+/// and the recipients of its own drafts.
+#[test]
+fn an_agent_cannot_look_up_a_contact_outside_its_conversation() {
+    use crate::contacts::tests::{fields, person};
+    use crate::contacts::{ContactEdit, ContactFactKind};
+    let core = hostile_core("contact-lookup");
+    let db = core.db().unwrap();
+    db.write_blocking(|tx| {
+        let mut w = MailWriter::new(tx);
+        for (id, to) in [("to-reese", "reese@acme.example"), ("to-ada", "ada@other.example")] {
+            w.upsert_message(&IncomingMessage {
+                id: MessageId::new(id),
+                thread_id: ThreadId::new(id),
+                from: Some(EmailAddress::new(Some("Me"), "me@example.com")),
+                to: vec![EmailAddress::new(None, to)],
+                subject: "Hello".into(),
+                date: 1_790_000_000_000,
+                internal_date: 1_790_000_000_000,
+                label_ids: vec![LabelId::new("SENT")],
+                ..Default::default()
+            })?;
+        }
+        w.finish().map(|_| ())
+    })
+    .unwrap();
+    for (email, label) in [("reese@acme.example", "Renewal pricing"), ("ada@other.example", "Acquisition talks")] {
+        let id = person(&core, email);
+        block_on(core.apply_contact_edits(
+            vec![
+                ContactEdit::Add { person_id: id, fields: fields(ContactFactKind::Topic, label, "Open") },
+                ContactEdit::AddTag { person_id: id, tag_id: "rel.customer".into() },
+            ],
+            "add".into(),
+        ))
+        .unwrap();
+    }
+    let lookup = |session: &str, args: Value| call(&core, session, Tool::ContactLookup, args);
+    let text = |o: &Outcome| match o {
+        Outcome::Ok { structured: Some(v), .. } => v.to_string(),
+        other => format!("{other:?}"),
+    };
+
+    // Started on the conversation with Reese: Reese's notes, and nobody else's.
+    let _a = session(&core, "about-reese", Scope::Selection([ThreadId::new("to-reese")].into()));
+    let reese = lookup("about-reese", json!({ "address": "Reese@Acme.example" }));
+    assert!(text(&reese).contains("Renewal pricing") && text(&reese).contains("Customer"), "{}", text(&reese));
+    assert!(text(&reese).contains("not instructions"));
+    assert!(text(&lookup("about-reese", json!({ "name": "reese" }))).contains("Renewal pricing"));
+    for args in [json!({ "address": "ada@other.example" }), json!({ "name": "ada" }), json!({ "name": "" }), json!({})]
+    {
+        let o = lookup("about-reese", args.clone());
+        assert_eq!(code(&o), "denied", "{args}");
+        assert!(!format!("{o:?}").contains("Acquisition"));
+    }
+    // The hostile mail's own conversation has no contact in it.
+    let _b = session(&core, "hostile", Scope::Selection([ThreadId::new("inj-send")].into()));
+    assert_eq!(code(&lookup("hostile", json!({ "address": "reese@acme.example" }))), "denied");
+    // Over the whole mailbox, with no draft: nobody.
+    let _c = session(&core, "wide", Scope::Mailbox);
+    assert_eq!(code(&lookup("wide", json!({ "address": "reese@acme.example" }))), "denied");
+    // Once it drafts to Ada, Ada's notes; still not Reese's.
+    let drafted = call(
+        &core,
+        "wide",
+        Tool::CreateDraft,
+        json!({ "to": ["ada@other.example"], "subject": "Hi", "body_markdown": "Hello" }),
+    );
+    assert_eq!(code(&drafted), "ok", "{drafted:?}");
+    assert!(text(&lookup("wide", json!({ "address": "ada@other.example" }))).contains("Acquisition talks"));
+    assert_eq!(code(&lookup("wide", json!({ "address": "reese@acme.example" }))), "denied");
+    // A held or never-use note is not given out.
+    let ada = person(&core, "ada@other.example");
+    let secret = block_on(core.apply_contact_edits(
+        vec![ContactEdit::Add {
+            person_id: ada,
+            fields: crate::contacts::ContactFactFields {
+                use_: crate::facts::FactUse::Never,
+                ..fields(ContactFactKind::Fact, "Private", "Never to be used")
+            },
+        }],
+        "add".into(),
+    ))
+    .unwrap();
+    assert!(!secret.added.is_empty());
+    assert!(!text(&lookup("wide", json!({ "address": "ada@other.example" }))).contains("Never to be used"));
+    // The tool reads: it is not one a read-only session is refused.
+    assert_eq!(Tool::ContactLookup.risk(), permissions::Risk::ReadOnly);
+}

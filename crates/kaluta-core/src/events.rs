@@ -173,6 +173,9 @@ pub enum CoreEvent {
     },
     /// Facts or their categories changed (spec §14.11); re-read them.
     FactsChanged,
+    /// Contacts, their items or the tag list changed (spec §14.16);
+    /// re-read them.
+    ContactsChanged,
     /// An agent mailbox's publishing to a rules server moved on: pushed,
     /// failed, started or stopped (spec §10.6); re-read its status.
     RulesPublicationChanged,

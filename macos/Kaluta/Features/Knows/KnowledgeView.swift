@@ -8,7 +8,7 @@ import SwiftUI
 /// 2026-11-21). A filter field narrows the list by its words, so a
 /// person's name or address finds what Kaluta knows about them.
 struct KnowledgeItem: Identifiable, Equatable {
-    enum Source: Equatable { case fact(FactInfo), guide(GuideEntry) }
+    enum Source: Equatable { case fact(FactInfo), guide(GuideEntry), contact(ContactFactInfo) }
     enum Tab: String, CaseIterable { case all, preferences, people }
 
     let id: String
@@ -40,6 +40,17 @@ struct KnowledgeItem: Identifiable, Equatable {
         return fromFacts + fromGuide
     }
 
+    /// What is known about contacts (spec §14.16), for the People tab: each
+    /// accepted item with whom it is about.
+    static func items(contactFacts: [ContactFactInfo], names: [Int64: String]) -> [KnowledgeItem] {
+        contactFacts.filter { $0.status == .accepted }.map { f in
+            let who = names[f.personId] ?? "A contact"
+            return KnowledgeItem(id: "contact-\(f.id)", title: f.kind == .tag ? "Tag: \(f.value)" : f.label,
+                                 detail: f.kind == .tag ? "Contacts · \(f.tag?.set.title ?? "Tag")" : "\(f.kindTitle) · \(f.value)",
+                                 scope: who, source: .contact(f), tabs: [.all, .people])
+        }
+    }
+
     /// Whether every word of `filter` is in the row's title, detail or
     /// scope, whatever its case or accents. An empty filter matches all.
     func matches(_ filter: String) -> Bool {
@@ -56,9 +67,12 @@ struct KnowledgeView: View {
     @Environment(AppModel.self) private var model
     @State private var tab: String? = KnowledgeItem.Tab.all.rawValue
     @State private var filter = ""
+    @State private var contactFacts: [ContactFactInfo] = []
 
     var body: some View {
+        let names = Dictionary(model.contacts.list.compactMap { c in c.personId.map { ($0, c.name) } }, uniquingKeysWith: { a, _ in a })
         let all = KnowledgeItem.items(facts: model.facts.facts, guide: model.guide.entries)
+            + KnowledgeItem.items(contactFacts: contactFacts, names: names)
         let chosen = KnowledgeItem.Tab(rawValue: tab ?? "") ?? .all
         let inTab = all.filter { $0.tabs.contains(chosen) }
         let shown = inTab.filter { $0.matches(filter) }
@@ -107,9 +121,11 @@ struct KnowledgeView: View {
                 }
             }
         }
-        .task {
+        .task(id: model.contacts.list.count + model.contacts.facts.count) {
             await model.facts.load()
             await model.guide.load()
+            await model.contacts.load()
+            contactFacts = (try? await model.core?.acceptedContactFacts()) ?? []
         }
     }
 
@@ -140,6 +156,9 @@ struct KnowledgeView: View {
         case let .guide(entry):
             model.selectedMailboxID = AppModel.guideMailboxID
             model.showGuideCategory(entry.category)
+        case let .contact(item):
+            model.contacts.selection = ContactsStore.tag(person: item.personId)
+            model.openContacts()
         }
     }
 
@@ -150,6 +169,8 @@ struct KnowledgeView: View {
             switch item.source {
             case let .fact(fact): model.guideSheet = .fact(fact, category: nil)
             case let .guide(entry): model.guideSheet = .edit(entry, category: entry.category)
+            // A contact's item is edited on the contact's page.
+            case .contact: open(item)
             }
         }
         Button("Delete") { // no-help: menu
@@ -157,6 +178,11 @@ struct KnowledgeView: View {
                 switch item.source {
                 case let .fact(fact): await model.deleteFact(fact)
                 case let .guide(entry): await model.deleteGuideEntry(entry)
+                case let .contact(item):
+                    let edit: ContactEdit = item.kind == .tag && item.tag != nil
+                        ? .removeTag(personId: item.personId, tagId: item.tag?.id ?? "") : .delete(id: item.id)
+                    await model.applyContactEdits([edit], actionName: "Delete", notice: "Deleted “\(item.headline)”")
+                    contactFacts = (try? await model.core?.acceptedContactFacts()) ?? []
                 }
             }
         }
@@ -184,6 +210,7 @@ struct KnowledgeView: View {
         switch item.source {
         case .fact: "Open this fact in Facts"
         case .guide: "Open this entry in the Writing Guide"
+        case .contact: "Open this contact's page"
         }
     }
 }

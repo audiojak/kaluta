@@ -10,9 +10,31 @@ struct AnalysisSettingsView: View {
     @State private var settings: AnalysisSettings?
     @State private var error: String?
 
+    /// What the choice of agent means for where mail goes.
+    static func agentNote(_ settings: AnalysisSettings) -> String {
+        let (chosen, other) = settings.agent == "codex" ? ("Codex", "Claude Code") : ("Claude Code", "Codex")
+        return settings.agentFallback
+            ? "Learning sends mail to \(chosen), or to \(other) when \(chosen) is not ready. A review or a contact already being read stays with the agent it started with."
+            : "Learning sends mail to \(chosen) only, and waits when it is not ready."
+    }
+
     var body: some View {
         Form {
             if let settings {
+                Section {
+                    Picker("Learn with", selection: bind(\.agent, settings)) {
+                        Text("Claude Code").tag("claude-code")
+                        Text("Codex").tag("codex")
+                    }
+                    .pickerStyle(.segmented)
+                    .hoverHelp("The agent that reads for reviews, facts, tasks and contacts")
+                    Toggle("Use the other agent when this one is not ready", isOn: bind(\.agentFallback, settings))
+                        .hoverHelp("If the chosen agent is signed out or missing, learn with the other one instead of waiting")
+                } footer: {
+                    Text(Self.agentNote(settings))
+                        .font(TypeRole.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section {
                     Toggle("Review AI drafts each day", isOn: bind(\.dailyReview, settings))
                         .hoverHelp("Once a day, compare what AI drafted with what you sent, and propose changes to your writing guide")
@@ -40,6 +62,9 @@ struct AnalysisSettingsView: View {
                 ProgressView().controlSize(.small)
             } else {
                 Text("Open an account to change its learning settings.").foregroundStyle(.secondary)
+            }
+            if model.core != nil, model.openAccountID != nil {
+                ContactLearningSettings()
             }
             Section {
                 Toggle("Notify me of new proposals", isOn: $notify)
@@ -69,6 +94,13 @@ struct AnalysisSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .task(id: model.openAccountID) { await model.contacts.load() }
+        .sheet(item: Binding(get: { model.contacts.settingsSheet }, set: { model.contacts.settingsSheet = $0 })) { sheet in
+            switch sheet {
+            case .pastMail: PastMailSheet()
+            case .tags: ContactTagsSheet()
+            }
+        }
         .task(id: model.openAccountID) {
             // Nothing from the last account is written into this one.
             settings = nil

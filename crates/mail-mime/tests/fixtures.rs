@@ -260,3 +260,64 @@ fn parse_headers_keeps_list_headers_from_a_provider_header_list() {
     assert_eq!(h.list.unsubscribe.as_deref(), Some("<https://example.org/u/1>"));
     assert_eq!(h.list.unsubscribe_post, None);
 }
+
+/// A message as Gmail stores it: its own server's verdict on top, and
+/// below it whatever the sender wrote.
+fn with_auth_headers(top: &str, lower: &str) -> String {
+    format!(
+        "Delivered-To: me@example.com\r\n\
+         Received: by 2002:a05:6402:1 with SMTP id x1; Mon, 2 Nov 2026 10:00:00 -0800 (PST)\r\n\
+         ARC-Authentication-Results: i=1; mx.google.com; dmarc=pass header.from=example.net\r\n\
+         {top}{lower}\
+         From: Reese Okafor <reese@example.net>\r\n\
+         To: me@example.com\r\n\
+         Subject: Invoice\r\n\
+         Date: Mon, 2 Nov 2026 10:00:00 -0800\r\n\
+         \r\n\
+         Hello\r\n"
+    )
+}
+
+#[test]
+fn the_topmost_authentication_results_is_the_receiving_servers() {
+    use mail_domain::SenderAuth;
+    use mail_mime::dmarc_verdict;
+    let gmail_fail = "Authentication-Results: mx.google.com;\r\n       dkim=neutral (body hash did not verify) header.i=@example.net;\r\n       spf=softfail (google.com: domain of transitioning x@evil.example does not designate 203.0.113.9 as permitted sender) smtp.mailfrom=x@evil.example;\r\n       dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=example.net\r\n";
+    let forged_pass =
+        "Authentication-Results: mx.google.com; dkim=pass; spf=pass; dmarc=pass header.from=example.net\r\n";
+    // A forged header further down is never read.
+    let m = parse(with_auth_headers(gmail_fail, forged_pass).as_bytes()).unwrap();
+    assert!(m.headers.authentication_results.as_deref().unwrap().contains("dmarc=fail"));
+    assert_eq!(dmarc_verdict(m.headers.authentication_results.as_deref(), "mx.google.com"), SenderAuth::Fail);
+    assert_eq!(m.headers.from, Some(addr(Some("Reese Okafor"), "reese@example.net")));
+
+    let gmail_pass = "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@example.net header.s=s1 header.b=AbCd;\r\n       spf=pass smtp.mailfrom=reese@example.net;\r\n       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.net\r\n";
+    let m = parse(with_auth_headers(gmail_pass, "").as_bytes()).unwrap();
+    assert_eq!(dmarc_verdict(m.headers.authentication_results.as_deref(), "MX.Google.com"), SenderAuth::Pass);
+
+    // The same order holds for a provider's header list (Gmail's API).
+    let h = parse_headers([
+        ("Authentication-Results", "mx.google.com; dmarc=fail header.from=example.net"),
+        ("Authentication-Results", "mx.google.com; dmarc=pass header.from=example.net"),
+        ("From", "reese@example.net"),
+    ]);
+    assert_eq!(dmarc_verdict(h.authentication_results.as_deref(), "mx.google.com"), SenderAuth::Fail);
+
+    // No header from the receiving server, or no verdict in it: none.
+    let m = parse(with_auth_headers("", "").as_bytes()).unwrap();
+    assert_eq!(m.headers.authentication_results, None);
+    assert_eq!(dmarc_verdict(None, "mx.google.com"), SenderAuth::None);
+    for said in [
+        "mx.sender.example; dmarc=pass header.from=example.net",
+        "mx.google.com.evil.example; dmarc=pass",
+        "mx.google.com; spf=pass smtp.mailfrom=a@example.net",
+        "mx.google.com; dmarc=none header.from=example.net",
+        "mx.google.com; dmarc=temperror",
+        "mx.google.com; dmarc=bestguesspass",
+        "mx.google.com; x-dmarc=pass; note=\"dmarc=pass\"",
+        "",
+    ] {
+        assert_eq!(dmarc_verdict(Some(said), "mx.google.com"), SenderAuth::None, "{said}");
+    }
+    assert_eq!(dmarc_verdict(Some("mx.google.com 1; DMARC=Pass (p=none)"), "mx.google.com"), SenderAuth::Pass);
+}

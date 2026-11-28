@@ -282,9 +282,14 @@ impl Core {
             let judged = async {
                 let notes = source.notes(&row.meeting_id).await?;
                 let transcript = source.transcript(&row.meeting_id, TRANSCRIPT_CHARS).await.unwrap_or_default();
-                let answer = self
-                    .ask_agent_hidden(&step.agent, prompt(&row, &people, me.as_deref(), &notes, &transcript))
-                    .await?;
+                // What is known about the people the follow-up would go to (spec §14.16).
+                let to: Vec<String> = others(&people, me.as_deref()).iter().filter_map(|p| p.email.clone()).collect();
+                let known = self.contact_sections(to).await.unwrap_or_default();
+                let asked = crate::contacts_prompt::with_contacts(
+                    prompt(&row, &people, me.as_deref(), &notes, &transcript),
+                    &known,
+                );
+                let answer = self.ask_agent_hidden(&step.agent, asked).await?;
                 Ok::<_, CoreError>(parse(&answer, &people, me.as_deref()))
             }
             .await;

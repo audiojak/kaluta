@@ -51,6 +51,10 @@ extension AppModel {
             MailCommand(id: "task", title: "New Task from Email…", keys: "T", listKey: "t", unavailable: none) {
                 Task { await self.openTaskDialog() }
             },
+            MailCommand(id: "contact", title: "Show Contact", unavailable: taskTarget == nil ? "Select a conversation first" : nil) {
+                self.showContactOfSelection()
+            },
+            MailCommand(id: "contacts", title: "Go to Contacts") { self.openContacts() },
             MailCommand(id: "tasks", title: "Create Tasks…", keys: "⇧T", listKey: "T") {
                 Task { await self.openBulkTasks() }
             },

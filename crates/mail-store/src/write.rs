@@ -54,6 +54,9 @@ pub struct IncomingMessage {
     pub attachments: Vec<IncomingAttachment>,
     /// Mailing-list headers; a fetch without them keeps stored ones.
     pub list: ListHeaders,
+    /// The receiving server's verdict on the sender; a fetch without one
+    /// keeps the stored one.
+    pub sender_auth: Option<mail_domain::SenderAuth>,
     pub headers_json: Option<String>,
 }
 
@@ -236,7 +239,8 @@ impl<'t> MailWriter<'t> {
                            headers_json = COALESCE(?20, headers_json),
                            list_id = COALESCE(?21, list_id), list_name = COALESCE(?22, list_name),
                            list_unsubscribe = COALESCE(?23, list_unsubscribe),
-                           list_unsubscribe_post = COALESCE(?24, list_unsubscribe_post)
+                           list_unsubscribe_post = COALESCE(?24, list_unsubscribe_post),
+                           sender_auth = COALESCE(?25, sender_auth)
                          WHERE id = ?1",
                     )?
                     .execute(params![
@@ -264,6 +268,7 @@ impl<'t> MailWriter<'t> {
                         m.list.name,
                         m.list.unsubscribe,
                         m.list.unsubscribe_post,
+                        m.sender_auth.map(mail_domain::SenderAuth::as_str),
                     ])?;
                 rowid
             }
@@ -273,9 +278,9 @@ impl<'t> MailWriter<'t> {
                         "INSERT INTO messages (thread_id, gmail_id, rfc822_message_id, in_reply_to, references_json,
                            from_name, from_email, subject, snippet, date, internal_date, size_estimate, body_state,
                            is_read, is_starred, is_draft, is_sent_by_me, has_attachments, headers_json,
-                           list_id, list_name, list_unsubscribe, list_unsubscribe_post)
+                           list_id, list_name, list_unsubscribe, list_unsubscribe_post, sender_auth)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
-                           ?20, ?21, ?22, ?23)",
+                           ?20, ?21, ?22, ?23, ?24)",
                     )?
                     .execute(params![
                         thread_rowid,
@@ -301,6 +306,7 @@ impl<'t> MailWriter<'t> {
                         m.list.name,
                         m.list.unsubscribe,
                         m.list.unsubscribe_post,
+                        m.sender_auth.map(mail_domain::SenderAuth::as_str),
                     ])?;
                 let rowid = self.tx.last_insert_rowid();
                 self.record_contacts(m, is_sent_by_me)?;

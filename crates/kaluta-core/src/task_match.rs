@@ -208,13 +208,10 @@ impl Core {
         let mut rest: Vec<&TaskRow> = open.iter().filter(|(_, s)| *s < LIKELY).map(|(t, _)| t).collect();
         rest.sort_by_key(|t| std::cmp::Reverse(t.created_at));
         shown.extend(rest.into_iter().take(MAX_CANDIDATES.saturating_sub(shown.len())).cloned());
-        let agent = match self.analysis_agent().await {
-            Ok(agent) => agent,
-            Err(_) => return Ok(quick()),
+        let agent = match self.learning_agent().await {
+            Ok(Ok(agent)) => agent,
+            _ => return Ok(quick()),
         };
-        if self.agent_not_ready(&agent).await?.is_some() {
-            return Ok(quick());
-        }
         let ids: Vec<i64> = shown.iter().map(|t| t.id).collect();
         let picked = match self.ask_agent_hidden(&agent, prompt(&email, &shown)).await {
             Ok(answer) => parse(&answer, &ids),

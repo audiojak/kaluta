@@ -76,7 +76,6 @@ struct MainWindow: View {
                 Dialog(title: "Learning Settings", width: Self.analysisSettingsWidth) {
                     // The grouped form insets itself: no padding of its own on top of the dialog's.
                     AnalysisSettingsView()
-                        .scrollDisabled(true)
                         .frame(height: Self.analysisSettingsHeight)
                 } buttons: {
                     Button("Done") { model.guideSheet = nil }
@@ -191,6 +190,10 @@ struct MainWindow: View {
         // line stops short at the floating sidebar's edge.
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .searchable(text: Bindable(model).searchText, placement: .toolbar, prompt: "Search mail")
+        // Typing `tag:` offers the account's contact tags (spec §8).
+        .searchSuggestions {
+            TagSuggestions(groups: TagCompletion.groups(for: model.searchText, tags: model.contacts.tags))
+        }
         .searchFocused($searchFocused)
         .onChange(of: model.searchFocusRequests) { searchFocused = true }
     }
@@ -206,6 +209,7 @@ struct MainWindow: View {
         if model.isGuide { return "Writing Guide" }
         if model.isFacts { return "Facts" }
         if model.isKnows { return "What Kaluta Knows" }
+        if model.isContacts { return "Contacts" }
         return selectedMailbox.map { LabelTree.leafName($0.name) } ?? "Kaluta"
     }
 
@@ -227,6 +231,12 @@ struct MainWindow: View {
             let waiting = model.analysis.factProposals.count
             if waiting > 0 { parts.append("\(waiting.formatted()) waiting") }
             if let reviewed = model.reviewedLine { parts.append(reviewed) }
+            return parts.joined(separator: " · ")
+        }
+        if model.isContacts {
+            let count = model.contacts.list.count
+            parts.append(count == 1 ? "1 contact" : "\(count.formatted()) contacts")
+            if model.contacts.held > 0 { parts.append("\(model.contacts.held.formatted()) to review") }
             return parts.joined(separator: " · ")
         }
         if model.isTaskList {
@@ -289,6 +299,13 @@ struct MainWindow: View {
                 if let limits = model.unverifiedAgentLimits, !model.isGuide, !model.isFacts {
                     AgentLimitsBanner(text: limits)
                 }
+                if !model.unknownSearchTags.isEmpty, model.threads.searchQuery != nil {
+                    Label("No tag named \(model.unknownSearchTags.map { "“\($0)”" }.joined(separator: ", ")). Type tag: to see your tags.",
+                          systemImage: "tag.slash")
+                        .font(TypeRole.meta)
+                        .foregroundStyle(.secondary)
+                        .padding(Space.m)
+                }
                 if let error = model.threads.searchError {
                     Label(error, systemImage: "exclamationmark.magnifyingglass")
                         .font(TypeRole.meta)
@@ -313,6 +330,8 @@ struct MainWindow: View {
                     FactsList(store: model.facts)
                 } else if model.isKnows {
                     KnowledgeView()
+                } else if model.isContacts {
+                    ContactsList(store: model.contacts)
                 } else if model.isTaskList {
                     TaskListView()
                 } else {
@@ -387,6 +406,8 @@ struct MainWindow: View {
         } else if model.isKnows {
             ContentUnavailableView("Choose One to Open It", systemImage: "brain",
                                    description: Text("Facts open in Facts, writing guide entries in the Writing Guide."))
+        } else if model.isContacts {
+            ContactPageView()
         } else if model.selectedThreadID != nil {
             ThreadReaderView()
         } else {
@@ -395,7 +416,7 @@ struct MainWindow: View {
     }
 
     private static let analysisSettingsWidth: CGFloat = 560
-    private static let analysisSettingsHeight: CGFloat = 340
+    private static let analysisSettingsHeight: CGFloat = 640
 }
 
 /// A message the provider would not send: why, and the draft to fix it.

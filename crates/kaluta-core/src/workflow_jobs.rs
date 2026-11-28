@@ -57,6 +57,9 @@ pub(crate) const JOBS: &[Job] = &[
     Job { name: "followups", daily_cap: crate::followups::DAILY_CAP, step: crate::followups::step },
     // With Granola connected: briefs for the next day's meetings.
     Job { name: "prep", daily_cap: crate::prep::DAILY_CAP, step: crate::prep::step },
+    // Only once the user has turned it on (spec §14.16). The one job with
+    // no fixed cap: its step keeps to the user's limit when there is one.
+    Job { name: crate::contacts_learn::JOB, daily_cap: u32::MAX, step: crate::contacts_learn::step },
 ];
 
 impl Core {
@@ -112,10 +115,7 @@ impl Core {
     /// Each job in turn, batch by batch, until none has work or budget
     /// left, a workflow opens, or the agent fails.
     async fn run_jobs(self: &Arc<Self>, jobs: &'static [Job]) -> Result<(), CoreError> {
-        let agent = self.analysis_agent().await?;
-        if let Some(why) = self.agent_not_ready(&agent).await? {
-            return Err(CoreError::new(ErrorKind::Agent, why));
-        }
+        let agent = self.ready_learning_agent().await?;
         loop {
             let mut did = 0;
             for job in jobs {

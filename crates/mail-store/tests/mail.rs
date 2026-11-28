@@ -607,3 +607,31 @@ fn list_filters_narrow_any_mailbox_and_combine() {
     assert_eq!(ids("INBOX+@attachments"), ["t4"]);
     assert_eq!(ids("STARRED+@unread"), ["t3"], "any mailbox");
 }
+
+#[test]
+fn the_senders_authentication_result_is_kept_per_message() {
+    use mail_domain::SenderAuth;
+    let db = open("sender-auth");
+    for (id, auth) in
+        [("m1", Some(SenderAuth::Pass)), ("m2", Some(SenderAuth::Fail)), ("m3", Some(SenderAuth::None)), ("m4", None)]
+    {
+        let mut m = msg(id, id, 1_000, &["INBOX"]);
+        m.sender_auth = auth;
+        write(&db, move |w| w.upsert_message(&m).unwrap());
+    }
+    // A later fetch that says nothing keeps what was stored; one that does replaces it.
+    write(&db, |w| w.upsert_message(&msg("m2", "m2", 1_000, &["INBOX", "STARRED"])).unwrap());
+    let mut again = msg("m4", "m4", 1_000, &["INBOX"]);
+    again.sender_auth = Some(SenderAuth::Fail);
+    write(&db, move |w| w.upsert_message(&again).unwrap());
+    let stored: Vec<(String, Option<String>)> = db
+        .read_blocking(|c| {
+            Ok(c.prepare("SELECT gmail_id, sender_auth FROM messages ORDER BY gmail_id")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?)
+        })
+        .unwrap();
+    let got: Vec<SenderAuth> = stored.iter().map(|(_, a)| SenderAuth::parse(a.as_deref())).collect();
+    assert_eq!(got, vec![SenderAuth::Pass, SenderAuth::Fail, SenderAuth::None, SenderAuth::Fail]);
+    assert_consistent(&db);
+}

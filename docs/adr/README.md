@@ -28,3 +28,4 @@ stay in the spec's dated amendments and the nightly plans in `docs/plans/`.
 | [0018](0018-workflows.md) | The start screen is home, and each daily job is a focused workflow | 2026-10-11 |
 | [0019](0019-calendar-access.md) | Calendar access is its own consent, after sign-in | 2026-10-29 |
 | [0020](0020-feedback-by-email.md) | Bug reports and feature requests go by email, and are reviewed before they are public | 2026-11-12 |
+| [0026](0026-contact-facts.md) | Facts about contacts are learned from received mail, behind a review gate | 2026-11-25 |

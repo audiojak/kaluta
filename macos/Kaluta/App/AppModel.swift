@@ -230,7 +230,7 @@ final class AppModel {
     /// tab when there are tabs (`INBOX+IMPORTANT+CATEGORY_SOCIAL`).
     var listMailboxID: String? {
         guard let id = selectedMailboxID, id != Self.tasksMailboxID, id != Self.guideMailboxID,
-              id != Self.factsMailboxID, id != Self.knowsMailboxID else { return nil }
+              id != Self.factsMailboxID, id != Self.knowsMailboxID, id != Self.contactsMailboxID else { return nil }
         var parts = [id]
         if id == "INBOX" {
             if inboxImportantOnly { parts.append("IMPORTANT") }
@@ -251,6 +251,16 @@ final class AppModel {
     /// is now: filters or tabs may have changed during the search.
     private func searchChanged() {
         let query = filteredSearch
+        let typed = searchText
+        if typed.lowercased().contains("tag:"), let core {
+            Task {
+                let unknown = (try? await core.unknownSearchTags(typed)) ?? []
+                // Only the answer for what the field says now; a tag still being typed is not unknown yet.
+                if typed == searchText { unknownSearchTags = TagCompletion.partial(in: typed) == nil ? unknown : [] }
+            }
+        } else {
+            unknownSearchTags = []
+        }
         guard query.isEmpty else { threads.search(query); return }
         threads.search("")
         if case .open = accountState, let id = listMailboxID, threads.searchQuery != nil || id != threads.mailboxID {
@@ -366,6 +376,9 @@ final class AppModel {
     var searchText = "" {
         didSet { if searchText != oldValue { searchChanged() } }
     }
+    /// The names the search's `tag:` operators ask for that are not tags
+    /// (spec §8): the list says so.
+    private(set) var unknownSearchTags: [String] = []
     /// Every selected thread; actions apply to all of them.
     var selectedThreadIDs: Set<String> = []
     /// Failed changes that were undone, shown as a banner.
@@ -482,6 +495,8 @@ final class AppModel {
     let analysis: AnalysisStore
     /// The open account's facts, with the global ones (spec §14.11).
     let facts: FactsStore
+    /// The open account's contacts and what is known about them (spec §14.16).
+    let contacts: ContactsStore
     /// Undo for the user's mail actions, one stack per account (spec §14.6a).
     let undo: MailUndo
     /// The Clean Up window's state (spec §14.12).
@@ -515,6 +530,7 @@ final class AppModel {
         guide = GuideStore(core: core)
         analysis = AnalysisStore(core: core)
         facts = FactsStore(core: core)
+        contacts = ContactsStore(core: core)
         undo = MailUndo(core: core)
         cleanUp = CleanUpStore(core: core, undo: undo)
         cleanUp.openComposer = { [weak self] in self?.compose($0) }
@@ -743,6 +759,9 @@ final class AppModel {
             facts.selection = nil
             factsRevision += 1
             await facts.load()
+            // Nor the last account's contacts: they are per account.
+            contacts.reset()
+            await contacts.load()
             await checkGuideInvite()
             if let summary = accounts.first(where: { $0.id == accountID }) {
                 accountEmail = summary.email
@@ -812,7 +831,7 @@ final class AppModel {
 
     /// A message is shown in the reader, so it is a stop in the Tab loop.
     var readerShown: Bool {
-        selectedThreadID != nil && !isGuide && !isFacts
+        selectedThreadID != nil && !isGuide && !isFacts && !isContacts
     }
 
     /// Bumped when routines change, so their views reload.
@@ -1761,6 +1780,7 @@ final class AppModel {
         searchText = ""
 
         if isTaskList { Task { await tasks.load() } }
+        if isContacts { Task { await contacts.load() } }
         if selectedMailboxID == "DRAFT" { Task { await loadKalutaWritten() } }
         if isGuide { Task { await guide.load(); await proposalsShown(.rules) } }
         if isFacts { Task { await proposalsShown(.facts) } }
@@ -1940,6 +1960,8 @@ final class AppModel {
             }
         case .analysisChanged:
             await analysisChanged()
+        case .contactsChanged:
+            await contactsChanged()
         case .factsChanged:
             factsRevision += 1
             await facts.load()

@@ -113,9 +113,14 @@ impl Core {
         let entries = self.list_guide_entries(vec![GuideStatus::Accepted]).await?;
         // Facts live in their own store (spec §14.11) and go with the guide.
         let facts = self.fact_lines().await?;
+        // What is known about the people written to goes with it too, only
+        // for a message and only about its recipients (spec §14.16).
+        let recipients = target.as_ref().map(|t| t.recipients.clone()).unwrap_or_default();
+        let contacts = self.contact_sections(recipients).await.unwrap_or_default();
+        let with_notes = |text: String| crate::contacts_prompt::with_contacts(with_facts(text, &facts), &contacts);
         if entries.is_empty() {
             let version = self.guide_version().await?;
-            return Ok(GuideRendered { text: with_facts(String::new(), &facts), version, audiences: vec![] });
+            return Ok(GuideRendered { text: with_notes(String::new()), version, audiences: vec![] });
         }
         let groups = self.list_audience_groups().await?;
         let version = self.guide_version().await?;
@@ -135,7 +140,7 @@ impl Core {
             }
         }
         let (text, audiences) = render(&entries, &groups, target.as_ref(), &examples, version);
-        Ok(GuideRendered { text: with_facts(text, &facts), version, audiences })
+        Ok(GuideRendered { text: with_notes(text), version, audiences })
     }
 }
 

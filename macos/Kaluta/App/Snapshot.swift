@@ -445,6 +445,67 @@ enum Snapshot {
                     try? await Task.sleep(for: .milliseconds(300))
                 }
             }
+            // A contact's page (spec §14.16): `page` with notes and tags the
+            // user added, `ask` as it is the first time, before learning
+            // about contacts has been turned on or declined.
+            if let contacts = defaults.string(forKey: "KalutaSnapshotContacts"), let model = delegate.model,
+               let core = model.core, await model.contacts.open(email: "reese.okafor@acme.example") == nil,
+               let contact = model.contacts.contact {
+                if contacts != "ask" {
+                    try? await core.contactLearningWasAsked()
+                    let note = { (kind: ContactFactKind, label: String, value: String, owedBy: ContactParty?) in
+                        ContactEdit.add(personId: contact.personId, fields: ContactFactFields(
+                            kind: kind, label: label, value: value, class: kind == .fact ? .role : .other, owedBy: owedBy,
+                            due: nil, use: .free, asOf: nil))
+                    }
+                    _ = try? await core.applyContactEdits([
+                        note(.topic, "Renewal pricing for 2027", "Waiting on their numbers", nil),
+                        note(.commitment, "Send the revised contract", "Promised for Friday", .you),
+                        note(.commitment, "Sign the order form", "Once legal has read it", .them),
+                        note(.fact, "Role", "VP of Engineering at Acme", nil),
+                        .addTag(personId: contact.personId, tagId: "rel.customer"),
+                        .addTag(personId: contact.personId, tagId: "role.vp"),
+                        .addTag(personId: contact.personId, tagId: "role.engineering"),
+                    ], reason: "snapshot")
+                }
+                await model.contacts.load()
+                model.openContacts()
+                let ground = Color(nsColor: .windowBackgroundColor)
+                switch contacts {
+                case "list":
+                    window = Self.hostingWindow(ContactsList(store: model.contacts).background(ground).environment(model),
+                                                width: 340, height: 300)
+                case "addtag":
+                    window = Self.hostingWindow(AddTagSheet().background(ground).environment(model), width: 470, height: nil)
+                case "tags":
+                    window = Self.hostingWindow(ContactTagsSheet().background(ground).environment(model), width: 520, height: nil)
+                case "pastmail":
+                    window = Self.hostingWindow(PastMailSheet().background(ground).environment(model), width: 460, height: nil)
+                case "dive":
+                    window = Self.hostingWindow(ContactDiveSheet().background(ground).environment(model), width: 460, height: nil)
+                case "fact":
+                    window = Self.hostingWindow(ContactFactEditor(item: nil).background(ground).environment(model),
+                                                width: 460, height: nil)
+                case "agentsettings":
+                    window = Self.hostingWindow(AgentSettings().background(ground).environment(model),
+                                                width: 620, height: 560)
+                case "newtask":
+                    let draft = TaskDraft(categories: ["Reply", "Decide", "Review", "Pay"])
+                    draft.title = "Renew the passport"
+                    window = Self.hostingWindow(TaskDialog(draft: draft).background(ground).environment(model),
+                                                width: 480, height: nil)
+                case "learning":
+                    window = Self.hostingWindow(AnalysisSettingsView().background(ground).environment(model),
+                                                width: 560, height: 760)
+                case "settings":
+                    let form = Form { ContactLearningSettings() }.formStyle(.grouped)
+                    window = Self.hostingWindow(form.background(ground).environment(model), width: 560, height: 420)
+                default:
+                    let page = ContactPageView().background(ground).environment(model)
+                    window = Self.hostingWindow(page, width: 720, height: contacts == "page" ? 620 : 420)
+                }
+                try? await Task.sleep(for: .milliseconds(1200))
+            }
             if defaults.bool(forKey: "KalutaSnapshotTaskList"), let model = delegate.model {
                 await model.seedDemoTasks()
                 model.selectedMailboxID = AppModel.tasksMailboxID

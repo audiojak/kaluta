@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Settings › Agents (spec §9.2): which agent CLIs are installed, signed in
@@ -7,6 +8,8 @@ struct AgentSettings: View {
     @Environment(AppModel.self) private var model
     @State private var providers: [AgentProviderInfo] = []
     @State private var checking = false
+    /// A fix was started in Terminal; the footer says what happens next.
+    @State private var waitingOnTerminal = false
 
     var body: some View {
         Form {
@@ -31,12 +34,16 @@ struct AgentSettings: View {
                     }
                 }
                 ForEach(providers, id: \.id) { provider in
-                    AgentRow(provider: provider, isDefault: provider.id == model.agent.providerID)
+                    AgentRow(provider: provider, isDefault: provider.id == model.agent.providerID) {
+                        waitingOnTerminal = true
+                    }
                 }
             } header: {
                 Text("Agents")
             } footer: {
-                Text("Kaluta uses the Claude Code or Codex command-line tool you already have, signed in with your own account. It never reads their credentials.")
+                Text(waitingOnTerminal
+                     ? "Finish in Terminal, then come back: Kaluta checks again when you return."
+                     : "Kaluta uses the Claude Code or Codex command-line tool you already have, signed in with your own account. It never reads their credentials.")
                     .foregroundStyle(.secondary)
             }
             // The model Kaluta asks for, where the agent lists its account's.
@@ -58,6 +65,11 @@ struct AgentSettings: View {
         }
         .formStyle(.grouped)
         .task { await load(refresh: false) }
+        // Back from signing in or installing in Terminal: look again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard !checking, providers.contains(where: { !AgentStatusText($0).isReady }) else { return }
+            Task { await load(refresh: true) }
+        }
     }
 
     private func load(refresh: Bool) async {
@@ -65,12 +77,16 @@ struct AgentSettings: View {
         checking = true
         providers = await core.agentProviders(refresh: refresh)
         checking = false
+        if providers.allSatisfy({ AgentStatusText($0).isReady }) { waitingOnTerminal = false }
     }
 }
 
 private struct AgentRow: View {
     let provider: AgentProviderInfo
     let isDefault: Bool
+    /// The fix was started in Terminal.
+    var started: () -> Void = {}
+    @State private var failed: String?
 
     var body: some View {
         let status = AgentStatusText(provider)
@@ -91,9 +107,53 @@ private struct AgentRow: View {
                 }
                 Text(status.detail).font(TypeRole.meta).foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let fix = status.fix {
+                    HStack(spacing: Space.m) {
+                        Text(fix.command).font(TypeRole.codeCaption).textSelection(.enabled)
+                            .padding(.horizontal, Space.s)
+                            .padding(.vertical, Space.xs)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: Radius.control))
+                        Button(fix.title) {
+                            failed = fix.runInTerminal() ? nil : "Terminal could not be opened. Copy the command and run it yourself."
+                            if failed == nil { started() }
+                        }
+                        .hoverHelp("Open Terminal and run this command for you")
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(fix.command, forType: .string)
+                        }
+                        .hoverHelp("Copy the command, to run it yourself")
+                    }
+                    .controlSize(.small)
+                    .padding(.top, Space.xs)
+                }
+                if let failed {
+                    Label(failed, systemImage: "exclamationmark.triangle").font(TypeRole.meta).foregroundStyle(Tone.failure)
+                }
             }
         }
-        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The command that puts an agent right, and the button that runs it.
+struct AgentFix: Equatable {
+    /// "Sign In…", "Install…" or "Update…".
+    let title: String
+    let command: String
+
+    /// Run the command in a new Terminal window, in a login shell so the
+    /// user's own PATH finds the tool. False when Terminal did not open.
+    @MainActor func runInTerminal() -> Bool {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("Kaluta Agent Setup.command")
+        let script = "#!/bin/zsh -l\n\(command)\necho\necho \"Finished. Go back to Kaluta: it checks again when you return.\"\n"
+        do {
+            try script.write(to: file, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: file.path)
+        } catch {
+            return false
+        }
+        return NSWorkspace.shared.open(file)
     }
 }
 
@@ -160,30 +220,46 @@ struct AgentStatusText: Equatable {
     let symbol: String
     let detail: String
     let isReady: Bool
+    /// What puts it right, when a command does.
+    let fix: AgentFix?
 
     init(_ provider: AgentProviderInfo) {
-        let cli = provider.id == "codex" ? "codex" : "claude"
+        let codex = provider.id == "codex"
+        let signIn = AgentFix(title: "Sign In…", command: codex ? "codex login" : "claude auth login")
+        let package = codex ? "codex" : "--cask claude-code"
         switch provider.status {
         case let .ready(version):
-            self.init("checkmark.circle.fill", "Ready — version \(version)", true)
+            self.init("checkmark.circle.fill", "Ready — version \(version)", true, nil)
         case .notInstalled:
-            self.init("arrow.down.circle", provider.id == "codex"
-                ? "Not installed. Install with: brew install codex"
-                : "Not installed. Install with: brew install --cask claude-code", false)
+            self.init("arrow.down.circle", "Not installed. Install with: brew install \(package)", false,
+                      AgentFix(title: "Install…", command: "brew install \(package)"))
         case let .notAuthenticated(version):
             self.init("person.crop.circle.badge.exclamationmark",
-                      "Version \(version) is installed but not signed in. Run \(cli == "codex" ? "codex login" : "claude") in Terminal to sign in.", false)
+                      "Version \(version) is installed but not signed in. Sign in with: \(signIn.command)", false, signIn)
         case let .updateRequired(version, minimum):
             self.init("exclamationmark.arrow.circlepath",
-                      "Version \(version) is too old; Kaluta needs \(minimum) or later.", false)
+                      "Version \(version) is too old; Kaluta needs \(minimum) or later.", false,
+                      AgentFix(title: "Update…", command: "brew upgrade \(package)"))
+        case let .error(message) where Self.isSignInFailure(message):
+            self.init("person.crop.circle.badge.exclamationmark",
+                      "Its sign-in has expired. Sign in again with: \(signIn.command)", false, signIn)
         case let .error(message):
-            self.init("exclamationmark.triangle", "Couldn’t check: \(message)", false)
+            self.init("exclamationmark.triangle", "Couldn’t check: \(message)", false, nil)
         }
     }
 
-    private init(_ symbol: String, _ detail: String, _ isReady: Bool) {
+    /// A check that failed because the tool's own sign-in lapsed, as the
+    /// tools word it ("Failed to authenticate: OAuth session expired…").
+    static func isSignInFailure(_ message: String) -> Bool {
+        let m = message.lowercased()
+        return ["authenticat", "oauth", "session expired", "token expired", "not logged in", "unauthorized", "401"]
+            .contains { m.contains($0) }
+    }
+
+    private init(_ symbol: String, _ detail: String, _ isReady: Bool, _ fix: AgentFix?) {
         self.symbol = symbol
         self.detail = detail
         self.isReady = isReady
+        self.fix = fix
     }
 }

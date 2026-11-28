@@ -60,6 +60,38 @@ pub struct ListHeaders {
     pub unsubscribe_post: Option<String>,
 }
 
+/// What the receiving server concluded about a message's sender (DMARC,
+/// from the `Authentication-Results` header that server added; spec
+/// §14.16). `None`: it said nothing (no policy, imported mail, mail synced
+/// before this was kept).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SenderAuth {
+    Pass,
+    Fail,
+    #[default]
+    None,
+}
+
+impl SenderAuth {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::None => "none",
+        }
+    }
+
+    /// As stored; anything unknown is `None`.
+    pub fn parse(s: Option<&str>) -> Self {
+        match s {
+            Some("pass") => Self::Pass,
+            Some("fail") => Self::Fail,
+            _ => Self::None,
+        }
+    }
+}
+
 impl ListHeaders {
     pub fn is_empty(&self) -> bool {
         self.id.is_none() && self.unsubscribe.is_none() && self.unsubscribe_post.is_none()

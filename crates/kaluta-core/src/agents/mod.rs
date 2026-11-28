@@ -42,6 +42,10 @@ pub(crate) struct ToolSession {
     /// Work the core does with the agent (writing-guide analysis): its
     /// transcript is not stored, so it stays out of the agent's history.
     pub hidden: bool,
+    /// The session may use no tool at all: it sees only what its prompt
+    /// holds (reading mail for contact facts, spec §14.16, where the mail
+    /// itself may try to talk the reader round).
+    pub sealed: bool,
     /// Where `mail_present_threads` shows results; set by the agent manager.
     pub sink: Option<EventSink>,
     /// The agent behind the session (`claude-code`, `codex`), and the last
@@ -73,6 +77,12 @@ pub(crate) struct AgentHub {
     pub(crate) cloud_locator: Mutex<Option<agent_api::process::Locator>>,
     /// The writing guide's learning job, per account (spec §14.9).
     pub(crate) guide_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// The deep dives' job, per account (spec §14.16).
+    pub(crate) contact_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Every prompt sent to a session with no tools, for tests that check
+    /// what such a session was shown.
+    #[cfg(test)]
+    pub(crate) sealed_prompts: Mutex<Vec<String>>,
     /// The daily review's job, per account (spec §14.10); when the
     /// scheduler last tried to start one, and why it could not.
     pub(crate) analysis_jobs: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
@@ -121,6 +131,7 @@ impl AgentHub {
             draft_quotes: HashMap::new(),
             read_only: false,
             hidden: false,
+            sealed: false,
             sink,
             agent: None,
             last_prompt: String::new(),

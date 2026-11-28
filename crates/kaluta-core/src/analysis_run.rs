@@ -24,7 +24,30 @@ pub(crate) mod keys {
     pub const DAILY_REVIEW: &str = "daily_review";
     pub const PAIRS_PER_DAY: &str = "pairs_per_day";
     pub const AGENT: &str = "agent";
+    /// "on": when the chosen agent is not ready, learn with the other one.
+    pub const AGENT_FALLBACK: &str = "agent_fallback";
     pub const LAST_RUN_AT: &str = "last_run_at";
+}
+
+/// The agents learning can use.
+pub(crate) const LEARNING_AGENTS: [&str; 2] = ["claude-code", "codex"];
+
+/// The agent chosen for learning: the setting, else the one the guide last
+/// learned with, else Claude Code.
+pub(crate) fn chosen_agent(c: &mail_store::Connection) -> mail_store::StoreResult<String> {
+    if let Some(agent) = store::meta(c, keys::AGENT)?.filter(|a| LEARNING_AGENTS.contains(&a.as_str())) {
+        return Ok(agent);
+    }
+    Ok(mail_store::guide::runs(c, 20)?
+        .into_iter()
+        .find(|r| r.status == "done")
+        .and_then(|r| r.agent)
+        .filter(|a| LEARNING_AGENTS.contains(&a.as_str()))
+        .unwrap_or_else(|| "claude-code".into()))
+}
+
+fn other_agent(agent: &str) -> &'static str {
+    if agent == "codex" { "claude-code" } else { "codex" }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -125,25 +148,31 @@ impl Core {
         runtime::run(async move { Ok(db.read(mail_store::compositions::recording).await?) }).await
     }
 
-    /// The agent reviews (and workflow jobs) use: the one chosen for
-    /// Analysis, else the one the guide last learned with.
-    pub(crate) async fn analysis_agent(&self) -> Result<String, CoreError> {
+    /// The agent to learn with now (spec §14.10 *Learn with*): the chosen
+    /// one when it is ready; else, with the fallback on, the other one when
+    /// that is ready. `Err` holds why the chosen agent cannot do the work.
+    pub(crate) async fn learning_agent(self: &Arc<Self>) -> Result<Result<String, String>, CoreError> {
         let db = self.db()?;
-        runtime::run(async move {
+        let (chosen, fallback) = runtime::run(async move {
             Ok(db
-                .read(|c| {
-                    if let Some(agent) = store::meta(c, keys::AGENT)? {
-                        return Ok(agent);
-                    }
-                    Ok(mail_store::guide::runs(c, 20)?
-                        .into_iter()
-                        .find(|r| r.status == "done")
-                        .and_then(|r| r.agent)
-                        .unwrap_or_else(|| "claude-code".into()))
-                })
+                .read(|c| Ok((chosen_agent(c)?, store::meta(c, keys::AGENT_FALLBACK)?.is_some_and(|v| v == "on"))))
                 .await?)
         })
-        .await
+        .await?;
+        let Some(why) = self.agent_not_ready(&chosen).await? else { return Ok(Ok(chosen)) };
+        if fallback {
+            let other = other_agent(&chosen);
+            if self.agent_not_ready(other).await?.is_none() {
+                tracing::info!(chosen = %chosen, using = other, "learning with the other agent");
+                return Ok(Ok(other.to_owned()));
+            }
+        }
+        Ok(Err(why))
+    }
+
+    /// [`Self::learning_agent`], with "not ready" as the error.
+    pub(crate) async fn ready_learning_agent(self: &Arc<Self>) -> Result<String, CoreError> {
+        self.learning_agent().await?.map_err(|why| CoreError::new(ErrorKind::Agent, why))
     }
 
     fn analysis_waiting(&self, why: Option<String>) {
@@ -312,13 +341,16 @@ impl Core {
     ) -> Result<RunRow, CoreError> {
         // One start at a time: matching and counting must not run twice.
         let _starting = self.agents.analysis_start.lock().await;
+        // A review keeps the agent it starts with to its end.
         let agent = match agent {
-            Some(a) => a,
-            None => self.analysis_agent().await?,
+            Some(a) => {
+                if let Some(why) = self.agent_not_ready(&a).await? {
+                    return Err(CoreError::new(ErrorKind::Agent, why));
+                }
+                a
+            }
+            None => self.ready_learning_agent().await?,
         };
-        if let Some(why) = self.agent_not_ready(&agent).await? {
-            return Err(CoreError::new(ErrorKind::Agent, why));
-        }
         let found = self.match_compositions(now).await?;
         // Sent as written: support for the entries that applied, no agent
         // needed.

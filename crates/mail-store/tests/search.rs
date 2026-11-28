@@ -219,3 +219,64 @@ fn results_page_with_a_cursor() {
     let all: Vec<_> = first.rows.iter().chain(&second.rows).map(|t| t.id.0.clone()).collect();
     assert_eq!(all, vec!["spam", "invoice", "plan", "old"]);
 }
+
+#[test]
+fn tag_finds_mail_with_a_person_who_has_that_contact_tag() {
+    use mail_store::contact_facts::{self as contacts, ContactFactRow};
+    let db = open();
+    db.write_blocking(|tx| {
+        let tag = |tx: &mail_store::Transaction<'_>, email: &str, tag_id: &str, status: &str| {
+            let person_id = contacts::ensure_person(tx, email, NOW)?;
+            contacts::insert(
+                tx,
+                &ContactFactRow {
+                    person_id,
+                    kind: "tag".into(),
+                    value: tag_id.into(),
+                    class: "other".into(),
+                    use_: "free".into(),
+                    source: "you".into(),
+                    risk: "low".into(),
+                    status: status.into(),
+                    ..Default::default()
+                },
+            )
+        };
+        tag(tx, "alex.rivera@example.com", "rel.customer", "accepted")?;
+        tag(tx, "alex.rivera@example.com", "rel.services-client", "accepted")?;
+        tag(tx, "alex.rivera@example.com", "role.vp", "accepted")?;
+        tag(tx, "billing@example.net", "rel.vendor", "accepted")?;
+        tag(tx, "sam.chen@example.org", "role.board-member", "accepted")?;
+        // Held for review, and rejected: neither finds anything.
+        tag(tx, "jordan.park@example.net", "rel.customer", "proposed")?;
+        tag(tx, "jordan.park@example.net", "rel.friend", "rejected")?;
+        // The user is tagged by nothing, even if a row said so.
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(q(&db, "tag:customer"), vec!["plan"], "from them, or sent to them");
+    assert_eq!(q(&db, "tag:CUSTOMER"), vec!["plan"]);
+    assert_eq!(q(&db, r#"tag:"services client""#), vec!["plan"]);
+    assert_eq!(q(&db, "tag:services-client"), vec!["plan"]);
+    assert_eq!(q(&db, "tag:rel.customer"), vec!["plan"], "a tag's id works too");
+    assert_eq!(q(&db, "tag:vendor"), vec!["invoice"]);
+    assert_eq!(q(&db, "tag:board-member"), vec!["plan"], "a cc'd contact; a name in both sets matches either");
+    assert!(q(&db, "tag:friend").is_empty(), "a rejected tag");
+    assert!(q(&db, "tag:wizard").is_empty(), "an unknown name finds nothing");
+    assert_eq!(q(&db, "tag:customer OR tag:vendor"), vec!["invoice", "plan"]);
+    assert_eq!(q(&db, "in:inbox -tag:vendor"), vec!["plan"]);
+    assert_eq!(q(&db, "tag:vendor has:attachment newer_than:30d"), vec!["invoice"]);
+    assert!(q(&db, "tag:customer has:attachment").is_empty());
+    assert_eq!(q(&db, "tag:customer in:sent"), vec!["plan"]);
+    // Jordan's held tag found nothing; accepted, it does.
+    assert!(!q(&db, "tag:customer").contains(&"old".to_string()));
+    db.write_blocking(|tx| {
+        tx.execute("UPDATE contact_facts SET status = 'accepted' WHERE status = 'proposed'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(q(&db, "tag:customer"), vec!["plan", "old"]);
+    // The names a query asks for, for the "No tag named …" line.
+    let asked = mail_store::search::tag_names(&parse("invoice (tag:customer OR -tag:wizard) from:alex").unwrap());
+    assert_eq!(asked, vec!["customer".to_string(), "wizard".to_string()]);
+}
